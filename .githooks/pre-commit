@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# Pre-commit hook for codesearch project
+# This hook enforces code quality standards and protects the main branch
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_status() {
+    local color=$1
+    local message=$2
+    echo -e "${color}${message}${NC}"
+}
+
+print_status $BLUE "🔍 Running pre-commit checks..."
+
+# 1. Prevent commits to main branch
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD")
+if [ "$current_branch" = "main" ]; then
+    print_status $RED "❌ COMMIT BLOCKED: Direct commits to main branch are not allowed!"
+    print_status $YELLOW "Please create a feature branch:"
+    print_status $YELLOW "  git checkout -b feat/your-feature-name"
+    print_status $YELLOW "  git add ."
+    print_status $YELLOW "  git commit -m 'your commit message'"
+    exit 1
+fi
+
+# 2. Check for merge commits to main branch
+if git rev-parse --verify MERGE_HEAD >/dev/null 2>&1; then
+    merge_target=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD")
+    if [ "$merge_target" = "main" ]; then
+        print_status $RED "❌ MERGE BLOCKED: Direct merges to main branch are not allowed!"
+        print_status $YELLOW "Please use pull requests to merge into main branch."
+        exit 1
+    fi
+fi
+
+print_status $GREEN "✅ Branch check passed (current branch: $current_branch)"
+
+# 3. Run cargo fmt check
+print_status $BLUE "🎨 Checking code formatting with cargo fmt..."
+if ! cargo fmt -- --check >/dev/null 2>&1; then
+    print_status $RED "❌ COMMIT BLOCKED: Code formatting issues found!"
+    print_status $YELLOW "Please run 'cargo fmt' to fix formatting issues:"
+    cargo fmt -- --check
+    print_status $YELLOW "Then stage your changes and commit again."
+    exit 1
+fi
+print_status $GREEN "✅ Code formatting check passed"
+
+# 4. Run cargo clippy (excluding problematic optional features)
+print_status $BLUE "🔧 Running linting with cargo clippy..."
+if ! cargo clippy --workspace --all-targets --no-default-features -- -D warnings >/dev/null 2>&1; then
+    print_status $RED "❌ COMMIT BLOCKED: Linting issues found!"
+    print_status $YELLOW "Please fix the following clippy warnings/errors:"
+    cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+    print_status $YELLOW "Then stage your changes and commit again."
+    exit 1
+fi
+print_status $GREEN "✅ Linting check passed"
+
+# 5. Run unit tests only (excluding integration tests in root tests/ directory for speed)
+print_status $BLUE "🧪 Running unit tests..."
+# Run lib tests for all workspace members but exclude the root package integration tests
+if ! cargo test --workspace --lib --no-default-features >/dev/null 2>&1; then
+    print_status $RED "❌ COMMIT BLOCKED: Unit tests are failing!"
+    print_status $YELLOW "Please fix the failing unit tests:"
+    cargo test --workspace --lib --no-default-features
+    print_status $YELLOW "Then commit again."
+    exit 1
+fi
+print_status $GREEN "✅ All unit tests passed"
+
+# 6. Check that we're not committing any TODO or FIXME comments (optional warning)
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(rs|toml)$' || true)
+if [ ! -z "$staged_files" ]; then
+    todo_count=$(git diff --cached $staged_files | grep -E '^\+.*\b(TODO|FIXME|XXX|HACK)\b' | wc -l || echo "0")
+    if [ "$todo_count" -gt 0 ]; then
+        print_status $YELLOW "⚠️  Warning: Found $todo_count TODO/FIXME comments in staged changes:"
+        git diff --cached $staged_files | grep -E '^\+.*\b(TODO|FIXME|XXX|HACK)\b' || true
+        print_status $YELLOW "Consider addressing these before committing (not blocking commit)."
+    fi
+fi
+
+print_status $GREEN "🎉 All pre-commit checks passed! Proceeding with commit..."

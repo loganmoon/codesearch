@@ -1,0 +1,45 @@
+[package]
+name = "indexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codesearch-core = { path = "../core" }
+codesearch-languages = { path = "../languages" }
+codesearch-storage = { path = "../storage" }
+codesearch-watcher = { path = "../watcher" }
+codesearch-embeddings = { path = "../embeddings" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+tree-sitter = { workspace = true }
+indicatif = { workspace = true }
+tokio = { workspace = true }
+glob = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-go = { workspace = true }
+git2 = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+lru = "0.12"
+futures = "0.3"
+im = "15.1"
+async-stream = "0.3"
+strsim = "0.11"
+twox-hash = { version = "2.1", features = ["xxhash3_128"] }
+regex = "1.11"
+
+
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread"] }
+tempfile = "3.14"
+async-trait = "0.1"
+codesearch-languages = { path = "../languages" }
+serde_json = { workspace = true }

@@ -1,0 +1,29 @@
+[package]
+name = "codesearch-languages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codesearch-core = { path = "../core" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-go = { workspace = true }
+im = { version = "15.1", features = ["serde"] }
+streaming-iterator = "0.1"
+
+[dev-dependencies]
+testing = { path = "../testing" }
+codesearch-storage = { path = "../storage" }
+tokio = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json = { workspace = true }

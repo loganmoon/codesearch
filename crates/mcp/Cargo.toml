@@ -1,0 +1,33 @@
+[package]
+name = "codesearch-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codesearch-core = { path = "../core" }
+codesearch-storage = { path = "../storage" }
+codesearch-embeddings = { path = "../embeddings" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rmcp = { version = "0.6", features = ["server", "schemars"] }
+rmcp-macros = "0.6"
+async-trait = { workspace = true }
+moka = { version = "0.12", features = ["future"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+mockall = "0.13"
+rmcp = { version = "0.6", features = ["server", "client", "transport-child-process"] }
+tokio-test = "0.4"
+tokio = { workspace = true, features = ["process", "macros"] }
+serde_json = { workspace = true }
+env_logger = "0.11"

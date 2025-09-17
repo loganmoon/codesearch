@@ -83,7 +83,7 @@ fn outer() {
 
     // Depending on the query, this might only match the outer function
     // or all functions. Document actual behavior:
-    assert!(entities.len() >= 1);
+    assert!(!entities.is_empty());
     assert_eq!(entities[0].name, "outer");
 }
 

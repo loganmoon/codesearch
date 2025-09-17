@@ -122,7 +122,7 @@ pub fn generate_entity_id_with_separator(
             let qualified_name = if scope_path.is_empty() {
                 n.to_string()
             } else {
-                format!("{}{}{}", scope_path, separator, n)
+                format!("{scope_path}{separator}{n}")
             };
             let unique_str = format!("{}:{}", file_path.display(), qualified_name);
             format!(

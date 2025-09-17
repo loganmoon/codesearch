@@ -7,7 +7,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndexerConfig {}
 
-//// Main configuration structure for the codesearch system
+/// Main configuration structure for the codesearch system
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     /// Indexer configuration
@@ -65,6 +65,7 @@ pub struct WatcherConfig {
 
 /// Configuration for storage backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct StorageConfig {}
 
 /// Configuration for language support
@@ -174,11 +175,6 @@ impl Default for WatcherConfig {
     }
 }
 
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 impl Default for LanguagesConfig {
     fn default() -> Self {

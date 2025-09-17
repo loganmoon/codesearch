@@ -107,7 +107,7 @@ impl RepositoryIndexer {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback
                     for file_path in chunk {
-                        match self.process_file(&file_path, &storage_client).await {
+                        match self.process_file(file_path, &storage_client).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -229,7 +229,7 @@ impl RepositoryIndexer {
                     &batch_relationships,
                 )
                 .await
-                .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {}", e)))?;
+                .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
 
             debug!(
                 "Successfully bulk loaded batch of {} files",
@@ -274,7 +274,7 @@ impl RepositoryIndexer {
 
         // Get appropriate extractor
         let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {}", language))
+            Error::entity_extraction(format!("No extractor available for {language}"))
         })?;
 
         // Extract entities
@@ -326,7 +326,7 @@ impl RepositoryIndexer {
 
         // Get appropriate extractor
         let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {}", language))
+            Error::entity_extraction(format!("No extractor available for {language}"))
         })?;
 
         // Extract entities
@@ -369,7 +369,7 @@ impl RepositoryIndexer {
                 &relationships,
             )
             .await
-            .map_err(|e| Error::Storage(format!("Failed to store entities: {}", e)))?;
+            .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
 
         debug!("Successfully stored entities from {:?}", file_path);
 
@@ -437,8 +437,8 @@ fn create_progress_bar(total: usize) -> ProgressBar {
 /// Create a storage client instance
 /// TODO: Replace with real Qdrant client when implemented
 fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
-    let client = MockStorageClient::new();
-    client
+    
+    MockStorageClient::new()
 }
 
 /// Map extracted entities to storage-specific models
@@ -473,20 +473,20 @@ fn map_to_storage_models(
             .entity_id(format!("{}#{}", file_path, entity_data.qualified_name))
             .name(entity_data.name.clone())
             .qualified_name(entity_data.qualified_name.clone())
-            .entity_type(entity_type.clone())
+            .entity_type(entity_type)
             .file_path(PathBuf::from(file_path))
             .location(entity_data.location.clone())
             .line_range((
                 entity_data.location.start_line,
                 entity_data.location.end_line,
             ))
-            .visibility(entity_data.visibility.clone())
+            .visibility(entity_data.visibility)
             .language(entity_data.variant.language())
             .lines_of_code(entity_data.location.end_line - entity_data.location.start_line + 1)
             .documentation_summary(entity_data.documentation.clone())
             .content(entity_data.content.clone())
             .build()
-            .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))?;
+            .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))?;
 
         all_entities.push(code_entity.clone());
 

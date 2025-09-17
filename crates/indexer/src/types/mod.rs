@@ -249,21 +249,21 @@ impl std::fmt::Display for IndexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::FileReadError(path, msg) => {
-                write!(f, "Failed to read file {:?}: {}", path, msg)
+                write!(f, "Failed to read file {path:?}: {msg}")
             }
             Self::UnsupportedLanguage(lang) => {
-                write!(f, "Unsupported language: {}", lang)
+                write!(f, "Unsupported language: {lang}")
             }
             Self::ExtractionError(path, msg) => {
-                write!(f, "Extraction failed for {:?}: {}", path, msg)
+                write!(f, "Extraction failed for {path:?}: {msg}")
             }
             Self::TransformationError(path, msg) => {
-                write!(f, "Transformation failed for {:?}: {}", path, msg)
+                write!(f, "Transformation failed for {path:?}: {msg}")
             }
             Self::StorageError(path, msg) => {
-                write!(f, "Storage operation failed for {:?}: {}", path, msg)
+                write!(f, "Storage operation failed for {path:?}: {msg}")
             }
-            Self::Generic(msg) => write!(f, "{}", msg),
+            Self::Generic(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -275,16 +275,16 @@ impl From<IndexError> for Error {
         match err {
             IndexError::FileReadError(path, msg) => Error::parse(path.display().to_string(), msg),
             IndexError::UnsupportedLanguage(lang) => {
-                Error::entity_extraction(format!("Unsupported language: {}", lang))
+                Error::entity_extraction(format!("Unsupported language: {lang}"))
             }
             IndexError::ExtractionError(path, msg) => {
-                Error::entity_extraction(format!("{:?}: {}", path, msg))
+                Error::entity_extraction(format!("{path:?}: {msg}"))
             }
             IndexError::TransformationError(path, msg) => {
-                Error::storage(format!("Transform {:?}: {}", path, msg))
+                Error::storage(format!("Transform {path:?}: {msg}"))
             }
             IndexError::StorageError(path, msg) => {
-                Error::storage(format!("Storage {:?}: {}", path, msg))
+                Error::storage(format!("Storage {path:?}: {msg}"))
             }
             IndexError::Generic(msg) => Error::entity_extraction(msg),
         }
@@ -363,7 +363,7 @@ mod tests {
     fn test_index_error_display() {
         let err =
             IndexError::FileReadError(PathBuf::from("test.rs"), "Permission denied".to_string());
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("test.rs"));
         assert!(display.contains("Permission denied"));
     }

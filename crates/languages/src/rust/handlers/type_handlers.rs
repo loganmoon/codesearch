@@ -371,11 +371,7 @@ fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
         .find(|s| !s.is_empty())?;
 
     // Check for discriminant (= value)
-    let discriminant = if let Some(eq_pos) = text.find('=') {
-        Some(text[eq_pos + 1..].trim().trim_end_matches(',').to_string())
-    } else {
-        None
-    };
+    let discriminant = text.find('=').map(|eq_pos| text[eq_pos + 1..].trim().trim_end_matches(',').to_string());
 
     // Extract fields based on variant type
     let fields = if text.contains('(') && text.contains(')') {

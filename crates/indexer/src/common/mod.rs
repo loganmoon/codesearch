@@ -66,7 +66,7 @@ pub fn find_files(root_path: &Path) -> Result<Vec<PathBuf>> {
         debug!("Searching for {} files with pattern: {}", ext, pattern);
 
         for entry in glob(&pattern)
-            .map_err(|e| Error::parse("glob", format!("Invalid glob pattern: {}", e)))?
+            .map_err(|e| Error::parse("glob", format!("Invalid glob pattern: {e}")))?
         {
             match entry {
                 Ok(path) => {
@@ -196,7 +196,7 @@ pub fn get_relative_path(base: &Path, full_path: &Path) -> Result<PathBuf> {
         .map_err(|_| {
             Error::parse(
                 full_path.display().to_string(),
-                format!("Failed to get relative path from {:?}", base),
+                format!("Failed to get relative path from {base:?}"),
             )
         })
 }

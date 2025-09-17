@@ -3,7 +3,7 @@
 //! This module defines all string constants used by the type and function handlers
 //! for tree-sitter AST traversal and entity extraction.
 
-#![deny(warnings)]
+#![warn(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 

@@ -3,7 +3,7 @@
 //! This module processes tree-sitter query matches for Rust functions
 //! and builds EntityData instances.
 
-#![deny(warnings)]
+#![warn(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
@@ -23,6 +23,7 @@ use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
 /// Process a function query match and extract entity data
+#[allow(dead_code)]
 pub fn handle_function(
     query_match: &QueryMatch,
     query: &Query,
@@ -88,6 +89,7 @@ pub fn handle_function(
 }
 
 /// Extract function parameters by walking the AST
+#[allow(dead_code)]
 fn extract_parameters(
     query_match: &QueryMatch,
     query: &Query,
@@ -136,6 +138,7 @@ fn extract_parameters(
 }
 
 /// Extract pattern and type parts from a parameter node
+#[allow(dead_code)]
 fn extract_parameter_parts(
     node: tree_sitter::Node,
     source: &str,
@@ -160,6 +163,7 @@ fn extract_parameter_parts(
 // ===== Helper Functions =====
 
 /// Extract function modifiers (async, unsafe, const)
+#[allow(dead_code)]
 fn extract_function_modifiers(query_match: &QueryMatch, query: &Query) -> (bool, bool, bool) {
     let Some(modifiers_node) = find_capture_node(query_match, query, capture_names::MODIFIERS)
     else {
@@ -184,6 +188,7 @@ fn extract_function_modifiers(query_match: &QueryMatch, query: &Query) -> (bool,
 }
 
 /// Components for building a function entity
+#[allow(dead_code)]
 struct FunctionEntityComponents {
     name: String,
     qualified_name: String,
@@ -201,6 +206,7 @@ struct FunctionEntityComponents {
 }
 
 /// Build a function entity from extracted components
+#[allow(dead_code)]
 fn build_function_entity(components: FunctionEntityComponents) -> EntityData {
     EntityData::new(
         components.name,

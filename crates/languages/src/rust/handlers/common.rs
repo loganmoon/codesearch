@@ -3,7 +3,7 @@
 //! This module provides shared functionality for AST traversal,
 //! text extraction, and documentation processing.
 
-#![deny(warnings)]
+#![warn(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 

@@ -17,8 +17,7 @@ codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
-codesearch-mcp = { path = "../mcp" }
-# indexer = { path = "../indexer" }
+indexer = { path = "../indexer" }
 
 # CLI framework
 clap = { workspace = true }

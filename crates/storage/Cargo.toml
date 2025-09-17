@@ -1,0 +1,10 @@
+[package]
+name = "codesearch-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1"
+codesearch-core = { path = "../core" }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

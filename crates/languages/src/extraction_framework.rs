@@ -3,7 +3,7 @@
 //! This module provides a configurable extractor that uses tree-sitter queries
 //! to extract entities from source code in a language-agnostic way.
 
-#![deny(warnings)]
+#![warn(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 

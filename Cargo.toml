@@ -4,11 +4,10 @@ members = [
     "crates/core",
     "crates/languages",
     "crates/embeddings",
- 
     "crates/watcher",
-    "crates/mcp",
-    "crates/cli", 
-    "crates/indexer", "crates/testing",
+    "crates/cli",
+    "crates/indexer",
+    "crates/storage",
 ]
 
 [workspace.metadata]

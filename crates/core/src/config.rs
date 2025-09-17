@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Indexer configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexerConfig {
-}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IndexerConfig {}
 
 //// Main configuration structure for the codesearch system
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -66,9 +65,7 @@ pub struct WatcherConfig {
 
 /// Configuration for storage backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageConfig {
-    
-}
+pub struct StorageConfig {}
 
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,12 +86,11 @@ pub struct LanguagesConfig {
 /// Python language configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PythonConfig {
-
     /// Whether to preserve docstrings with functions
     #[serde(default = "default_true")]
     pub preserve_docstrings: bool,
 
-    /// Whether to include type hints 
+    /// Whether to include type hints
     #[serde(default = "default_true")]
     pub include_type_hints: bool,
 }
@@ -102,7 +98,6 @@ pub struct PythonConfig {
 /// JavaScript/TypeScript language configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct JavaScriptConfig {
-
     /// Whether to preserve JSX components intact
     #[serde(default = "default_true")]
     pub preserve_jsx: bool,
@@ -126,7 +121,23 @@ fn default_batch_size() -> usize {
     32
 }
 fn default_device() -> String {
-    "gpu".to_string()
+    "cpu".to_string()
+}
+
+fn default_provider() -> String {
+    "local".to_string()
+}
+
+fn default_model() -> String {
+    "all-minilm-l6-v2".to_string()
+}
+
+fn default_branch_strategy() -> String {
+    "index_current".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 fn default_debounce_ms() -> u64 {
     500
@@ -158,14 +169,14 @@ impl Default for WatcherConfig {
         Self {
             debounce_ms: default_debounce_ms(),
             ignore_patterns: default_ignore_patterns(),
+            branch_strategy: default_branch_strategy(),
         }
     }
 }
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 
@@ -173,8 +184,8 @@ impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled_languages(),
-            // python: PythonConfig::default(),
-            // javascript: JavaScriptConfig::default(),
+            python: PythonConfig::default(),
+            javascript: JavaScriptConfig::default(),
         }
     }
 }
@@ -232,7 +243,6 @@ impl Config {
                 "Invalid device '{}'. Must be one of: {:?}",
                 self.embeddings.device, valid_devices
             )));
-        }
         }
 
         Ok(())

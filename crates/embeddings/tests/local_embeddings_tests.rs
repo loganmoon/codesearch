@@ -43,10 +43,7 @@ async fn test_batch_size_validation() {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for TestProvider {
-        async fn embed(
-            &self,
-            texts: Vec<String>,
-        ) -> codesearch_core::error::Result<Vec<Vec<f64>>> {
+        async fn embed(&self, texts: Vec<String>) -> codesearch_core::error::Result<Vec<Vec<f64>>> {
             if texts.len() > self.max_batch {
                 return Err(EmbeddingError::BatchSizeExceeded {
                     requested: texts.len(),

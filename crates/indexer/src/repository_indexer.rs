@@ -5,8 +5,11 @@
 use crate::common::find_files;
 use crate::types::{IndexResult, IndexStats};
 use codesearch_core::error::{Error, Result};
-use codesearch_languages::{extraction_framework::GenericExtractor, rust::create_rust_extractor};
-
+use codesearch_core::{CodeEntity, EntityType};
+use codesearch_languages::{
+    extraction_framework::GenericExtractor, rust::create_rust_extractor, transport::EntityData,
+};
+use codesearch_storage::{MockStorageClient, StorageClient};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
@@ -146,10 +149,8 @@ impl RepositoryIndexer {
         &mut self,
         file_paths: &[PathBuf],
         storage_client: &impl StorageClient,
-        pb: &indicatif::ProgressBar,
+        _pb: &indicatif::ProgressBar,
     ) -> Result<IndexStats> {
-        use futures::future::join_all;
-
         debug!("Processing batch of {} files", file_paths.len());
 
         // Process statistics
@@ -163,13 +164,12 @@ impl RepositoryIndexer {
         let mut batch_variables = Vec::new();
         let mut batch_relationships = Vec::new();
 
-        // Process files in parallel within the batch
-        let extraction_futures: Vec<_> = file_paths
-            .iter()
-            .map(|file_path| self.extract_from_file(file_path))
-            .collect();
-
-        let extraction_results = join_all(extraction_futures).await;
+        // Process files sequentially for now to avoid borrowing issues
+        let mut extraction_results = Vec::new();
+        for file_path in file_paths {
+            let result = self.extract_from_file(file_path).await;
+            extraction_results.push(result);
+        }
 
         // Process each extraction result
         for (file_path, result) in file_paths.iter().zip(extraction_results) {
@@ -179,8 +179,14 @@ impl RepositoryIndexer {
                     let file_path_str = file_path.to_string_lossy().to_string();
                     let repository_id = self.repository_path.to_string_lossy().to_string();
 
-                    match map_to_storage_models(entities, &file_path_str, &repository_id) {
-                        Ok((stored_entities, stored_functions, stored_types, stored_variables, relationships)) => {
+                    match map_to_storage_models(entities.clone(), &file_path_str, &repository_id) {
+                        Ok((
+                            stored_entities,
+                            stored_functions,
+                            stored_types,
+                            stored_variables,
+                            relationships,
+                        )) => {
                             batch_entities.extend(stored_entities);
                             batch_functions.extend(stored_functions);
                             batch_types.extend(stored_types);
@@ -225,14 +231,20 @@ impl RepositoryIndexer {
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {}", e)))?;
 
-            debug!("Successfully bulk loaded batch of {} files", file_paths.len());
+            debug!(
+                "Successfully bulk loaded batch of {} files",
+                file_paths.len()
+            );
         }
 
         Ok(stats)
     }
 
     /// Extract entities from a single file (used for parallel processing)
-    async fn extract_from_file(&mut self, file_path: &Path) -> Result<(Vec<CodeEntity>, IndexStats)> {
+    async fn extract_from_file(
+        &mut self,
+        file_path: &Path,
+    ) -> Result<(Vec<EntityData>, IndexStats)> {
         debug!("Extracting from file: {:?}", file_path);
 
         let mut stats = IndexStats::default();
@@ -422,6 +434,92 @@ fn create_progress_bar(total: usize) -> ProgressBar {
     pb
 }
 
+/// Create a storage client instance
+/// TODO: Replace with real Qdrant client when implemented
+fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
+    let client = MockStorageClient::new();
+    client
+}
+
+/// Map extracted entities to storage-specific models
+/// TODO: Add embedding generation here when embedding service is ready
+fn map_to_storage_models(
+    entities: Vec<EntityData>,
+    file_path: &str,
+    _repository_id: &str,
+) -> Result<(
+    Vec<CodeEntity>,
+    Vec<CodeEntity>,
+    Vec<CodeEntity>,
+    Vec<CodeEntity>,
+    Vec<(String, String, String)>,
+)> {
+    use codesearch_core::entities::CodeEntityBuilder;
+    use std::path::PathBuf;
+
+    let mut all_entities = Vec::new();
+    let mut functions = Vec::new();
+    let mut types = Vec::new();
+    let mut variables = Vec::new();
+    let mut relationships = Vec::new();
+
+    // Convert EntityData to CodeEntity and categorize them
+    for entity_data in entities {
+        // Get EntityType from the variant
+        let entity_type = entity_data.variant.entity_type();
+
+        // Build CodeEntity from EntityData
+        let code_entity = CodeEntityBuilder::default()
+            .entity_id(format!("{}#{}", file_path, entity_data.qualified_name))
+            .name(entity_data.name.clone())
+            .qualified_name(entity_data.qualified_name.clone())
+            .entity_type(entity_type.clone())
+            .file_path(PathBuf::from(file_path))
+            .location(entity_data.location.clone())
+            .line_range((
+                entity_data.location.start_line,
+                entity_data.location.end_line,
+            ))
+            .visibility(entity_data.visibility.clone())
+            .language(entity_data.variant.language())
+            .lines_of_code(entity_data.location.end_line - entity_data.location.start_line + 1)
+            .documentation_summary(entity_data.documentation.clone())
+            .content(entity_data.content.clone())
+            .build()
+            .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))?;
+
+        all_entities.push(code_entity.clone());
+
+        match entity_type {
+            EntityType::Function | EntityType::Method => {
+                functions.push(code_entity);
+            }
+            EntityType::Class
+            | EntityType::Struct
+            | EntityType::Interface
+            | EntityType::Trait
+            | EntityType::Enum => {
+                types.push(code_entity);
+            }
+            EntityType::Variable | EntityType::Constant => {
+                variables.push(code_entity);
+            }
+            _ => {}
+        }
+
+        // Convert relationships to storage format
+        for rel in &entity_data.relationships {
+            relationships.push((
+                rel.from.clone(),
+                rel.to.clone(),
+                format!("{:?}", rel.relationship_type),
+            ));
+        }
+    }
+
+    Ok((all_entities, functions, types, variables, relationships))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,7 +563,7 @@ mod tests {
 
         // Create a mock storage client for testing
         // In a real test, we'd use a mock implementation
-        let storage_client = create_storage_client("localhost".to_string(), 8080);
+        let storage_client = MockStorageClient::new();
 
         // This will fail without a running storage server, but tests the extraction
         let result = indexer.process_file(&test_file, &storage_client).await;

@@ -1,0 +1,49 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## PROJECT OVERVIEW
+
+Codesearchis a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with MCP server integration.
+
+# Rust Development Mandate
+
+## Architecture Principles
+
+  - Design narrow, abstract public APIs centered around traits
+  - Limit public exports to traits, models, errors, and factory functions
+  - Keep implementation details in private modules
+  - Use core domain types directly (`CodeEntity` from `code-context-core`)
+  - Implement From/Into traits for API boundary conversions
+  - Never assume that backwards compatibility is required, unless specifically requested by the user
+
+## Code Quality Standards
+
+  - Return Result types - never panic with .unwrap() or .expect()
+  - Use core::Error for all error types
+  - Enforce `#![deny(warnings)]`, `#![deny(clippy::unwrap_used)]`, `#![deny(clippy::expect_used)]`
+  - VERY strongly favor immutability and borrowing over cloning. Favor builders over `new` or direct struct initialization
+  - VERY strongly prefer standalone functions over unnecessary &self methods
+  - Implement RAII for resource management
+
+## Avoid These Patterns
+
+  - Excessive `Box`/`Pin`/`Arc` wrapping when simpler ownership suffices
+  - Global state, e.g., with `OnceLock<Mutex<HashMap<>>>`
+  - Mixed responsibilities in single modules
+  - Redundant allocations during type conversions
+  - Ignoring compiler warnings or clippy lints
+
+## Style Rules
+  - When formatting strings use this syntax: println!("The thing is {thing}");
+
+## DEVELOPMENT COMMANDS
+
+**Building & Testing:**
+```bash
+cargo build --workspace --all-targets       # Build all debug targets
+cargo build --release --workspace --all-targets  # Build all release targets
+cargo test --workspace                    # Run all tests
+cargo clippy --workspace                  # Lint with strict rules
+cargo fmt                      # Format code
+```

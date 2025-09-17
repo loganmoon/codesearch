@@ -1,6 +1,4 @@
-
 use codesearch_embeddings::provider::EmbeddingProvider;
-
 
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},

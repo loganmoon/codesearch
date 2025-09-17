@@ -12,26 +12,10 @@
 //! # Example
 //!
 //! ```no_run
-//! use codesearch_core::{Config, CodeEntity, EntityType, Chunk};
-//! use std::path::PathBuf;
+//! use codesearch_core::Config;
 //!
 //! // Load configuration
 //! let config = Config::default();
-//!
-//! // Create a code entity
-//! let entity = CodeEntity::new(
-//!     "my_function".to_string(),
-//!     EntityType::Function,
-//!     PathBuf::from("src/main.rs"),
-//!     (1, 10),
-//! );
-//!
-//! // Create a chunk
-//! let chunk = Chunk::new(
-//!     "fn my_function() { }".to_string(),
-//!     PathBuf::from("src/main.rs"),
-//!     (1, 10),
-//! );
 //! ```
 
 pub mod config;

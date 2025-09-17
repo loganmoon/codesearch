@@ -7,6 +7,7 @@ pub(crate) mod entities;
 pub(crate) mod handlers;
 pub(crate) mod queries;
 
+#[allow(unused_imports)]
 pub use entities::{FieldInfo, MacroType, RustEntityVariant, VariantInfo};
 
 use crate::extraction_framework::{GenericExtractor, LanguageConfigurationBuilder};

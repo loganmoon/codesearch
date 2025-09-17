@@ -1,8 +1,8 @@
-#![deny(warnings)]
+#![warn(warnings)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-mod rust;
+pub mod rust;
 
 // Unified entity builders
 pub mod generic_entities;

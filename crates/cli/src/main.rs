@@ -9,12 +9,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::Config;
-use indicatif::{ProgressBar, ProgressStyle};
-use rmcp::service::ServiceExt;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 use tracing::{info, warn};
 
 #[derive(Parser)]
@@ -100,20 +96,6 @@ async fn main() -> Result<()> {
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
             search_code(config, query, limit).await
         }
-        Some(Commands::Health) => {
-            // Find repository root
-            let repo_root = find_repository_root()?;
-            // Load configuration
-            let config = load_config(&repo_root, cli.config.as_deref()).await?;
-            health_check(config).await
-        }
-        Some(Commands::Cleanup) => {
-            // Find repository root
-            let repo_root = find_repository_root()?;
-            // Load configuration
-            let config = load_config(&repo_root, cli.config.as_deref()).await?;
-            cleanup_instances(config).await
-        }
         None => {
             // Default behavior - show help
             println!(
@@ -165,7 +147,6 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     // Create vector database client
 
-
     // Initialize the repository (if necessary)
 
     todo!("Not yet implemented")
@@ -194,7 +175,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
 }
 
 /// Start the MCP server
-async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
+async fn serve(_config: Config, _host: String, _port: u16) -> Result<()> {
     println!("🚀 Starting MCP server on stdio...");
     todo!()
 }

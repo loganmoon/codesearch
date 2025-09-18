@@ -267,16 +267,3 @@ async fn test_stats_accumulation() {
     assert_eq!(total_stats.processing_time_ms, 150);
     assert_eq!(total_stats.memory_usage_bytes, Some(1024)); // Max value
 }
-
-// TODO: These tests were testing internal implementation details.
-// They should be moved to unit tests within the common module itself.
-
-// #[test]
-// fn test_language_detection() {
-//     // Test moved to unit tests in common module
-// }
-
-// #[test]
-// fn test_file_filtering() {
-//     // Test moved to unit tests in common module
-// }

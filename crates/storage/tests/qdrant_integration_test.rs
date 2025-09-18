@@ -17,7 +17,6 @@ async fn qdrant_available() -> bool {
         provider: "qdrant".to_string(),
         host: "localhost".to_string(),
         port: 6334,
-        use_mock: false,
         ..Default::default()
     };
 
@@ -53,7 +52,7 @@ fn create_test_entities(count: usize) -> Vec<CodeEntity> {
 #[ignore] // Run with --ignored when Qdrant is available
 async fn test_qdrant_collection_lifecycle() {
     if !qdrant_available().await {
-        panic!("Qdrant not available, skipping test");        
+        panic!("Qdrant not available, skipping test");
     }
 
     let config = StorageConfig {
@@ -61,7 +60,6 @@ async fn test_qdrant_collection_lifecycle() {
         host: "localhost".to_string(),
         port: 6334,
         collection_name: "test_lifecycle".to_string(),
-        use_mock: false,
         ..Default::default()
     };
 
@@ -97,7 +95,6 @@ async fn test_qdrant_bulk_load() {
         port: 6334,
         collection_name: "test_bulk_load".to_string(),
         batch_size: 10,
-        use_mock: false,
         ..Default::default()
     };
 
@@ -138,7 +135,6 @@ async fn test_qdrant_search_operations() {
         port: 6334,
         collection_name: "test_search".to_string(),
         vector_size: 768,
-        use_mock: false,
         ..Default::default()
     };
 
@@ -189,7 +185,6 @@ async fn test_qdrant_get_by_id() {
         host: "localhost".to_string(),
         port: 6334,
         collection_name: "test_get_by_id".to_string(),
-        use_mock: false,
         ..Default::default()
     };
 
@@ -250,7 +245,6 @@ async fn test_qdrant_error_handling() {
         host: "invalid_host".to_string(),
         port: 9999,
         timeout_ms: 1000, // Short timeout
-        use_mock: false,
         ..Default::default()
     };
 

@@ -194,9 +194,37 @@ async fn serve(_config: Config, _host: String, _port: u16) -> Result<()> {
 }
 
 /// Index the repository
-async fn index_repository(_config: Config, _force: bool, _progress: bool) -> Result<()> {
-    // TODO: Implement indexing once storage API is ready
-    todo!("📚 Indexing not yet implemented")
+async fn index_repository(config: Config, _force: bool, _progress: bool) -> Result<()> {
+    // Create storage client
+    let storage_client = codesearch_storage::create_storage_client(config.storage.clone())
+        .await
+        .context("Failed to create storage client")?;
+
+    // Initialize storage (create collections if needed)
+    storage_client
+        .initialize()
+        .await
+        .context("Failed to initialize storage")?;
+
+    // Create indexer with storage client
+    let mut indexer = indexer::create_indexer(
+        storage_client,
+        std::env::current_dir().context("Failed to get current directory")?,
+    );
+
+    // Run indexing
+    let result = indexer
+        .index_repository()
+        .await
+        .context("Failed to index repository")?;
+
+    println!("✅ Indexing complete!");
+    println!("  Files processed: {}", result.stats.total_files);
+    println!("  Entities extracted: {}", result.stats.entities_extracted);
+    println!("  Relationships: {}", result.stats.relationships_extracted);
+
+    // TODO: Wire up actual storage operations in issue #3
+    Ok(())
 }
 
 /// Search the indexed code

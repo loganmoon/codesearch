@@ -1,4 +1,3 @@
-use crate::error::StorageError;
 use crate::{StorageClient, StorageManager};
 use async_trait::async_trait;
 use codesearch_core::Error;
@@ -21,9 +20,7 @@ impl StorageManager for QdrantStorage {
         self.client
             .create_collection(create_collection.build())
             .await
-            .map_err(|e| {
-                StorageError::BackendError(format!("Failed to create collection {name}: {e}"))
-            })?;
+            .map_err(|e| Error::storage(format!("Failed to create collection {name}: {e}")))?;
 
         Ok(())
     }
@@ -34,18 +31,17 @@ impl StorageManager for QdrantStorage {
         self.client
             .delete_collection(delete_collection.build())
             .await
-            .map_err(|e| {
-                StorageError::BackendError(format!("Failed to delete collection {name}: {e}"))
-            })?;
+            .map_err(|e| Error::storage(format!("Failed to delete collection {name}: {e}")))?;
 
         Ok(())
     }
 
     async fn collection_exists(&self, name: &str) -> Result<bool, Error> {
-        let collections =
-            self.client.list_collections().await.map_err(|e| {
-                StorageError::BackendError(format!("Failed to list collections: {e}"))
-            })?;
+        let collections = self
+            .client
+            .list_collections()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to list collections: {e}")))?;
 
         Ok(collections.collections.iter().any(|c| c.name == name))
     }

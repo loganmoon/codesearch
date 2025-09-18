@@ -1,4 +1,3 @@
-use crate::error::StorageError;
 use crate::StorageEntity;
 use codesearch_core::{CodeEntity, Error};
 use qdrant_client::qdrant::{PointStruct, UpsertPointsBuilder};
@@ -8,7 +7,7 @@ use super::client::QdrantStorage;
 
 /// Convert CodeEntity to Qdrant PointStruct
 fn entity_to_point(entity: &CodeEntity, index: u64) -> PointStruct {
-    let storage_entity = StorageEntity::from(entity.clone());
+    let storage_entity = StorageEntity::from(entity);
 
     // Create payload with entity fields using serde_json::Map for compatibility
     let mut payload = serde_json::Map::new();
@@ -70,9 +69,7 @@ pub(super) async fn bulk_load_entities(
             .client
             .upsert_points(upsert_operation)
             .await
-            .map_err(|e| {
-                StorageError::BackendError(format!("Failed to upsert batch {batch_idx}: {e}"))
-            })?;
+            .map_err(|e| Error::storage(format!("Failed to upsert batch {batch_idx}: {e}")))?;
     }
 
     Ok(())

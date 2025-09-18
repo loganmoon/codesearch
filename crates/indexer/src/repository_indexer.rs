@@ -4,12 +4,13 @@
 
 use crate::common::find_files;
 use crate::types::{IndexResult, IndexStats};
-use codesearch_core::config::StorageConfig;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::{CodeEntity, EntityType};
-use codesearch_languages::{create_extractor, EntityData, GenericExtractor, Language};
-use codesearch_storage::{create_storage_client, StorageClient};
+use codesearch_languages::{create_unified_extractor, EntityData, Extractor, UnifiedExtractor};
+use codesearch_storage::StorageClient;
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -46,34 +47,24 @@ impl IndexProgress {
 }
 
 /// Main repository indexer
-pub struct RepositoryIndexer {
-    storage_config: StorageConfig,
+pub(crate) struct RepositoryIndexer {
+    storage_client: Arc<dyn StorageClient>,
     repository_path: PathBuf,
-    extractors: ExtractorRegistry,
+    extractor: std::sync::Mutex<UnifiedExtractor>,
 }
 
 impl RepositoryIndexer {
     /// Create a new repository indexer
-    pub fn new(storage_config: StorageConfig, repository_path: PathBuf) -> Self {
+    pub fn new(storage_client: Arc<dyn StorageClient>, repository_path: PathBuf) -> Self {
         Self {
-            storage_config,
+            storage_client,
             repository_path,
-            extractors: ExtractorRegistry::new(),
+            extractor: std::sync::Mutex::new(create_unified_extractor()),
         }
     }
 
-    /// Create a new repository indexer with default storage config
-    pub fn with_defaults(repository_path: PathBuf) -> Self {
-        Self::new(StorageConfig::default(), repository_path)
-    }
-
-    /// Get the repository path
-    pub fn repository_path(&self) -> &Path {
-        &self.repository_path
-    }
-
-    /// Index the entire repository
-    pub async fn index_repository(&mut self) -> Result<IndexResult> {
+    /// Index the entire repository (internal implementation)
+    async fn index_repository_impl(&mut self) -> Result<IndexResult> {
         info!("Starting repository indexing: {:?}", self.repository_path);
         let start_time = Instant::now();
 
@@ -85,8 +76,8 @@ impl RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Create storage client
-        let storage_client = create_storage_client(self.storage_config.clone()).await?;
+        // Clone the storage client Arc to avoid borrow issues
+        let storage_client = self.storage_client.clone();
 
         // Process statistics
         let mut stats = IndexStats::default();
@@ -97,7 +88,10 @@ impl RepositoryIndexer {
         for chunk in files.chunks(BATCH_SIZE) {
             pb.set_message(format!("Processing batch of {} files", chunk.len()));
 
-            match self.process_batch(chunk, &*storage_client, &pb).await {
+            match self
+                .process_batch(chunk, storage_client.as_ref(), &pb)
+                .await
+            {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
                     for file_path in chunk {
@@ -109,7 +103,7 @@ impl RepositoryIndexer {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback
                     for file_path in chunk {
-                        match self.process_file(file_path, &*storage_client).await {
+                        match self.process_file(file_path, storage_client.as_ref()).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -256,31 +250,12 @@ impl RepositoryIndexer {
             .await
             .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
 
-        // Determine language from extension
-        let extension = file_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-
-        let language = match extension {
-            "rs" => "rust",
-            "py" => "python",
-            "js" | "jsx" => "javascript",
-            "ts" | "tsx" => "typescript",
-            "go" => "go",
-            _ => {
-                debug!("Unsupported file type: {:?}", file_path);
-                return Ok((Vec::new(), stats));
-            }
-        };
-
-        // Get appropriate extractor
-        let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {language}"))
-        })?;
-
-        // Extract entities
-        let entities = extractor.extract(&content, file_path)?;
+        // Extract entities using unified extractor
+        let entities = self
+            .extractor
+            .lock()
+            .map_err(|e| Error::parse("mutex", e.to_string()))?
+            .extract(file_path, &content)?;
         debug!("Extracted {} entities from {:?}", entities.len(), file_path);
 
         // Update stats
@@ -308,31 +283,12 @@ impl RepositoryIndexer {
             .await
             .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
 
-        // Determine language from extension
-        let extension = file_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-
-        let language = match extension {
-            "rs" => "rust",
-            "py" => "python",
-            "js" | "jsx" => "javascript",
-            "ts" | "tsx" => "typescript",
-            "go" => "go",
-            _ => {
-                debug!("Unsupported file type: {:?}", file_path);
-                return Ok(stats);
-            }
-        };
-
-        // Get appropriate extractor
-        let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {language}"))
-        })?;
-
-        // Extract entities
-        let entities = extractor.extract(&content, file_path)?;
+        // Extract entities using unified extractor
+        let entities = self
+            .extractor
+            .lock()
+            .map_err(|e| Error::parse("mutex", e.to_string()))?
+            .extract(file_path, &content)?;
         debug!("Extracted {} entities from {:?}", entities.len(), file_path);
 
         if entities.is_empty() {
@@ -386,40 +342,14 @@ impl RepositoryIndexer {
     }
 }
 
-/// Registry for managing language extractors
-struct ExtractorRegistry {
-    rust_extractor: Option<GenericExtractor<'static>>,
-    // Future: Add other language extractors
-    // python_extractor: Option<GenericExtractor<'static>>,
-    // typescript_extractor: Option<GenericExtractor<'static>>,
-}
-
-impl ExtractorRegistry {
-    fn new() -> Self {
-        Self {
-            rust_extractor: None,
-        }
+#[async_trait]
+impl crate::Indexer for RepositoryIndexer {
+    async fn index_repository(&mut self) -> Result<IndexResult> {
+        self.index_repository_impl().await
     }
 
-    fn get_or_create(&mut self, language: &str) -> Option<&mut GenericExtractor<'static>> {
-        match language {
-            "rust" => {
-                if self.rust_extractor.is_none() {
-                    match create_extractor(Language::Rust) {
-                        Ok(extractor) => self.rust_extractor = Some(extractor),
-                        Err(e) => {
-                            error!("Failed to create Rust extractor: {}", e);
-                            return None;
-                        }
-                    }
-                }
-                self.rust_extractor.as_mut()
-            }
-            _ => {
-                debug!("No extractor available for language: {}", language);
-                None
-            }
-        }
+    fn repository_path(&self) -> &Path {
+        &self.repository_path
     }
 }
 
@@ -518,23 +448,25 @@ fn map_to_storage_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codesearch_storage::MockStorageClient;
     use tempfile::TempDir;
     use tokio::fs;
 
     #[tokio::test]
     async fn test_repository_indexer_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let indexer = RepositoryIndexer::with_defaults(temp_dir.path().to_path_buf());
-        assert_eq!(indexer.repository_path(), temp_dir.path());
+        let storage_client = Arc::new(MockStorageClient::new());
+        let indexer = RepositoryIndexer::new(storage_client, temp_dir.path().to_path_buf());
+        assert_eq!(indexer.repository_path, temp_dir.path());
     }
 
     #[tokio::test]
     async fn test_empty_repository_indexing() {
         let temp_dir = TempDir::new().unwrap();
-        let mut indexer = RepositoryIndexer::with_defaults(temp_dir.path().to_path_buf());
+        let storage_client = Arc::new(MockStorageClient::new());
+        let mut indexer = RepositoryIndexer::new(storage_client, temp_dir.path().to_path_buf());
 
-        // This will fail because no storage server is running, but we can test the flow
-        let result = indexer.index_repository().await;
+        let result = indexer.index_repository_impl().await;
         assert!(result.is_ok());
 
         if let Ok(index_result) = result {
@@ -543,26 +475,27 @@ mod tests {
         }
     }
 
-    // TODO: This test needs to be updated to use the proper mock from codesearch_storage
-    // #[tokio::test]
-    // async fn test_file_processing() {
-    //     let temp_dir = TempDir::new().unwrap();
-    //     let test_file = temp_dir.path().join("test.rs");
-    //     fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
-    //         .await
-    //         .unwrap();
+    #[tokio::test]
+    async fn test_file_processing() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test.rs");
+        fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
+            .await
+            .unwrap();
 
-    //     let mut indexer = RepositoryIndexer::with_defaults(temp_dir.path().to_path_buf());
+        let storage_client = Arc::new(MockStorageClient::new());
+        let mut indexer =
+            RepositoryIndexer::new(storage_client.clone(), temp_dir.path().to_path_buf());
 
-    //     // Create a mock storage client for testing
-    //     // Need to use the mock from codesearch_storage crate
-    //     // let storage_client = ...;
+        // Test file processing
+        let result = indexer
+            .process_file(&test_file, storage_client.as_ref())
+            .await;
 
-    //     // This will fail without a running storage server, but tests the extraction
-    //     // let result = indexer.process_file(&test_file, &storage_client).await;
-
-    //     // The test should at least attempt extraction
-    //     // Full success depends on storage being available
-    //     // assert!(result.is_ok() || result.is_err());
-    // }
+        // The test should at least attempt extraction
+        assert!(result.is_ok());
+        if let Ok(stats) = result {
+            assert!(stats.entities_extracted > 0);
+        }
+    }
 }

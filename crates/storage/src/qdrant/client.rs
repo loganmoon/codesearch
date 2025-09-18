@@ -1,4 +1,3 @@
-use crate::error::StorageError;
 use codesearch_core::{config::StorageConfig, Error};
 use qdrant_client::{
     qdrant::{Distance, VectorParams, VectorsConfig},
@@ -26,13 +25,13 @@ impl QdrantStorage {
         }
 
         let client = Qdrant::new(client_config)
-            .map_err(|e| StorageError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| Error::storage(format!("Connection failed: {e}")))?;
 
         // Verify connection is alive
         client
             .health_check()
             .await
-            .map_err(|e| StorageError::ConnectionFailed(format!("Health check failed: {e}")))?;
+            .map_err(|e| Error::storage(format!("Health check failed: {e}")))?;
 
         Ok(Self { client, config })
     }

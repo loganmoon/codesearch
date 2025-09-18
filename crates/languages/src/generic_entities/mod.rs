@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use crate::rust::entities::RustEntityVariant;
 
 mod error;
-pub use error::BuilderError;
 
 /// Language-agnostic entity variant that wraps language-specific variants
 #[derive(Debug, Clone, Serialize, Deserialize)]

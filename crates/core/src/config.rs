@@ -101,10 +101,6 @@ pub struct StorageConfig {
     /// Timeout in milliseconds for storage operations
     #[serde(default = "default_storage_timeout_ms")]
     pub timeout_ms: u64,
-
-    /// Use mock storage for testing
-    #[serde(default = "default_use_mock")]
-    pub use_mock: bool,
 }
 
 /// Configuration for language support
@@ -225,10 +221,6 @@ fn default_storage_timeout_ms() -> u64 {
     30000
 }
 
-fn default_use_mock() -> bool {
-    false
-}
-
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -272,7 +264,6 @@ impl Default for StorageConfig {
             distance_metric: default_distance_metric(),
             batch_size: default_storage_batch_size(),
             timeout_ms: default_storage_timeout_ms(),
-            use_mock: default_use_mock(),
         }
     }
 }

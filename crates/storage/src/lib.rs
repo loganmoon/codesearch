@@ -81,8 +81,8 @@ pub struct ScoredEntity {
     pub score: f32,
 }
 
-impl From<CodeEntity> for StorageEntity {
-    fn from(entity: CodeEntity) -> Self {
+impl From<&CodeEntity> for StorageEntity {
+    fn from(entity: &CodeEntity) -> Self {
         StorageEntity {
             id: entity.entity_id.clone(),
             name: entity.name.clone(),
@@ -90,7 +90,7 @@ impl From<CodeEntity> for StorageEntity {
             file_path: entity.file_path.to_string_lossy().into_owned(),
             start_line: entity.location.start_line,
             end_line: entity.location.end_line,
-            content: entity.content.unwrap_or_default(),
+            content: entity.content.clone().unwrap_or_default(),
             embedding: None,
         }
     }

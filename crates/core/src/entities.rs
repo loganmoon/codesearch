@@ -98,10 +98,10 @@ pub struct CodeEntity {
     /// Simple name of the entity
     pub name: String,
 
-    /// Full qualified name of the entity (e.g., "module.class.method")
+    /// Fully qualified name of the entity (e.g., "module.class.method")
     pub qualified_name: String,
 
-    /// Parent scope of this entity (e.g., containing class or module)
+    /// Fully qualified name of the parent scope of this entity (e.g., containing class or module)
     #[builder(default = "None")]
     pub parent_scope: Option<String>,
 
@@ -183,7 +183,7 @@ pub enum RelationshipType {
     Returns,
     AcceptsParameter,
     ThrowsException,
-    DefinesEntity, // chunk-to-entity
+    DefinesEntity,
 }
 
 /// Represents a relationship between code entities

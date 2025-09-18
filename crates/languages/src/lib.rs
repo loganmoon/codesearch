@@ -13,11 +13,14 @@ mod transport;
 // Generic data-driven extractor framework
 mod extraction_framework;
 
+mod unified_extractor;
+
 use codesearch_core::error::Result;
 
 // Re-export only the public API
 pub use extraction_framework::GenericExtractor;
 pub use transport::EntityData;
+pub use unified_extractor::{Extractor, UnifiedExtractor};
 
 // Re-export Language from core for convenience
 pub use codesearch_core::entities::Language;
@@ -26,35 +29,30 @@ pub use codesearch_core::entities::Language;
 pub fn create_extractor(language: Language) -> Result<GenericExtractor<'static>> {
     match language {
         Language::Rust => rust::create_rust_extractor(),
-        Language::Python => {
-            Err(codesearch_core::error::Error::NotImplemented(
-                "Python extractor not yet implemented".to_string(),
-            ))
-        }
-        Language::JavaScript => {
-            Err(codesearch_core::error::Error::NotImplemented(
-                "JavaScript extractor not yet implemented".to_string(),
-            ))
-        }
-        Language::TypeScript => {
-            Err(codesearch_core::error::Error::NotImplemented(
-                "TypeScript extractor not yet implemented".to_string(),
-            ))
-        }
-        Language::Go => {
-            Err(codesearch_core::error::Error::NotImplemented(
-                "Go extractor not yet implemented".to_string(),
-            ))
-        }
+        Language::Python => Err(codesearch_core::error::Error::NotImplemented(
+            "Python extractor not yet implemented".to_string(),
+        )),
+        Language::JavaScript => Err(codesearch_core::error::Error::NotImplemented(
+            "JavaScript extractor not yet implemented".to_string(),
+        )),
+        Language::TypeScript => Err(codesearch_core::error::Error::NotImplemented(
+            "TypeScript extractor not yet implemented".to_string(),
+        )),
+        Language::Go => Err(codesearch_core::error::Error::NotImplemented(
+            "Go extractor not yet implemented".to_string(),
+        )),
         Language::Java | Language::CSharp | Language::Cpp => {
-            Err(codesearch_core::error::Error::NotImplemented(
-                format!("{} extractor not yet implemented", language),
-            ))
+            Err(codesearch_core::error::Error::NotImplemented(format!(
+                "{language} extractor not yet implemented"
+            )))
         }
-        Language::Unknown => {
-            Err(codesearch_core::error::Error::InvalidInput(
-                "Cannot create extractor for unknown language".to_string(),
-            ))
-        }
+        Language::Unknown => Err(codesearch_core::error::Error::InvalidInput(
+            "Cannot create extractor for unknown language".to_string(),
+        )),
     }
+}
+
+/// Create a unified extractor that routes to appropriate language extractors
+pub fn create_unified_extractor() -> UnifiedExtractor {
+    UnifiedExtractor::new()
 }

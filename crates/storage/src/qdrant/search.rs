@@ -1,4 +1,3 @@
-use crate::error::StorageError;
 use crate::{ScoredEntity, StorageEntity};
 use codesearch_core::Error;
 use qdrant_client::qdrant::{SearchPointsBuilder, Value as QdrantValue};
@@ -48,11 +47,11 @@ pub(super) async fn search_similar(
 
     // Validate vector dimensions
     if query_vector.len() != storage.config.vector_size {
-        return Err(StorageError::InvalidDimensions {
-            expected: storage.config.vector_size,
-            actual: query_vector.len(),
-        }
-        .into());
+        return Err(Error::storage(format!(
+            "Invalid vector dimensions: expected {}, got {}",
+            storage.config.vector_size,
+            query_vector.len()
+        )));
     }
 
     // Build search request
@@ -68,7 +67,7 @@ pub(super) async fn search_similar(
         .client
         .search_points(search_builder)
         .await
-        .map_err(|e| StorageError::BackendError(format!("Search failed: {e}")))?;
+        .map_err(|e| Error::storage(format!("Search failed: {e}")))?;
 
     // Convert results to ScoredEntity
     let mut scored_entities = Vec::new();
@@ -121,7 +120,7 @@ pub(super) async fn get_entity_by_id(
                 .limit(1),
         )
         .await
-        .map_err(|e| StorageError::BackendError(format!("Failed to get entity by ID: {e}")))?;
+        .map_err(|e| Error::storage(format!("Failed to get entity by ID: {e}")))?;
 
     // Convert the first result if found
     if let Some(point) = scroll_result.result.first() {
@@ -177,7 +176,7 @@ pub(super) async fn get_entities_by_ids(
                 .limit(ids.len() as u32),
         )
         .await
-        .map_err(|e| StorageError::BackendError(format!("Failed to get entities by IDs: {e}")))?;
+        .map_err(|e| Error::storage(format!("Failed to get entities by IDs: {e}")))?;
 
     // Convert results to StorageEntity
     let mut entities = Vec::new();

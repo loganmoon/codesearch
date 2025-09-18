@@ -12,250 +12,186 @@ A high-performance semantic code indexing system that enables intelligent code s
 - **📊 Vector Embeddings**: Support for both local and remote embedding models
 - **🔧 Multi-Language Support**: Rust, Python, JavaScript/TypeScript, and Go
 
-## Table of Contents
-
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-- [Architecture](#architecture)
-- [Configuration](#configuration)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-
 ## Installation
 
-### Prerequisites
-
-- Rust toolchain (1.75 or later)
-- Docker and Docker Compose (for Qdrant vector database)
-- Git (for repository integration features)
-
-### Building from Source
+### Using Docker
 
 ```bash
 # Clone the repository
-git clone https://github.com/loganmoon/codesearch
+git clone https://github.com/yourusername/codesearch.git
+cd codesearch
+
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Or build the Docker image directly
+docker build -t codesearch .
+```
+
+### From Source
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/codesearch.git
 cd codesearch
 
 # Build the project
 cargo build --release
 
-# The binary will be available at ./target/release/codesearch
+# Install to PATH (optional)
+cargo install --path crates/cli
 ```
-
-### Docker Setup
-
-For running Qdrant vector database:
-
-```bash
-# Start Qdrant using Docker Compose
-docker-compose up -d
 
 ## Quick Start
 
-1. **Initialize Codesearch in your repository and create the index:**
+1. **Initialize a repository for indexing:**
 
 ```bash
+# Navigate to your project directory
+cd /path/to/your/project
+
+# Index the repository
 codesearch index
 ```
 
-This creates a `.codesearch/config.toml` configuration file in your repository and parses all supported code files and stores their semantic representations.
-
-3. **Start the MCP server (optional):**
+2. **Search for code:**
 
 ```bash
-codesearch serve --port 8699
-```
-
-This enables integration with AI assistants and development tools.
-
-4. **Search your code:**
-
-```bash
+# Search for specific code patterns
 codesearch search "function that handles authentication"
+
+# Limit results
+codesearch search "database connection" --limit 5
 ```
 
-## Usage
-
-### Command-Line Interface
+3. **Start the MCP server:**
 
 ```bash
-# Index repository (with progress bar)
-codesearch index --progress
-
-# Force complete re-indexing
-codesearch index --force
-
-# Search indexed code
-codesearch search "your search query" --limit 20
-
-# Start MCP server
-codesearch serve --host localhost --port 8699
-
-# Enable verbose logging
-codesearch --verbose <command>
-
-# Use custom config file
-codesearch --config path/to/config.toml <command>
-```
-
-### MCP Server Integration
-
-The MCP (Model Context Protocol) server allows Codesearch to integrate with AI assistants and development tools:
-
-```bash
-# Start the server
+# Start the Model Context Protocol server
 codesearch serve
 
-# The server provides semantic code search capabilities via the MCP protocol
-# Configure your AI assistant to connect to http://localhost:8699
+# Or specify a custom port
+codesearch serve --port 8080
+```
+
+## Configuration
+
+Configuration is stored in `.codesearch/config.toml` within your repository:
+
+```toml
+[indexing]
+ignore_patterns = [
+    "target/",
+    "node_modules/",
+    ".git/",
+    "*.min.js"
+]
+languages = ["rust", "python", "javascript", "typescript", "go"]
+
+[embeddings]
+provider = "embed_anything"  # or "openai"
+model = "all-MiniLM-L6-v2"
+
+[storage]
+provider = "qdrant"
+host = "localhost"
+port = 6334
+collection_name = "code_entities"
+
+[server]
+host = "localhost"
+port = 8699
 ```
 
 ## Architecture
 
-Codesearch is built as a modular Rust workspace with specialized crates:
+The project is organized as a Rust workspace with the following crates:
 
-### Core Components
-
-- **`codesearch-core`**: Foundation types, entities, configuration, and error handling
-- **`codesearch-languages`**: AST parsing and entity extraction for supported languages
-- **`codesearch-embeddings`**: Vector embedding generation with local/remote provider support
-- **`codesearch-indexer`**: Repository indexing with Git integration
-- **`codesearch-watcher`**: Real-time file system monitoring with gitignore support
-- **`codesearch-storage`**: Persistent storage layer for indexed data
-- **`codesearch` (CLI)**: Command-line interface and MCP server
-
-### Data Flow
-
-1. **Parsing**: Source files are parsed into AST representations
-2. **Entity Extraction**: Code entities (functions, classes, etc.) are extracted
-3. **Embedding Generation**: Entities are converted to vector embeddings
-4. **Storage**: Embeddings are stored in Qdrant vector database
-5. **Search**: Queries are embedded and matched against stored vectors
-6. **Retrieval**: Relevant code entities are returned with context
-
-## Configuration
-
-### Environment Variables
-
-Create a `.env` file from the example:
-
-```bash
-cp .env.example .env
-```
-
-Key configuration options:
-
-```bash
-# Logging level (trace, debug, info, warn, error)
-RUST_LOG=info
-
-# Qdrant vector database
-QDRANT_HOST=localhost
-QDRANT_PORT=6334
-QDRANT_COLLECTION=codesearch
-
-# MCP server
-APP_HOST=0.0.0.0
-APP_PORT=8699
-
-# Indexing
-INDEX_BATCH_SIZE=100
-INDEX_SHOW_PROGRESS=true
-
-# File watching
-WATCH_ENABLED=true
-WATCH_DEBOUNCE_MS=500
-```
-
-### Configuration File
-
-The `.codesearch/config.toml` file created by `codesearch index` contains:
-
-- Repository-specific settings
-- Ignore patterns for file watching
-- Language-specific parsing options
-- Embedding model configuration
+- **`core`**: Foundation types, entities, configuration, and error handling
+- **`languages`**: AST parsing and entity extraction for supported languages
+- **`embeddings`**: Vector embedding providers (local and remote)
+- **`indexer`**: Repository indexing logic with Git integration
+- **`watcher`**: Real-time file system monitoring
+- **`storage`**: Persistent storage layer for indexed data
+- **`cli`**: Command-line interface and MCP server
 
 ## Development
 
-### Building and Testing
+### Building
 
 ```bash
 # Build all crates
-cargo build --workspace --all-targets
+cargo build --workspace
 
-# Run all tests
+# Run tests
 cargo test --workspace
 
-# Run tests for specific crate
-cargo test --package codesearch-core
-
-# Run with strict linting
-cargo clippy --workspace
-
-# Format code
-cargo fmt
-
-# Build optimized release version
-cargo build --release --workspace --all-targets
+# Run with verbose logging
+RUST_LOG=debug cargo run -- index
 ```
 
-### Project Structure
+### Adding Language Support
 
+To add support for a new language:
+
+1. Add the tree-sitter grammar to `crates/languages/Cargo.toml`
+2. Create a new module in `crates/languages/src/`
+3. Implement the entity extraction logic
+4. Register the language in the extractor factory
+
+## MCP Integration
+
+Codesearch implements the Model Context Protocol (MCP) for seamless integration with AI assistants:
+
+```bash
+# Start the MCP server
+codesearch serve
+
+# The server communicates via stdio by default
+# Configure your AI assistant to connect to the codesearch MCP server
 ```
-codesearch/
-├── crates/
-│   ├── core/           # Foundation types and configuration
-│   ├── languages/      # Language parsers and AST handling
-│   ├── embeddings/     # Embedding generation
-│   ├── indexer/        # Repository indexing logic
-│   ├── watcher/        # File system monitoring
-│   ├── storage/        # Data persistence layer
-│   └── cli/            # CLI and MCP server
-├── docker-compose.yml  # Qdrant setup
-├── Dockerfile          # Container build
-└── README.md           # This file
+
+### Available MCP Tools
+
+- `search_code`: Search for code entities by semantic meaning
+- `get_entity`: Retrieve detailed information about a specific code entity
+- `list_files`: List indexed files in the repository
+- `get_file_entities`: Get all entities within a specific file
+
+## Storage Backends
+
+### Qdrant (Default)
+
+Codesearch uses Qdrant for vector storage:
+
+```bash
+# Start Qdrant using Docker
+docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+# Configure in .codesearch/config.toml
+[storage]
+provider = "qdrant"
+host = "localhost"
+port = 6334
 ```
 
-### Code Quality Standards
+### Custom Storage
 
-- All code must pass `cargo clippy` with strict settings
-- No `.unwrap()` or `.expect()` in production code
-- All functions return `Result` types for error handling
-- Comprehensive test coverage for core functionality
-- Documentation for all public APIs
+Implement the `StorageClient` trait to add custom storage backends.
 
-## Contributing
+## Performance
 
-Contributions are welcome! Please follow these guidelines:
+Codesearch is designed for performance:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes with descriptive messages
-4. Ensure all tests pass and code is formatted
-5. Push to your fork and open a Pull Request
-
-Please read the [CLAUDE.md](./CLAUDE.md) file for detailed development guidelines and architecture principles.
+- **Parallel Processing**: Files are processed in parallel batches
+- **Memory Management**: Configurable memory limits for large repositories
 
 ## License
 
-This project is dual-licensed under either:
-
-- MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-
-at your option.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-Built with excellent Rust crates including:
-- [tree-sitter](https://tree-sitter.github.io/) for AST parsing
-- [Qdrant](https://qdrant.tech/) for vector storage
-- [tokio](https://tokio.rs/) for async runtime
-- [clap](https://clap.rs/) for CLI interface
-
----
-
-For bug reports and feature requests, please open an issue on [GitHub](https://github.com/loganmoon/codesearch/issues).
+- Built with [tree-sitter](https://tree-sitter.github.io/) for robust AST parsing
+- Vector storage powered by [Qdrant](https://qdrant.tech/)
+- Embeddings via [embed_anything](https://github.com/StarlightSearch/EmbedAnything) (which uses [Candle](https://github.com/huggingface/candle) under the hood) and [OpenAI](https://openai.com/)

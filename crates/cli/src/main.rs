@@ -32,8 +32,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize codesearch in the current repository
-    Init,
     /// Start the MCP (Model Context Protocol) server for client integration
     Serve {
         /// Port to bind to
@@ -44,7 +42,7 @@ enum Commands {
         #[arg(long, default_value = "localhost")]
         host: String,
     },
-    /// Index the repository
+    /// Index the repository (initializes configuration if needed)
     Index {
         /// Force re-indexing of all files
         #[arg(long)]
@@ -74,7 +72,6 @@ async fn main() -> Result<()> {
 
     // Execute commands
     match cli.command {
-        Some(Commands::Init) => init_repository(cli.config.as_deref()).await,
         Some(Commands::Serve { port, host }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
@@ -85,6 +82,8 @@ async fn main() -> Result<()> {
         Some(Commands::Index { force, progress }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
+            // Initialize configuration if needed (won't replace existing)
+            ensure_config_exists(&repo_root, cli.config.as_deref()).await?;
             // Load configuration
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
             index_repository(config, force, progress).await
@@ -98,9 +97,7 @@ async fn main() -> Result<()> {
         }
         None => {
             // Default behavior - show help
-            println!(
-                "Use 'codesearch init' to initialize a repository, or --help for more options"
-            );
+            println!("Use 'codesearch index' to index a repository, or --help for more options");
             Ok(())
         }
     }
@@ -120,41 +117,57 @@ fn init_logging(verbose: bool) -> Result<()> {
     Ok(())
 }
 
-/// Initialize codesearch in a repository
-async fn init_repository(config_path: Option<&Path>) -> Result<()> {
-    let current_dir = env::current_dir()?;
+/// Ensure configuration exists (create if needed, but don't replace existing)
+async fn ensure_config_exists(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
+    // Determine the config file path
+    let config_file = if let Some(path) = config_path {
+        path.to_path_buf()
+    } else {
+        repo_root.join(".codesearch").join("config.toml")
+    };
 
-    info!("Initializing codesearch in {:?}", current_dir);
-
-    // Create default configuration if it doesn't exist
-    let config_file = current_dir.join("codesearch.toml");
+    // Only create if it doesn't exist
     if !config_file.exists() {
+        info!("Initializing codesearch configuration at {:?}", config_file);
+
+        // Create parent directory if needed
+        if let Some(parent) = config_file.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {parent:?}"))?;
+        }
+
+        // Create default configuration
         let config = Config::default();
         config
             .save(&config_file)
             .with_context(|| format!("Failed to save config to {config_file:?}"))?;
         info!("Created default configuration at {:?}", config_file);
+    } else {
+        info!("Using existing configuration at {:?}", config_file);
     }
 
-    // Load or use provided configuration
-    let config = if let Some(path) = config_path {
-        Config::from_file(path)?
-    } else {
-        Config::from_file(&config_file)?
-    };
-
-    config.validate()?;
-
-    // Create vector database client
-
-    // Initialize the repository (if necessary)
-
-    todo!("Not yet implemented")
+    Ok(())
 }
 
 /// Find the repository root directory
 fn find_repository_root() -> Result<PathBuf> {
-    todo!("Use git to find repository root. Be sure to check for submodules and/or worktrees that might throw things off.")
+    let current_dir = env::current_dir().context("Failed to get current directory")?;
+
+    // Try to discover the git repository
+    match git2::Repository::discover(&current_dir) {
+        Ok(repo) => {
+            // Get the workdir (repository root)
+            let workdir = repo.workdir().ok_or_else(|| {
+                anyhow::anyhow!("Repository has no working directory (bare repository?)")
+            })?;
+            Ok(workdir.to_path_buf())
+        }
+        Err(e) => {
+            // If git discovery fails, fall back to current directory
+            warn!("Could not find git repository: {e}. Using current directory as root.");
+            Ok(current_dir)
+        }
+    }
 }
 
 /// Load configuration from file or defaults
@@ -162,7 +175,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
     let config_file = if let Some(path) = config_path {
         path.to_path_buf()
     } else {
-        repo_root.join("codesearch.toml")
+        repo_root.join(".codesearch").join("config.toml")
     };
 
     if config_file.exists() {

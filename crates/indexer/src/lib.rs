@@ -7,10 +7,10 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-pub mod common;
-pub mod git_provider;
-pub mod repository_indexer;
-pub mod types;
+mod common;
+mod git_provider;
+mod repository_indexer;
+mod types;
 
 // Re-export main types
 pub use repository_indexer::{IndexProgress, RepositoryIndexer};
@@ -19,11 +19,24 @@ pub use types::{DiffContext, EntityChange, IndexResult, IndexStats};
 // Re-export error types from core
 pub use codesearch_core::error::{Error, Result};
 
-/// Create a new repository indexer
+/// Create a new repository indexer with the specified storage backend
+///
+/// # Arguments
+///
+/// * `storage_config` - The storage configuration
+/// * `repository_path` - The path to the repository to index
 pub fn create_indexer(
-    storage_host: String,
-    storage_port: u16,
+    storage_config: codesearch_core::config::StorageConfig,
     repository_path: std::path::PathBuf,
 ) -> RepositoryIndexer {
-    RepositoryIndexer::new(storage_host, storage_port, repository_path)
+    RepositoryIndexer::new(storage_config, repository_path)
+}
+
+/// Create a new repository indexer with default storage configuration
+///
+/// # Arguments
+///
+/// * `repository_path` - The path to the repository to index
+pub fn create_indexer_with_defaults(repository_path: std::path::PathBuf) -> RepositoryIndexer {
+    RepositoryIndexer::with_defaults(repository_path)
 }

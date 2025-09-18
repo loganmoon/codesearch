@@ -64,8 +64,48 @@ pub struct WatcherConfig {
 }
 
 /// Configuration for storage backend
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StorageConfig {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageConfig {
+    /// Provider type: "qdrant" or "mock"
+    #[serde(default = "default_storage_provider")]
+    pub provider: String,
+
+    /// Host for the storage backend
+    #[serde(default = "default_storage_host")]
+    pub host: String,
+
+    /// Port for the storage backend
+    #[serde(default = "default_storage_port")]
+    pub port: u16,
+
+    /// Optional API key for cloud services
+    #[serde(default)]
+    pub api_key: Option<String>,
+
+    /// Collection name for storing entities
+    #[serde(default = "default_collection_name")]
+    pub collection_name: String,
+
+    /// Vector size for embeddings (must match embedding model)
+    #[serde(default = "default_vector_size")]
+    pub vector_size: usize,
+
+    /// Distance metric: "cosine", "euclidean", or "dot"
+    #[serde(default = "default_distance_metric")]
+    pub distance_metric: String,
+
+    /// Batch size for bulk operations
+    #[serde(default = "default_storage_batch_size")]
+    pub batch_size: usize,
+
+    /// Timeout in milliseconds for storage operations
+    #[serde(default = "default_storage_timeout_ms")]
+    pub timeout_ms: u64,
+
+    /// Use mock storage for testing
+    #[serde(default = "default_use_mock")]
+    pub use_mock: bool,
+}
 
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +193,42 @@ fn default_ignore_patterns() -> Vec<String> {
     ]
 }
 
+fn default_storage_provider() -> String {
+    "qdrant".to_string()
+}
+
+fn default_storage_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_storage_port() -> u16 {
+    6334
+}
+
+fn default_collection_name() -> String {
+    "codesearch".to_string()
+}
+
+fn default_vector_size() -> usize {
+    768 // Default for all-minilm-l6-v2
+}
+
+fn default_distance_metric() -> String {
+    "cosine".to_string()
+}
+
+fn default_storage_batch_size() -> usize {
+    100
+}
+
+fn default_storage_timeout_ms() -> u64 {
+    30000
+}
+
+fn default_use_mock() -> bool {
+    false
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -180,6 +256,23 @@ impl Default for LanguagesConfig {
             enabled: default_enabled_languages(),
             python: PythonConfig::default(),
             javascript: JavaScriptConfig::default(),
+        }
+    }
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_storage_provider(),
+            host: default_storage_host(),
+            port: default_storage_port(),
+            api_key: None,
+            collection_name: default_collection_name(),
+            vector_size: default_vector_size(),
+            distance_metric: default_distance_metric(),
+            batch_size: default_storage_batch_size(),
+            timeout_ms: default_storage_timeout_ms(),
+            use_mock: default_use_mock(),
         }
     }
 }
@@ -221,11 +314,11 @@ impl Config {
 
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
-        // Validate provider
+        // Validate embeddings provider
         let valid_providers = ["local", "openai", "gemini"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
-                "Invalid provider '{}'. Must be one of: {:?}",
+                "Invalid embeddings provider '{}'. Must be one of: {:?}",
                 self.embeddings.provider, valid_providers
             )));
         }
@@ -237,6 +330,47 @@ impl Config {
                 "Invalid device '{}'. Must be one of: {:?}",
                 self.embeddings.device, valid_devices
             )));
+        }
+
+        // Validate storage provider
+        let valid_storage_providers = ["qdrant", "mock"];
+        if !valid_storage_providers.contains(&self.storage.provider.as_str()) {
+            return Err(Error::config(format!(
+                "Invalid storage provider '{}'. Must be one of: {:?}",
+                self.storage.provider, valid_storage_providers
+            )));
+        }
+
+        // Validate vector size
+        if self.storage.vector_size == 0 || self.storage.vector_size > 4096 {
+            return Err(Error::config(format!(
+                "Invalid vector size {}. Must be between 1 and 4096",
+                self.storage.vector_size
+            )));
+        }
+
+        // Validate distance metric
+        let valid_metrics = ["cosine", "euclidean", "dot"];
+        if !valid_metrics.contains(&self.storage.distance_metric.as_str()) {
+            return Err(Error::config(format!(
+                "Invalid distance metric '{}'. Must be one of: {:?}",
+                self.storage.distance_metric, valid_metrics
+            )));
+        }
+
+        // Validate batch size
+        if self.storage.batch_size == 0 || self.storage.batch_size > 1000 {
+            return Err(Error::config(format!(
+                "Invalid batch size {}. Must be between 1 and 1000",
+                self.storage.batch_size
+            )));
+        }
+
+        // Validate port
+        if self.storage.port == 0 {
+            return Err(Error::config(
+                "Invalid port: must be greater than 0".to_string(),
+            ));
         }
 
         Ok(())

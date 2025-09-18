@@ -50,6 +50,10 @@ pub enum Error {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    /// Feature not yet implemented
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
     /// Process management errors
     #[error("Process management error: {0}")]
     ProcessManagement(String),

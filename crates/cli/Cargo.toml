@@ -44,3 +44,6 @@ rmcp = { version = "0.6", features = ["server"] }
 
 # File system utilities
 glob = { workspace = true }
+
+# Git integration
+git2 = { workspace = true }

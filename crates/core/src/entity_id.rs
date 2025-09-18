@@ -106,6 +106,7 @@ pub fn generate_entity_id(
 }
 
 /// Generate entity ID for language-specific scope separators
+#[allow(clippy::too_many_arguments)]
 pub fn generate_entity_id_with_separator(
     name: Option<&str>,
     entity_type: EntityType,

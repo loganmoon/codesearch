@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## PROJECT OVERVIEW
 
-Codesearchis a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with MCP server integration.
+Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with MCP server integration.
 
 # Rust Development Mandate
 
@@ -37,6 +37,19 @@ Codesearchis a Rust-based semantic code indexing system that provides intelligen
 ## Style Rules
   - When formatting strings use this syntax: println!("The thing is {thing}");
 
+## CRATE ARCHITECTURE
+
+This is a workspace with these crates:
+- **core**: Foundation types, entities, configuration, error handling
+- **languages**: AST parsing and entity extraction for supported languages (Rust, Python, JS/TS, Go)
+- **embeddings**: Vector embedding providers and local/remote embedding generation
+- **indexer**: Repository indexing logic with Git integration
+- **watcher**: Real-time file system monitoring with ignore patterns
+- **storage**: Persistent storage layer for indexed data
+- **cli**: Command-line interface and MCP server (`codesearch` binary)
+
+The main binary is `codesearch` which provides init, serve, index, and watch commands.
+
 ## DEVELOPMENT COMMANDS
 
 **Building & Testing:**
@@ -44,6 +57,21 @@ Codesearchis a Rust-based semantic code indexing system that provides intelligen
 cargo build --workspace --all-targets       # Build all debug targets
 cargo build --release --workspace --all-targets  # Build all release targets
 cargo test --workspace                    # Run all tests
+cargo test --package <crate-name>         # Run tests for specific crate
+cargo test --test <test-name>             # Run specific integration test
 cargo clippy --workspace                  # Lint with strict rules
 cargo fmt                      # Format code
 ```
+
+**Running:**
+```bash
+cargo run -- init                        # Initialize codesearch in current repo
+cargo run -- index                       # Index the repository
+cargo run -- serve                       # Start MCP server
+```
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

@@ -64,8 +64,7 @@ pub struct WatcherConfig {
 }
 
 /// Configuration for storage backend
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StorageConfig {}
 
 /// Configuration for language support
@@ -174,7 +173,6 @@ impl Default for WatcherConfig {
         }
     }
 }
-
 
 impl Default for LanguagesConfig {
     fn default() -> Self {

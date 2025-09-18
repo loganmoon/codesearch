@@ -437,7 +437,6 @@ fn create_progress_bar(total: usize) -> ProgressBar {
 /// Create a storage client instance
 /// TODO: Replace with real Qdrant client when implemented
 fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
-    
     MockStorageClient::new()
 }
 

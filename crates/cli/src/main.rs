@@ -229,7 +229,7 @@ async fn serve(
     port: u16,
     http: bool,
     no_auto_start: bool,
-    _stop_on_exit: bool,  // TODO: Implement cleanup on exit
+    _stop_on_exit: bool, // TODO: Implement cleanup on exit
     compose_file: Option<PathBuf>,
 ) -> Result<()> {
     // Check and start dependencies if needed
@@ -311,10 +311,7 @@ async fn check_storage_health(config: &Config) -> bool {
 }
 
 /// Ensure Docker dependencies are running
-async fn ensure_dependencies_running(
-    config: &Config,
-    compose_file: Option<&Path>,
-) -> Result<()> {
+async fn ensure_dependencies_running(config: &Config, compose_file: Option<&Path>) -> Result<()> {
     println!("🔍 Checking dependencies...");
 
     // Check if storage is already healthy
@@ -323,8 +320,10 @@ async fn ensure_dependencies_running(
         return Ok(());
     }
 
-    println!("⚠️  Storage service not accessible at {}:{}",
-             config.storage.host, config.storage.port);
+    println!(
+        "⚠️  Storage service not accessible at {}:{}",
+        config.storage.host, config.storage.port
+    );
     println!("🐳 Starting Docker services...");
 
     // Find docker-compose file
@@ -338,7 +337,7 @@ async fn ensure_dependencies_running(
         .arg(&compose_path)
         .arg("up")
         .arg("-d")
-        .arg("qdrant")  // Only start what we need
+        .arg("qdrant") // Only start what we need
         .output()
         .or_else(|_| {
             // Fallback to docker-compose for older installations
@@ -373,7 +372,10 @@ fn find_docker_compose_file(explicit_path: Option<&Path>) -> Result<PathBuf> {
         if path.exists() {
             return Ok(path.to_path_buf());
         } else {
-            bail!("Specified docker-compose file not found: {}", path.display());
+            bail!(
+                "Specified docker-compose file not found: {}",
+                path.display()
+            );
         }
     }
 
@@ -414,13 +416,18 @@ async fn wait_for_storage(config: &Config, timeout: Duration) -> Result<()> {
         }
 
         if start.elapsed() > timeout {
-            bail!("Timeout waiting for storage service to start after {} seconds",
-                  timeout.as_secs());
+            bail!(
+                "Timeout waiting for storage service to start after {} seconds",
+                timeout.as_secs()
+            );
         }
 
         // Show progress
         if attempt % 3 == 0 {
-            println!("   Still waiting... ({}s elapsed)", start.elapsed().as_secs());
+            println!(
+                "   Still waiting... ({}s elapsed)",
+                start.elapsed().as_secs()
+            );
         }
 
         sleep(Duration::from_secs(1)).await;

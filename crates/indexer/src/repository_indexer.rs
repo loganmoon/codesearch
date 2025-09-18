@@ -7,7 +7,7 @@ use crate::types::{IndexResult, IndexStats};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::{CodeEntity, EntityType};
 use codesearch_languages::{create_unified_extractor, EntityData, Extractor, UnifiedExtractor};
-use codesearch_storage::StorageClient;
+use codesearch_storage::{EntityBatch, StorageClient};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -216,14 +216,14 @@ impl RepositoryIndexer {
                 batch_relationships.len()
             );
 
+            let batch = EntityBatch::new()
+                .with_entities(&batch_entities)
+                .with_functions(&batch_functions)
+                .with_types(&batch_types)
+                .with_variables(&batch_variables);
+
             storage_client
-                .bulk_load_entities(
-                    &batch_entities,
-                    &batch_functions,
-                    &batch_types,
-                    &batch_variables,
-                    &batch_relationships,
-                )
+                .bulk_load_entities(&batch)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
 
@@ -318,14 +318,14 @@ impl RepositoryIndexer {
         );
 
         // Stage 3: Commit - Bulk load to storage
+        let batch = EntityBatch::new()
+            .with_entities(&stored_entities)
+            .with_functions(&stored_functions)
+            .with_types(&stored_types)
+            .with_variables(&stored_variables);
+
         storage_client
-            .bulk_load_entities(
-                &stored_entities,
-                &stored_functions,
-                &stored_types,
-                &stored_variables,
-                &relationships,
-            )
+            .bulk_load_entities(&batch)
             .await
             .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
 
@@ -448,14 +448,19 @@ fn map_to_storage_models(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codesearch_storage::MockStorageClient;
+    use codesearch_core::config::StorageConfig;
+    use codesearch_storage::create_storage_client;
     use tempfile::TempDir;
     use tokio::fs;
 
     #[tokio::test]
     async fn test_repository_indexer_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let storage_client = Arc::new(MockStorageClient::new());
+        let config = StorageConfig {
+            provider: "mock".to_string(),
+            ..Default::default()
+        };
+        let storage_client = create_storage_client(config).await.unwrap();
         let indexer = RepositoryIndexer::new(storage_client, temp_dir.path().to_path_buf());
         assert_eq!(indexer.repository_path, temp_dir.path());
     }
@@ -463,7 +468,11 @@ mod tests {
     #[tokio::test]
     async fn test_empty_repository_indexing() {
         let temp_dir = TempDir::new().unwrap();
-        let storage_client = Arc::new(MockStorageClient::new());
+        let config = StorageConfig {
+            provider: "mock".to_string(),
+            ..Default::default()
+        };
+        let storage_client = create_storage_client(config).await.unwrap();
         let mut indexer = RepositoryIndexer::new(storage_client, temp_dir.path().to_path_buf());
 
         let result = indexer.index_repository_impl().await;
@@ -483,7 +492,11 @@ mod tests {
             .await
             .unwrap();
 
-        let storage_client = Arc::new(MockStorageClient::new());
+        let config = StorageConfig {
+            provider: "mock".to_string(),
+            ..Default::default()
+        };
+        let storage_client = create_storage_client(config).await.unwrap();
         let mut indexer =
             RepositoryIndexer::new(storage_client.clone(), temp_dir.path().to_path_buf());
 

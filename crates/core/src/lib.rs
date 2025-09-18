@@ -26,8 +26,8 @@ pub mod error;
 // Re-export main types for convenience
 pub use config::{Config, EmbeddingsConfig, IndexerConfig, StorageConfig, WatcherConfig};
 pub use entities::{
-    CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,
-    RelationshipType, SourceLocation, Visibility,
+    CodeEntity, EntityType, FunctionSignature, InternedString, Language,
+    SourceLocation, Visibility,
 };
 pub use entity_id::{generate_entity_id, generate_entity_id_with_separator, ScopeContext};
 pub use error::{Error, Result, ResultExt};

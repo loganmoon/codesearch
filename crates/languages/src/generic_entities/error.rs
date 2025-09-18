@@ -5,6 +5,7 @@ use std::fmt;
 
 /// Errors that can occur during entity building
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum BuilderError {
     /// Missing required field
     MissingRequiredField(String),

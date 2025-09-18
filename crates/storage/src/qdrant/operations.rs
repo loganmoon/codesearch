@@ -1,4 +1,4 @@
-use crate::StorageEntity;
+use crate::{EntityBatch, StorageEntity};
 use codesearch_core::{CodeEntity, Error};
 use qdrant_client::qdrant::{PointStruct, UpsertPointsBuilder};
 use serde_json::json;
@@ -31,18 +31,10 @@ fn entity_to_point(entity: &CodeEntity, index: u64) -> PointStruct {
 /// Handle bulk loading of entities with proper batching
 pub(super) async fn bulk_load_entities(
     storage: &QdrantStorage,
-    entities: &[CodeEntity],
-    functions: &[CodeEntity],
-    types: &[CodeEntity],
-    variables: &[CodeEntity],
-    _relationships: &[(String, String, String)],
+    batch: &EntityBatch<'_>,
 ) -> Result<(), Error> {
     // Combine all entities
-    let mut all_entities = Vec::new();
-    all_entities.extend_from_slice(entities);
-    all_entities.extend_from_slice(functions);
-    all_entities.extend_from_slice(types);
-    all_entities.extend_from_slice(variables);
+    let all_entities = batch.entities;
 
     if all_entities.is_empty() {
         return Ok(());

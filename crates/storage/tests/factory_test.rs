@@ -1,5 +1,4 @@
-use codesearch_core::config::StorageConfig;
-use codesearch_storage::{create_storage_client, StorageClient, StorageManager};
+// Test for storage factory and entity conversion
 
 #[tokio::test]
 async fn test_storage_entity_conversion() {
@@ -28,7 +27,7 @@ async fn test_storage_entity_conversion() {
         .build()
         .unwrap();
 
-    let storage_entity = StorageEntity::from(code_entity.clone());
+    let storage_entity = StorageEntity::from(&code_entity);
 
     assert_eq!(storage_entity.id, "test_id");
     assert_eq!(storage_entity.name, "test_function");

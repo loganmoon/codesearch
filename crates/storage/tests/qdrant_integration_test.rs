@@ -8,7 +8,7 @@ use codesearch_core::{
     entities::{CodeEntityBuilder, Language, SourceLocation},
     CodeEntity, EntityType,
 };
-use codesearch_storage::create_storage_client;
+use codesearch_storage::{create_storage_client, EntityBatch};
 use std::path::PathBuf;
 
 /// Helper to check if Qdrant is available
@@ -113,10 +113,12 @@ async fn test_qdrant_bulk_load() {
     let variables: Vec<CodeEntity> = entities.iter().skip(35).cloned().collect();
 
     // Load entities
-    client
-        .bulk_load_entities(&entities, &functions, &types, &variables, &Vec::new())
-        .await
-        .unwrap();
+    let batch = EntityBatch::new()
+        .with_entities(&entities)
+        .with_functions(&functions)
+        .with_types(&types)
+        .with_variables(&variables);
+    client.bulk_load_entities(&batch).await.unwrap();
 
     // Clean up
     client.delete_collection("test_bulk_load").await.unwrap();
@@ -146,10 +148,8 @@ async fn test_qdrant_search_operations() {
 
     // Load some test entities
     let entities = create_test_entities(10);
-    client
-        .bulk_load_entities(&entities, &[], &[], &[], &[])
-        .await
-        .unwrap();
+    let batch = EntityBatch::new().with_entities(&entities);
+    client.bulk_load_entities(&batch).await.unwrap();
 
     // Wait a bit for indexing
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -196,10 +196,8 @@ async fn test_qdrant_get_by_id() {
 
     // Load test entities
     let entities = create_test_entities(5);
-    client
-        .bulk_load_entities(&entities, &[], &[], &[], &[])
-        .await
-        .unwrap();
+    let batch = EntityBatch::new().with_entities(&entities);
+    client.bulk_load_entities(&batch).await.unwrap();
 
     // Wait for indexing
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;

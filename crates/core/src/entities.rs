@@ -169,28 +169,31 @@ pub struct FunctionSignature {
     pub generics: Vec<String>,
 }
 
-/// Relationship types between code entities
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
-#[serde(rename_all = "snake_case")]
-pub enum RelationshipType {
-    Contains,
-    Calls,
-    Imports,
-    InheritsFrom,
-    Implements,
-    Defines,
-    Uses,
-    Returns,
-    AcceptsParameter,
-    ThrowsException,
-    DefinesEntity,
-}
 
-/// Represents a relationship between code entities
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodeRelationship {
-    pub relationship_type: RelationshipType,
-    pub from_entity_id: String,
-    pub to_entity_id: String,
-    pub properties: ImHashMap<String, String>,
-}
+// Removing relationships until graph DB integration
+
+// /// Relationship types between code entities
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
+// #[serde(rename_all = "snake_case")]
+// pub enum RelationshipType {
+//     Contains,
+//     Calls,
+//     Imports,
+//     InheritsFrom,
+//     Implements,
+//     Defines,
+//     Uses,
+//     Returns,
+//     AcceptsParameter,
+//     ThrowsException,
+//     DefinesEntity,
+// }
+
+// /// Represents a relationship between code entities
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct CodeRelationship {
+//     pub relationship_type: RelationshipType,
+//     pub from_entity_id: String,
+//     pub to_entity_id: String,
+//     pub properties: ImHashMap<String, String>,
+// }

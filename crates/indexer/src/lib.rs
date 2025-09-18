@@ -7,7 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-mod common;
+pub(crate) mod common;
 mod git_provider;
 mod repository_indexer;
 mod types;

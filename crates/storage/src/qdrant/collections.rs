@@ -1,4 +1,4 @@
-use crate::{StorageClient, StorageManager};
+use crate::{EntityBatch, StorageClient, StorageManager};
 use async_trait::async_trait;
 use codesearch_core::Error;
 use qdrant_client::qdrant::{CreateCollectionBuilder, DeleteCollectionBuilder};
@@ -7,6 +7,20 @@ use super::client::QdrantStorage;
 
 #[async_trait]
 impl StorageManager for QdrantStorage {
+    async fn initialize(&self) -> Result<(), Error> {
+        // Create default collection if it doesn't exist
+        self.create_collection(&self.config.collection_name).await
+    }
+
+    async fn clear(&self) -> Result<(), Error> {
+        // Delete and recreate the collection to clear all data
+        let collection_name = &self.config.collection_name;
+        if self.collection_exists(collection_name).await? {
+            self.delete_collection(collection_name).await?;
+        }
+        self.create_collection(collection_name).await
+    }
+
     async fn create_collection(&self, name: &str) -> Result<(), Error> {
         // Check if collection already exists
         if self.collection_exists(name).await? {
@@ -49,39 +63,10 @@ impl StorageManager for QdrantStorage {
 
 #[async_trait]
 impl StorageClient for QdrantStorage {
-    async fn initialize(&self) -> Result<(), Error> {
-        // Create default collection if it doesn't exist
-        self.create_collection(&self.config.collection_name).await
-    }
-
-    async fn clear(&self) -> Result<(), Error> {
-        // Delete and recreate the collection to clear all data
-        let collection_name = &self.config.collection_name;
-        if self.collection_exists(collection_name).await? {
-            self.delete_collection(collection_name).await?;
-        }
-        self.create_collection(collection_name).await
-    }
-
-    // Other StorageClient trait methods will be implemented in operations.rs and search.rs
-    async fn bulk_load_entities(
-        &self,
-        entities: &[codesearch_core::CodeEntity],
-        functions: &[codesearch_core::CodeEntity],
-        types: &[codesearch_core::CodeEntity],
-        variables: &[codesearch_core::CodeEntity],
-        relationships: &[(String, String, String)],
-    ) -> Result<(), Error> {
+    // StorageClient trait methods are implemented in operations.rs and search.rs
+    async fn bulk_load_entities(&self, batch: &EntityBatch<'_>) -> Result<(), Error> {
         // Implementation in operations.rs
-        super::operations::bulk_load_entities(
-            self,
-            entities,
-            functions,
-            types,
-            variables,
-            relationships,
-        )
-        .await
+        super::operations::bulk_load_entities(self, batch).await
     }
 
     async fn search_similar(

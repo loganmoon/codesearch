@@ -10,16 +10,15 @@ mod struct_tests;
 mod trait_tests;
 
 use crate::rust::queries;
-use crate::transport::EntityData;
-use codesearch_core::error::Result;
+use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, Query, QueryCursor};
 
 /// Helper to extract entities from source code using a handler
-fn extract_with_handler<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<EntityData>>
+fn extract_with_handler<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<CodeEntity>>
 where
-    F: Fn(&tree_sitter::QueryMatch, &Query, &str, &Path) -> Result<Vec<EntityData>>,
+    F: Fn(&tree_sitter::QueryMatch, &Query, &str, &Path) -> Result<Vec<CodeEntity>>,
 {
     let mut parser = Parser::new();
     parser

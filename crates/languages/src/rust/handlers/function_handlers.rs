@@ -7,7 +7,6 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::rust::entities::RustEntityVariant;
 use crate::rust::handlers::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
     find_capture_node, node_to_text,
@@ -15,10 +14,13 @@ use crate::rust::handlers::common::{
 use crate::rust::handlers::constants::{
     capture_names, function_modifiers, keywords, node_kinds, punctuation, special_idents,
 };
-use crate::transport::{EntityData, EntityVariant};
-use codesearch_core::entities::{SourceLocation, Visibility};
+use codesearch_core::entities::{
+    CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
+    Visibility,
+};
 use codesearch_core::entity_id::ScopeContext;
 use codesearch_core::error::{Error, Result};
+use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
@@ -29,7 +31,7 @@ pub fn handle_function(
     query: &Query,
     source: &str,
     file_path: &Path,
-) -> Result<Vec<EntityData>> {
+) -> Result<Vec<CodeEntity>> {
     let scope_context = ScopeContext::new();
 
     // Extract function name
@@ -69,7 +71,7 @@ pub fn handle_function(
     let qualified_name = scope_context.build_qualified_name(&name);
 
     // Build the entity using a dedicated function
-    let entity_data = build_function_entity(FunctionEntityComponents {
+    let entity = build_function_entity(FunctionEntityComponents {
         name,
         qualified_name,
         file_path: file_path.to_path_buf(),
@@ -83,9 +85,9 @@ pub fn handle_function(
         return_type,
         documentation,
         content: Some(content),
-    });
+    })?;
 
-    Ok(vec![entity_data])
+    Ok(vec![entity])
 }
 
 /// Extract function parameters by walking the AST
@@ -207,22 +209,49 @@ struct FunctionEntityComponents {
 
 /// Build a function entity from extracted components
 #[allow(dead_code)]
-fn build_function_entity(components: FunctionEntityComponents) -> EntityData {
-    EntityData::new(
-        components.name,
-        components.qualified_name,
-        components.file_path,
-        components.location,
-        EntityVariant::Rust(RustEntityVariant::Function {
-            is_async: components.is_async,
-            is_unsafe: components.is_unsafe,
-            is_const: components.is_const,
-            generics: components.generics,
-            parameters: components.parameters,
-            return_type: components.return_type,
-        }),
-    )
-    .with_visibility(components.visibility)
-    .with_documentation(components.documentation)
-    .with_content(components.content)
+fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEntity> {
+    let mut metadata = EntityMetadata::default();
+    metadata.is_async = components.is_async;
+    metadata.is_const = components.is_const;
+    metadata.generic_params = components.generics.clone();
+    metadata.is_generic = !components.generics.is_empty();
+
+    // Add unsafe as an attribute if applicable
+    if components.is_unsafe {
+        metadata
+            .attributes
+            .insert("unsafe".to_string(), "true".to_string());
+    }
+
+    let signature = FunctionSignature {
+        parameters: components
+            .parameters
+            .iter()
+            .map(|(name, ty)| (name.clone(), Some(ty.clone())))
+            .collect(),
+        return_type: components.return_type.clone(),
+        is_async: components.is_async,
+        generics: components.generics.clone(),
+    };
+
+    CodeEntityBuilder::default()
+        .entity_id(format!(
+            "{}#{}",
+            components.file_path.display(),
+            components.qualified_name
+        ))
+        .name(components.name)
+        .qualified_name(components.qualified_name)
+        .entity_type(EntityType::Function)
+        .location(components.location.clone())
+        .visibility(components.visibility)
+        .documentation_summary(components.documentation)
+        .content(components.content)
+        .metadata(metadata)
+        .signature(Some(signature))
+        .language(Language::Rust)
+        .file_path(components.file_path)
+        .line_range((components.location.start_line, components.location.end_line))
+        .build()
+        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))
 }

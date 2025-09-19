@@ -1,9 +1,8 @@
 //! Tests for struct extraction handler
 
 use super::*;
-use crate::rust::entities::RustEntityVariant;
 use crate::rust::handlers::type_handlers::handle_struct;
-use crate::transport::EntityVariant;
+use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
 fn test_unit_struct() {
@@ -17,16 +16,11 @@ struct UnitStruct;
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "UnitStruct");
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct {
-        fields, is_tuple, ..
-    }) = &entity.variant
-    {
-        assert_eq!(fields.len(), 0);
-        assert!(!is_tuple);
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Unit struct has no fields
+    assert_eq!(entity.metadata.attributes.get("fields"), None);
+    assert_eq!(entity.metadata.attributes.get("struct_type"), None);
 }
 
 #[test]
@@ -40,19 +34,26 @@ struct TupleStruct(i32, String, bool);
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct {
-        fields, is_tuple, ..
-    }) = &entity.variant
-    {
-        assert!(is_tuple);
-        assert_eq!(fields.len(), 3);
-        assert_eq!(fields[0].field_type, "i32");
-        assert_eq!(fields[1].field_type, "String");
-        assert_eq!(fields[2].field_type, "bool");
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check it's marked as tuple
+    assert_eq!(
+        entity
+            .metadata
+            .attributes
+            .get("struct_type")
+            .map(|s| s.as_str()),
+        Some("tuple")
+    );
+
+    // Check fields (stored as comma-separated in attributes)
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Tuple struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 3);
 }
 
 #[test]
@@ -71,28 +72,23 @@ struct User {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct {
-        fields, is_tuple, ..
-    }) = &entity.variant
-    {
-        assert!(!is_tuple);
-        assert_eq!(fields.len(), 4);
+    // Not a tuple struct
+    assert_eq!(entity.metadata.attributes.get("struct_type"), None);
 
-        assert_eq!(fields[0].name, "id");
-        assert_eq!(fields[0].field_type, "u64");
-
-        assert_eq!(fields[1].name, "name");
-        assert_eq!(fields[1].field_type, "String");
-
-        assert_eq!(fields[2].name, "email");
-        assert_eq!(fields[2].field_type, "String");
-
-        assert_eq!(fields[3].name, "is_active");
-        assert_eq!(fields[3].field_type, "bool");
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check fields
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 4);
+    assert!(fields.contains(&"id"));
+    assert!(fields.contains(&"name"));
+    assert!(fields.contains(&"email"));
+    assert!(fields.contains(&"is_active"));
 }
 
 #[test]
@@ -114,18 +110,22 @@ where
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct {
-        generics, fields, ..
-    }) = &entity.variant
-    {
-        assert_eq!(generics.len(), 2);
-        assert!(generics.contains(&"T".to_string()));
-        assert!(generics.contains(&"U".to_string()));
-        assert_eq!(fields.len(), 3);
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check generics
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
+    assert!(entity.metadata.generic_params.contains(&"U".to_string()));
+
+    // Check fields
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 3);
 }
 
 #[test]
@@ -142,16 +142,23 @@ struct DerivedStruct {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct { derives, .. }) = &entity.variant {
-        assert!(derives.contains(&"Debug".to_string()));
-        assert!(derives.contains(&"Clone".to_string()));
-        assert!(derives.contains(&"PartialEq".to_string()));
-        assert!(derives.contains(&"Serialize".to_string()));
-        assert!(derives.contains(&"Deserialize".to_string()));
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check derives stored as decorators
+    assert!(entity.metadata.decorators.contains(&"Debug".to_string()));
+    assert!(entity.metadata.decorators.contains(&"Clone".to_string()));
+    assert!(entity
+        .metadata
+        .decorators
+        .contains(&"PartialEq".to_string()));
+    assert!(entity
+        .metadata
+        .decorators
+        .contains(&"Serialize".to_string()));
+    assert!(entity
+        .metadata
+        .decorators
+        .contains(&"Deserialize".to_string()));
 }
 
 #[test]
@@ -168,18 +175,19 @@ struct Reference<'a, 'b: 'a> {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct {
-        generics, fields, ..
-    }) = &entity.variant
-    {
-        assert_eq!(generics.len(), 2);
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].field_type, "&'a str");
-        assert_eq!(fields[1].field_type, "&'b str");
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check generics (includes lifetimes)
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check fields
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 2);
 }
 
 #[test]
@@ -203,8 +211,8 @@ pub struct DocumentedUser {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    assert!(entity.documentation.is_some());
-    let doc = entity.documentation.as_ref().unwrap();
+    assert!(entity.documentation_summary.is_some());
+    let doc = entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("user in the system"));
     assert!(doc.contains("registered user"));
 }
@@ -226,14 +234,18 @@ where
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Struct);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct { fields, .. }) = &entity.variant {
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].field_type, "Vec<Option<Box<T>>>");
-        assert_eq!(fields[1].field_type, "HashMap<String, T>");
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check fields
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 2);
+    assert!(fields.contains(&"data"));
+    assert!(fields.contains(&"cache"));
 }
 
 #[test]
@@ -251,17 +263,17 @@ pub struct MixedVisibility {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
-
-    use codesearch_core::entities::Visibility;
+    assert_eq!(entity.entity_type, EntityType::Struct);
     assert_eq!(entity.visibility, Visibility::Public);
 
-    if let EntityVariant::Rust(RustEntityVariant::Struct { fields, .. }) = &entity.variant {
-        assert_eq!(fields.len(), 3);
-        // Field visibility is tracked in the FieldInfo
-        assert_eq!(fields[0].visibility, Visibility::Public);
-        assert_eq!(fields[1].visibility, Visibility::Private);
-        assert_eq!(fields[2].visibility, Visibility::Public); // pub(crate) is still public
-    } else {
-        panic!("Expected struct variant");
-    }
+    // Check fields
+    let fields_str = entity
+        .metadata
+        .attributes
+        .get("fields")
+        .expect("Struct should have fields");
+    let fields: Vec<&str> = fields_str.split(',').collect();
+    assert_eq!(fields.len(), 3);
+    // Note: Individual field visibility is not currently preserved in the simplified model
+    // This is a trade-off for simplification
 }

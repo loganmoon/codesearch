@@ -3,7 +3,9 @@
 //! This module provides serializable intermediate representations for entities
 //! extracted from source code that bridge the extraction and storage stages.
 
-use codesearch_core::entities::{CodeEntityBuilder, EntityMetadata, Language, SourceLocation, Visibility};
+use codesearch_core::entities::{
+    CodeEntityBuilder, EntityMetadata, Language, SourceLocation, Visibility,
+};
 use codesearch_core::CodeEntity;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

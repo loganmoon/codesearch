@@ -3,7 +3,8 @@
 //! Provides the main three-stage indexing pipeline for processing repositories.
 
 use crate::common::find_files;
-use crate::types::{IndexResult, IndexStats};
+use crate::{IndexResult, IndexStats};
+use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::{CodeEntity, EntityType};
 use codesearch_languages::create_extractor;
@@ -13,11 +14,11 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::fs;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-/// Progress tracking for indexing operations
+/// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
-pub struct IndexProgress {
+struct IndexProgress {
     pub total_files: usize,
     pub processed_files: usize,
     pub failed_files: usize,
@@ -110,7 +111,7 @@ impl RepositoryIndexer {
                             }
                             Err(e) => {
                                 error!("Failed to process file {:?}: {}", file_path, e);
-                                stats.failed_files += 1;
+                                stats.increment_failed_files();
                                 progress.update(&file_path.to_string_lossy(), false);
                             }
                         }
@@ -192,14 +193,14 @@ impl RepositoryIndexer {
                         }
                         Err(e) => {
                             error!("Failed to transform entities from {:?}: {}", file_path, e);
-                            stats.failed_files += 1;
+                            stats.increment_failed_files();
                             errors.push(e.to_string());
                         }
                     }
                 }
                 Err(e) => {
                     error!("Failed to extract from {:?}: {}", file_path, e);
-                    stats.failed_files += 1;
+                    stats.increment_failed_files();
                     errors.push(e.to_string());
                 }
             }
@@ -264,7 +265,7 @@ impl RepositoryIndexer {
         debug!("Extracted {} entities from {:?}", entities.len(), file_path);
 
         // Update stats
-        stats.entities_extracted = entities.len();
+        stats.set_entities_extracted(entities.len());
         // Note: Relationships are not directly exposed in CodeEntity yet
 
         Ok((entities, stats))
@@ -339,12 +340,79 @@ impl RepositoryIndexer {
 
         Ok(stats)
     }
+}
 
-    /// Process a diff for incremental updates
-    pub async fn process_diff(&mut self, _diff_context: &crate::types::DiffContext) -> Result<()> {
-        // TODO: Implement incremental update logic
-        warn!("Incremental updates not yet implemented");
-        Ok(())
+#[async_trait]
+impl crate::Indexer for RepositoryIndexer {
+    /// Index the entire repository
+    async fn index_repository(&mut self) -> Result<IndexResult> {
+        info!("Starting repository indexing: {:?}", self.repository_path);
+        let start_time = Instant::now();
+
+        // Find all files to process
+        let files = find_files(&self.repository_path)?;
+        info!("Found {} files to process", files.len());
+
+        // Create progress tracking
+        let mut progress = IndexProgress::new(files.len());
+        let pb = create_progress_bar(files.len());
+
+        // Create storage client
+        let storage_client = create_storage_client(self.storage_host.clone(), self.storage_port);
+
+        // Process statistics
+        let mut stats = IndexStats::new();
+
+        // Process files in batches for better performance
+        const BATCH_SIZE: usize = 100; // Configurable batch size
+
+        for chunk in files.chunks(BATCH_SIZE) {
+            pb.set_message(format!("Processing batch of {} files", chunk.len()));
+
+            match self.process_batch(chunk, &storage_client, &pb).await {
+                Ok(batch_stats) => {
+                    stats.merge(batch_stats);
+                    for file_path in chunk {
+                        progress.update(&file_path.to_string_lossy(), true);
+                        pb.inc(1);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to process batch: {}", e);
+                    // Process failed batch files individually as fallback
+                    for file_path in chunk {
+                        match self.process_file(file_path, &storage_client).await {
+                            Ok(file_stats) => {
+                                stats.merge(file_stats);
+                                progress.update(&file_path.to_string_lossy(), true);
+                            }
+                            Err(e) => {
+                                error!("Failed to process file {:?}: {}", file_path, e);
+                                stats.increment_failed_files();
+                                progress.update(&file_path.to_string_lossy(), false);
+                            }
+                        }
+                        pb.inc(1);
+                    }
+                }
+            }
+        }
+
+        pb.finish_with_message("Indexing complete");
+
+        // Calculate final statistics
+        stats.set_total_files(files.len());
+        stats.set_processing_time_ms(start_time.elapsed().as_millis() as u64);
+
+        info!(
+            "Indexing complete: {} files, {} entities, {} relationships in {:.2}s",
+            stats.total_files(),
+            stats.entities_extracted(),
+            stats.relationships_extracted(),
+            stats.processing_time_ms() as f64 / 1000.0
+        );
+
+        Ok(IndexResult::new(stats, Vec::new()))
     }
 }
 

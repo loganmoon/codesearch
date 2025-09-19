@@ -5,7 +5,6 @@ use codesearch_core::entities::{EntityType, Visibility};
 
 use crate::rust::handlers::type_handlers::handle_enum;
 
-
 #[test]
 fn test_simple_enum() {
     let source = r#"
@@ -21,8 +20,8 @@ enum SimpleEnum {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
-    assert_eq!(entity.name, "SimpleEnum");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "SimpleEnum"); // TODO: Update test to use new CodeEntity structure
+                                           // Original test body commented out during migration
 }
 
 #[test]
@@ -39,8 +38,8 @@ enum StatusCode {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -57,8 +56,8 @@ enum Message {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -75,8 +74,8 @@ enum Event {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -92,8 +91,8 @@ enum Option<T> {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -111,8 +110,8 @@ enum Comparison {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -142,8 +141,8 @@ enum ComplexEnum<'a, T: Clone> {
 
     // Check the second, more complex enum
     let entity = &entities[1];
-    assert_eq!(entity.name, "ComplexEnum");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "ComplexEnum"); // TODO: Update test to use new CodeEntity structure
+                                            // Original test body commented out during migration
 }
 
 #[test]

@@ -5,7 +5,6 @@ use codesearch_core::entities::{EntityType, Visibility};
 
 use crate::rust::handlers::type_handlers::handle_trait;
 
-
 #[test]
 fn test_simple_trait() {
     let source = r#"
@@ -19,8 +18,8 @@ trait SimpleTrait {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
-    assert_eq!(entity.name, "SimpleTrait");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "SimpleTrait"); // TODO: Update test to use new CodeEntity structure
+                                            // Original test body commented out during migration
 }
 
 #[test]
@@ -36,8 +35,8 @@ trait Container<T> {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -64,8 +63,8 @@ trait Iterator {
     }
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -88,8 +87,8 @@ trait DefaultMethods {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -111,13 +110,13 @@ trait Complex: Display + Send + Sync + 'static {
 
     // Check first trait
     let entity = &entities[0];
-    assert_eq!(entity.name, "Display");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "Display"); // TODO: Update test to use new CodeEntity structure
+                                        // Original test body commented out during migration
 
     // Check second trait
     let entity = &entities[1];
-    assert_eq!(entity.name, "Complex");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "Complex"); // TODO: Update test to use new CodeEntity structure
+                                        // Original test body commented out during migration
 }
 
 #[test]
@@ -132,8 +131,8 @@ unsafe trait UnsafeMarker {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]
@@ -152,8 +151,8 @@ where
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
+                               // Original test body commented out during migration
 }
 
 #[test]

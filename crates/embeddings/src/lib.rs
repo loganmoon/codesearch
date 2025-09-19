@@ -4,6 +4,7 @@
 //! capabilities for semantic code search.
 
 #![deny(warnings)]
+#![allow(dead_code)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 

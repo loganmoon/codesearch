@@ -1,4 +1,5 @@
 #![deny(warnings)]
+#![allow(dead_code)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
@@ -256,3 +257,6 @@ impl From<&CodeEntity> for StorageEntity {
 }
 
 // Mock implementation is now in private mock module for test/development use
+
+// Export mock storage for testing (available to integration tests in other crates)
+pub use mock::MockStorageClient;

@@ -58,29 +58,36 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 
 /// Find all files in a directory that should be indexed
 pub fn find_files(root_path: &Path) -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> = Vec::new();
+    // Create a single glob pattern with all supported extensions
+    let extensions_pattern = SUPPORTED_EXTENSIONS.join(",");
+    let pattern = if SUPPORTED_EXTENSIONS.len() == 1 {
+        format!("{}/**/*.{}", root_path.display(), SUPPORTED_EXTENSIONS[0])
+    } else {
+        format!("{}/**/*.{{{}}}", root_path.display(), extensions_pattern)
+    };
 
-    // Process each supported extension separately
-    for ext in SUPPORTED_EXTENSIONS {
-        let pattern = format!("{}/**/*.{}", root_path.display(), ext);
-        debug!("Searching for {} files with pattern: {}", ext, pattern);
+    debug!("Searching for files with pattern: {}", pattern);
 
-        for entry in glob(&pattern)
-            .map_err(|e| Error::parse("glob", format!("Invalid glob pattern: {e}")))?
-        {
+    // Collect all matching files in a single pass
+    let mut files: Vec<PathBuf> = glob(&pattern)
+        .map_err(|e| Error::parse("glob", format!("Invalid glob pattern: {e}")))?
+        .filter_map(|entry| {
             match entry {
                 Ok(path) => {
                     // Check if file should be included
                     if should_include_file(&path) {
-                        files.push(path);
+                        Some(path)
+                    } else {
+                        None
                     }
                 }
                 Err(e) => {
                     warn!("Error reading file entry: {}", e);
+                    None
                 }
             }
-        }
-    }
+        })
+        .collect();
 
     // Sort files for consistent processing order
     files.sort();

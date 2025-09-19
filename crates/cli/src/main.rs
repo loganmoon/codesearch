@@ -3,6 +3,7 @@
 //! This binary provides the command-line interface for the codesearch system.
 
 #![deny(warnings)]
+#![allow(dead_code)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 

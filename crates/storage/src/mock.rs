@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use codesearch_core::Error;
 
 #[derive(Default)]
-pub(crate) struct MockStorageClient;
+#[cfg_attr(test, derive(Clone))]
+pub struct MockStorageClient;
 
 /// Builder for MockStorageClient
 pub(crate) struct MockStorageClientBuilder;
@@ -21,7 +22,7 @@ impl MockStorageClientBuilder {
 
 impl MockStorageClient {
     /// Create a new mock client (kept for compatibility)
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         MockStorageClientBuilder::new().build()
     }
 }

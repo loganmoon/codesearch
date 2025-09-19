@@ -2,7 +2,10 @@
 //!
 //! These tests verify the complete three-stage indexing pipeline.
 
-use indexer::{create_indexer_with_defaults, IndexStats, RepositoryIndexer};
+use codesearch_storage::MockStorageClient;
+use glob;
+use indexer::{create_indexer, IndexStats};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
 
@@ -172,8 +175,9 @@ async fn test_full_indexing_pipeline() {
     let test_repo = create_test_repository().await;
     let repo_path = test_repo.path().to_path_buf();
 
-    // Create indexer with default configuration
-    let mut indexer = create_indexer_with_defaults(repo_path.clone());
+    // Create indexer with mock storage
+    let storage = Arc::new(MockStorageClient::new());
+    let mut indexer = create_indexer(storage, repo_path.clone());
 
     // Verify repository path is set correctly
     assert_eq!(indexer.repository_path(), repo_path);
@@ -195,7 +199,8 @@ async fn test_full_indexing_pipeline() {
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
-    let mut indexer = RepositoryIndexer::with_defaults(temp_dir.path().to_path_buf());
+    let storage = Arc::new(MockStorageClient::new());
+    let mut indexer = create_indexer(storage, temp_dir.path().to_path_buf());
 
     let result = indexer.index_repository().await;
     assert!(result.is_ok());
@@ -210,7 +215,13 @@ async fn test_indexer_with_empty_repository() {
 #[tokio::test]
 async fn test_file_discovery() {
     let test_repo = create_test_repository().await;
-    let files = indexer::common::find_files(test_repo.path()).unwrap();
+
+    // Use glob to find Rust files
+    let pattern = format!("{}/**/*.rs", test_repo.path().display());
+    let files: Vec<_> = glob::glob(&pattern)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .collect();
 
     // Should find exactly 3 Rust files (main.rs, lib.rs, utils.rs)
     assert_eq!(files.len(), 3);

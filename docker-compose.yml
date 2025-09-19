@@ -1,3 +1,6 @@
+# Database services for codesearch
+# The codesearch CLI runs natively and connects to these containerized services
+
 services:
   qdrant:
     image: qdrant/qdrant:latest
@@ -10,46 +13,13 @@ services:
     environment:
       - QDRANT__LOG_LEVEL=INFO
     healthcheck:
-      test: ["CMD-SHELL", "echo 'Qdrant is running'"]
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-    networks:
-      - codesearch-net
     restart: unless-stopped
-
-  codesearch:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: codesearch-app
-    depends_on:
-      qdrant:
-        condition: service_healthy
-    environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6334
-      - QDRANT_REST_PORT=6333
-      - RUST_LOG=${RUST_LOG:-info}
-      - CODESEARCH_CONFIG=/workspace/codesearch.toml
-    volumes:
-      - ./:/workspace:ro
-      - codesearch_cache:/home/codesearch/.cache
-    networks:
-      - codesearch-net
-    restart: unless-stopped
-    # Keep container running for development
-    # Change this to actual command when ready (e.g., ["serve", "--host", "0.0.0.0", "--port", "8699"])
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["echo 'Codesearch container ready. Run commands with: docker exec codesearch-app codesearch <command>' && sleep infinity"]
 
 volumes:
   qdrant_data:
     driver: local
-  codesearch_cache:
-    driver: local
-
-networks:
-  codesearch-net:
-    driver: bridge

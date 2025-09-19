@@ -6,7 +6,7 @@ use crate::common::find_files;
 use crate::{IndexResult, IndexStats};
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
-use codesearch_core::{CodeEntity, EntityType};
+use codesearch_core::CodeEntity;
 use codesearch_languages::create_extractor;
 use codesearch_storage::{MockStorageClient, StorageClient};
 
@@ -156,10 +156,6 @@ impl RepositoryIndexer {
 
         // Collect all entities from the batch
         let mut batch_entities = Vec::new();
-        let mut batch_functions = Vec::new();
-        let mut batch_types = Vec::new();
-        let mut batch_variables = Vec::new();
-        let mut batch_relationships = Vec::new();
 
         // Process files sequentially for now to avoid borrowing issues
         let mut extraction_results = Vec::new();
@@ -172,31 +168,9 @@ impl RepositoryIndexer {
         for (file_path, result) in file_paths.iter().zip(extraction_results) {
             match result {
                 Ok((entities, file_stats)) => {
-                    // Transform to storage models
-                    let file_path_str = file_path.to_string_lossy().to_string();
-                    let repository_id = self.repository_path.to_string_lossy().to_string();
-
-                    match map_to_storage_models(entities.clone(), &file_path_str, &repository_id) {
-                        Ok((
-                            stored_entities,
-                            stored_functions,
-                            stored_types,
-                            stored_variables,
-                            relationships,
-                        )) => {
-                            batch_entities.extend(stored_entities);
-                            batch_functions.extend(stored_functions);
-                            batch_types.extend(stored_types);
-                            batch_variables.extend(stored_variables);
-                            batch_relationships.extend(relationships);
-                            stats.merge(file_stats);
-                        }
-                        Err(e) => {
-                            error!("Failed to transform entities from {:?}: {}", file_path, e);
-                            stats.increment_failed_files();
-                            errors.push(e.to_string());
-                        }
-                    }
+                    // Just add entities directly to batch without transformation
+                    batch_entities.extend(entities);
+                    stats.merge(file_stats);
                 }
                 Err(e) => {
                     error!("Failed to extract from {:?}: {}", file_path, e);
@@ -208,23 +182,10 @@ impl RepositoryIndexer {
 
         // Bulk load all entities from the batch
         if !batch_entities.is_empty() {
-            debug!(
-                "Bulk loading {} entities, {} functions, {} types, {} variables, {} relationships",
-                batch_entities.len(),
-                batch_functions.len(),
-                batch_types.len(),
-                batch_variables.len(),
-                batch_relationships.len()
-            );
+            debug!("Bulk loading {} entities", batch_entities.len());
 
             storage_client
-                .bulk_load_entities(
-                    &batch_entities,
-                    &batch_functions,
-                    &batch_types,
-                    &batch_variables,
-                    &batch_relationships,
-                )
+                .bulk_load_entities(&batch_entities)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
 
@@ -308,31 +269,11 @@ impl RepositoryIndexer {
         stats.entities_extracted = entities.len();
         // Note: Relationships are not directly exposed in CodeEntity yet
 
-        // Stage 2: Transform - Convert to storage models
-        let file_path_str = file_path.to_string_lossy().to_string();
-        let repository_id = self.repository_path.to_string_lossy().to_string();
+        // Stage 2: Store - Bulk load to storage
+        debug!("Storing {} entities", entities.len());
 
-        let (stored_entities, stored_functions, stored_types, stored_variables, relationships) =
-            map_to_storage_models(entities, &file_path_str, &repository_id)?;
-
-        debug!(
-            "Transformed to {} entities, {} functions, {} types, {} variables, {} relationships",
-            stored_entities.len(),
-            stored_functions.len(),
-            stored_types.len(),
-            stored_variables.len(),
-            relationships.len()
-        );
-
-        // Stage 3: Commit - Bulk load to storage
         storage_client
-            .bulk_load_entities(
-                &stored_entities,
-                &stored_functions,
-                &stored_types,
-                &stored_variables,
-                &relationships,
-            )
+            .bulk_load_entities(&entities)
             .await
             .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
 
@@ -435,51 +376,6 @@ fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
     MockStorageClient::new()
 }
 
-/// Map extracted entities to storage-specific models
-/// TODO: Add embedding generation here when embedding service is ready
-fn map_to_storage_models(
-    entities: Vec<CodeEntity>,
-    _file_path: &str,
-    _repository_id: &str,
-) -> Result<(
-    Vec<CodeEntity>,
-    Vec<CodeEntity>,
-    Vec<CodeEntity>,
-    Vec<CodeEntity>,
-    Vec<(String, String, String)>,
-)> {
-    let mut all_entities = Vec::new();
-    let mut functions = Vec::new();
-    let mut types = Vec::new();
-    let mut variables = Vec::new();
-    let relationships = Vec::new(); // No relationships in CodeEntity yet
-
-    // Categorize entities by type
-    for code_entity in entities {
-        let entity_type = code_entity.entity_type.clone();
-
-        all_entities.push(code_entity.clone());
-
-        match entity_type {
-            EntityType::Function | EntityType::Method => {
-                functions.push(code_entity);
-            }
-            EntityType::Class
-            | EntityType::Struct
-            | EntityType::Interface
-            | EntityType::Trait
-            | EntityType::Enum => {
-                types.push(code_entity);
-            }
-            EntityType::Variable | EntityType::Constant => {
-                variables.push(code_entity);
-            }
-            _ => {}
-        }
-    }
-
-    Ok((all_entities, functions, types, variables, relationships))
-}
 
 #[cfg(test)]
 mod tests {

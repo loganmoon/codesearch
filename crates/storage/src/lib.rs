@@ -13,10 +13,6 @@ pub trait StorageClient: Send + Sync {
     async fn bulk_load_entities(
         &self,
         entities: &[CodeEntity],
-        functions: &[CodeEntity],
-        types: &[CodeEntity],
-        variables: &[CodeEntity],
-        relationships: &[(String, String, String)],
     ) -> Result<()>;
 }
 
@@ -35,10 +31,6 @@ impl StorageClient for MockStorageClient {
     async fn bulk_load_entities(
         &self,
         _entities: &[CodeEntity],
-        _functions: &[CodeEntity],
-        _types: &[CodeEntity],
-        _variables: &[CodeEntity],
-        _relationships: &[(String, String, String)],
     ) -> Result<()> {
         // Mock implementation - just succeed
         Ok(())

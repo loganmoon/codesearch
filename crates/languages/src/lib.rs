@@ -9,7 +9,6 @@ use std::path::Path;
 mod extraction_framework;
 mod generic_entities;
 mod rust;
-mod transport;
 
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {

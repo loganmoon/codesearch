@@ -7,7 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::rust::entities::{FieldInfo, RustEntityVariant, VariantInfo};
+use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handlers::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
     find_capture_node, node_to_text, require_capture_node,
@@ -15,10 +15,10 @@ use crate::rust::handlers::common::{
 use crate::rust::handlers::constants::{
     capture_names, keywords, node_kinds, punctuation, special_idents,
 };
-use crate::transport::{EntityData, EntityVariant};
-use codesearch_core::entities::{SourceLocation, Visibility};
+use codesearch_core::entities::{CodeEntityBuilder, EntityType, EntityMetadata, Language, SourceLocation, Visibility};
 use codesearch_core::entity_id::ScopeContext;
-use codesearch_core::error::Result;
+use codesearch_core::error::{Error, Result};
+use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
@@ -62,12 +62,13 @@ impl<'a, 'b> ExtractionContext<'a, 'b> {
 fn extract_type_entity(
     ctx: &ExtractionContext,
     capture_name: &str,
-    build_variant: impl FnOnce(&ExtractionContext) -> RustEntityVariant,
-) -> Result<EntityData> {
+    entity_type: EntityType,
+    build_metadata: impl FnOnce(&ExtractionContext) -> EntityMetadata,
+) -> Result<CodeEntity> {
     let name = extract_name(ctx)?;
     let main_node = require_capture_node(ctx.query_match, ctx.query, capture_name)?;
-    let variant = build_variant(ctx);
-    build_entity_data(ctx, &name, main_node, variant)
+    let metadata = build_metadata(ctx);
+    build_entity_data(ctx, &name, main_node, entity_type, metadata)
 }
 
 // ============================================================================
@@ -81,18 +82,30 @@ pub fn handle_struct(
     query: &Query,
     source: &str,
     file_path: &Path,
-) -> Result<Vec<EntityData>> {
+) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext::new(query_match, query, source, file_path);
-    extract_type_entity(&ctx, capture_names::STRUCT, |ctx| {
+    extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
         let (fields, is_tuple) = extract_struct_fields(ctx);
-        RustEntityVariant::Struct {
-            generics,
-            derives,
-            fields,
-            is_tuple,
+
+        let mut metadata = EntityMetadata::default();
+        metadata.generic_params = generics;
+        metadata.is_generic = !metadata.generic_params.is_empty();
+        metadata.decorators = derives;
+
+        // Store struct-specific info in attributes
+        if is_tuple {
+            metadata.attributes.insert("struct_type".to_string(), "tuple".to_string());
         }
+
+        // Store field info as JSON in attributes
+        if !fields.is_empty() {
+            let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+            metadata.attributes.insert("fields".to_string(), field_names.join(","));
+        }
+
+        metadata
     })
     .map(|data| vec![data])
 }
@@ -104,17 +117,25 @@ pub fn handle_enum(
     query: &Query,
     source: &str,
     file_path: &Path,
-) -> Result<Vec<EntityData>> {
+) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext::new(query_match, query, source, file_path);
-    extract_type_entity(&ctx, capture_names::ENUM, |ctx| {
+    extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
         let variants = extract_enum_variants(ctx);
-        RustEntityVariant::Enum {
-            generics,
-            derives,
-            variants,
+
+        let mut metadata = EntityMetadata::default();
+        metadata.generic_params = generics;
+        metadata.is_generic = !metadata.generic_params.is_empty();
+        metadata.decorators = derives;
+
+        // Store variant info in attributes
+        if !variants.is_empty() {
+            let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+            metadata.attributes.insert("variants".to_string(), variant_names.join(","));
         }
+
+        metadata
     })
     .map(|data| vec![data])
 }
@@ -126,18 +147,30 @@ pub fn handle_trait(
     query: &Query,
     source: &str,
     file_path: &Path,
-) -> Result<Vec<EntityData>> {
+) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext::new(query_match, query, source, file_path);
-    extract_type_entity(&ctx, capture_names::TRAIT, |ctx| {
+    extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         let generics = extract_generics(ctx);
         let bounds = extract_trait_bounds(ctx);
         let (associated_types, methods) = extract_trait_members(ctx);
-        RustEntityVariant::Trait {
-            generics,
-            bounds,
-            associated_types,
-            methods,
+
+        let mut metadata = EntityMetadata::default();
+        metadata.generic_params = generics;
+        metadata.is_generic = !metadata.generic_params.is_empty();
+        metadata.is_abstract = true; // Traits are abstract by nature
+
+        // Store trait-specific info in attributes
+        if !bounds.is_empty() {
+            metadata.attributes.insert("bounds".to_string(), bounds.join(" + "));
         }
+        if !associated_types.is_empty() {
+            metadata.attributes.insert("associated_types".to_string(), associated_types.join(","));
+        }
+        if !methods.is_empty() {
+            metadata.attributes.insert("methods".to_string(), methods.join(","));
+        }
+
+        metadata
     })
     .map(|data| vec![data])
 }
@@ -162,32 +195,30 @@ fn build_entity_data(
     ctx: &ExtractionContext,
     name: &str,
     main_node: Node,
-    variant: RustEntityVariant,
-) -> Result<EntityData> {
+    entity_type: EntityType,
+    metadata: EntityMetadata,
+) -> Result<CodeEntity> {
     let location = SourceLocation::from_tree_sitter_node(main_node);
     let content = node_to_text(main_node, ctx.source).ok();
     let visibility = extract_visibility(ctx.query_match, ctx.query);
     let documentation = extract_preceding_doc_comments(main_node, ctx.source);
     let qualified_name = ctx.scope_context.build_qualified_name(name);
 
-    let mut entity_data = EntityData::new(
-        name.to_string(),
-        qualified_name,
-        ctx.file_path.to_path_buf(),
-        location,
-        EntityVariant::Rust(variant),
-    )
-    .with_visibility(visibility);
-
-    if let Some(doc) = documentation {
-        entity_data = entity_data.with_documentation(Some(doc));
-    }
-
-    if let Some(content_str) = content {
-        entity_data = entity_data.with_content(Some(content_str));
-    }
-
-    Ok(entity_data)
+    CodeEntityBuilder::default()
+        .entity_id(format!("{}#{}", ctx.file_path.display(), qualified_name))
+        .name(name.to_string())
+        .qualified_name(qualified_name.clone())
+        .entity_type(entity_type)
+        .location(location.clone())
+        .visibility(visibility)
+        .documentation_summary(documentation)
+        .content(content)
+        .metadata(metadata)
+        .language(Language::Rust)
+        .file_path(ctx.file_path.to_path_buf())
+        .line_range((location.start_line, location.end_line))
+        .build()
+        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))
 }
 
 // ============================================================================

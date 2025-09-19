@@ -3,7 +3,8 @@
 //! This module provides serializable intermediate representations for entities
 //! extracted from source code that bridge the extraction and storage stages.
 
-use codesearch_core::entities::{SourceLocation, Visibility};
+use codesearch_core::entities::{CodeEntityBuilder, EntityMetadata, Language, SourceLocation, Visibility};
+use codesearch_core::CodeEntity;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -148,6 +149,43 @@ impl EntityData {
     pub fn with_dependencies(mut self, deps: Vec<String>) -> Self {
         self.dependencies = deps;
         self
+    }
+}
+
+/// Convert EntityData to CodeEntity
+impl From<EntityData> for CodeEntity {
+    fn from(entity: EntityData) -> Self {
+        let entity_type = entity.variant.entity_type();
+        let metadata = entity.variant.into_metadata();
+        let signature = entity.variant.extract_signature();
+        let file_path = entity.file_path.clone();
+        let location = entity.location.clone();
+
+        CodeEntityBuilder::default()
+            .entity_id(format!("{}#{}", file_path.display(), entity.qualified_name))
+            .name(entity.name)
+            .qualified_name(entity.qualified_name)
+            .entity_type(entity_type)
+            .location(entity.location)
+            .visibility(entity.visibility)
+            .documentation_summary(entity.documentation)
+            .content(entity.content)
+            .dependencies(entity.dependencies)
+            .metadata(metadata)
+            .signature(signature)
+            .language(match &entity.variant {
+                EntityVariant::Rust(_) => Language::Rust,
+                // Add other languages as they're implemented
+            })
+            .file_path(file_path)
+            .line_range((location.start_line, location.end_line))
+            .build()
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to build CodeEntity from EntityData: {}", e);
+                // Panic is appropriate here as this indicates a programming error
+                // All required fields should be present in EntityData
+                panic!("Failed to convert EntityData to CodeEntity: {}", e);
+            })
     }
 }
 

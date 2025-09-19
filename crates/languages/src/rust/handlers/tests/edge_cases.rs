@@ -1,6 +1,7 @@
 //! Edge case tests for Rust extraction handlers
 
 use super::*;
+use codesearch_core::entities::{EntityType, Visibility};
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::type_handlers::handle_struct;
 
@@ -227,14 +228,10 @@ struct Nested {
     assert_eq!(function_entities.len(), 1);
 
     // Check that the complex return type is captured
-    use crate::rust::entities::RustEntityVariant;
-    use crate::transport::EntityVariant;
-
-    if let EntityVariant::Rust(RustEntityVariant::Function { return_type, .. }) =
-        &function_entities[0].variant
-    {
-        assert!(return_type.is_some());
-        let ret_type = return_type.as_ref().unwrap();
+    let entity = &function_entities[0];
+    if let Some(sig) = &entity.signature {
+        assert!(sig.return_type.is_some());
+        let ret_type = sig.return_type.as_ref().unwrap();
         assert!(ret_type.contains("Result"));
         assert!(ret_type.contains("Option"));
         assert!(ret_type.contains("Vec"));

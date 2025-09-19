@@ -14,7 +14,10 @@ use crate::rust::handlers::common::{
 use crate::rust::handlers::constants::{
     capture_names, function_modifiers, keywords, node_kinds, punctuation, special_idents,
 };
-use codesearch_core::entities::{CodeEntityBuilder, EntityType, FunctionSignature, EntityMetadata, Language, SourceLocation, Visibility};
+use codesearch_core::entities::{
+    CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
+    Visibility,
+};
 use codesearch_core::entity_id::ScopeContext;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
@@ -215,11 +218,15 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
 
     // Add unsafe as an attribute if applicable
     if components.is_unsafe {
-        metadata.attributes.insert("unsafe".to_string(), "true".to_string());
+        metadata
+            .attributes
+            .insert("unsafe".to_string(), "true".to_string());
     }
 
     let signature = FunctionSignature {
-        parameters: components.parameters.iter()
+        parameters: components
+            .parameters
+            .iter()
             .map(|(name, ty)| (name.clone(), Some(ty.clone())))
             .collect(),
         return_type: components.return_type.clone(),
@@ -228,7 +235,11 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
     };
 
     CodeEntityBuilder::default()
-        .entity_id(format!("{}#{}", components.file_path.display(), components.qualified_name))
+        .entity_id(format!(
+            "{}#{}",
+            components.file_path.display(),
+            components.qualified_name
+        ))
         .name(components.name)
         .qualified_name(components.qualified_name)
         .entity_type(EntityType::Function)

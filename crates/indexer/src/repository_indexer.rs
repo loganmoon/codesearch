@@ -376,7 +376,6 @@ fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
     MockStorageClient::new()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

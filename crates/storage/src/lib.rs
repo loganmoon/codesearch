@@ -10,10 +10,7 @@ use codesearch_core::{error::Result, CodeEntity};
 #[async_trait]
 pub trait StorageClient: Send + Sync {
     /// Bulk load entities into storage
-    async fn bulk_load_entities(
-        &self,
-        entities: &[CodeEntity],
-    ) -> Result<()>;
+    async fn bulk_load_entities(&self, entities: &[CodeEntity]) -> Result<()>;
 }
 
 /// Mock storage client for testing
@@ -28,10 +25,7 @@ impl MockStorageClient {
 
 #[async_trait]
 impl StorageClient for MockStorageClient {
-    async fn bulk_load_entities(
-        &self,
-        _entities: &[CodeEntity],
-    ) -> Result<()> {
+    async fn bulk_load_entities(&self, _entities: &[CodeEntity]) -> Result<()> {
         // Mock implementation - just succeed
         Ok(())
     }

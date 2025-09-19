@@ -195,8 +195,7 @@ async fn test_full_indexing_pipeline() {
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
-    let mut indexer =
-        create_indexer("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
+    let mut indexer = create_indexer("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
 
     let result = indexer.index_repository().await;
     assert!(result.is_ok());

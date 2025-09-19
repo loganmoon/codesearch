@@ -15,7 +15,9 @@ use crate::rust::handlers::common::{
 use crate::rust::handlers::constants::{
     capture_names, keywords, node_kinds, punctuation, special_idents,
 };
-use codesearch_core::entities::{CodeEntityBuilder, EntityType, EntityMetadata, Language, SourceLocation, Visibility};
+use codesearch_core::entities::{
+    CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation, Visibility,
+};
 use codesearch_core::entity_id::ScopeContext;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
@@ -96,13 +98,17 @@ pub fn handle_struct(
 
         // Store struct-specific info in attributes
         if is_tuple {
-            metadata.attributes.insert("struct_type".to_string(), "tuple".to_string());
+            metadata
+                .attributes
+                .insert("struct_type".to_string(), "tuple".to_string());
         }
 
         // Store field info as JSON in attributes
         if !fields.is_empty() {
             let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-            metadata.attributes.insert("fields".to_string(), field_names.join(","));
+            metadata
+                .attributes
+                .insert("fields".to_string(), field_names.join(","));
         }
 
         metadata
@@ -132,7 +138,9 @@ pub fn handle_enum(
         // Store variant info in attributes
         if !variants.is_empty() {
             let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-            metadata.attributes.insert("variants".to_string(), variant_names.join(","));
+            metadata
+                .attributes
+                .insert("variants".to_string(), variant_names.join(","));
         }
 
         metadata
@@ -161,13 +169,19 @@ pub fn handle_trait(
 
         // Store trait-specific info in attributes
         if !bounds.is_empty() {
-            metadata.attributes.insert("bounds".to_string(), bounds.join(" + "));
+            metadata
+                .attributes
+                .insert("bounds".to_string(), bounds.join(" + "));
         }
         if !associated_types.is_empty() {
-            metadata.attributes.insert("associated_types".to_string(), associated_types.join(","));
+            metadata
+                .attributes
+                .insert("associated_types".to_string(), associated_types.join(","));
         }
         if !methods.is_empty() {
-            metadata.attributes.insert("methods".to_string(), methods.join(","));
+            metadata
+                .attributes
+                .insert("methods".to_string(), methods.join(","));
         }
 
         metadata

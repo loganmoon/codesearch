@@ -61,4 +61,3 @@ impl Extractor for RustExtractor {
         extractor.extract(source, file_path)
     }
 }
-

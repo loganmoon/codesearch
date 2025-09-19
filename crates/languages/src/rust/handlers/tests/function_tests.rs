@@ -1,9 +1,8 @@
 //! Tests for function extraction handler
 
 use super::*;
-use crate::rust::entities::RustEntityVariant;
 use crate::rust::handlers::function_handlers::handle_function;
-use crate::transport::EntityVariant;
+use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
 fn test_simple_function() {
@@ -19,22 +18,19 @@ fn simple_function() {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "simple_function");
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        is_async,
-        is_unsafe,
-        is_const,
-        parameters,
-        ..
-    }) = &entity.variant
-    {
-        assert!(!is_async);
-        assert!(!is_unsafe);
-        assert!(!is_const);
-        assert_eq!(parameters.len(), 0);
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check metadata
+    assert!(!entity.metadata.is_async);
+    assert!(!entity.metadata.is_const);
+    assert_eq!(entity.metadata.attributes.get("unsafe"), None);
+
+    // Check signature
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 0);
 }
 
 #[test]
@@ -50,18 +46,18 @@ async fn fetch_data() -> Result<String, Error> {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        is_async,
-        return_type,
-        ..
-    }) = &entity.variant
-    {
-        assert!(is_async);
-        assert_eq!(return_type.as_deref(), Some("Result<String, Error>"));
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check async
+    assert!(entity.metadata.is_async);
+
+    // Check signature
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert!(sig.is_async);
+    assert_eq!(sig.return_type.as_deref(), Some("Result<String, Error>"));
 }
 
 #[test]
@@ -77,20 +73,22 @@ unsafe fn dangerous_operation(ptr: *mut u8) {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        is_unsafe,
-        parameters,
-        ..
-    }) = &entity.variant
-    {
-        assert!(is_unsafe);
-        assert_eq!(parameters.len(), 1);
-        assert_eq!(parameters[0].0, "ptr");
-        assert_eq!(parameters[0].1, "*mut u8");
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check unsafe
+    assert_eq!(
+        entity.metadata.attributes.get("unsafe").map(|s| s.as_str()),
+        Some("true")
+    );
+
+    // Check parameters
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 1);
+    assert_eq!(sig.parameters[0].0, "ptr");
+    assert_eq!(sig.parameters[0].1.as_deref(), Some("*mut u8"));
 }
 
 #[test]
@@ -106,20 +104,18 @@ const fn compile_time_computation(x: i32) -> i32 {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        is_const,
-        parameters,
-        return_type,
-        ..
-    }) = &entity.variant
-    {
-        assert!(is_const);
-        assert_eq!(parameters.len(), 1);
-        assert_eq!(return_type.as_deref(), Some("i32"));
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check const
+    assert!(entity.metadata.is_const);
+
+    // Check signature
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 1);
+    assert_eq!(sig.return_type.as_deref(), Some("i32"));
 }
 
 #[test]
@@ -138,22 +134,25 @@ where
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        generics,
-        parameters,
-        return_type,
-        ..
-    }) = &entity.variant
-    {
-        assert_eq!(generics.len(), 2);
-        assert!(generics.contains(&"T: Clone".to_string()));
-        assert!(generics.contains(&"U".to_string()));
-        assert_eq!(parameters.len(), 2);
-        assert_eq!(return_type.as_deref(), Some("(T, U)"));
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check generics
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert!(entity
+        .metadata
+        .generic_params
+        .contains(&"T: Clone".to_string()));
+    assert!(entity.metadata.generic_params.contains(&"U".to_string()));
+
+    // Check signature
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.return_type.as_deref(), Some("(T, U)"));
+    assert_eq!(sig.generics.len(), 2);
 }
 
 #[test]
@@ -173,8 +172,8 @@ pub fn documented_function(x: i32) -> i32 {
     let entity = &entities[0];
 
     assert_eq!(entity.name, "documented_function");
-    assert!(entity.documentation.is_some());
-    let doc = entity.documentation.as_ref().unwrap();
+    assert!(entity.documentation_summary.is_some());
+    let doc = entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("well-documented"));
     assert!(doc.contains("important"));
 }
@@ -192,22 +191,20 @@ fn lifetime_func<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function {
-        generics,
-        parameters,
-        return_type,
-        ..
-    }) = &entity.variant
-    {
-        assert_eq!(generics.len(), 2);
-        assert_eq!(parameters.len(), 2);
-        assert_eq!(parameters[0].0, "x");
-        assert_eq!(parameters[0].1, "&'a str");
-        assert_eq!(return_type.as_deref(), Some("&'a str"));
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check generics (includes lifetimes)
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check parameters
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.parameters[0].0, "x");
+    assert_eq!(sig.parameters[0].1.as_deref(), Some("&'a str"));
+    assert_eq!(sig.return_type.as_deref(), Some("&'a str"));
 }
 
 #[test]
@@ -246,14 +243,16 @@ fn complex_params(
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
+    assert_eq!(entity.entity_type, EntityType::Function);
 
-    if let EntityVariant::Rust(RustEntityVariant::Function { parameters, .. }) = &entity.variant {
-        assert_eq!(parameters.len(), 3);
-        // Parameter patterns are complex and might be simplified in extraction
-        assert!(parameters[0].0.contains("(x, y)") || parameters[0].0 == "(x, y)");
-    } else {
-        panic!("Expected function variant");
-    }
+    // Check parameters
+    let sig = entity
+        .signature
+        .as_ref()
+        .expect("Function should have signature");
+    assert_eq!(sig.parameters.len(), 3);
+    // Parameter patterns are complex and might be simplified in extraction
+    assert!(sig.parameters[0].0.contains("(x, y)") || sig.parameters[0].0 == "(x, y)");
 }
 
 #[test]
@@ -271,7 +270,6 @@ pub(crate) fn crate_public() {}
     assert_eq!(entities.len(), 3);
 
     // Check visibility is properly extracted
-    use codesearch_core::entities::Visibility;
     assert_eq!(entities[0].visibility, Visibility::Public);
     assert_eq!(entities[1].visibility, Visibility::Private);
     assert_eq!(entities[2].visibility, Visibility::Public); // pub(crate) is still public

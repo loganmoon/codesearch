@@ -10,7 +10,7 @@ mod struct_tests;
 mod trait_tests;
 
 use crate::rust::queries;
-use codesearch_core::{CodeEntity, error::Result};
+use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, Query, QueryCursor};

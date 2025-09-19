@@ -15,7 +15,8 @@ use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch};
 use crate::transport::EntityData;
 
 /// Handler function type for processing query matches into entities
-pub type EntityHandler = Box<dyn Fn(&QueryMatch, &Query, &str, &Path) -> Result<Vec<EntityData>>>;
+pub type EntityHandler =
+    Box<dyn Fn(&QueryMatch, &Query, &str, &Path) -> Result<Vec<EntityData>> + Send + Sync>;
 
 /// Defines how to extract a specific type of entity
 struct EntityExtractor {

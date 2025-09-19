@@ -6,9 +6,7 @@ use crate::common::find_files;
 use crate::types::{IndexResult, IndexStats};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::{CodeEntity, EntityType};
-use codesearch_languages::{
-    extraction_framework::GenericExtractor, rust::create_rust_extractor, transport::EntityData,
-};
+use codesearch_languages::create_extractor;
 use codesearch_storage::{MockStorageClient, StorageClient};
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -51,7 +49,6 @@ pub struct RepositoryIndexer {
     storage_host: String,
     storage_port: u16,
     repository_path: PathBuf,
-    extractors: ExtractorRegistry,
 }
 
 impl RepositoryIndexer {
@@ -61,7 +58,6 @@ impl RepositoryIndexer {
             storage_host,
             storage_port,
             repository_path,
-            extractors: ExtractorRegistry::new(),
         }
     }
 
@@ -244,38 +240,24 @@ impl RepositoryIndexer {
     async fn extract_from_file(
         &mut self,
         file_path: &Path,
-    ) -> Result<(Vec<EntityData>, IndexStats)> {
+    ) -> Result<(Vec<CodeEntity>, IndexStats)> {
         debug!("Extracting from file: {:?}", file_path);
 
         let mut stats = IndexStats::default();
+
+        // Create extractor for this file
+        let extractor = match create_extractor(file_path) {
+            Some(ext) => ext,
+            None => {
+                debug!("No extractor available for file: {:?}", file_path);
+                return Ok((Vec::new(), stats));
+            }
+        };
 
         // Read file
         let content = fs::read_to_string(file_path)
             .await
             .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
-
-        // Determine language from extension
-        let extension = file_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-
-        let language = match extension {
-            "rs" => "rust",
-            "py" => "python",
-            "js" | "jsx" => "javascript",
-            "ts" | "tsx" => "typescript",
-            "go" => "go",
-            _ => {
-                debug!("Unsupported file type: {:?}", file_path);
-                return Ok((Vec::new(), stats));
-            }
-        };
-
-        // Get appropriate extractor
-        let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {language}"))
-        })?;
 
         // Extract entities
         let entities = extractor.extract(&content, file_path)?;
@@ -283,9 +265,7 @@ impl RepositoryIndexer {
 
         // Update stats
         stats.entities_extracted = entities.len();
-        for entity in &entities {
-            stats.relationships_extracted += entity.relationships.len();
-        }
+        // Note: Relationships are not directly exposed in CodeEntity yet
 
         Ok((entities, stats))
     }
@@ -301,33 +281,19 @@ impl RepositoryIndexer {
         // Initialize stats for this file
         let mut stats = IndexStats::default();
 
-        // Stage 1: Extract - Read file and determine language
-        let content = fs::read_to_string(file_path)
-            .await
-            .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
-
-        // Determine language from extension
-        let extension = file_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-
-        let language = match extension {
-            "rs" => "rust",
-            "py" => "python",
-            "js" | "jsx" => "javascript",
-            "ts" | "tsx" => "typescript",
-            "go" => "go",
-            _ => {
-                debug!("Unsupported file type: {:?}", file_path);
+        // Stage 1: Create extractor for file
+        let extractor = match create_extractor(file_path) {
+            Some(ext) => ext,
+            None => {
+                debug!("No extractor available for file: {:?}", file_path);
                 return Ok(stats);
             }
         };
 
-        // Get appropriate extractor
-        let extractor = self.extractors.get_or_create(language).ok_or_else(|| {
-            Error::entity_extraction(format!("No extractor available for {language}"))
-        })?;
+        // Read file
+        let content = fs::read_to_string(file_path)
+            .await
+            .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
 
         // Extract entities
         let entities = extractor.extract(&content, file_path)?;
@@ -339,9 +305,7 @@ impl RepositoryIndexer {
 
         // Update extraction stats
         stats.entities_extracted = entities.len();
-        for entity in &entities {
-            stats.relationships_extracted += entity.relationships.len();
-        }
+        // Note: Relationships are not directly exposed in CodeEntity yet
 
         // Stage 2: Transform - Convert to storage models
         let file_path_str = file_path.to_string_lossy().to_string();
@@ -384,43 +348,6 @@ impl RepositoryIndexer {
     }
 }
 
-/// Registry for managing language extractors
-struct ExtractorRegistry {
-    rust_extractor: Option<GenericExtractor<'static>>,
-    // Future: Add other language extractors
-    // python_extractor: Option<GenericExtractor<'static>>,
-    // typescript_extractor: Option<GenericExtractor<'static>>,
-}
-
-impl ExtractorRegistry {
-    fn new() -> Self {
-        Self {
-            rust_extractor: None,
-        }
-    }
-
-    fn get_or_create(&mut self, language: &str) -> Option<&mut GenericExtractor<'static>> {
-        match language {
-            "rust" => {
-                if self.rust_extractor.is_none() {
-                    match create_rust_extractor() {
-                        Ok(extractor) => self.rust_extractor = Some(extractor),
-                        Err(e) => {
-                            error!("Failed to create Rust extractor: {}", e);
-                            return None;
-                        }
-                    }
-                }
-                self.rust_extractor.as_mut()
-            }
-            _ => {
-                debug!("No extractor available for language: {}", language);
-                None
-            }
-        }
-    }
-}
-
 /// Create a progress bar for indexing operations
 fn create_progress_bar(total: usize) -> ProgressBar {
     let pb = ProgressBar::new(total as u64);
@@ -443,8 +370,8 @@ fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
 /// Map extracted entities to storage-specific models
 /// TODO: Add embedding generation here when embedding service is ready
 fn map_to_storage_models(
-    entities: Vec<EntityData>,
-    file_path: &str,
+    entities: Vec<CodeEntity>,
+    _file_path: &str,
     _repository_id: &str,
 ) -> Result<(
     Vec<CodeEntity>,
@@ -453,39 +380,15 @@ fn map_to_storage_models(
     Vec<CodeEntity>,
     Vec<(String, String, String)>,
 )> {
-    use codesearch_core::entities::CodeEntityBuilder;
-    use std::path::PathBuf;
-
     let mut all_entities = Vec::new();
     let mut functions = Vec::new();
     let mut types = Vec::new();
     let mut variables = Vec::new();
-    let mut relationships = Vec::new();
+    let relationships = Vec::new(); // No relationships in CodeEntity yet
 
-    // Convert EntityData to CodeEntity and categorize them
-    for entity_data in entities {
-        // Get EntityType from the variant
-        let entity_type = entity_data.variant.entity_type();
-
-        // Build CodeEntity from EntityData
-        let code_entity = CodeEntityBuilder::default()
-            .entity_id(format!("{}#{}", file_path, entity_data.qualified_name))
-            .name(entity_data.name.clone())
-            .qualified_name(entity_data.qualified_name.clone())
-            .entity_type(entity_type)
-            .file_path(PathBuf::from(file_path))
-            .location(entity_data.location.clone())
-            .line_range((
-                entity_data.location.start_line,
-                entity_data.location.end_line,
-            ))
-            .visibility(entity_data.visibility)
-            .language(entity_data.variant.language())
-            .lines_of_code(entity_data.location.end_line - entity_data.location.start_line + 1)
-            .documentation_summary(entity_data.documentation.clone())
-            .content(entity_data.content.clone())
-            .build()
-            .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))?;
+    // Categorize entities by type
+    for code_entity in entities {
+        let entity_type = code_entity.entity_type.clone();
 
         all_entities.push(code_entity.clone());
 
@@ -504,15 +407,6 @@ fn map_to_storage_models(
                 variables.push(code_entity);
             }
             _ => {}
-        }
-
-        // Convert relationships to storage format
-        for rel in &entity_data.relationships {
-            relationships.push((
-                rel.from.clone(),
-                rel.to.clone(),
-                format!("{:?}", rel.relationship_type),
-            ));
         }
     }
 

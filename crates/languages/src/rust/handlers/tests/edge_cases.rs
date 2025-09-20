@@ -1,7 +1,6 @@
 //! Edge case tests for Rust extraction handlers
 
 use super::*;
-use codesearch_core::entities::{EntityType, Visibility};
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::type_handlers::handle_struct;
 

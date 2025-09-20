@@ -1,10 +1,8 @@
 //! Tests for enum extraction handler
 
 use super::*;
-use codesearch_core::entities::{EntityType, Visibility};
-
+use codesearch_core::entities::EntityType;
 use crate::rust::handlers::type_handlers::handle_enum;
-
 
 #[test]
 fn test_simple_enum() {
@@ -21,8 +19,16 @@ enum SimpleEnum {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
-    assert_eq!(entity.name, "SimpleEnum");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "SimpleEnum");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check enum variants are captured in metadata
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("First"));
+    assert!(variants_str.contains("Second"));
+    assert!(variants_str.contains("Third"));
 }
 
 #[test]
@@ -39,8 +45,17 @@ enum StatusCode {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "StatusCode");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check enum variants with discriminants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Ok"));
+    assert!(variants_str.contains("NotFound"));
+    assert!(variants_str.contains("ServerError"));
 }
 
 #[test]
@@ -57,8 +72,17 @@ enum Message {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Message");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check tuple variants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Move"));
+    assert!(variants_str.contains("Write"));
+    assert!(variants_str.contains("Color"));
 }
 
 #[test]
@@ -75,8 +99,17 @@ enum Event {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Event");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check struct variants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Click"));
+    assert!(variants_str.contains("KeyPress"));
+    assert!(variants_str.contains("Scroll"));
 }
 
 #[test]
@@ -92,8 +125,21 @@ enum Option<T> {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Option");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check generics
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 1);
+    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
+
+    // Check variants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Some"));
+    assert!(variants_str.contains("None"));
 }
 
 #[test]
@@ -111,8 +157,20 @@ enum Comparison {
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0];    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Comparison");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check derives stored as decorators
+    assert!(entity.metadata.decorators.contains(&"Debug".to_string()));
+    assert!(entity.metadata.decorators.contains(&"Clone".to_string()));
+    assert!(entity.metadata.decorators.contains(&"Copy".to_string()));
+    assert!(entity.metadata.decorators.contains(&"PartialEq".to_string()));
+    assert!(entity.metadata.decorators.contains(&"Eq".to_string()));
+
+    // Check variants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
 }
 
 #[test]
@@ -142,8 +200,21 @@ enum ComplexEnum<'a, T: Clone> {
 
     // Check the second, more complex enum
     let entity = &entities[1];
-    assert_eq!(entity.name, "ComplexEnum");    // TODO: Update test to use new CodeEntity structure
-    // Original test body commented out during migration
+    assert_eq!(entity.name, "ComplexEnum");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check generics with lifetime and trait bounds
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check variants
+    let variants = entity.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Simple"));
+    assert!(variants_str.contains("Reference"));
+    assert!(variants_str.contains("Tuple"));
+    assert!(variants_str.contains("Struct"));
 }
 
 #[test]

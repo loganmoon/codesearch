@@ -6,7 +6,6 @@ use codesearch_core::entities::{EntityType, Visibility};
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
 
-
 /// Large comprehensive Rust code sample (100+ lines)
 const LARGE_RUST_SAMPLE: &str = r####"
 //! A comprehensive Rust module for testing entity extraction
@@ -189,7 +188,6 @@ impl std::error::Error for ProcessError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-use codesearch_core::entities::{EntityType, Visibility};
 
     #[test]
     fn test_config_default() {
@@ -224,35 +222,31 @@ fn test_large_file_extraction() {
     assert!(function_names.contains(&"raw_memory_copy"));
 
     // Check async function
-    let _async_func = function_entities
+    let async_func = function_entities
         .iter()
         .find(|e| e.name == "fetch_data")
         .expect("Should find fetch_data function");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Function { is_async, .. }) = &async_func.variant {
-//         // assert!(is_async);
-//     }
+    assert!(async_func.metadata.is_async);
+    assert_eq!(async_func.entity_type, EntityType::Function);
 
     // Check unsafe function
-    let _unsafe_func = function_entities
+    let unsafe_func = function_entities
         .iter()
         .find(|e| e.name == "raw_memory_copy")
         .expect("Should find raw_memory_copy function");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Function { is_unsafe, .. }) = &unsafe_func.variant
-//     {
-//         // assert!(is_unsafe);
-//     }
+    assert_eq!(unsafe_func.metadata.attributes.get("unsafe").map(|s| s.as_str()), Some("true"));
+    assert_eq!(unsafe_func.entity_type, EntityType::Function);
 
     // Check const function
-    let _const_func = function_entities
+    let const_func = function_entities
         .iter()
         .find(|e| e.name == "calculate_buffer_size")
         .expect("Should find calculate_buffer_size function");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Function { is_const, .. }) = &const_func.variant {
-//         // assert!(is_const);
-//     }
+    assert!(const_func.metadata.is_const);
+    assert_eq!(const_func.entity_type, EntityType::Function);
 }
 
 #[test]
@@ -272,38 +266,39 @@ fn test_large_file_struct_extraction() {
     assert!(struct_names.contains(&"Marker"));
 
     // Check Config struct has fields
-    let _config_struct = struct_entities
+    let config_struct = struct_entities
         .iter()
         .find(|e| e.name == "Config")
         .expect("Should find Config struct");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Struct { fields, .. }) = &config_struct.variant {
-//         assert_eq!(fields.len(), 4);
-//         assert!(fields.iter().any(|f| f.name == "hostname"));
-//         assert!(fields.iter().any(|f| f.name == "port"));
-//         assert!(fields.iter().any(|f| f.name == "debug"));
-//         assert!(fields.iter().any(|f| f.name == "timeout"));
-//     }
+    assert_eq!(config_struct.entity_type, EntityType::Struct);
+    let fields = config_struct.metadata.attributes.get("fields");
+    assert!(fields.is_some());
+    let fields_str = fields.unwrap();
+    assert!(fields_str.contains("hostname"));
+    assert!(fields_str.contains("port"));
+    assert!(fields_str.contains("debug"));
+    assert!(fields_str.contains("timeout"));
 
     // Check Color is a tuple struct
-    let _color_struct = struct_entities
+    let color_struct = struct_entities
         .iter()
         .find(|e| e.name == "Color")
         .expect("Should find Color struct");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Struct {
-//         is_tuple, fields, ..
-//     }) = &color_struct.variant
+    assert_eq!(color_struct.entity_type, EntityType::Struct);
+    // Tuple structs are marked with struct_type attribute
+    assert_eq!(color_struct.metadata.attributes.get("struct_type").map(|s| s.as_str()), Some("tuple"));
 
     // Check Marker is a unit struct
-    let _marker_struct = struct_entities
+    let marker_struct = struct_entities
         .iter()
         .find(|e| e.name == "Marker")
         .expect("Should find Marker struct");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Struct { fields, .. }) = &marker_struct.variant {
-//         assert_eq!(fields.len(), 0);
-//     }
+    assert_eq!(marker_struct.entity_type, EntityType::Struct);
+    // Unit structs have no fields
+    assert!(marker_struct.metadata.attributes.get("fields").is_none());
 }
 
 #[test]
@@ -320,18 +315,19 @@ fn test_large_file_enum_extraction() {
     assert!(enum_names.contains(&"ProcessError"));
 
     // Check Message enum variants
-    let _message_enum = enum_entities
+    let message_enum = enum_entities
         .iter()
         .find(|e| e.name == "Message")
         .expect("Should find Message enum");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Enum { variants, .. }) = &message_enum.variant {
-//         assert_eq!(variants.len(), 4);
-//         assert!(variants.iter().any(|v| v.name == "Text"));
-//         assert!(variants.iter().any(|v| v.name == "Binary"));
-//         assert!(variants.iter().any(|v| v.name == "Control"));
-//         assert!(variants.iter().any(|v| v.name == "Error"));
-//     }
+    assert_eq!(message_enum.entity_type, EntityType::Enum);
+    let variants = message_enum.metadata.attributes.get("variants");
+    assert!(variants.is_some());
+    let variants_str = variants.unwrap();
+    assert!(variants_str.contains("Text"));
+    assert!(variants_str.contains("Binary"));
+    assert!(variants_str.contains("Control"));
+    assert!(variants_str.contains("Error"));
 }
 
 #[test]
@@ -349,32 +345,44 @@ fn test_large_file_trait_extraction() {
     assert!(trait_names.contains(&"Container"));
 
     // Check Processable trait methods
-    let _processable_trait = trait_entities
+    let processable_trait = trait_entities
         .iter()
         .find(|e| e.name == "Processable")
         .expect("Should find Processable trait");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Trait { methods, .. }) =
-//         &processable_trait.variant
-//     {
-//         assert!(methods.len() >= 3);
-//         assert!(methods.contains(&"process".to_string()));
-//         assert!(methods.contains(&"validate".to_string()));
-//         assert!(methods.contains(&"identifier".to_string()));
-//     }
+    assert_eq!(processable_trait.entity_type, EntityType::Trait);
+    let methods = processable_trait.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("process"));
+    assert!(methods_str.contains("validate"));
+    assert!(methods_str.contains("identifier"));
 
     // Check Container trait has associated types
-    let _container_trait = trait_entities
+    let container_trait = trait_entities
         .iter()
         .find(|e| e.name == "Container")
         .expect("Should find Container trait");
 
-//     // TODO: Fix this - if let EntityVariant::Rust(RustEntityVariant::Trait {
-//         associated_types,
-//         methods,
-//         generics,
-//         ..
-//     }) = &container_trait.variant
+    assert_eq!(container_trait.entity_type, EntityType::Trait);
+    assert!(container_trait.metadata.is_generic);
+    assert_eq!(container_trait.metadata.generic_params.len(), 1);
+
+    // Check associated types
+    let assoc_types = container_trait.metadata.attributes.get("associated_types");
+    assert!(assoc_types.is_some());
+    let assoc_types_str = assoc_types.unwrap();
+    assert!(assoc_types_str.contains("Item"));
+    assert!(assoc_types_str.contains("Error"));
+
+    // Check methods
+    let methods = container_trait.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("add"));
+    assert!(methods_str.contains("remove"));
+    assert!(methods_str.contains("size"));
+    assert!(methods_str.contains("clear"));
 }
 
 #[test]
@@ -403,7 +411,7 @@ fn test_visibility_extraction() {
     // Most functions should be public
     let public_count = function_entities
         .iter()
-        .filter(|e| e.visibility == codesearch_core::entities::Visibility::Public)
+        .filter(|e| e.visibility == Visibility::Public)
         .count();
 
     assert!(public_count > 0);
@@ -429,5 +437,5 @@ fn test_extremely_large_extraction_performance() {
 
     // Extraction should be fast, even for large files
     // Adjust threshold as needed based on performance requirements
-    assert!(duration.as_millis() < 1000);
+    assert!(duration.as_millis() < 100);
 }

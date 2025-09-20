@@ -3,7 +3,6 @@
 use super::*;
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::type_handlers::handle_struct;
-use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
 fn test_empty_source() {

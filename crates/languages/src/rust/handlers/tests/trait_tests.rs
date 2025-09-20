@@ -1,8 +1,7 @@
 //! Tests for trait extraction handler
 
 use super::*;
-use codesearch_core::entities::{EntityType, Visibility};
-
+use codesearch_core::entities::EntityType;
 use crate::rust::handlers::type_handlers::handle_trait;
 
 #[test]
@@ -35,8 +34,21 @@ trait Container<T> {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
-                               // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Container");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check generics
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 1);
+    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("get"));
+    assert!(methods_str.contains("set"));
 }
 
 #[test]
@@ -63,8 +75,22 @@ trait Iterator {
     }
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
-                               // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Iterator");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check associated types
+    let assoc_types = entity.metadata.attributes.get("associated_types");
+    assert!(assoc_types.is_some());
+    let assoc_types_str = assoc_types.unwrap();
+    assert!(assoc_types_str.contains("Item"));
+    assert!(assoc_types_str.contains("IntoIter"));
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("next"));
 }
 
 #[test]
@@ -87,8 +113,17 @@ trait DefaultMethods {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
-                               // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "DefaultMethods");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check methods (both required and with default impl)
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("required"));
+    assert!(methods_str.contains("with_default"));
+    assert!(methods_str.contains("another_default"));
 }
 
 #[test]
@@ -131,8 +166,18 @@ unsafe trait UnsafeMarker {
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
-                               // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "UnsafeMarker");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check unsafe attribute
+    assert_eq!(entity.metadata.attributes.get("unsafe").map(|s| s.as_str()), Some("true"));
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("unsafe_method"));
 }
 
 #[test]
@@ -151,8 +196,25 @@ where
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
-    let entity = &entities[0]; // TODO: Update test to use new CodeEntity structure
-                               // Original test body commented out during migration
+    let entity = &entities[0];
+    assert_eq!(entity.name, "ComplexBounds");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check generics
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 1);
+    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
+
+    // Check where clause constraints are captured
+    let where_clause = entity.metadata.attributes.get("where_clause");
+    if where_clause.is_some() {
+        let where_str = where_clause.unwrap();
+        assert!(where_str.contains("Clone") || where_str.contains("Debug"));
+    }
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
 }
 
 #[test]

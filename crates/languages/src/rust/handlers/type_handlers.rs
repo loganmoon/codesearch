@@ -161,11 +161,19 @@ pub fn handle_trait(
         let generics = extract_generics(ctx);
         let bounds = extract_trait_bounds(ctx);
         let (associated_types, methods) = extract_trait_members(ctx);
+        let is_unsafe = check_trait_is_unsafe(ctx);
 
         let mut metadata = EntityMetadata::default();
         metadata.generic_params = generics;
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.is_abstract = true; // Traits are abstract by nature
+
+        // Add unsafe attribute if applicable
+        if is_unsafe {
+            metadata
+                .attributes
+                .insert("unsafe".to_string(), "true".to_string());
+        }
 
         // Store trait-specific info in attributes
         if !bounds.is_empty() {
@@ -547,4 +555,25 @@ fn extract_method_name(node: Node, source: &str) -> Option<String> {
                     .is_some()
         })
         .and_then(|child| node_to_text(child, source).ok())
+}
+
+/// Check if a trait has the unsafe modifier
+#[allow(dead_code)]
+fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
+    // Get the trait node (this is the trait_item node)
+    if let Ok(trait_node) = require_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT) {
+        // The trait_item node contains the entire trait definition
+        // Check its children for the 'unsafe' keyword
+        let mut cursor = trait_node.walk();
+        for child in trait_node.children(&mut cursor) {
+            if child.kind() == "unsafe" {
+                return true;
+            }
+            // Stop when we reach 'trait' keyword - unsafe should come before it
+            if child.kind() == "trait" {
+                break;
+            }
+        }
+    }
+    false
 }

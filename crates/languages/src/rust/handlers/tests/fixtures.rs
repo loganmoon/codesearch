@@ -188,7 +188,6 @@ impl std::error::Error for ProcessError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-use codesearch_core::entities::{EntityType, Visibility};
 
     #[test]
     fn test_config_default() {
@@ -402,7 +401,7 @@ fn test_visibility_extraction() {
     // Most functions should be public
     let public_count = function_entities
         .iter()
-        .filter(|e| e.visibility == codesearch_core::entities::Visibility::Public)
+        .filter(|e| e.visibility == Visibility::Public)
         .count();
 
     assert!(public_count > 0);

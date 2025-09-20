@@ -1,8 +1,8 @@
 //! Tests for trait extraction handler
 
 use super::*;
-use codesearch_core::entities::EntityType;
 use crate::rust::handlers::type_handlers::handle_trait;
+use codesearch_core::entities::EntityType;
 
 #[test]
 fn test_simple_trait() {
@@ -171,7 +171,10 @@ unsafe trait UnsafeMarker {
     assert_eq!(entity.entity_type, EntityType::Trait);
 
     // Check unsafe attribute
-    assert_eq!(entity.metadata.attributes.get("unsafe").map(|s| s.as_str()), Some("true"));
+    assert_eq!(
+        entity.metadata.attributes.get("unsafe").map(|s| s.as_str()),
+        Some("true")
+    );
 
     // Check methods
     let methods = entity.metadata.attributes.get("methods");

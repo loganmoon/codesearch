@@ -1,8 +1,8 @@
 //! Tests for enum extraction handler
 
 use super::*;
-use codesearch_core::entities::EntityType;
 use crate::rust::handlers::type_handlers::handle_enum;
+use codesearch_core::entities::EntityType;
 
 #[test]
 fn test_simple_enum() {
@@ -165,7 +165,10 @@ enum Comparison {
     assert!(entity.metadata.decorators.contains(&"Debug".to_string()));
     assert!(entity.metadata.decorators.contains(&"Clone".to_string()));
     assert!(entity.metadata.decorators.contains(&"Copy".to_string()));
-    assert!(entity.metadata.decorators.contains(&"PartialEq".to_string()));
+    assert!(entity
+        .metadata
+        .decorators
+        .contains(&"PartialEq".to_string()));
     assert!(entity.metadata.decorators.contains(&"Eq".to_string()));
 
     // Check variants

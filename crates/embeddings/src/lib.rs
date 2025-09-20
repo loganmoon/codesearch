@@ -55,7 +55,7 @@ impl EmbeddingManager {
     }
 
     /// Generate embeddings for texts
-    pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f64>>> {
+    pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         self.provider.embed(texts).await
     }
 }

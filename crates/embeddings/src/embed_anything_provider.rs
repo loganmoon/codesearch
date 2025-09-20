@@ -132,7 +132,7 @@ impl EmbedAnythingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for EmbedAnythingProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f64>>> {
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -188,22 +188,18 @@ impl EmbeddingProvider for EmbedAnythingProvider {
                         ))
                     })?;
 
-                    // Efficient f32 to f64 conversion
-                    let mut f64_vec = Vec::with_capacity(dense_vec.len());
-                    f64_vec.extend(dense_vec.into_iter().map(|v| v as f64));
-
                     // Validate dimensions
-                    if f64_vec.len() != expected_dim {
+                    if dense_vec.len() != expected_dim {
                         return Err(EmbeddingError::InferenceError(format!(
                             "Dimension mismatch: expected {expected_dim}, got {}",
-                            f64_vec.len()
+                            dense_vec.len()
                         )));
                     }
 
-                    chunk_results.push(f64_vec);
+                    chunk_results.push(dense_vec);
                 }
 
-                Ok::<Vec<Vec<f64>>, EmbeddingError>(chunk_results)
+                Ok::<Vec<Vec<f32>>, EmbeddingError>(chunk_results)
             })
             .await
             .map_err(|e| {

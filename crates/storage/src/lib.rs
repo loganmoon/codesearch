@@ -87,14 +87,15 @@ pub async fn create_storage_client(
     collection_name: &str,
 ) -> Result<Arc<dyn StorageClient>> {
     let url = format!("http://{}:{}", config.qdrant_host, config.qdrant_port);
-    let qdrant_client = qdrant_client::Qdrant::from_url(&url)
-        .build()
-        .map_err(|e| codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e)))?;
+    let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e))
+    })?;
 
     let client = qdrant::client::QdrantStorageClient::new(
         Arc::new(qdrant_client),
         collection_name.to_string(),
-    ).await?;
+    )
+    .await?;
 
     Ok(Arc::new(client))
 }
@@ -104,13 +105,12 @@ pub async fn create_collection_manager(
     config: &StorageConfig,
 ) -> Result<Arc<dyn CollectionManager>> {
     let url = format!("http://{}:{}", config.qdrant_host, config.qdrant_port);
-    let qdrant_client = qdrant_client::Qdrant::from_url(&url)
-        .build()
-        .map_err(|e| codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e)))?;
+    let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e))
+    })?;
 
-    let manager = qdrant::collection_manager::QdrantCollectionManager::new(
-        Arc::new(qdrant_client),
-    ).await?;
+    let manager =
+        qdrant::collection_manager::QdrantCollectionManager::new(Arc::new(qdrant_client)).await?;
 
     Ok(Arc::new(manager))
 }

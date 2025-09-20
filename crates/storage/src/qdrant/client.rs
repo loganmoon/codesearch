@@ -7,9 +7,7 @@ use codesearch_core::{
     CodeEntity,
 };
 use qdrant_client::{
-    qdrant::{
-        Filter, PointId, PointStruct, SearchPoints, Value as QdrantValue,
-    },
+    qdrant::{Filter, PointId, PointStruct, SearchPoints, Value as QdrantValue},
     Payload, Qdrant,
 };
 use serde_json::json;
@@ -149,14 +147,12 @@ impl StorageClient for QdrantStorageClient {
 
         // Use upsert to handle duplicates gracefully
         self.qdrant_client
-            .upsert_points(
-                qdrant_client::qdrant::UpsertPoints::from(
-                    qdrant_client::qdrant::UpsertPointsBuilder::new(
-                        self.collection_name.clone(),
-                        points,
-                    ),
+            .upsert_points(qdrant_client::qdrant::UpsertPoints::from(
+                qdrant_client::qdrant::UpsertPointsBuilder::new(
+                    self.collection_name.clone(),
+                    points,
                 ),
-            )
+            ))
             .await
             .map_err(|e| Error::storage(e.to_string()))?;
 

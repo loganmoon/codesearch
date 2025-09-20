@@ -236,7 +236,14 @@ fn test_large_file_extraction() {
         .find(|e| e.name == "raw_memory_copy")
         .expect("Should find raw_memory_copy function");
 
-    assert_eq!(unsafe_func.metadata.attributes.get("unsafe").map(|s| s.as_str()), Some("true"));
+    assert_eq!(
+        unsafe_func
+            .metadata
+            .attributes
+            .get("unsafe")
+            .map(|s| s.as_str()),
+        Some("true")
+    );
     assert_eq!(unsafe_func.entity_type, EntityType::Function);
 
     // Check const function
@@ -288,7 +295,14 @@ fn test_large_file_struct_extraction() {
 
     assert_eq!(color_struct.entity_type, EntityType::Struct);
     // Tuple structs are marked with struct_type attribute
-    assert_eq!(color_struct.metadata.attributes.get("struct_type").map(|s| s.as_str()), Some("tuple"));
+    assert_eq!(
+        color_struct
+            .metadata
+            .attributes
+            .get("struct_type")
+            .map(|s| s.as_str()),
+        Some("tuple")
+    );
 
     // Check Marker is a unit struct
     let marker_struct = struct_entities

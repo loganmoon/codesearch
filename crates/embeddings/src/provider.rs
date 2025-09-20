@@ -15,8 +15,8 @@ pub trait EmbeddingProvider: Send + Sync {
     /// * `texts` - List of text strings to embed
     ///
     /// # Returns
-    /// A vector of embedding vectors (f64 for HelixDB compatibility), one for each input text
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f64>>>;
+    /// A vector of embedding vectors (f32 for Qdrant compatibility), one for each input text
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>>;
 
     /// Get the embedding dimension
     ///

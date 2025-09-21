@@ -194,17 +194,13 @@ impl IndexStats {
 
 /// Create a new repository indexer
 pub fn create_indexer(
-    storage_host: String,
-    storage_port: u16,
     repository_path: PathBuf,
-    collection_name: String,
+    storage_client: std::sync::Arc<dyn codesearch_storage::StorageClient>,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(
-        storage_host,
-        storage_port,
         repository_path,
-        collection_name,
+        storage_client,
         embedding_manager,
     ))
 }

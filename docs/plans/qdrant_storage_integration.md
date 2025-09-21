@@ -400,14 +400,14 @@ codesearch-embeddings = { path = "../embeddings" }
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Indexer tests pass: `cargo test -p codesearch-indexer`
-- [ ] Integration test with real storage: `cargo test --test indexer_integration`
+- [x] Indexer tests pass: `cargo test -p codesearch-indexer`
+- [x] Integration test with real storage: `cargo test --test indexer_integration`
 
 #### Manual Verification:
-- [ ] Files are indexed with embeddings
-- [ ] Entities appear in Qdrant with vectors
-- [ ] Batch processing handles large repositories
-- [ ] Error recovery works for failed batches
+- [x] Files are indexed with embeddings
+- [x] Entities appear in Qdrant with vectors
+- [x] Batch processing handles large repositories
+- [x] Error recovery works for failed batches
 
 ---
 

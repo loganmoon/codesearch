@@ -3,6 +3,7 @@
 //! These tests verify the complete three-stage indexing pipeline.
 
 use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
+use codesearch_storage::{MockStorageClient, StorageClient};
 use indexer::create_indexer;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -198,12 +199,11 @@ async fn test_full_indexing_pipeline() {
     let repo_path = test_repo.path().to_path_buf();
 
     // Create indexer
+    let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
     let embedding_manager = create_test_embedding_manager();
     let mut indexer = create_indexer(
-        "localhost".to_string(),
-        8080,
         repo_path.clone(),
-        "test_collection".to_string(),
+        storage_client,
         embedding_manager,
     );
 
@@ -227,12 +227,11 @@ async fn test_full_indexing_pipeline() {
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
+    let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
     let embedding_manager = create_test_embedding_manager();
     let mut indexer = create_indexer(
-        "localhost".to_string(),
-        8080,
         temp_dir.path().to_path_buf(),
-        "test_collection".to_string(),
+        storage_client,
         embedding_manager,
     );
 

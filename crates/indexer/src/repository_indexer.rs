@@ -9,10 +9,11 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_languages::create_extractor;
 use codesearch_embeddings::EmbeddingManager;
-use codesearch_storage::{create_storage_client, StorageClient};
+use codesearch_storage::StorageClient;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, error, info};
@@ -48,10 +49,8 @@ impl IndexProgress {
 
 /// Main repository indexer
 pub struct RepositoryIndexer {
-    storage_host: String,
-    storage_port: u16,
     repository_path: PathBuf,
-    collection_name: String,
+    storage_client: std::sync::Arc<dyn StorageClient>,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
 }
 
@@ -108,17 +107,13 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
 impl RepositoryIndexer {
     /// Create a new repository indexer
     pub fn new(
-        storage_host: String,
-        storage_port: u16,
         repository_path: PathBuf,
-        collection_name: String,
+        storage_client: std::sync::Arc<dyn StorageClient>,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
     ) -> Self {
         Self {
-            storage_host,
-            storage_port,
             repository_path,
-            collection_name,
+            storage_client,
             embedding_manager,
         }
     }
@@ -141,13 +136,8 @@ impl RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Create storage client
-        let storage_client = create_storage_client_from_config(
-            self.storage_host.clone(),
-            self.storage_port,
-            self.collection_name.clone(),
-        )
-        .await?;
+        // Clone the Arc to avoid borrowing issues
+        let storage_client = Arc::clone(&self.storage_client);
 
         // Process statistics
         let mut stats = IndexStats::default();
@@ -388,13 +378,8 @@ impl crate::Indexer for RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Create storage client
-        let storage_client = create_storage_client_from_config(
-            self.storage_host.clone(),
-            self.storage_port,
-            self.collection_name.clone(),
-        )
-        .await?;
+        // Clone the Arc to avoid borrowing issues
+        let storage_client = Arc::clone(&self.storage_client);
 
         // Process statistics
         let mut stats = IndexStats::new();
@@ -465,29 +450,6 @@ fn create_progress_bar(total: usize) -> ProgressBar {
     pb
 }
 
-/// Create a storage client instance
-async fn create_storage_client_from_config(
-    host: String,
-    port: u16,
-    collection_name: String,
-) -> Result<std::sync::Arc<dyn StorageClient>> {
-    // Create storage config for the factory
-    let config = codesearch_core::config::StorageConfig {
-        qdrant_host: host,
-        qdrant_port: port,
-        qdrant_rest_port: 6333, // Default REST port
-        collection_name: collection_name.clone(),
-        auto_start_deps: false, // Already handled by CLI
-        docker_compose_file: None,
-    };
-
-    // Use the storage crate's factory to create a real client
-    let client = create_storage_client(&config, &collection_name)
-        .await
-        .map_err(|e| Error::Storage(format!("Failed to create storage client: {e}")))?;
-
-    Ok(client)
-}
 
 #[cfg(test)]
 mod tests {
@@ -524,12 +486,11 @@ mod tests {
     #[tokio::test]
     async fn test_repository_indexer_creation() {
         let temp_dir = TempDir::new().unwrap();
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let indexer = RepositoryIndexer::new(
-            "localhost".to_string(),
-            8080,
             temp_dir.path().to_path_buf(),
-            "test_collection".to_string(),
+            storage_client,
             embedding_manager,
         );
         assert_eq!(indexer.repository_path(), temp_dir.path());
@@ -538,12 +499,11 @@ mod tests {
     #[tokio::test]
     async fn test_empty_repository_indexing() {
         let temp_dir = TempDir::new().unwrap();
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let mut indexer = RepositoryIndexer::new(
-            "localhost".to_string(),
-            8080,
             temp_dir.path().to_path_buf(),
-            "test_collection".to_string(),
+            storage_client,
             embedding_manager,
         );
 
@@ -565,18 +525,13 @@ mod tests {
             .await
             .unwrap();
 
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let mut indexer = RepositoryIndexer::new(
-            "localhost".to_string(),
-            8080,
             temp_dir.path().to_path_buf(),
-            "test_collection".to_string(),
+            storage_client.clone(),
             embedding_manager,
         );
-
-        // Create a mock storage client for testing
-        // In a real test, we'd use a mock implementation
-        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
 
         // This will fail without a running storage server, but tests the extraction
         let result = indexer.process_file(&test_file, &storage_client).await;

@@ -2,9 +2,34 @@
 //!
 //! These tests verify the complete three-stage indexing pipeline.
 
-use indexer::{create_indexer, Indexer};
+use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
+use indexer::create_indexer;
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
+
+// Mock embedding provider for testing
+struct MockEmbeddingProvider;
+
+#[async_trait::async_trait]
+impl EmbeddingProvider for MockEmbeddingProvider {
+    async fn embed(&self, texts: Vec<String>) -> indexer::Result<Vec<Vec<f32>>> {
+        // Return dummy embeddings with 384 dimensions
+        Ok(texts.into_iter().map(|_| vec![0.0f32; 384]).collect())
+    }
+
+    fn embedding_dimension(&self) -> usize {
+        384
+    }
+
+    fn max_sequence_length(&self) -> usize {
+        512
+    }
+}
+
+fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
+    Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
+}
 
 /// Helper to create a test repository with sample Rust files
 async fn create_test_repository() -> TempDir {
@@ -173,7 +198,14 @@ async fn test_full_indexing_pipeline() {
     let repo_path = test_repo.path().to_path_buf();
 
     // Create indexer
-    let mut indexer = create_indexer("localhost".to_string(), 8080, repo_path.clone());
+    let embedding_manager = create_test_embedding_manager();
+    let mut indexer = create_indexer(
+        "localhost".to_string(),
+        8080,
+        repo_path.clone(),
+        "test_collection".to_string(),
+        embedding_manager,
+    );
 
     // Verify repository path is set correctly
     // Repository path is now internal to the implementation
@@ -195,7 +227,14 @@ async fn test_full_indexing_pipeline() {
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
-    let mut indexer = create_indexer("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
+    let embedding_manager = create_test_embedding_manager();
+    let mut indexer = create_indexer(
+        "localhost".to_string(),
+        8080,
+        temp_dir.path().to_path_buf(),
+        "test_collection".to_string(),
+        embedding_manager,
+    );
 
     let result = indexer.index_repository().await;
     assert!(result.is_ok());

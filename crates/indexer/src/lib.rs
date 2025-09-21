@@ -20,6 +20,9 @@ mod types;
 // Re-export error types from core
 pub use codesearch_core::error::{Error, Result};
 
+// Re-export RepositoryIndexer for direct use
+pub use repository_indexer::RepositoryIndexer;
+
 /// Main trait for repository indexing
 #[async_trait]
 pub trait Indexer: Send + Sync {
@@ -191,13 +194,13 @@ impl IndexStats {
 
 /// Create a new repository indexer
 pub fn create_indexer(
-    storage_host: String,
-    storage_port: u16,
     repository_path: PathBuf,
+    storage_client: std::sync::Arc<dyn codesearch_storage::StorageClient>,
+    embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(
-        storage_host,
-        storage_port,
         repository_path,
+        storage_client,
+        embedding_manager,
     ))
 }

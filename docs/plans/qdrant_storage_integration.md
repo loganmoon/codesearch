@@ -93,19 +93,19 @@ pub trait CollectionManager: Send + Sync {
 }
 ```
 
-#### 3. StorageManager Coordination Layer
+#### 3. CollectionManager Coordination Layer
 **File**: `crates/storage/src/manager.rs` (new file)
 **Changes**: Create manager following EmbeddingManager pattern
 
 ```rust
 // Coordination layer that owns both client and collection manager
-pub struct StorageManager {
+pub struct CollectionManager {
     client: Arc<dyn StorageClient>,
     collection_manager: Arc<dyn CollectionManager>,
     collection_name: String,
 }
 
-impl StorageManager {
+impl CollectionManager {
     /// Initialize from configuration
     pub async fn from_config(config: &StorageConfig) -> Result<Self> {
         // Create Qdrant connection
@@ -311,7 +311,7 @@ pub collection_name: String, // No default - must be set explicitly
 ## Phase 4: CLI Init Command Completion
 
 ### Overview
-Complete the init command to create collections using the StorageManager, properly separating collection management from CRUD operations.
+Complete the init command to create collections using the CollectionManager, properly separating collection management from CRUD operations.
 
 ### Changes Required:
 
@@ -323,10 +323,10 @@ Complete the init command to create collections using the StorageManager, proper
 // Lines 174-179: Replace TODO with:
 // 1. Start dependencies if needed
 // 2. Create embedding manager from config
-// 3. Create StorageManager from config (not just client)
+// 3. Create CollectionManager from config (not just client)
 // 4. Get dimensions from embedding provider
-// 5. Use StorageManager to initialize collection with dimensions
-// 6. Perform health check via StorageManager
+// 5. Use CollectionManager to initialize collection with dimensions
+// 6. Perform health check via CollectionManager
 // 7. Save updated config with collection name
 ```
 
@@ -336,7 +336,7 @@ Complete the init command to create collections using the StorageManager, proper
 
 ```rust
 // Helper functions for:
-// - Creating StorageManager with retries
+// - Creating CollectionManager with retries
 // - Collection initialization via manager.initialize_collection()
 // - Health checking via manager.health_check()
 // - Proper separation of management vs CRUD operations
@@ -345,14 +345,14 @@ Complete the init command to create collections using the StorageManager, proper
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Init command compiles: `cargo build --bin codesearch`
-- [ ] Integration test passes: `cargo test --test init_integration`
+- [x] Init command compiles: `cargo build --bin codesearch`
+- [x] Integration test passes: `cargo test --test init_integration`
 
 #### Manual Verification:
-- [ ] Running `codesearch init` creates collection in Qdrant
-- [ ] Collection has correct vector dimensions
-- [ ] Config file updated with collection name
-- [ ] Subsequent init calls handle existing collections gracefully
+- [x] Running `codesearch init` creates collection in Qdrant
+- [x] Collection has correct vector dimensions
+- [x] Config file updated with collection name
+- [x] Subsequent init calls handle existing collections gracefully
 
 ---
 
@@ -371,7 +371,7 @@ Update the indexer to use only the StorageClient trait for CRUD operations, with
 // Lines 373-377: Replace with:
 fn create_storage_client(host: String, port: u16, collection_name: String) -> impl StorageClient {
     // Create connection to Qdrant
-    // Create QdrantStorageClient (NOT StorageManager)
+    // Create QdrantStorageClient (NOT CollectionManager)
     // Return client that assumes collection already exists
     // No collection management here - that's handled by CLI init
 }
@@ -400,21 +400,21 @@ codesearch-embeddings = { path = "../embeddings" }
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Indexer tests pass: `cargo test -p codesearch-indexer`
-- [ ] Integration test with real storage: `cargo test --test indexer_integration`
+- [x] Indexer tests pass: `cargo test -p codesearch-indexer`
+- [x] Integration test with real storage: `cargo test --test indexer_integration`
 
 #### Manual Verification:
-- [ ] Files are indexed with embeddings
-- [ ] Entities appear in Qdrant with vectors
-- [ ] Batch processing handles large repositories
-- [ ] Error recovery works for failed batches
+- [x] Files are indexed with embeddings
+- [x] Entities appear in Qdrant with vectors
+- [x] Batch processing handles large repositories
+- [x] Error recovery works for failed batches
 
 ---
 
 ## Phase 6: Complete Index and Search Commands
 
 ### Overview
-Implement the index and search CLI commands using the appropriate components - StorageManager for initialization checks, StorageClient for operations.
+Implement the index and search CLI commands using the appropriate components - CollectionManager for initialization checks, StorageClient for operations.
 
 ### Changes Required:
 
@@ -425,7 +425,7 @@ Implement the index and search CLI commands using the appropriate components - S
 ```rust
 // Lines 245-248: Implement full indexing
 // 1. Ensure dependencies running
-// 2. Create StorageManager from config
+// 2. Create CollectionManager from config
 // 3. Verify collection exists via manager (fail if not initialized)
 // 4. Get storage client from manager for indexer
 // 5. Create embedding manager
@@ -440,7 +440,7 @@ Implement the index and search CLI commands using the appropriate components - S
 
 ```rust
 // Lines 251-255: Implement search
-// 1. Create StorageManager from config
+// 1. Create CollectionManager from config
 // 2. Get storage client from manager
 // 3. Create embedding manager
 // 4. Generate query embedding
@@ -468,7 +468,6 @@ Implement the index and search CLI commands using the appropriate components - S
 ### Unit Tests:
 - StorageClient CRUD operations with mock collection
 - CollectionManager lifecycle operations independently
-- StorageManager coordination between components
 - Point conversion from CodeEntity to Qdrant format
 - Collection name generation from paths
 - Search filter construction
@@ -504,7 +503,7 @@ Implement the index and search CLI commands using the appropriate components - S
 ## Migration Notes
 
 For existing users with mock storage:
-- First run will create new Qdrant collection via StorageManager
+- First run will create new Qdrant collection via CollectionManager
 - Collection management now separate from CRUD operations
 - Indexer no longer responsible for collection initialization
 - Config file will be updated with collection name

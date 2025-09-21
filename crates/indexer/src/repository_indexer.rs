@@ -8,10 +8,12 @@ use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_languages::create_extractor;
-use codesearch_storage::{MockStorageClient, StorageClient};
+use codesearch_embeddings::EmbeddingManager;
+use codesearch_storage::StorageClient;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, error, info};
@@ -47,18 +49,72 @@ impl IndexProgress {
 
 /// Main repository indexer
 pub struct RepositoryIndexer {
-    storage_host: String,
-    storage_port: u16,
     repository_path: PathBuf,
+    storage_client: std::sync::Arc<dyn StorageClient>,
+    embedding_manager: std::sync::Arc<EmbeddingManager>,
+}
+
+/// Extract embeddable content from a CodeEntity
+fn extract_embedding_content(entity: &CodeEntity) -> String {
+    // Combine relevant fields for embedding generation
+    let mut content_parts = Vec::new();
+
+    // Add entity name and qualified name
+    content_parts.push(format!("{} {}", entity.entity_type, entity.name));
+    content_parts.push(entity.qualified_name.clone());
+
+    // Add documentation summary if available
+    if let Some(doc) = &entity.documentation_summary {
+        content_parts.push(doc.clone());
+    }
+
+    // Add signature information for functions/methods
+    if let Some(sig) = &entity.signature {
+        // Format parameters as "name: type" or just "name" if no type
+        let params: Vec<String> = sig.parameters
+            .iter()
+            .map(|(name, type_opt)| {
+                if let Some(ty) = type_opt {
+                    format!("{}: {}", name, ty)
+                } else {
+                    name.clone()
+                }
+            })
+            .collect();
+        let params_str = params.join(", ");
+
+        if let Some(ret_type) = &sig.return_type {
+            content_parts.push(format!("({}) -> {}", params_str, ret_type));
+        } else {
+            content_parts.push(format!("({})", params_str));
+        }
+    }
+
+    // Add actual content if available (truncate for efficiency)
+    if let Some(content) = &entity.content {
+        // Take first 500 chars to avoid overly long embeddings
+        let truncated = if content.len() > 500 {
+            format!("{}...", &content[..500])
+        } else {
+            content.clone()
+        };
+        content_parts.push(truncated);
+    }
+
+    content_parts.join(" ")
 }
 
 impl RepositoryIndexer {
     /// Create a new repository indexer
-    pub fn new(storage_host: String, storage_port: u16, repository_path: PathBuf) -> Self {
+    pub fn new(
+        repository_path: PathBuf,
+        storage_client: std::sync::Arc<dyn StorageClient>,
+        embedding_manager: std::sync::Arc<EmbeddingManager>,
+    ) -> Self {
         Self {
-            storage_host,
-            storage_port,
             repository_path,
+            storage_client,
+            embedding_manager,
         }
     }
 
@@ -80,8 +136,8 @@ impl RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Create storage client
-        let storage_client = create_storage_client(self.storage_host.clone(), self.storage_port);
+        // Clone the Arc to avoid borrowing issues
+        let storage_client = Arc::clone(&self.storage_client);
 
         // Process statistics
         let mut stats = IndexStats::default();
@@ -145,7 +201,7 @@ impl RepositoryIndexer {
     async fn process_batch(
         &mut self,
         file_paths: &[PathBuf],
-        storage_client: &impl StorageClient,
+        storage_client: &std::sync::Arc<dyn StorageClient>,
         _pb: &indicatif::ProgressBar,
     ) -> Result<IndexStats> {
         debug!("Processing batch of {} files", file_paths.len());
@@ -184,10 +240,20 @@ impl RepositoryIndexer {
         if !batch_entities.is_empty() {
             debug!("Bulk loading {} entities", batch_entities.len());
 
-            // TODO: Add real embeddings in Phase 5
-            let dummy_embeddings = vec![vec![0.0f32; 384]; batch_entities.len()];
+            // Generate embeddings for all entities
+            let embedding_texts: Vec<String> = batch_entities
+                .iter()
+                .map(extract_embedding_content)
+                .collect();
+
+            let embeddings = self
+                .embedding_manager
+                .embed(embedding_texts)
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
+
             storage_client
-                .bulk_load_entities(batch_entities, dummy_embeddings)
+                .bulk_load_entities(batch_entities, embeddings)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
 
@@ -238,7 +304,7 @@ impl RepositoryIndexer {
     async fn process_file(
         &mut self,
         file_path: &Path,
-        storage_client: &impl StorageClient,
+        storage_client: &std::sync::Arc<dyn StorageClient>,
     ) -> Result<IndexStats> {
         debug!("Processing file: {:?}", file_path);
 
@@ -274,10 +340,20 @@ impl RepositoryIndexer {
         // Stage 2: Store - Bulk load to storage
         debug!("Storing {} entities", entities.len());
 
-        // TODO: Add real embeddings in Phase 5
-        let dummy_embeddings = vec![vec![0.0f32; 384]; entities.len()];
+        // Generate embeddings for entities
+        let embedding_texts: Vec<String> = entities
+            .iter()
+            .map(extract_embedding_content)
+            .collect();
+
+        let embeddings = self
+            .embedding_manager
+            .embed(embedding_texts)
+            .await
+            .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
+
         storage_client
-            .bulk_load_entities(entities, dummy_embeddings)
+            .bulk_load_entities(entities, embeddings)
             .await
             .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
 
@@ -302,8 +378,8 @@ impl crate::Indexer for RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Create storage client
-        let storage_client = create_storage_client(self.storage_host.clone(), self.storage_port);
+        // Clone the Arc to avoid borrowing issues
+        let storage_client = Arc::clone(&self.storage_client);
 
         // Process statistics
         let mut stats = IndexStats::new();
@@ -374,31 +450,62 @@ fn create_progress_bar(total: usize) -> ProgressBar {
     pb
 }
 
-/// Create a storage client instance
-/// TODO: Replace with real Qdrant client when implemented
-fn create_storage_client(_host: String, _port: u16) -> impl StorageClient {
-    MockStorageClient::new()
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codesearch_embeddings::{EmbeddingProvider, EmbeddingManager};
+    use codesearch_storage::MockStorageClient;
+    use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::fs;
+
+    // Mock embedding provider for testing
+    struct MockEmbeddingProvider;
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for MockEmbeddingProvider {
+        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+            // Return dummy embeddings with 384 dimensions
+            Ok(texts.into_iter().map(|_| vec![0.0f32; 384]).collect())
+        }
+
+        fn embedding_dimension(&self) -> usize {
+            384
+        }
+
+        fn max_sequence_length(&self) -> usize {
+            512
+        }
+    }
+
+    fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
+        Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
+    }
 
     #[tokio::test]
     async fn test_repository_indexer_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let indexer =
-            RepositoryIndexer::new("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
+        let embedding_manager = create_test_embedding_manager();
+        let indexer = RepositoryIndexer::new(
+            temp_dir.path().to_path_buf(),
+            storage_client,
+            embedding_manager,
+        );
         assert_eq!(indexer.repository_path(), temp_dir.path());
     }
 
     #[tokio::test]
     async fn test_empty_repository_indexing() {
         let temp_dir = TempDir::new().unwrap();
-        let mut indexer =
-            RepositoryIndexer::new("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
+        let embedding_manager = create_test_embedding_manager();
+        let mut indexer = RepositoryIndexer::new(
+            temp_dir.path().to_path_buf(),
+            storage_client,
+            embedding_manager,
+        );
 
         // This will fail because no storage server is running, but we can test the flow
         let result = indexer.index_repository().await;
@@ -418,12 +525,13 @@ mod tests {
             .await
             .unwrap();
 
-        let mut indexer =
-            RepositoryIndexer::new("localhost".to_string(), 8080, temp_dir.path().to_path_buf());
-
-        // Create a mock storage client for testing
-        // In a real test, we'd use a mock implementation
-        let storage_client = MockStorageClient::new();
+        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
+        let embedding_manager = create_test_embedding_manager();
+        let mut indexer = RepositoryIndexer::new(
+            temp_dir.path().to_path_buf(),
+            storage_client.clone(),
+            embedding_manager,
+        );
 
         // This will fail without a running storage server, but tests the extraction
         let result = indexer.process_file(&test_file, &storage_client).await;

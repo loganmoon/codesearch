@@ -12,8 +12,12 @@ mod storage_init;
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
+use codesearch_embeddings::{EmbeddingConfig, EmbeddingManager};
+use codesearch_storage::{create_collection_manager, create_storage_client};
+use indexer::RepositoryIndexer;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::{info, warn};
 
 #[derive(Parser)]
@@ -351,9 +355,77 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
 }
 
 /// Index the repository
-async fn index_repository(_config: Config, _force: bool, _progress: bool) -> Result<()> {
-    // TODO: Implement indexing once storage API is ready
-    todo!("📚 Indexing not yet implemented")
+async fn index_repository(config: Config, _force: bool, _progress: bool) -> Result<()> {
+    info!("Starting repository indexing");
+
+    // Step 1: Ensure dependencies are running
+    if config.storage.auto_start_deps {
+        docker::ensure_dependencies_running(&config.storage)
+            .await
+            .context("Failed to ensure dependencies are running")?;
+    }
+
+    // Step 2: Verify collection exists (fail if not initialized)
+    let collection_manager = create_collection_manager(&config.storage)
+        .await
+        .context("Failed to create collection manager")?;
+
+    if !collection_manager
+        .collection_exists(&config.storage.collection_name)
+        .await
+        .context("Failed to check if collection exists")?
+    {
+        return Err(anyhow!(
+            "Collection '{}' does not exist. Please run 'codesearch init' first.",
+            config.storage.collection_name
+        ));
+    }
+
+    // Step 3: Create embedding manager
+    let embedding_config = EmbeddingConfig::default();
+    let embedding_manager = Arc::new(
+        EmbeddingManager::from_config(embedding_config)
+            .await
+            .context("Failed to create embedding manager")?
+    );
+
+    // Step 4: Create storage client for the indexer
+    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+        .await
+        .context("Failed to create storage client")?;
+
+    // Step 5: Get repository path
+    let repo_path = find_repository_root()?;
+
+    // Step 6: Create and run indexer
+    let mut indexer = RepositoryIndexer::new(
+        repo_path.clone(),
+        storage_client,
+        embedding_manager,
+    );
+
+    // Step 7: Run indexing (it has built-in progress tracking)
+    let result = indexer.index_repository().await
+        .context("Failed to index repository")?;
+
+    // Step 8: Report statistics
+    info!("✅ Indexing completed successfully!");
+    info!("  Files processed: {}", result.stats().total_files());
+    info!("  Entities extracted: {}", result.stats().entities_extracted());
+    info!("  Failed files: {}", result.stats().failed_files());
+    info!("  Duration: {:.2}s", result.stats().processing_time_ms() as f64 / 1000.0);
+
+    if result.stats().failed_files() > 0 && !result.errors().is_empty() {
+        warn!("Errors encountered during indexing:");
+        for err in result.errors().iter().take(5) {
+            warn!("  - {}", err);
+        }
+        if result.errors().len() > 5 {
+            warn!("  ... and {} more errors", result.errors().len() - 5);
+        }
+    }
+
+    Ok(())
 }
 
 /// Search the indexed code

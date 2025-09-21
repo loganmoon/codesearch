@@ -7,6 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod docker;
+mod storage_init;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
@@ -171,9 +172,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
             docker_compose_file: None,
         };
 
-        let config = Config::builder()
-            .storage(storage_config)
-            .build();
+        let config = Config::builder().storage(storage_config).build();
 
         config
             .save(&config_file)
@@ -206,11 +205,55 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     config.validate()?;
 
-    // Create vector database client
+    // Ensure dependencies are running if auto-start is enabled
+    if config.storage.auto_start_deps {
+        docker::ensure_dependencies_running(&config.storage).await?;
+    }
 
-    // Initialize the repository (if necessary)
+    // Create embedding manager to get dimensions
+    let embeddings_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+        .provider(codesearch_embeddings::EmbeddingProviderType::Local)
+        .model(config.embeddings.model.clone())
+        .batch_size(config.embeddings.batch_size)
+        .device(match config.embeddings.device.as_str() {
+            "cuda" => codesearch_embeddings::DeviceType::Cuda,
+            _ => codesearch_embeddings::DeviceType::Cpu,
+        })
+        .build();
 
-    todo!("Not yet implemented")
+    let embedding_manager = codesearch_embeddings::EmbeddingManager::from_config(embeddings_config)
+        .await
+        .context("Failed to create embedding manager")?;
+
+    // Get embedding dimensions from the provider
+    let dimensions = embedding_manager.provider().embedding_dimension();
+    info!("Embedding model dimensions: {}", dimensions);
+
+    // Create collection manager with retry logic
+    let collection_manager = storage_init::create_collection_manager_with_retry(&config.storage)
+        .await
+        .context("Failed to create collection manager")?;
+
+    // Initialize collection with proper error handling
+    storage_init::initialize_collection(
+        collection_manager.as_ref(),
+        &config.storage.collection_name,
+        dimensions,
+    )
+    .await
+    .context("Failed to initialize collection")?;
+
+    // Perform health check with diagnostics
+    storage_init::verify_storage_health(collection_manager.as_ref())
+        .await
+        .context("Storage backend verification failed")?;
+
+    info!("✓ Repository initialized successfully");
+    info!("  Collection: {}", config.storage.collection_name);
+    info!("  Dimensions: {}", dimensions);
+    info!("  Config: {:?}", config_path);
+
+    Ok(())
 }
 
 /// Find the repository root directory
@@ -286,9 +329,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
             docker_compose_file: None,
         };
 
-        Config::builder()
-            .storage(storage_config)
-            .build()
+        Config::builder().storage(storage_config).build()
     };
 
     Ok(config)
@@ -362,9 +403,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                             auto_start_deps: true,
                             docker_compose_file: None,
                         };
-                        Config::builder()
-                            .storage(storage_config)
-                            .build()
+                        Config::builder().storage(storage_config).build()
                     }
                 }
             } else {
@@ -377,9 +416,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                     auto_start_deps: true,
                     docker_compose_file: None,
                 };
-                Config::builder()
-                    .storage(storage_config)
-                    .build()
+                Config::builder().storage(storage_config).build()
             };
 
             let status = docker::get_dependencies_status(&config.storage).await?;

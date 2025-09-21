@@ -10,7 +10,7 @@ mod docker;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use codesearch_core::config::Config;
+use codesearch_core::config::{Config, StorageConfig};
 use std::env;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -152,10 +152,29 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     info!("Initializing codesearch in {:?}", current_dir);
 
+    // Find the repository root
+    let repo_root = find_repository_root()?;
+
     // Create default configuration if it doesn't exist
     let config_file = current_dir.join("codesearch.toml");
     if !config_file.exists() {
-        let config = Config::default();
+        // Generate collection name from repository path
+        let collection_name = StorageConfig::generate_collection_name(&repo_root);
+        info!("Generated collection name: {}", collection_name);
+
+        let storage_config = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name,
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
+        let config = Config::builder()
+            .storage(storage_config)
+            .build();
+
         config
             .save(&config_file)
             .with_context(|| format!("Failed to save config to {config_file:?}"))?;
@@ -163,10 +182,26 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
     }
 
     // Load or use provided configuration
-    let config = if let Some(path) = config_path {
-        Config::from_file(path)?
+    let config_path = config_path.unwrap_or(&config_file);
+    let config = Config::from_file(config_path)?;
+
+    // Ensure collection name is set
+    let config = if config.storage.collection_name.is_empty() {
+        let collection_name = StorageConfig::generate_collection_name(&repo_root);
+        info!("Updated collection name: {}", collection_name);
+        let updated_config = Config::builder()
+            .storage(StorageConfig {
+                collection_name,
+                ..config.storage
+            })
+            .embeddings(config.embeddings)
+            .watcher(config.watcher)
+            .languages(config.languages)
+            .build();
+        updated_config.save(config_path)?;
+        updated_config
     } else {
-        Config::from_file(&config_file)?
+        config
     };
 
     config.validate()?;
@@ -217,13 +252,46 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
         repo_root.join("codesearch.toml")
     };
 
-    if config_file.exists() {
-        Config::from_file(&config_file)
-            .with_context(|| format!("Failed to load configuration from {config_file:?}"))
+    let config = if config_file.exists() {
+        let loaded = Config::from_file(&config_file)
+            .with_context(|| format!("Failed to load configuration from {config_file:?}"))?;
+
+        // Ensure collection name is set
+        if loaded.storage.collection_name.is_empty() {
+            let collection_name = StorageConfig::generate_collection_name(repo_root);
+            info!("Generated collection name: {}", collection_name);
+            Config::builder()
+                .storage(StorageConfig {
+                    collection_name,
+                    ..loaded.storage
+                })
+                .embeddings(loaded.embeddings)
+                .watcher(loaded.watcher)
+                .languages(loaded.languages)
+                .build()
+        } else {
+            loaded
+        }
     } else {
         warn!("No configuration file found, using defaults");
-        Ok(Config::default())
-    }
+        let collection_name = StorageConfig::generate_collection_name(repo_root);
+        info!("Generated collection name: {}", collection_name);
+
+        let storage_config = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name,
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
+        Config::builder()
+            .storage(storage_config)
+            .build()
+    };
+
+    Ok(config)
 }
 
 /// Start the MCP server
@@ -282,11 +350,36 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
         DepsCommands::Status => {
             // Try to load config to get Qdrant settings, use defaults if not found
             let config = if let Ok(repo_root) = find_repository_root() {
-                load_config(&repo_root, config_path)
-                    .await
-                    .unwrap_or_default()
+                match load_config(&repo_root, config_path).await {
+                    Ok(config) => config,
+                    Err(_) => {
+                        // Use default storage settings for status check
+                        let storage_config = StorageConfig {
+                            qdrant_host: "localhost".to_string(),
+                            qdrant_port: 6334,
+                            qdrant_rest_port: 6333,
+                            collection_name: "codesearch".to_string(),
+                            auto_start_deps: true,
+                            docker_compose_file: None,
+                        };
+                        Config::builder()
+                            .storage(storage_config)
+                            .build()
+                    }
+                }
             } else {
-                Config::default()
+                // Use default storage settings for status check
+                let storage_config = StorageConfig {
+                    qdrant_host: "localhost".to_string(),
+                    qdrant_port: 6334,
+                    qdrant_rest_port: 6333,
+                    collection_name: "codesearch".to_string(),
+                    auto_start_deps: true,
+                    docker_compose_file: None,
+                };
+                Config::builder()
+                    .storage(storage_config)
+                    .build()
             };
 
             let status = docker::get_dependencies_status(&config.storage).await?;

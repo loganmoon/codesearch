@@ -402,20 +402,17 @@ impl CodesearchConfigBuilder {
         self
     }
 
-
     /// Set the watcher configuration
     pub fn watcher(mut self, watcher: WatcherConfig) -> Self {
         self.watcher = watcher;
         self
     }
 
-
     /// Set the languages configuration
     pub fn languages(mut self, languages: LanguagesConfig) -> Self {
         self.languages = languages;
         self
     }
-
 
     /// Build the Config
     pub fn build(self) -> Config {
@@ -517,7 +514,9 @@ mod tests {
         assert!(!name.contains(':'));
 
         // Should only contain valid characters
-        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        assert!(name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
 
         // Should be deterministic
         let name2 = StorageConfig::generate_collection_name(path);
@@ -562,9 +561,7 @@ mod tests {
             docker_compose_file: None,
         };
 
-        let config = Config::builder()
-            .storage(storage)
-            .build();
+        let config = Config::builder().storage(storage).build();
 
         assert_eq!(config.storage.collection_name, "test_collection");
         assert_eq!(config.embeddings.provider, "local");
@@ -582,9 +579,7 @@ mod tests {
             docker_compose_file: None,
         };
 
-        let config = Config::builder()
-            .storage(storage)
-            .build();
+        let config = Config::builder().storage(storage).build();
 
         assert_eq!(config.storage.collection_name, "my_collection");
         assert_eq!(config.storage.qdrant_host, "192.168.1.1");
@@ -638,10 +633,7 @@ mod tests {
             branch_strategy: "index_current".to_string(),
         };
 
-        let config = Config::builder()
-            .storage(storage)
-            .watcher(watcher)
-            .build();
+        let config = Config::builder().storage(storage).watcher(watcher).build();
 
         assert_eq!(config.watcher.debounce_ms, 1000);
         assert_eq!(config.watcher.ignore_patterns, vec!["*.tmp", "build/"]);

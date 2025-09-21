@@ -162,8 +162,17 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         let collection_name = StorageConfig::generate_collection_name(&repo_root);
         info!("Generated collection name: {}", collection_name);
 
+        let storage_config = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name,
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
         let config = Config::builder()
-            .collection_name(collection_name)
+            .storage(storage_config)
             .build();
 
         config
@@ -267,8 +276,18 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
         warn!("No configuration file found, using defaults");
         let collection_name = StorageConfig::generate_collection_name(repo_root);
         info!("Generated collection name: {}", collection_name);
+
+        let storage_config = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name,
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
         Config::builder()
-            .collection_name(collection_name)
+            .storage(storage_config)
             .build()
     };
 
@@ -331,11 +350,36 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
         DepsCommands::Status => {
             // Try to load config to get Qdrant settings, use defaults if not found
             let config = if let Ok(repo_root) = find_repository_root() {
-                load_config(&repo_root, config_path)
-                    .await
-                    .unwrap_or_default()
+                match load_config(&repo_root, config_path).await {
+                    Ok(config) => config,
+                    Err(_) => {
+                        // Use default storage settings for status check
+                        let storage_config = StorageConfig {
+                            qdrant_host: "localhost".to_string(),
+                            qdrant_port: 6334,
+                            qdrant_rest_port: 6333,
+                            collection_name: "codesearch".to_string(),
+                            auto_start_deps: true,
+                            docker_compose_file: None,
+                        };
+                        Config::builder()
+                            .storage(storage_config)
+                            .build()
+                    }
+                }
             } else {
-                Config::default()
+                // Use default storage settings for status check
+                let storage_config = StorageConfig {
+                    qdrant_host: "localhost".to_string(),
+                    qdrant_port: 6334,
+                    qdrant_rest_port: 6333,
+                    collection_name: "codesearch".to_string(),
+                    auto_start_deps: true,
+                    docker_compose_file: None,
+                };
+                Config::builder()
+                    .storage(storage_config)
+                    .build()
             };
 
             let status = docker::get_dependencies_status(&config.storage).await?;

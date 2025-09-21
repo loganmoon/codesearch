@@ -8,7 +8,7 @@ use std::path::Path;
 pub struct IndexerConfig {}
 
 /// Main configuration structure for the codesearch system
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Indexer configuration
     pub indexer: IndexerConfig,
@@ -213,19 +213,6 @@ impl Default for WatcherConfig {
     }
 }
 
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            qdrant_host: default_qdrant_host(),
-            qdrant_port: default_qdrant_port(),
-            qdrant_rest_port: default_qdrant_rest_port(),
-            collection_name: String::new(), // Must be set explicitly
-            auto_start_deps: default_auto_start_deps(),
-            docker_compose_file: None,
-        }
-    }
-}
-
 impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
@@ -387,7 +374,7 @@ pub struct CodesearchConfigBuilder {
     indexer: IndexerConfig,
     embeddings: EmbeddingsConfig,
     watcher: WatcherConfig,
-    storage: StorageConfig,
+    storage: Option<StorageConfig>,
     languages: LanguagesConfig,
 }
 
@@ -398,38 +385,14 @@ impl CodesearchConfigBuilder {
             indexer: IndexerConfig::default(),
             embeddings: EmbeddingsConfig::default(),
             watcher: WatcherConfig::default(),
-            storage: StorageConfig::default(),
+            storage: None,
             languages: LanguagesConfig::default(),
         }
     }
 
     /// Set the storage configuration
     pub fn storage(mut self, storage: StorageConfig) -> Self {
-        self.storage = storage;
-        self
-    }
-
-    /// Set the collection name for storage
-    pub fn collection_name(mut self, name: String) -> Self {
-        self.storage.collection_name = name;
-        self
-    }
-
-    /// Set the Qdrant host
-    pub fn qdrant_host(mut self, host: String) -> Self {
-        self.storage.qdrant_host = host;
-        self
-    }
-
-    /// Set the Qdrant port
-    pub fn qdrant_port(mut self, port: u16) -> Self {
-        self.storage.qdrant_port = port;
-        self
-    }
-
-    /// Set whether to auto-start dependencies
-    pub fn auto_start_deps(mut self, auto_start: bool) -> Self {
-        self.storage.auto_start_deps = auto_start;
+        self.storage = Some(storage);
         self
     }
 
@@ -439,29 +402,6 @@ impl CodesearchConfigBuilder {
         self
     }
 
-    /// Set the embeddings provider
-    pub fn embeddings_provider(mut self, provider: String) -> Self {
-        self.embeddings.provider = provider;
-        self
-    }
-
-    /// Set the embeddings model
-    pub fn embeddings_model(mut self, model: String) -> Self {
-        self.embeddings.model = model;
-        self
-    }
-
-    /// Set the embeddings batch size
-    pub fn embeddings_batch_size(mut self, batch_size: usize) -> Self {
-        self.embeddings.batch_size = batch_size;
-        self
-    }
-
-    /// Set the embeddings device
-    pub fn embeddings_device(mut self, device: String) -> Self {
-        self.embeddings.device = device;
-        self
-    }
 
     /// Set the watcher configuration
     pub fn watcher(mut self, watcher: WatcherConfig) -> Self {
@@ -469,17 +409,6 @@ impl CodesearchConfigBuilder {
         self
     }
 
-    /// Set the watcher debounce time in milliseconds
-    pub fn watcher_debounce_ms(mut self, debounce_ms: u64) -> Self {
-        self.watcher.debounce_ms = debounce_ms;
-        self
-    }
-
-    /// Set the watcher ignore patterns
-    pub fn watcher_ignore_patterns(mut self, patterns: Vec<String>) -> Self {
-        self.watcher.ignore_patterns = patterns;
-        self
-    }
 
     /// Set the languages configuration
     pub fn languages(mut self, languages: LanguagesConfig) -> Self {
@@ -487,11 +416,6 @@ impl CodesearchConfigBuilder {
         self
     }
 
-    /// Set the enabled languages
-    pub fn enabled_languages(mut self, languages: Vec<String>) -> Self {
-        self.languages.enabled = languages;
-        self
-    }
 
     /// Build the Config
     pub fn build(self) -> Config {
@@ -499,7 +423,7 @@ impl CodesearchConfigBuilder {
             indexer: self.indexer,
             embeddings: self.embeddings,
             watcher: self.watcher,
-            storage: self.storage,
+            storage: self.storage.expect("Storage config is required"),
             languages: self.languages,
         }
     }
@@ -629,8 +553,17 @@ mod tests {
 
     #[test]
     fn test_config_builder_basic() {
+        let storage = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name: "test_collection".to_string(),
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
         let config = Config::builder()
-            .collection_name("test_collection".to_string())
+            .storage(storage)
             .build();
 
         assert_eq!(config.storage.collection_name, "test_collection");
@@ -640,11 +573,17 @@ mod tests {
 
     #[test]
     fn test_config_builder_storage_settings() {
+        let storage = StorageConfig {
+            qdrant_host: "192.168.1.1".to_string(),
+            qdrant_port: 6335,
+            qdrant_rest_port: 6333,
+            collection_name: "my_collection".to_string(),
+            auto_start_deps: false,
+            docker_compose_file: None,
+        };
+
         let config = Config::builder()
-            .collection_name("my_collection".to_string())
-            .qdrant_host("192.168.1.1".to_string())
-            .qdrant_port(6335)
-            .auto_start_deps(false)
+            .storage(storage)
             .build();
 
         assert_eq!(config.storage.collection_name, "my_collection");
@@ -655,11 +594,25 @@ mod tests {
 
     #[test]
     fn test_config_builder_embeddings_settings() {
+        let storage = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name: "test".to_string(),
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
+        let embeddings = EmbeddingsConfig {
+            provider: "openai".to_string(),
+            model: "text-embedding-ada-002".to_string(),
+            batch_size: 64,
+            device: "cuda".to_string(),
+        };
+
         let config = Config::builder()
-            .embeddings_provider("openai".to_string())
-            .embeddings_model("text-embedding-ada-002".to_string())
-            .embeddings_batch_size(64)
-            .embeddings_device("cuda".to_string())
+            .storage(storage)
+            .embeddings(embeddings)
             .build();
 
         assert_eq!(config.embeddings.provider, "openai");
@@ -670,9 +623,24 @@ mod tests {
 
     #[test]
     fn test_config_builder_watcher_settings() {
+        let storage = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name: "test".to_string(),
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
+        let watcher = WatcherConfig {
+            debounce_ms: 1000,
+            ignore_patterns: vec!["*.tmp".to_string(), "build/".to_string()],
+            branch_strategy: "index_current".to_string(),
+        };
+
         let config = Config::builder()
-            .watcher_debounce_ms(1000)
-            .watcher_ignore_patterns(vec!["*.tmp".to_string(), "build/".to_string()])
+            .storage(storage)
+            .watcher(watcher)
             .build();
 
         assert_eq!(config.watcher.debounce_ms, 1000);
@@ -681,8 +649,24 @@ mod tests {
 
     #[test]
     fn test_config_builder_language_settings() {
+        let storage = StorageConfig {
+            qdrant_host: "localhost".to_string(),
+            qdrant_port: 6334,
+            qdrant_rest_port: 6333,
+            collection_name: "test".to_string(),
+            auto_start_deps: true,
+            docker_compose_file: None,
+        };
+
+        let languages = LanguagesConfig {
+            enabled: vec!["rust".to_string(), "python".to_string()],
+            python: PythonConfig::default(),
+            javascript: JavaScriptConfig::default(),
+        };
+
         let config = Config::builder()
-            .enabled_languages(vec!["rust".to_string(), "python".to_string()])
+            .storage(storage)
+            .languages(languages)
             .build();
 
         assert_eq!(config.languages.enabled, vec!["rust", "python"]);

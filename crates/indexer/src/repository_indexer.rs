@@ -184,8 +184,10 @@ impl RepositoryIndexer {
         if !batch_entities.is_empty() {
             debug!("Bulk loading {} entities", batch_entities.len());
 
+            // TODO: Add real embeddings in Phase 5
+            let dummy_embeddings = vec![vec![0.0f32; 384]; batch_entities.len()];
             storage_client
-                .bulk_load_entities(&batch_entities)
+                .bulk_load_entities(batch_entities, dummy_embeddings)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
 
@@ -272,8 +274,10 @@ impl RepositoryIndexer {
         // Stage 2: Store - Bulk load to storage
         debug!("Storing {} entities", entities.len());
 
+        // TODO: Add real embeddings in Phase 5
+        let dummy_embeddings = vec![vec![0.0f32; 384]; entities.len()];
         storage_client
-            .bulk_load_entities(&entities)
+            .bulk_load_entities(entities, dummy_embeddings)
             .await
             .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
 

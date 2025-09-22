@@ -9,6 +9,8 @@ pub enum EmbeddingProviderType {
     /// Local embeddings using Candle
     #[default]
     Local,
+    /// Mock provider for testing
+    Mock,
 }
 
 /// Device type for computation

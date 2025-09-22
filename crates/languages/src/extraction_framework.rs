@@ -94,7 +94,7 @@ impl LanguageConfigurationBuilder {
 
             // Parse the query to count captures
             let temp_query = Query::new(&self.language, &extractor.query).map_err(|e| {
-                anyhow::anyhow!("Failed to parse query for {}: {}", extractor.name, e)
+                anyhow::anyhow!("Failed to parse query for {}: {e}", extractor.name)
             })?;
             current_offset += temp_query.capture_names().len();
 
@@ -113,7 +113,7 @@ impl LanguageConfigurationBuilder {
 
         // Compile the combined query
         let compiled_query = Query::new(&self.language, &combined)
-            .map_err(|e| anyhow::anyhow!("Failed to compile combined query: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to compile combined query: {e}"))?;
 
         Ok(LanguageConfiguration {
             language: self.language,
@@ -150,7 +150,7 @@ impl<'a> GenericExtractor<'a> {
         let mut parser = Parser::new();
         parser
             .set_language(&config.language)
-            .map_err(|e| anyhow::anyhow!("Failed to set language: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to set language: {e}"))?;
 
         Ok(Self { config, parser })
     }
@@ -211,6 +211,7 @@ impl<'a> GenericExtractor<'a> {
 }
 
 /// Helper function to create a source location from a node
+#[allow(dead_code)]
 pub fn node_to_source_location(node: Node) -> codesearch_core::entities::SourceLocation {
     codesearch_core::entities::SourceLocation::from_tree_sitter_node(node)
 }

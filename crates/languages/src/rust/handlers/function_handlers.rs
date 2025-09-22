@@ -210,11 +210,13 @@ struct FunctionEntityComponents {
 /// Build a function entity from extracted components
 #[allow(dead_code)]
 fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEntity> {
-    let mut metadata = EntityMetadata::default();
-    metadata.is_async = components.is_async;
-    metadata.is_const = components.is_const;
-    metadata.generic_params = components.generics.clone();
-    metadata.is_generic = !components.generics.is_empty();
+    let mut metadata = EntityMetadata {
+        is_async: components.is_async,
+        is_const: components.is_const,
+        generic_params: components.generics.clone(),
+        is_generic: !components.generics.is_empty(),
+        ..Default::default()
+    };
 
     // Add unsafe as an attribute if applicable
     if components.is_unsafe {
@@ -253,5 +255,5 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         .file_path(components.file_path)
         .line_range((components.location.start_line, components.location.end_line))
         .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))
+        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }

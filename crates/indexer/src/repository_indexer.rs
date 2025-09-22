@@ -9,7 +9,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::StorageClient;
+use codesearch_storage::{EmbeddedEntity, StorageClient};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
@@ -18,9 +18,12 @@ use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, error, info};
 
+const DELIM: &str = " ";
+
 /// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
 struct IndexProgress {
+    #[allow(dead_code)]
     pub total_files: usize,
     pub processed_files: usize,
     pub failed_files: usize,
@@ -57,52 +60,47 @@ pub struct RepositoryIndexer {
 /// Extract embeddable content from a CodeEntity
 fn extract_embedding_content(entity: &CodeEntity) -> String {
     // Combine relevant fields for embedding generation
-    let mut content_parts = Vec::new();
+    let mut content = String::with_capacity(500);
 
-    // Add entity name and qualified name
-    content_parts.push(format!("{} {}", entity.entity_type, entity.name));
-    content_parts.push(entity.qualified_name.clone());
+    // Add entity name and qualified name (moved)
+    content.push_str(&format!("{} {}", entity.entity_type, entity.name));
+    chain_delim(&mut content, &entity.qualified_name);
 
     // Add documentation summary if available
     if let Some(doc) = &entity.documentation_summary {
-        content_parts.push(doc.clone());
+        chain_delim(&mut content, doc);
     }
 
     // Add signature information for functions/methods
     if let Some(sig) = &entity.signature {
         // Format parameters as "name: type" or just "name" if no type
-        let params: Vec<String> = sig
+        let _ = sig // collect into strings
             .parameters
             .iter()
             .map(|(name, type_opt)| {
                 if let Some(ty) = type_opt {
-                    format!("{}: {}", name, ty)
+                    // format
+                    format!("{name}: {ty}")
                 } else {
                     name.clone()
                 }
             })
-            .collect();
-        let params_str = params.join(", ");
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|p| chain_delim(&mut content, p))
+            .collect::<Vec<_>>();
 
         if let Some(ret_type) = &sig.return_type {
-            content_parts.push(format!("({}) -> {}", params_str, ret_type));
-        } else {
-            content_parts.push(format!("({})", params_str));
+            chain_delim(&mut content, &format!("-> {ret_type}"));
         }
     }
 
-    // Add actual content if available (truncate for efficiency)
-    if let Some(content) = &entity.content {
-        // Take first 500 chars to avoid overly long embeddings
-        let truncated = if content.len() > 500 {
-            format!("{}...", &content[..500])
-        } else {
-            content.clone()
-        };
-        content_parts.push(truncated);
-    }
+    content
+}
 
-    content_parts.join(" ")
+fn chain_delim(out_str: &mut String, text: &str) {
+    out_str.push_str(DELIM);
+    out_str.push_str(text);
 }
 
 impl RepositoryIndexer {
@@ -185,10 +183,18 @@ impl RepositoryIndexer {
         stats.processing_time_ms = start_time.elapsed().as_millis() as u64;
 
         info!(
-            "Indexing complete: {} files, {} entities, {} relationships in {:.2}s",
+            "Indexing complete: {} files, {} entities, {} relationships{} in {:.2}s",
             stats.total_files,
             stats.entities_extracted,
             stats.relationships_extracted,
+            if stats.entities_skipped_size > 0 {
+                format!(
+                    " ({} entities skipped due to size)",
+                    stats.entities_skipped_size
+                )
+            } else {
+                String::new()
+            },
             stats.processing_time_ms as f64 / 1000.0
         );
 
@@ -242,21 +248,45 @@ impl RepositoryIndexer {
             debug!("Bulk loading {} entities", batch_entities.len());
 
             // Generate embeddings for all entities
-            let embedding_texts: Vec<String> = batch_entities
-                .iter()
+            let embedding_texts: Vec<String> = batch_entities // create embedding texts from each entity
+                .iter() // iterate
                 .map(extract_embedding_content)
                 .collect();
 
-            let embeddings = self
-                .embedding_manager
-                .embed(embedding_texts)
+            let option_embeddings = self // embed all texts
+                .embedding_manager // access
+                .embed(embedding_texts) // call embed
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
-            storage_client
-                .bulk_load_entities(batch_entities, embeddings)
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+            // Filter entities with valid embeddings
+            let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new(); // create destination
+
+            for (entity, opt_embedding) in batch_entities
+                .into_iter()
+                .zip(option_embeddings.into_iter())
+            {
+                if let Some(embedding) = opt_embedding {
+                    embedded_entities.push(EmbeddedEntity { entity, embedding });
+                    // copy
+                } else {
+                    debug!(
+                        // debug log
+                        "Skipped entity due to size: {} in {}",
+                        entity.qualified_name,
+                        entity.file_path.display()
+                    );
+                }
+            }
+
+            // Only store entities that have embeddings
+            if !embedded_entities.is_empty() {
+                storage_client // store entities
+                    .bulk_load_entities(embedded_entities) // store
+                    .await
+                    // await
+                    .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+            }
 
             debug!(
                 "Successfully bulk loaded batch of {} files",
@@ -344,16 +374,35 @@ impl RepositoryIndexer {
         // Generate embeddings for entities
         let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
 
-        let embeddings = self
+        let option_embeddings = self
             .embedding_manager
             .embed(embedding_texts)
             .await
             .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
-        storage_client
-            .bulk_load_entities(entities, embeddings)
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+        // Filter entities with valid embeddings
+        let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
+
+        for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
+            if let Some(embedding) = opt_embedding {
+                embedded_entities.push(EmbeddedEntity { entity, embedding });
+            } else {
+                stats.entities_skipped_size += 1;
+                info!(
+                    "Skipped entity due to size: {} in {}",
+                    entity.name,
+                    entity.file_path.display()
+                );
+            }
+        }
+
+        // Only store entities that have embeddings
+        if !embedded_entities.is_empty() {
+            storage_client
+                .bulk_load_entities(embedded_entities)
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+        }
 
         debug!("Successfully stored entities from {:?}", file_path);
 
@@ -462,9 +511,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for MockEmbeddingProvider {
-        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
             // Return dummy embeddings with 384 dimensions
-            Ok(texts.into_iter().map(|_| vec![0.0f32; 384]).collect())
+            Ok(texts.into_iter().map(|_| Some(vec![0.0f32; 384])).collect())
         }
 
         fn embedding_dimension(&self) -> usize {
@@ -476,13 +525,15 @@ mod tests {
         }
     }
 
+    /// Creates a test embedding manager
     fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
         Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
     }
 
     #[tokio::test]
-    async fn test_repository_indexer_creation() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_repository_indexer_creation() -> anyhow::Result<()> {
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let indexer = RepositoryIndexer::new(
@@ -491,11 +542,13 @@ mod tests {
             embedding_manager,
         );
         assert_eq!(indexer.repository_path(), temp_dir.path());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_empty_repository_indexing() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_empty_repository_indexing() -> anyhow::Result<()> {
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let mut indexer = RepositoryIndexer::new(
@@ -512,18 +565,20 @@ mod tests {
             assert_eq!(index_result.stats.total_files, 0);
             assert_eq!(index_result.stats.entities_extracted, 0);
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_file_processing() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_file_processing() -> anyhow::Result<()> {
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
             .await
-            .unwrap();
+            .map_err(|e| anyhow::anyhow!("Failed to write test file: {e}"))?;
 
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
-        let embedding_manager = create_test_embedding_manager();
+        let embedding_manager = create_test_embedding_manager(); // creates test embedding manager
         let mut indexer = RepositoryIndexer::new(
             temp_dir.path().to_path_buf(),
             storage_client.clone(),
@@ -536,5 +591,6 @@ mod tests {
         // The test should at least attempt extraction
         // Full success depends on storage being available
         assert!(result.is_ok() || result.is_err());
+        Ok(())
     }
 }

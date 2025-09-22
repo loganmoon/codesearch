@@ -1,6 +1,6 @@
 //! Qdrant storage client implementation for CRUD operations
 
-use crate::{SearchFilters, StorageClient};
+use crate::{EmbeddedEntity, SearchFilters, StorageClient};
 use async_trait::async_trait;
 use codesearch_core::{
     error::{Error, Result},
@@ -54,7 +54,7 @@ impl QdrantStorageClient {
         }
 
         serde_json::from_value(serde_json::Value::Object(json_map))
-            .map_err(|e| Error::storage(format!("Failed to deserialize entity: {}", e)))
+            .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))
     }
 
     /// Convert Qdrant Value to serde_json Value
@@ -120,28 +120,20 @@ impl QdrantStorageClient {
 
 #[async_trait]
 impl StorageClient for QdrantStorageClient {
-    async fn bulk_load_entities(
-        &self,
-        entities: Vec<CodeEntity>,
-        embeddings: Vec<Vec<f32>>,
-    ) -> Result<()> {
-        if entities.is_empty() || embeddings.is_empty() {
+    async fn bulk_load_entities(&self, embedded_entities: Vec<EmbeddedEntity>) -> Result<()> {
+        if embedded_entities.is_empty() {
             return Ok(());
         }
 
-        if entities.len() != embeddings.len() {
-            return Err(Error::invalid_input(
-                "Entities and embeddings must have the same length",
-            ));
-        }
-
-        let points: Vec<PointStruct> = entities
+        let points: Vec<PointStruct> = embedded_entities
             .iter()
-            .zip(embeddings.iter())
-            .enumerate()
-            .map(|(_idx, (entity, embedding))| {
-                let id = PointId::from(entity.entity_id.clone());
-                PointStruct::new(id, embedding.clone(), Self::entity_to_payload(entity))
+            .map(|embedded| {
+                let id = PointId::from(embedded.entity.entity_id.clone());
+                PointStruct::new(
+                    id,
+                    embedded.embedding.clone(),
+                    Self::entity_to_payload(&embedded.entity),
+                )
             })
             .collect();
 

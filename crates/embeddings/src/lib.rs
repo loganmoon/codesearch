@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub mod config;
 mod embed_anything_provider;
 pub mod error;
+mod mock_provider;
 pub mod provider;
 
 pub use config::{
@@ -40,6 +41,10 @@ impl EmbeddingManager {
                 let provider = create_embed_anything_provider(config).await?;
                 Arc::from(provider)
             }
+            EmbeddingProviderType::Mock => {
+                let provider = mock_provider::MockEmbeddingProvider::new(384);
+                Arc::new(provider) as Arc<dyn EmbeddingProvider>
+            }
         };
 
         Ok(Self { provider })
@@ -51,7 +56,7 @@ impl EmbeddingManager {
     }
 
     /// Generate embeddings for texts
-    pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
         self.provider.embed(texts).await
     }
 }

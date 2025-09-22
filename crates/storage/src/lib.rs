@@ -22,15 +22,18 @@ pub struct SearchFilters {
     pub file_path: Option<PathBuf>,
 }
 
+/// Represents a code entity with its vector embedding
+#[derive(Debug, Clone)]
+pub struct EmbeddedEntity {
+    pub entity: CodeEntity,
+    pub embedding: Vec<f32>,
+}
+
 /// Trait for storage clients (CRUD operations only)
 #[async_trait]
 pub trait StorageClient: Send + Sync {
     /// Bulk load entities with their embeddings
-    async fn bulk_load_entities(
-        &self,
-        entities: Vec<CodeEntity>,
-        embeddings: Vec<Vec<f32>>,
-    ) -> Result<()>;
+    async fn bulk_load_entities(&self, embedded_entities: Vec<EmbeddedEntity>) -> Result<()>;
 
     /// Search for similar entities
     async fn search_similar(
@@ -47,6 +50,12 @@ pub trait StorageClient: Send + Sync {
 /// Mock storage client for testing
 pub struct MockStorageClient;
 
+impl Default for MockStorageClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockStorageClient {
     /// Create a new mock storage client
     pub fn new() -> Self {
@@ -56,11 +65,7 @@ impl MockStorageClient {
 
 #[async_trait]
 impl StorageClient for MockStorageClient {
-    async fn bulk_load_entities(
-        &self,
-        _entities: Vec<CodeEntity>,
-        _embeddings: Vec<Vec<f32>>,
-    ) -> Result<()> {
+    async fn bulk_load_entities(&self, _embedded_entities: Vec<EmbeddedEntity>) -> Result<()> {
         // Mock implementation - just succeed
         Ok(())
     }
@@ -88,7 +93,7 @@ pub async fn create_storage_client(
 ) -> Result<Arc<dyn StorageClient>> {
     let url = format!("http://{}:{}", config.qdrant_host, config.qdrant_port);
     let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
-        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e))
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {e}"))
     })?;
 
     let client = qdrant::client::QdrantStorageClient::new(
@@ -106,7 +111,7 @@ pub async fn create_collection_manager(
 ) -> Result<Arc<dyn CollectionManager>> {
     let url = format!("http://{}:{}", config.qdrant_host, config.qdrant_port);
     let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
-        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {}", e))
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {e}"))
     })?;
 
     let manager =

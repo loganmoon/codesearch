@@ -39,7 +39,7 @@ impl CollectionManager for QdrantCollectionManager {
                 .qdrant_client
                 .collection_info(collection_name)
                 .await
-                .map_err(|e| Error::storage(format!("Failed to get collection info: {}", e)))?;
+                .map_err(|e| Error::storage(format!("Failed to get collection info: {e}")))?;
 
             if let Some(result) = collection_info.result {
                 if let Some(config) = result.config {
@@ -55,8 +55,7 @@ impl CollectionManager for QdrantCollectionManager {
 
                             if current_dims != vector_dimensions {
                                 return Err(Error::storage(format!(
-                                    "Collection '{}' exists with {} dimensions, but {} dimensions requested",
-                                    collection_name, current_dims, vector_dimensions
+                                    "Collection '{collection_name}' exists with {current_dims} dimensions, but {vector_dimensions} dimensions requested"
                                 )));
                             }
                         }
@@ -78,7 +77,7 @@ impl CollectionManager for QdrantCollectionManager {
             self.qdrant_client
                 .create_collection(create_collection)
                 .await
-                .map_err(|e| Error::storage(format!("Failed to create collection: {}", e)))?;
+                .map_err(|e| Error::storage(format!("Failed to create collection: {e}")))?;
         }
 
         Ok(())
@@ -88,7 +87,7 @@ impl CollectionManager for QdrantCollectionManager {
         self.qdrant_client
             .delete_collection(collection_name)
             .await
-            .map_err(|e| Error::storage(format!("Failed to delete collection: {}", e)))?;
+            .map_err(|e| Error::storage(format!("Failed to delete collection: {e}")))?;
 
         Ok(())
     }
@@ -98,7 +97,7 @@ impl CollectionManager for QdrantCollectionManager {
             .qdrant_client
             .list_collections()
             .await
-            .map_err(|e| Error::storage(format!("Failed to list collections: {}", e)))?;
+            .map_err(|e| Error::storage(format!("Failed to list collections: {e}")))?;
 
         Ok(collections
             .collections
@@ -110,7 +109,7 @@ impl CollectionManager for QdrantCollectionManager {
         self.qdrant_client
             .health_check()
             .await
-            .map_err(|e| Error::storage(format!("Qdrant health check failed: {}", e)))?;
+            .map_err(|e| Error::storage(format!("Qdrant health check failed: {e}")))?;
 
         Ok(())
     }

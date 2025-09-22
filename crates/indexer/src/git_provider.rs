@@ -7,12 +7,14 @@ use tracing::{debug, trace};
 
 /// Provides Git content access without holding state
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct GitContentProvider {
     repo_root: PathBuf,
 }
 
 impl GitContentProvider {
     /// Create a new provider for the given repository path
+    #[allow(dead_code)]
     pub fn new(repo_path: &Path) -> Result<Self> {
         // Open repository once to validate and get workdir
         let repo = Repository::open(repo_path)?;
@@ -25,12 +27,14 @@ impl GitContentProvider {
     }
 
     /// Get the previous version of a file from Git HEAD
+    #[allow(dead_code)]
     pub fn get_previous_content(&self, file_path: &Path) -> Result<String> {
         debug!("Fetching previous content for: {:?}", file_path);
         get_previous_content(&self.repo_root, file_path)
     }
 
     /// Get content from a specific commit
+    #[allow(dead_code)]
     pub fn get_content_at_commit(&self, file_path: &Path, commit_sha: &str) -> Result<String> {
         debug!(
             "Fetching content at commit {} for: {:?}",
@@ -40,16 +44,19 @@ impl GitContentProvider {
     }
 
     /// Check if a file has unstaged changes
+    #[allow(dead_code)]
     pub fn has_unstaged_changes(&self, file_path: &Path) -> Result<bool> {
         has_unstaged_changes(&self.repo_root, file_path)
     }
 
     /// Get the last commit that modified a file
+    #[allow(dead_code)]
     pub fn get_last_commit_for_file(&self, file_path: &Path) -> Result<git2::Oid> {
         get_last_commit_for_file(&self.repo_root, file_path)
     }
 
     /// Get relative path from repository root
+    #[allow(dead_code)]
     pub fn get_relative_path(&self, file_path: &Path) -> Result<PathBuf> {
         get_relative_path(&self.repo_root, file_path)
     }
@@ -58,6 +65,7 @@ impl GitContentProvider {
 // Pure functions that open repository on demand
 
 /// Get the previous version of a file from Git HEAD
+#[allow(dead_code)]
 pub fn get_previous_content(repo_path: &Path, file_path: &Path) -> Result<String> {
     debug!("Fetching previous content for: {:?}", file_path);
 
@@ -76,7 +84,7 @@ pub fn get_previous_content(repo_path: &Path, file_path: &Path) -> Result<String
     // Find the file in the tree
     let entry = tree
         .get_path(&relative_path)
-        .map_err(|e| anyhow!("File not found in HEAD: {}", e))?;
+        .map_err(|e| anyhow!("File not found in HEAD: {e}"))?;
 
     // Get the blob
     let object = entry.to_object(&repo)?;
@@ -86,7 +94,7 @@ pub fn get_previous_content(repo_path: &Path, file_path: &Path) -> Result<String
 
     // Convert to string
     let content = std::str::from_utf8(blob.content())
-        .map_err(|e| anyhow!("Failed to decode file content: {}", e))?
+        .map_err(|e| anyhow!("Failed to decode file content: {e}"))?
         .to_string();
 
     trace!("Retrieved {} bytes of previous content", content.len());
@@ -94,6 +102,7 @@ pub fn get_previous_content(repo_path: &Path, file_path: &Path) -> Result<String
 }
 
 /// Get content from a specific commit
+#[allow(dead_code)]
 pub fn get_content_at_commit(
     repo_path: &Path,
     file_path: &Path,
@@ -118,7 +127,7 @@ pub fn get_content_at_commit(
     // Find the file in the tree
     let entry = tree
         .get_path(&relative_path)
-        .map_err(|e| anyhow!("File not found at commit {}: {}", commit_sha, e))?;
+        .map_err(|e| anyhow!("File not found at commit {commit_sha}: {e}"))?;
 
     // Get the blob
     let object = entry.to_object(&repo)?;
@@ -128,13 +137,14 @@ pub fn get_content_at_commit(
 
     // Convert to string
     let content = std::str::from_utf8(blob.content())
-        .map_err(|e| anyhow!("Failed to decode file content: {}", e))?
+        .map_err(|e| anyhow!("Failed to decode file content: {e}"))?
         .to_string();
 
     Ok(content)
 }
 
 /// Check if a file has unstaged changes
+#[allow(dead_code)]
 pub fn has_unstaged_changes(repo_path: &Path, file_path: &Path) -> Result<bool> {
     // Open repository fresh
     let repo = Repository::open(repo_path)?;
@@ -156,6 +166,7 @@ pub fn has_unstaged_changes(repo_path: &Path, file_path: &Path) -> Result<bool> 
 }
 
 /// Get the last commit that modified a file
+#[allow(dead_code)]
 pub fn get_last_commit_for_file(repo_path: &Path, file_path: &Path) -> Result<git2::Oid> {
     // Open repository fresh
     let repo = Repository::open(repo_path)?;
@@ -191,10 +202,11 @@ pub fn get_last_commit_for_file(repo_path: &Path, file_path: &Path) -> Result<gi
         }
     }
 
-    Err(anyhow!("No commits found for file: {:?}", file_path))
+    Err(anyhow!("No commits found for file: {file_path:?}"))
 }
 
 /// Get relative path from repository root
+#[allow(dead_code)]
 fn get_relative_path(repo_root: &Path, file_path: &Path) -> Result<PathBuf> {
     file_path
         .strip_prefix(repo_root)
@@ -206,11 +218,12 @@ fn get_relative_path(repo_root: &Path, file_path: &Path) -> Result<PathBuf> {
             canonical_file
                 .strip_prefix(&canonical_root)
                 .map(|p| p.to_path_buf())
-                .map_err(|e| anyhow!("Failed to get relative path: {}", e))
+                .map_err(|e| anyhow!("Failed to get relative path: {e}"))
         })
 }
 
 /// Get relative path from repository using the repo's workdir
+#[allow(dead_code)]
 fn get_relative_path_from_repo(repo: &Repository, file_path: &Path) -> Result<PathBuf> {
     let repo_root = repo
         .workdir()
@@ -220,11 +233,13 @@ fn get_relative_path_from_repo(repo: &Repository, file_path: &Path) -> Result<Pa
 }
 
 /// LRU Cache for storing file contents to avoid repeated Git operations
+#[allow(dead_code)]
 pub struct ContentCache {
     cache: LruCache<(PathBuf, Option<String>), String>,
 }
 
 impl ContentCache {
+    #[allow(dead_code)]
     pub fn new(max_size: usize) -> Self {
         // Create LRU cache with specified capacity
         // Default to 100 if max_size is 0
@@ -237,24 +252,29 @@ impl ContentCache {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get(&mut self, file_path: &Path, commit: Option<&str>) -> Option<String> {
         let key = (file_path.to_path_buf(), commit.map(String::from));
         self.cache.get(&key).cloned()
     }
 
+    #[allow(dead_code)]
     pub fn insert(&mut self, file_path: PathBuf, commit: Option<String>, content: String) {
         // LRU cache automatically handles eviction
         self.cache.put((file_path, commit), content);
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.cache.clear();
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.cache.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.cache.is_empty()
     }

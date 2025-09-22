@@ -62,7 +62,7 @@ pub fn find_files(root_path: &Path) -> Result<Vec<PathBuf>> {
 
     // Process each supported extension separately
     for ext in SUPPORTED_EXTENSIONS {
-        let pattern = format!("{}/**/*.{}", root_path.display(), ext);
+        let pattern = format!("{}/**/*.{ext}", root_path.display());
         debug!("Searching for {} files with pattern: {}", ext, pattern);
 
         for entry in glob(&pattern)
@@ -137,7 +137,7 @@ fn path_matches_pattern(path: &str, pattern: &str) -> bool {
     let pattern = pattern.replace("__STAR__", "[^/]*");
 
     // Convert to regex pattern
-    let pattern = format!("^{}$", pattern.replace('/', "/"));
+    let pattern = format!("^{pattern}$");
 
     // Try to match
     if let Ok(re) = regex::Regex::new(&pattern) {
@@ -149,6 +149,7 @@ fn path_matches_pattern(path: &str, pattern: &str) -> bool {
 }
 
 /// Get the language identifier from a file extension
+#[allow(dead_code)]
 pub fn get_language_from_extension(extension: &str) -> Option<&'static str> {
     match extension.to_lowercase().as_str() {
         "rs" => Some("rust"),
@@ -173,22 +174,8 @@ pub fn get_language_from_extension(extension: &str) -> Option<&'static str> {
     }
 }
 
-/// Calculate a simple hash for a file's content
-pub fn calculate_file_hash(content: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
-}
-
-/// Count lines in a string
-pub fn count_lines(content: &str) -> usize {
-    content.lines().count()
-}
-
 /// Extract the relative path from a base directory
+#[allow(dead_code)]
 pub fn get_relative_path(base: &Path, full_path: &Path) -> Result<PathBuf> {
     full_path
         .strip_prefix(base)
@@ -203,6 +190,7 @@ pub fn get_relative_path(base: &Path, full_path: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
     use std::fs;
     use tempfile::TempDir;
@@ -217,9 +205,9 @@ mod tests {
         assert!(!should_include_file(Path::new(".git/config")));
 
         // Test include patterns (these would need actual files to fully test)
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let test_file = temp_dir.path().join("test.rs");
-        fs::write(&test_file, "fn main() {}").unwrap();
+        fs::write(&test_file, "fn main() {}").expect("Failed to write test file");
         assert!(should_include_file(&test_file));
     }
 
@@ -232,28 +220,10 @@ mod tests {
     }
 
     #[test]
-    fn test_count_lines() {
-        assert_eq!(count_lines(""), 0);
-        assert_eq!(count_lines("single line"), 1);
-        assert_eq!(count_lines("line 1\nline 2\nline 3"), 3);
-        assert_eq!(count_lines("line 1\n\nline 3"), 3); // Empty line counts
-    }
-
-    #[test]
-    fn test_calculate_file_hash() {
-        let hash1 = calculate_file_hash("content");
-        let hash2 = calculate_file_hash("content");
-        let hash3 = calculate_file_hash("different");
-
-        assert_eq!(hash1, hash2);
-        assert_ne!(hash1, hash3);
-    }
-
-    #[test]
     fn test_get_relative_path() {
         let base = Path::new("/home/user/project");
         let full = Path::new("/home/user/project/src/main.rs");
-        let relative = get_relative_path(base, full).unwrap();
+        let relative = get_relative_path(base, full).expect("Failed to get relative path");
         assert_eq!(relative, Path::new("src/main.rs"));
 
         // Test error case

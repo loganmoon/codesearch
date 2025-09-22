@@ -24,13 +24,13 @@ impl TestQdrant {
         // Create temp directory
         std::fs::create_dir_all(&temp_dir).context("Failed to create temp directory for Qdrant")?;
 
-        // Find available ports (using defaults for simplicity in test)
-        let port = 16334; // Test port offset from default
-        let rest_port = 16333;
+        // Find available ports dynamically to avoid conflicts
+        let port = portpicker::pick_unused_port().expect("No available port for Qdrant");
+        let rest_port = portpicker::pick_unused_port().expect("No available port for Qdrant REST");
 
         // Start Qdrant container with temporary storage
         let output = Command::new("docker")
-            .args(&[
+            .args([
                 "run",
                 "-d",
                 "--name",
@@ -49,8 +49,7 @@ impl TestQdrant {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!(
-                "Failed to start Qdrant container: {}",
-                stderr
+                "Failed to start Qdrant container: {stderr}"
             ));
         }
 
@@ -69,11 +68,11 @@ impl TestQdrant {
     fn cleanup(&self) {
         // Stop and remove container
         let _ = Command::new("docker")
-            .args(&["stop", &self.container_name])
+            .args(["stop", &self.container_name])
             .output();
 
         let _ = Command::new("docker")
-            .args(&["rm", &self.container_name])
+            .args(["rm", &self.container_name])
             .output();
 
         // Remove temp directory
@@ -96,7 +95,7 @@ fn create_test_repo() -> Result<TempDir> {
     // Initialize git repo
     Command::new("git")
         .current_dir(temp_dir.path())
-        .args(&["init"])
+        .args(["init"])
         .output()
         .context("Failed to init git repo")?;
 
@@ -123,6 +122,8 @@ async fn test_init_command_creates_collection() -> Result<()> {
     // Create config file with test Qdrant settings
     let config_content = format!(
         r#"
+[indexer]
+
 [storage]
 qdrant_host = "localhost"
 qdrant_port = {}
@@ -131,10 +132,7 @@ collection_name = ""
 auto_start_deps = false
 
 [embeddings]
-provider = "local"
-model = "all-minilm-l6-v2"
-batch_size = 32
-device = "cpu"
+provider = "mock"
 
 [watcher]
 debounce_ms = 500
@@ -150,13 +148,23 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command
+    // Run init command using cargo run with manifest path
+    let manifest_path = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let workspace_manifest = Path::new(&manifest_path)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("Cargo.toml");
+
     let output = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
+            "--manifest-path",
+            workspace_manifest.to_str().unwrap(),
             "--package",
-            "codesearch-cli",
+            "codesearch",
             "--",
             "init",
             "--config",
@@ -169,15 +177,13 @@ enabled = ["rust"]
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    println!("stdout: {}", stdout);
-    println!("stderr: {}", stderr);
+    println!("stdout: {stdout}");
+    println!("stderr: {stderr}");
 
     // Check that init succeeded
     assert!(
         output.status.success(),
-        "Init command failed: stdout={}, stderr={}",
-        stdout,
-        stderr
+        "Init command failed: stdout={stdout}, stderr={stderr}"
     );
 
     // Verify success message in output
@@ -209,6 +215,8 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_content = format!(
         r#"
+[indexer]
+
 [storage]
 qdrant_host = "localhost"
 qdrant_port = {}
@@ -217,10 +225,7 @@ collection_name = "{}"
 auto_start_deps = false
 
 [embeddings]
-provider = "local"
-model = "all-minilm-l6-v2"
-batch_size = 32
-device = "cpu"
+provider = "mock"
 
 [watcher]
 debounce_ms = 500
@@ -236,13 +241,23 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command first time
+    // Run init command first time using cargo run with manifest path
+    let manifest_path = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
+    let workspace_manifest = Path::new(&manifest_path)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("Cargo.toml");
+
     let output1 = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
+            "--manifest-path",
+            workspace_manifest.to_str().unwrap(),
             "--package",
-            "codesearch-cli",
+            "codesearch",
             "--",
             "init",
             "--config",
@@ -256,10 +271,12 @@ enabled = ["rust"]
     // Run init command again - should handle existing collection gracefully
     let output2 = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
+            "--manifest-path",
+            workspace_manifest.to_str().unwrap(),
             "--package",
-            "codesearch-cli",
+            "codesearch",
             "--",
             "init",
             "--config",
@@ -275,9 +292,7 @@ enabled = ["rust"]
     // Second init should also succeed
     assert!(
         output2.status.success(),
-        "Second init command failed: stdout={}, stderr={}",
-        stdout,
-        stderr
+        "Second init command failed: stdout={stdout}, stderr={stderr}"
     );
 
     // Should still show success message

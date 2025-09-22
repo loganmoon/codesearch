@@ -219,7 +219,6 @@ mod tests {
         assert_eq!(get_language_from_extension("unknown"), None);
     }
 
-
     #[test]
     fn test_get_relative_path() {
         let base = Path::new("/home/user/project");

@@ -1,6 +1,7 @@
 //! Integration tests for the init command
 
 use anyhow::{Context, Result};
+use git2::Repository;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
@@ -24,9 +25,9 @@ impl TestQdrant {
         // Create temp directory
         std::fs::create_dir_all(&temp_dir).context("Failed to create temp directory for Qdrant")?;
 
-        // Find available ports (using defaults for simplicity in test)
-        let port = 16334; // Test port offset from default
-        let rest_port = 16333;
+        // Find available ports dynamically to avoid conflicts
+        let port = portpicker::pick_unused_port().expect("No available port for Qdrant");
+        let rest_port = portpicker::pick_unused_port().expect("No available port for Qdrant REST");
 
         // Start Qdrant container with temporary storage
         let output = Command::new("docker")
@@ -36,11 +37,11 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:6334"),
+                &format!("{port}"),
                 "-p",
-                &format!("{rest_port}:6333"),
+                &format!("{rest_port}"),
                 "-v",
-                &format!("{temp_dir_name}:/qdrant/storage"),
+                &format!("{temp_dir_name}"),
                 "qdrant/qdrant",
             ])
             .output()
@@ -122,6 +123,8 @@ async fn test_init_command_creates_collection() -> Result<()> {
     // Create config file with test Qdrant settings
     let config_content = format!(
         r#"
+[indexer]
+
 [storage]
 qdrant_host = "localhost"
 qdrant_port = {}
@@ -131,7 +134,7 @@ auto_start_deps = false
 
 [embeddings]
 provider = "local"
-model = "all-minilm-l6-v2"
+model = "sentence-transformers/all-MiniLM-L6-v2"
 batch_size = 32
 device = "cpu"
 
@@ -149,18 +152,35 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command
-    let output = Command::new("cargo")
+    // Build the binary first to avoid cargo output in test
+    let build_output = Command::new("cargo")
+        .args(["build", "--package", "codesearch"])
+        .output()?;
+
+    if !build_output.status.success() {
+        return Err(anyhow::anyhow!("Failed to build codesearch binary"));
+    }
+
+    // Find the git repository root using git2
+    let repo = Repository::discover(".")?;
+    let workspace_root = repo.workdir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find git repository root"))?
+        .to_path_buf();
+
+    // Run init command directly from test repo
+    let binary_path = workspace_root
+        .join("target")
+        .join("debug")
+        .join("codesearch");
+
+    // Verify binary exists
+    if !binary_path.exists() {
+        return Err(anyhow::anyhow!("Binary not found at {:?}", binary_path));
+    }
+
+    let output = Command::new(&binary_path)
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--package",
-            "codesearch-cli",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .env("RUST_LOG", "info")
         .output()
         .context("Failed to run init command")?;
@@ -206,6 +226,8 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_content = format!(
         r#"
+[indexer]
+
 [storage]
 qdrant_host = "localhost"
 qdrant_port = {}
@@ -215,7 +237,7 @@ auto_start_deps = false
 
 [embeddings]
 provider = "local"
-model = "all-minilm-l6-v2"
+model = "sentence-transformers/all-MiniLM-L6-v2"
 batch_size = 32
 device = "cpu"
 
@@ -233,35 +255,46 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command first time
-    let output1 = Command::new("cargo")
+    // Build the binary first to avoid cargo output in test
+    let build_output = Command::new("cargo")
+        .args(["build", "--package", "codesearch"])
+        .output()?;
+
+    if !build_output.status.success() {
+        return Err(anyhow::anyhow!("Failed to build codesearch binary"));
+    }
+
+    // Find the workspace root by looking for Cargo.toml
+    let mut workspace_root = std::env::current_dir()?;
+    while !workspace_root.join("Cargo.toml").exists() {
+        if !workspace_root.pop() {
+            return Err(anyhow::anyhow!("Could not find workspace root"));
+        }
+    }
+
+    // Run init command first time from test repo
+    let binary_path = workspace_root
+        .join("target")
+        .join("debug")
+        .join("codesearch");
+
+    // Verify binary exists
+    if !binary_path.exists() {
+        return Err(anyhow::anyhow!("Binary not found at {:?}", binary_path));
+    }
+
+    let output1 = Command::new(&binary_path)
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--package",
-            "codesearch-cli",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .output()
         .context("Failed to run first init command")?;
 
     assert!(output1.status.success(), "First init failed");
 
     // Run init command again - should handle existing collection gracefully
-    let output2 = Command::new("cargo")
+    let output2 = Command::new(&binary_path)
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--package",
-            "codesearch-cli",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .env("RUST_LOG", "info")
         .output()
         .context("Failed to run second init command")?;

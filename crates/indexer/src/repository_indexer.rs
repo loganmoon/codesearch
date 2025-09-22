@@ -18,6 +18,8 @@ use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, error, info};
 
+const DELIM: &str = " ";
+
 /// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
 struct IndexProgress {
@@ -58,46 +60,47 @@ pub struct RepositoryIndexer {
 /// Extract embeddable content from a CodeEntity
 fn extract_embedding_content(entity: &CodeEntity) -> String {
     // Combine relevant fields for embedding generation
-    let mut content_parts = Vec::new();
+    let mut content = String::with_capacity(500);
 
-    // Add entity name and qualified name
-    content_parts.push(format!("{} {}", entity.entity_type, entity.name));
-    content_parts.push(entity.qualified_name.clone());
+    // Add entity name and qualified name (moved)
+    content.push_str(&format!("{} {}", entity.entity_type, entity.name));
+    chain_delim(&mut content, &entity.qualified_name);
 
     // Add documentation summary if available
     if let Some(doc) = &entity.documentation_summary {
-        content_parts.push(doc.clone());
+        chain_delim(&mut content, doc);
     }
 
     // Add signature information for functions/methods
     if let Some(sig) = &entity.signature {
         // Format parameters as "name: type" or just "name" if no type
-        let params: Vec<String> = sig
+        let _ = sig // collect into strings
             .parameters
             .iter()
             .map(|(name, type_opt)| {
                 if let Some(ty) = type_opt {
+                    // format
                     format!("{name}: {ty}")
                 } else {
                     name.clone()
                 }
             })
-            .collect();
-        let params_str = params.join(", ");
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|p| chain_delim(&mut content, p))
+            .collect::<Vec<_>>();
 
         if let Some(ret_type) = &sig.return_type {
-            content_parts.push(format!("({params_str}) -> {ret_type}"));
-        } else {
-            content_parts.push(format!("({params_str})"));
+            chain_delim(&mut content, &format!("-> {ret_type}"));
         }
     }
 
-    // Add actual content if available
-    if let Some(content) = &entity.content {
-        content_parts.push(content.clone());
-    }
+    content
+}
 
-    content_parts.join(" ")
+fn chain_delim(out_str: &mut String, text: &str) {
+    out_str.push_str(DELIM);
+    out_str.push_str(text);
 }
 
 impl RepositoryIndexer {
@@ -245,19 +248,19 @@ impl RepositoryIndexer {
             debug!("Bulk loading {} entities", batch_entities.len());
 
             // Generate embeddings for all entities
-            let embedding_texts: Vec<String> = batch_entities
-                .iter()
+            let embedding_texts: Vec<String> = batch_entities // create embedding texts from each entity
+                .iter() // iterate
                 .map(extract_embedding_content)
                 .collect();
 
-            let option_embeddings = self
-                .embedding_manager
-                .embed(embedding_texts)
+            let option_embeddings = self // embed all texts
+                .embedding_manager // access
+                .embed(embedding_texts) // call embed
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
             // Filter entities with valid embeddings
-            let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
+            let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new(); // create destination
 
             for (entity, opt_embedding) in batch_entities
                 .into_iter()
@@ -265,8 +268,10 @@ impl RepositoryIndexer {
             {
                 if let Some(embedding) = opt_embedding {
                     embedded_entities.push(EmbeddedEntity { entity, embedding });
+                    // copy
                 } else {
                     debug!(
+                        // debug log
                         "Skipped entity due to size: {} in {}",
                         entity.qualified_name,
                         entity.file_path.display()
@@ -276,9 +281,10 @@ impl RepositoryIndexer {
 
             // Only store entities that have embeddings
             if !embedded_entities.is_empty() {
-                storage_client
-                    .bulk_load_entities(embedded_entities)
+                storage_client // store entities
+                    .bulk_load_entities(embedded_entities) // store
                     .await
+                    // await
                     .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
             }
 
@@ -519,13 +525,15 @@ mod tests {
         }
     }
 
+    /// Creates a test embedding manager
     fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
         Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
     }
 
     #[tokio::test]
     async fn test_repository_indexer_creation() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let indexer = RepositoryIndexer::new(
@@ -539,7 +547,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_repository_indexing() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let mut indexer = RepositoryIndexer::new(
@@ -561,14 +570,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_processing() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
+        let temp_dir =
+            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
             .await
             .map_err(|e| anyhow::anyhow!("Failed to write test file: {e}"))?;
 
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
-        let embedding_manager = create_test_embedding_manager();
+        let embedding_manager = create_test_embedding_manager(); // creates test embedding manager
         let mut indexer = RepositoryIndexer::new(
             temp_dir.path().to_path_buf(),
             storage_client.clone(),

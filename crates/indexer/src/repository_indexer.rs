@@ -7,8 +7,8 @@ use crate::{IndexResult, IndexStats};
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
-use codesearch_languages::create_extractor;
 use codesearch_embeddings::EmbeddingManager;
+use codesearch_languages::create_extractor;
 use codesearch_storage::StorageClient;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -71,7 +71,8 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
     // Add signature information for functions/methods
     if let Some(sig) = &entity.signature {
         // Format parameters as "name: type" or just "name" if no type
-        let params: Vec<String> = sig.parameters
+        let params: Vec<String> = sig
+            .parameters
             .iter()
             .map(|(name, type_opt)| {
                 if let Some(ty) = type_opt {
@@ -341,10 +342,7 @@ impl RepositoryIndexer {
         debug!("Storing {} entities", entities.len());
 
         // Generate embeddings for entities
-        let embedding_texts: Vec<String> = entities
-            .iter()
-            .map(extract_embedding_content)
-            .collect();
+        let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
 
         let embeddings = self
             .embedding_manager
@@ -450,11 +448,10 @@ fn create_progress_bar(total: usize) -> ProgressBar {
     pb
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codesearch_embeddings::{EmbeddingProvider, EmbeddingManager};
+    use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
     use codesearch_storage::MockStorageClient;
     use std::sync::Arc;
     use tempfile::TempDir;

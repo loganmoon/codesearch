@@ -12,8 +12,9 @@ mod storage_init;
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
+use codesearch_core::entities::EntityType;
 use codesearch_embeddings::{EmbeddingConfig, EmbeddingManager};
-use codesearch_storage::{create_collection_manager, create_storage_client};
+use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
 use indexer::RepositoryIndexer;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -69,6 +70,18 @@ enum Commands {
         /// Number of results to return
         #[arg(short, long, default_value = "10")]
         limit: usize,
+
+        /// Filter by entity type (function, class, struct, etc.)
+        #[arg(long)]
+        entity_type: Option<String>,
+
+        /// Filter by programming language
+        #[arg(long)]
+        language: Option<String>,
+
+        /// Filter by file path pattern
+        #[arg(long)]
+        file: Option<PathBuf>,
     },
     /// Manage containerized dependencies
     #[command(subcommand)]
@@ -117,12 +130,18 @@ async fn main() -> Result<()> {
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
             index_repository(config, force, progress).await
         }
-        Some(Commands::Search { query, limit }) => {
+        Some(Commands::Search {
+            query,
+            limit,
+            entity_type,
+            language,
+            file,
+        }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
             // Load configuration
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
-            search_code(config, query, limit).await
+            search_code(config, query, limit, entity_type, language, file).await
         }
         Some(Commands::Deps(deps_cmd)) => {
             handle_deps_command(deps_cmd, cli.config.as_deref()).await
@@ -386,7 +405,7 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     let embedding_manager = Arc::new(
         EmbeddingManager::from_config(embedding_config)
             .await
-            .context("Failed to create embedding manager")?
+            .context("Failed to create embedding manager")?,
     );
 
     // Step 4: Create storage client for the indexer
@@ -398,22 +417,26 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     let repo_path = find_repository_root()?;
 
     // Step 6: Create and run indexer
-    let mut indexer = RepositoryIndexer::new(
-        repo_path.clone(),
-        storage_client,
-        embedding_manager,
-    );
+    let mut indexer = RepositoryIndexer::new(repo_path.clone(), storage_client, embedding_manager);
 
     // Step 7: Run indexing (it has built-in progress tracking)
-    let result = indexer.index_repository().await
+    let result = indexer
+        .index_repository()
+        .await
         .context("Failed to index repository")?;
 
     // Step 8: Report statistics
     info!("✅ Indexing completed successfully!");
     info!("  Files processed: {}", result.stats().total_files());
-    info!("  Entities extracted: {}", result.stats().entities_extracted());
+    info!(
+        "  Entities extracted: {}",
+        result.stats().entities_extracted()
+    );
     info!("  Failed files: {}", result.stats().failed_files());
-    info!("  Duration: {:.2}s", result.stats().processing_time_ms() as f64 / 1000.0);
+    info!(
+        "  Duration: {:.2}s",
+        result.stats().processing_time_ms() as f64 / 1000.0
+    );
 
     if result.stats().failed_files() > 0 && !result.errors().is_empty() {
         warn!("Errors encountered during indexing:");
@@ -429,10 +452,125 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
 }
 
 /// Search the indexed code
-async fn search_code(_config: Config, _query: String, _limit: usize) -> Result<()> {
-    // TODO: Implement code search
-    println!("🔍 Searching code...");
-    todo!("⚠️  Code search implementation is not yet complete")
+async fn search_code(
+    config: Config,
+    query: String,
+    limit: usize,
+    entity_type: Option<String>,
+    language: Option<String>,
+    file_path: Option<PathBuf>,
+) -> Result<()> {
+    info!("🔍 Searching for: {}", query);
+
+    // Step 1: Ensure dependencies are running
+    if config.storage.auto_start_deps {
+        docker::ensure_dependencies_running(&config.storage)
+            .await
+            .context("Failed to ensure dependencies are running")?;
+    }
+
+    // Step 2: Create collection manager and verify collection exists
+    let collection_manager = create_collection_manager(&config.storage)
+        .await
+        .context("Failed to create collection manager")?;
+
+    if !collection_manager
+        .collection_exists(&config.storage.collection_name)
+        .await
+        .context("Failed to check if collection exists")?
+    {
+        return Err(anyhow!(
+            "Collection '{}' does not exist. Please run 'codesearch init' and 'codesearch index' first.",
+            config.storage.collection_name
+        ));
+    }
+
+    // Step 3: Get storage client from manager
+    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+        .await
+        .context("Failed to create storage client")?;
+
+    // Step 4: Create embedding manager
+    let embedding_config = EmbeddingConfig::default();
+    let embedding_manager = EmbeddingManager::from_config(embedding_config)
+        .await
+        .context("Failed to create embedding manager")?;
+
+    // Step 5: Generate query embedding
+    let query_embeddings = embedding_manager
+        .embed(vec![query.clone()])
+        .await
+        .context("Failed to generate query embedding")?;
+
+    let query_embedding = query_embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("Failed to get query embedding"))?;
+
+    // Step 6: Construct search filters if provided
+    let filters = if entity_type.is_some() || language.is_some() || file_path.is_some() {
+        let parsed_entity_type = entity_type
+            .as_ref()
+            .map(|t| parse_entity_type(t))
+            .transpose()?;
+
+        Some(SearchFilters {
+            entity_type: parsed_entity_type,
+            language,
+            file_path,
+        })
+    } else {
+        None
+    };
+
+    // Step 7: Search for similar entities
+    let results = storage_client
+        .search_similar(query_embedding, limit, filters)
+        .await
+        .context("Failed to search for similar entities")?;
+
+    // Step 8: Display results
+    if results.is_empty() {
+        println!("No results found for query: {}", query);
+    } else {
+        println!("\n📊 Found {} results:\n", results.len());
+        println!("{}", "─".repeat(80));
+
+        for (idx, (entity, score)) in results.iter().enumerate() {
+            let similarity_percent = (score * 100.0) as u32;
+
+            println!(
+                "{}. {} ({}% similarity)",
+                idx + 1,
+                entity.name,
+                similarity_percent
+            );
+            println!("   Type: {:?}", entity.entity_type);
+            println!(
+                "   File: {}:{}",
+                entity.file_path.display(),
+                entity.location.start_line
+            );
+
+            if let Some(ref content) = entity.content {
+                // Show first 200 chars of content
+                let preview = if content.len() > 200 {
+                    format!("{}...", &content[..200])
+                } else {
+                    content.to_string()
+                };
+                println!("   Preview: {}", preview.replace('\n', "\n            "));
+            }
+
+            if idx < results.len() - 1 {
+                println!("{}", "─".repeat(80));
+            }
+        }
+        println!("{}", "─".repeat(80));
+        println!("\n✅ Search completed successfully");
+    }
+
+    Ok(())
 }
 
 /// Handle dependency management commands
@@ -495,5 +633,28 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
             println!("{status}");
             Ok(())
         }
+    }
+}
+
+/// Parse entity type string to EntityType enum
+fn parse_entity_type(entity_type: &str) -> Result<EntityType> {
+    match entity_type.to_lowercase().as_str() {
+        "function" => Ok(EntityType::Function),
+        "method" => Ok(EntityType::Method),
+        "class" => Ok(EntityType::Class),
+        "struct" => Ok(EntityType::Struct),
+        "interface" => Ok(EntityType::Interface),
+        "trait" => Ok(EntityType::Trait),
+        "enum" => Ok(EntityType::Enum),
+        "module" => Ok(EntityType::Module),
+        "package" => Ok(EntityType::Package),
+        "const" | "constant" => Ok(EntityType::Constant),
+        "variable" | "var" => Ok(EntityType::Variable),
+        "type" | "typealias" | "type_alias" => Ok(EntityType::TypeAlias),
+        "macro" => Ok(EntityType::Macro),
+        _ => Err(anyhow!(
+            "Invalid entity type: {}. Valid types are: function, method, class, struct, interface, trait, enum, module, package, constant, variable, type, macro",
+            entity_type
+        )),
     }
 }

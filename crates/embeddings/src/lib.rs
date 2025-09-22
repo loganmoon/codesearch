@@ -15,10 +15,6 @@ mod embed_anything_provider;
 pub mod error;
 pub mod provider;
 
-// Keep local module for now but don't export it
-// #[allow(dead_code)]
-// mod local;
-
 pub use config::{
     BackendType, DeviceType, EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType,
 };
@@ -57,16 +53,5 @@ impl EmbeddingManager {
     /// Generate embeddings for texts
     pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         self.provider.embed(texts).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_manager_creation() {
-        // This will be tested more thoroughly in integration tests
-        // For now, just ensure the module compiles
-        assert_eq!(1 + 1, 2);
     }
 }

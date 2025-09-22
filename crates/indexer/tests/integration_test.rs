@@ -201,11 +201,7 @@ async fn test_full_indexing_pipeline() {
     // Create indexer
     let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
     let embedding_manager = create_test_embedding_manager();
-    let mut indexer = create_indexer(
-        repo_path.clone(),
-        storage_client,
-        embedding_manager,
-    );
+    let mut indexer = create_indexer(repo_path.clone(), storage_client, embedding_manager);
 
     // Verify repository path is set correctly
     // Repository path is now internal to the implementation

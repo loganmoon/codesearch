@@ -30,17 +30,17 @@ impl TestQdrant {
 
         // Start Qdrant container with temporary storage
         let output = Command::new("docker")
-            .args(&[
+            .args([
                 "run",
                 "-d",
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{}:6334", port),
+                &format!("{port}:6334"),
                 "-p",
-                &format!("{}:6333", rest_port),
+                &format!("{rest_port}:6333"),
                 "-v",
-                &format!("{}:/qdrant/storage", temp_dir_name),
+                &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant",
             ])
             .output()
@@ -49,8 +49,7 @@ impl TestQdrant {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow::anyhow!(
-                "Failed to start Qdrant container: {}",
-                stderr
+                "Failed to start Qdrant container: {stderr}"
             ));
         }
 
@@ -69,11 +68,11 @@ impl TestQdrant {
     fn cleanup(&self) {
         // Stop and remove container
         let _ = Command::new("docker")
-            .args(&["stop", &self.container_name])
+            .args(["stop", &self.container_name])
             .output();
 
         let _ = Command::new("docker")
-            .args(&["rm", &self.container_name])
+            .args(["rm", &self.container_name])
             .output();
 
         // Remove temp directory
@@ -96,7 +95,7 @@ fn create_test_repo() -> Result<TempDir> {
     // Initialize git repo
     Command::new("git")
         .current_dir(temp_dir.path())
-        .args(&["init"])
+        .args(["init"])
         .output()
         .context("Failed to init git repo")?;
 
@@ -153,7 +152,7 @@ enabled = ["rust"]
     // Run init command
     let output = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
             "--package",
             "codesearch-cli",
@@ -169,15 +168,13 @@ enabled = ["rust"]
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    println!("stdout: {}", stdout);
-    println!("stderr: {}", stderr);
+    println!("stdout: {stdout}");
+    println!("stderr: {stderr}");
 
     // Check that init succeeded
     assert!(
         output.status.success(),
-        "Init command failed: stdout={}, stderr={}",
-        stdout,
-        stderr
+        "Init command failed: stdout={stdout}, stderr={stderr}"
     );
 
     // Verify success message in output
@@ -239,7 +236,7 @@ enabled = ["rust"]
     // Run init command first time
     let output1 = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
             "--package",
             "codesearch-cli",
@@ -256,7 +253,7 @@ enabled = ["rust"]
     // Run init command again - should handle existing collection gracefully
     let output2 = Command::new("cargo")
         .current_dir(test_repo.path())
-        .args(&[
+        .args([
             "run",
             "--package",
             "codesearch-cli",
@@ -275,9 +272,7 @@ enabled = ["rust"]
     // Second init should also succeed
     assert!(
         output2.status.success(),
-        "Second init command failed: stdout={}, stderr={}",
-        stdout,
-        stderr
+        "Second init command failed: stdout={stdout}, stderr={stderr}"
     );
 
     // Should still show success message

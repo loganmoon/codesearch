@@ -21,6 +21,7 @@ use tracing::{debug, error, info};
 /// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
 struct IndexProgress {
+    #[allow(dead_code)]
     pub total_files: usize,
     pub processed_files: usize,
     pub failed_files: usize,
@@ -76,7 +77,7 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
             .iter()
             .map(|(name, type_opt)| {
                 if let Some(ty) = type_opt {
-                    format!("{}: {}", name, ty)
+                    format!("{name}: {ty}")
                 } else {
                     name.clone()
                 }
@@ -85,9 +86,9 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
         let params_str = params.join(", ");
 
         if let Some(ret_type) = &sig.return_type {
-            content_parts.push(format!("({}) -> {}", params_str, ret_type));
+            content_parts.push(format!("({params_str}) -> {ret_type}"));
         } else {
-            content_parts.push(format!("({})", params_str));
+            content_parts.push(format!("({params_str})"));
         }
     }
 
@@ -534,8 +535,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_repository_indexer_creation() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_repository_indexer_creation() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let indexer = RepositoryIndexer::new(
@@ -544,11 +545,12 @@ mod tests {
             embedding_manager,
         );
         assert_eq!(indexer.repository_path(), temp_dir.path());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_empty_repository_indexing() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_empty_repository_indexing() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
         let mut indexer = RepositoryIndexer::new(
@@ -565,15 +567,16 @@ mod tests {
             assert_eq!(index_result.stats.total_files, 0);
             assert_eq!(index_result.stats.entities_extracted, 0);
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_file_processing() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_file_processing() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
             .await
-            .unwrap();
+            .map_err(|e| anyhow::anyhow!("Failed to write test file: {e}"))?;
 
         let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
         let embedding_manager = create_test_embedding_manager();
@@ -589,5 +592,6 @@ mod tests {
         // The test should at least attempt extraction
         // Full success depends on storage being available
         assert!(result.is_ok() || result.is_err());
+        Ok(())
     }
 }

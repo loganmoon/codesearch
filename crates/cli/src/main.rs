@@ -534,7 +534,7 @@ async fn search_code(
 
     // Step 8: Display results
     if results.is_empty() {
-        println!("No results found for query: {}", query);
+        println!("No results found for query: {query}");
     } else {
         println!("\n📊 Found {} results:\n", results.len());
         println!("{}", "─".repeat(80));
@@ -656,8 +656,7 @@ fn parse_entity_type(entity_type: &str) -> Result<EntityType> {
         "type" | "typealias" | "type_alias" => Ok(EntityType::TypeAlias),
         "macro" => Ok(EntityType::Macro),
         _ => Err(anyhow!(
-            "Invalid entity type: {}. Valid types are: function, method, class, struct, interface, trait, enum, module, package, constant, variable, type, macro",
-            entity_type
+            "Invalid entity type: {entity_type}. Valid types are: function, method, class, struct, interface, trait, enum, module, package, constant, variable, type, macro"
         )),
     }
 }

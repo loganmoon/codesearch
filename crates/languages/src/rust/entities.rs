@@ -77,15 +77,16 @@ pub struct VariantInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MacroType {
-    DeclarativeMacro,
-    ProcMacro,
-    DeriveMacro,
-    AttributeMacro,
+    Declarative,
+    Proc,
+    Derive,
+    Attribute,
 }
 
 impl RustEntityVariant {
     /// Convert the variant to an EntityType
-    pub fn into_entity_type(&self) -> EntityType {
+    #[allow(dead_code)]
+    pub fn to_entity_type(&self) -> EntityType {
         match self {
             RustEntityVariant::Function { .. } => EntityType::Function,
             RustEntityVariant::Struct { .. } => EntityType::Struct,
@@ -100,7 +101,8 @@ impl RustEntityVariant {
     }
 
     /// Convert the variant to EntityMetadata
-    pub fn into_metadata(&self) -> EntityMetadata {
+    #[allow(dead_code)]
+    pub fn to_metadata(&self) -> EntityMetadata {
         let mut metadata = EntityMetadata::default();
         let mut attributes = HashMap::new();
 
@@ -277,10 +279,10 @@ impl RustEntityVariant {
             }
             RustEntityVariant::Macro { macro_type, export } => {
                 let macro_type_str = match macro_type {
-                    MacroType::DeclarativeMacro => "declarative",
-                    MacroType::ProcMacro => "proc_macro",
-                    MacroType::DeriveMacro => "derive",
-                    MacroType::AttributeMacro => "attribute",
+                    MacroType::Declarative => "declarative",
+                    MacroType::Proc => "proc_macro",
+                    MacroType::Derive => "derive",
+                    MacroType::Attribute => "attribute",
                 };
 
                 attributes.insert("macro_type".to_string(), macro_type_str.to_string());
@@ -293,6 +295,7 @@ impl RustEntityVariant {
     }
 
     /// Extract function signature if applicable
+    #[allow(dead_code)]
     pub fn extract_signature(&self) -> Option<FunctionSignature> {
         match self {
             RustEntityVariant::Function {

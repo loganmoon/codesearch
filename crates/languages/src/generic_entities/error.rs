@@ -5,6 +5,7 @@ use std::fmt;
 
 /// Errors that can occur during entity building
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum BuilderError {
     /// Missing required field
     MissingRequiredField(String),
@@ -13,10 +14,10 @@ pub enum BuilderError {
     InvalidFieldValue { field: String, reason: String },
 
     /// Core builder error
-    CoreBuilderError(String),
+    Core(String),
 
     /// Validation error
-    ValidationError(String),
+    Validation(String),
 }
 
 impl fmt::Display for BuilderError {
@@ -28,10 +29,10 @@ impl fmt::Display for BuilderError {
             BuilderError::InvalidFieldValue { field, reason } => {
                 write!(f, "Invalid value for field '{field}': {reason}")
             }
-            BuilderError::CoreBuilderError(msg) => {
+            BuilderError::Core(msg) => {
                 write!(f, "Core builder error: {msg}")
             }
-            BuilderError::ValidationError(msg) => {
+            BuilderError::Validation(msg) => {
                 write!(f, "Validation error: {msg}")
             }
         }
@@ -42,12 +43,12 @@ impl Error for BuilderError {}
 
 impl From<String> for BuilderError {
     fn from(msg: String) -> Self {
-        BuilderError::CoreBuilderError(msg)
+        BuilderError::Core(msg)
     }
 }
 
 impl From<&str> for BuilderError {
     fn from(msg: &str) -> Self {
-        BuilderError::CoreBuilderError(msg.to_string())
+        BuilderError::Core(msg.to_string())
     }
 }

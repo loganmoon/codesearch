@@ -41,8 +41,7 @@ pub async fn create_collection_manager_with_retry(
             }
             Err(e) => {
                 return Err(e).context(format!(
-                    "Failed to connect to storage backend after {} attempts",
-                    MAX_RETRIES
+                    "Failed to connect to storage backend after {MAX_RETRIES} attempts"
                 ))
             }
         }

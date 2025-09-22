@@ -227,7 +227,7 @@ fn build_entity_data(
     let qualified_name = ctx.scope_context.build_qualified_name(name);
 
     CodeEntityBuilder::default()
-        .entity_id(format!("{}#{}", ctx.file_path.display(), qualified_name))
+        .entity_id(format!("{}#{qualified_name}", ctx.file_path.display()))
         .name(name.to_string())
         .qualified_name(qualified_name.clone())
         .entity_type(entity_type)
@@ -240,7 +240,7 @@ fn build_entity_data(
         .file_path(ctx.file_path.to_path_buf())
         .line_range((location.start_line, location.end_line))
         .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {}", e)))
+        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }
 
 // ============================================================================

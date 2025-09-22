@@ -246,11 +246,10 @@ fn small_function() -> i32 {
         r#"
 fn large_function() {{
     // This is a very large function that should be skipped
-    let data = "{}";
+    let data = "{large_body}";
     println!("{{}}", data);
 }}
-"#,
-        large_body
+"#
     );
     fs::write(src_dir.join("large.rs"), large_content)
         .await

@@ -163,6 +163,7 @@ impl IndexStats {
         self.total_files = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_failed_files(&mut self, value: usize) {
         self.failed_files = value;
     }
@@ -171,18 +172,22 @@ impl IndexStats {
         self.entities_extracted = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_relationships_extracted(&mut self, value: usize) {
         self.relationships_extracted = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_functions_indexed(&mut self, value: usize) {
         self.functions_indexed = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_types_indexed(&mut self, value: usize) {
         self.types_indexed = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_variables_indexed(&mut self, value: usize) {
         self.variables_indexed = value;
     }
@@ -191,6 +196,7 @@ impl IndexStats {
         self.processing_time_ms = value;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_memory_usage_bytes(&mut self, value: Option<u64>) {
         self.memory_usage_bytes = value;
     }

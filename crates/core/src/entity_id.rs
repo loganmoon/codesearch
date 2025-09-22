@@ -105,17 +105,30 @@ pub fn generate_entity_id(
     }
 }
 
+/// Parameters for generating entity IDs with custom separators
+pub struct EntityIdParams<'a> {
+    pub name: Option<&'a str>,
+    pub entity_type: EntityType,
+    pub file_path: &'a Path,
+    pub start_line: usize,
+    pub start_column: usize,
+    pub scope_path: &'a str,
+    pub separator: &'a str,
+    pub anonymous_index: usize,
+}
+
 /// Generate entity ID for language-specific scope separators
-pub fn generate_entity_id_with_separator(
-    name: Option<&str>,
-    entity_type: EntityType,
-    file_path: &Path,
-    start_line: usize,
-    start_column: usize,
-    scope_path: &str,
-    separator: &str,
-    anonymous_index: usize,
-) -> String {
+pub fn generate_entity_id_with_separator(params: EntityIdParams) -> String {
+    let EntityIdParams {
+        name,
+        entity_type,
+        file_path,
+        start_line,
+        start_column,
+        scope_path,
+        separator,
+        anonymous_index,
+    } = params;
     match name {
         Some(n) if !n.is_empty() && n != "anonymous" => {
             // Named entity: use fully qualified name with custom separator
@@ -221,29 +234,29 @@ mod tests {
         let path = Path::new("/src/main.py");
 
         // Python-style qualified name
-        let id = generate_entity_id_with_separator(
-            Some("method"),
-            EntityType::Function,
-            path,
-            10,
-            5,
-            "MyClass",
-            ".",
-            0,
-        );
+        let id = generate_entity_id_with_separator(EntityIdParams {
+            name: Some("method"),
+            entity_type: EntityType::Function,
+            file_path: path,
+            start_line: 10,
+            start_column: 5,
+            scope_path: "MyClass",
+            separator: ".",
+            anonymous_index: 0,
+        });
         assert!(id.starts_with("entity-"));
 
         // JavaScript-style qualified name
-        let id2 = generate_entity_id_with_separator(
-            Some("method"),
-            EntityType::Function,
-            Path::new("/src/main.js"),
-            10,
-            5,
-            "MyClass.prototype",
-            ".",
-            0,
-        );
+        let id2 = generate_entity_id_with_separator(EntityIdParams {
+            name: Some("method"),
+            entity_type: EntityType::Function,
+            file_path: Path::new("/src/main.js"),
+            start_line: 10,
+            start_column: 5,
+            scope_path: "MyClass.prototype",
+            separator: ".",
+            anonymous_index: 0,
+        });
         assert!(id2.starts_with("entity-"));
         assert_ne!(id, id2); // Different paths should give different IDs
     }

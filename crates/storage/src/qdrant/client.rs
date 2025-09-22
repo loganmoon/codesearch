@@ -54,7 +54,7 @@ impl QdrantStorageClient {
         }
 
         serde_json::from_value(serde_json::Value::Object(json_map))
-            .map_err(|e| Error::storage(format!("Failed to deserialize entity: {}", e)))
+            .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))
     }
 
     /// Convert Qdrant Value to serde_json Value
@@ -138,8 +138,7 @@ impl StorageClient for QdrantStorageClient {
         let points: Vec<PointStruct> = entities
             .iter()
             .zip(embeddings.iter())
-            .enumerate()
-            .map(|(_idx, (entity, embedding))| {
+            .map(|(entity, embedding)| {
                 let id = PointId::from(entity.entity_id.clone());
                 PointStruct::new(id, embedding.clone(), Self::entity_to_payload(entity))
             })

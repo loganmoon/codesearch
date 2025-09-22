@@ -84,7 +84,7 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("Failed to start dependencies:\n{}", stderr));
+        return Err(anyhow!("Failed to start dependencies:\n{stderr}"));
     }
 
     info!("Dependencies started successfully");

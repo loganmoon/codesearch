@@ -152,7 +152,7 @@ fn default_provider() -> String {
 }
 
 fn default_model() -> String {
-    "all-minilm-l6-v2".to_string()
+    "sfr-small".to_string()
 }
 
 fn default_branch_strategy() -> String {
@@ -263,7 +263,7 @@ impl StorageConfig {
         let hash = XxHash3_128::oneshot(path_str.as_bytes());
 
         // Format: <repo_name>_<hash>
-        format!("{}_{:032x}", sanitized_name, hash)
+        format!("{sanitized_name}_{hash:032x}")
     }
 }
 
@@ -478,7 +478,7 @@ mod tests {
     fn test_collection_name_long_repo_name() {
         // Create a path with very long repo name
         let long_name = "a".repeat(100);
-        let path_str = format!("/home/user/{}", long_name);
+        let path_str = format!("/home/user/{long_name}");
         let path = Path::new(&path_str);
         let name = StorageConfig::generate_collection_name(path);
 

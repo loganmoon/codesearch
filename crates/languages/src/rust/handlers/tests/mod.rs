@@ -1,7 +1,5 @@
 //! Comprehensive test suite for Rust extraction handlers
 
-#![cfg(test)]
-
 mod edge_cases;
 mod enum_tests;
 mod fixtures;

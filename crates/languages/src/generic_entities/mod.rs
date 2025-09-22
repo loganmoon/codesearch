@@ -21,13 +21,15 @@ pub enum EntityVariant {
 }
 impl EntityVariant {
     /// Get the entity type for this variant
+    #[allow(dead_code)]
     pub fn entity_type(&self) -> codesearch_core::entities::EntityType {
         match self {
-            EntityVariant::Rust(rust_variant) => rust_variant.into_entity_type(),
+            EntityVariant::Rust(rust_variant) => rust_variant.to_entity_type(),
         }
     }
 
     /// Get the language for this variant
+    #[allow(dead_code)]
     pub fn language(&self) -> Language {
         match self {
             EntityVariant::Rust(_) => Language::Rust,
@@ -35,13 +37,15 @@ impl EntityVariant {
     }
 
     /// Convert the variant to EntityMetadata
-    pub fn into_metadata(&self) -> codesearch_core::entities::EntityMetadata {
+    #[allow(dead_code)]
+    pub fn to_metadata(&self) -> codesearch_core::entities::EntityMetadata {
         match self {
-            EntityVariant::Rust(rust_variant) => rust_variant.into_metadata(),
+            EntityVariant::Rust(rust_variant) => rust_variant.to_metadata(),
         }
     }
 
     /// Extract function signature if applicable
+    #[allow(dead_code)]
     pub fn extract_signature(&self) -> Option<codesearch_core::entities::FunctionSignature> {
         match self {
             EntityVariant::Rust(rust_variant) => rust_variant.extract_signature(),

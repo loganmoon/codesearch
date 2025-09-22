@@ -13,13 +13,22 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::entities::EntityType;
-use codesearch_embeddings::{EmbeddingConfig, EmbeddingManager};
+use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
 use indexer::RepositoryIndexer;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{info, warn};
+
+/// Convert provider string to EmbeddingProviderType enum
+fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProviderType {
+    match provider {
+        "local" => codesearch_embeddings::EmbeddingProviderType::Local,
+        "mock" => codesearch_embeddings::EmbeddingProviderType::Mock,
+        _ => codesearch_embeddings::EmbeddingProviderType::Local, // Default to local
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "codesearch")]
@@ -235,7 +244,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     // Create embedding manager to get dimensions
     let embeddings_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
-        .provider(codesearch_embeddings::EmbeddingProviderType::Local)
+        .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
         .device(match config.embeddings.device.as_str() {
@@ -401,7 +410,15 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     }
 
     // Step 3: Create embedding manager
-    let embedding_config = EmbeddingConfig::default();
+    let embedding_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+        .provider(parse_provider_type(&config.embeddings.provider))
+        .model(config.embeddings.model.clone())
+        .batch_size(config.embeddings.batch_size)
+        .device(match config.embeddings.device.as_str() {
+            "cuda" => codesearch_embeddings::DeviceType::Cuda,
+            _ => codesearch_embeddings::DeviceType::Cpu,
+        })
+        .build();
     let embedding_manager = Arc::new(
         EmbeddingManager::from_config(embedding_config)
             .await
@@ -491,7 +508,15 @@ async fn search_code(
         .context("Failed to create storage client")?;
 
     // Step 4: Create embedding manager
-    let embedding_config = EmbeddingConfig::default();
+    let embedding_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+        .provider(parse_provider_type(&config.embeddings.provider))
+        .model(config.embeddings.model.clone())
+        .batch_size(config.embeddings.batch_size)
+        .device(match config.embeddings.device.as_str() {
+            "cuda" => codesearch_embeddings::DeviceType::Cuda,
+            _ => codesearch_embeddings::DeviceType::Cpu,
+        })
+        .build();
     let embedding_manager = EmbeddingManager::from_config(embedding_config)
         .await
         .context("Failed to create embedding manager")?;

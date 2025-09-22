@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub mod config;
 mod embed_anything_provider;
 pub mod error;
+mod mock_provider;
 pub mod provider;
 
 pub use config::{
@@ -39,6 +40,10 @@ impl EmbeddingManager {
             EmbeddingProviderType::Local => {
                 let provider = create_embed_anything_provider(config).await?;
                 Arc::from(provider)
+            }
+            EmbeddingProviderType::Mock => {
+                let provider = mock_provider::MockEmbeddingProvider::new(384);
+                Arc::new(provider) as Arc<dyn EmbeddingProvider>
             }
         };
 

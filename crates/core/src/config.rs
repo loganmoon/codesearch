@@ -331,7 +331,7 @@ impl Config {
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
         // Validate provider
-        let valid_providers = ["local", "openai", "gemini"];
+        let valid_providers = ["local", "openai", "gemini", "mock"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
                 "Invalid provider '{}'. Must be one of: {:?}",

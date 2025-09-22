@@ -19,9 +19,9 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 
 ## Code Quality Standards
 
-  - Return Result types - never panic with .unwrap() or .expect()
+  - Return Result types - never panic with .unwrap() or .expect() except in tests
   - Use core::Error for all error types
-  - Enforce `#![deny(warnings)]`, `#![deny(clippy::unwrap_used)]`, `#![deny(clippy::expect_used)]`
+  - Enforce `#![deny(warnings)]`, `#![deny(clippy::unwrap_used)]`, `#![deny(clippy::expect_used)]` ONLY in non-test code
   - VERY strongly favor immutability and borrowing over cloning. Favor builders over `new` or direct struct initialization
   - VERY strongly prefer standalone functions over unnecessary &self methods
   - Implement RAII for resource management

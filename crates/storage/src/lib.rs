@@ -22,15 +22,18 @@ pub struct SearchFilters {
     pub file_path: Option<PathBuf>,
 }
 
+/// Represents a code entity with its vector embedding
+#[derive(Debug, Clone)]
+pub struct EmbeddedEntity {
+    pub entity: CodeEntity,
+    pub embedding: Vec<f32>,
+}
+
 /// Trait for storage clients (CRUD operations only)
 #[async_trait]
 pub trait StorageClient: Send + Sync {
     /// Bulk load entities with their embeddings
-    async fn bulk_load_entities(
-        &self,
-        entities: Vec<CodeEntity>,
-        embeddings: Vec<Vec<f32>>,
-    ) -> Result<()>;
+    async fn bulk_load_entities(&self, embedded_entities: Vec<EmbeddedEntity>) -> Result<()>;
 
     /// Search for similar entities
     async fn search_similar(
@@ -62,11 +65,7 @@ impl MockStorageClient {
 
 #[async_trait]
 impl StorageClient for MockStorageClient {
-    async fn bulk_load_entities(
-        &self,
-        _entities: Vec<CodeEntity>,
-        _embeddings: Vec<Vec<f32>>,
-    ) -> Result<()> {
+    async fn bulk_load_entities(&self, _embedded_entities: Vec<EmbeddedEntity>) -> Result<()> {
         // Mock implementation - just succeed
         Ok(())
     }

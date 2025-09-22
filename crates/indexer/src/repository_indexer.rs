@@ -9,7 +9,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::StorageClient;
+use codesearch_storage::{EmbeddedEntity, StorageClient};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
@@ -257,38 +257,29 @@ impl RepositoryIndexer {
                 .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
             // Filter entities with valid embeddings
-            let mut filtered_entities = Vec::new();
-            let mut filtered_embeddings = Vec::new();
-            let mut skipped_count = 0;
+            let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
 
             for (entity, opt_embedding) in batch_entities
                 .into_iter()
                 .zip(option_embeddings.into_iter())
             {
                 if let Some(embedding) = opt_embedding {
-                    filtered_entities.push(entity);
-                    filtered_embeddings.push(embedding);
+                    embedded_entities.push(EmbeddedEntity { entity, embedding });
                 } else {
-                    skipped_count += 1;
-                    info!(
+                    debug!(
                         "Skipped entity due to size: {} in {}",
-                        entity.name,
+                        entity.qualified_name,
                         entity.file_path.display()
                     );
                 }
             }
 
             // Only store entities that have embeddings
-            if !filtered_entities.is_empty() {
+            if !embedded_entities.is_empty() {
                 storage_client
-                    .bulk_load_entities(filtered_entities, filtered_embeddings)
+                    .bulk_load_entities(embedded_entities)
                     .await
                     .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
-            }
-
-            if skipped_count > 0 {
-                info!("Skipped {} entities due to size limits", skipped_count);
-                stats.entities_skipped_size += skipped_count;
             }
 
             debug!(
@@ -384,13 +375,11 @@ impl RepositoryIndexer {
             .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
         // Filter entities with valid embeddings
-        let mut filtered_entities = Vec::new();
-        let mut filtered_embeddings = Vec::new();
+        let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
 
         for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
             if let Some(embedding) = opt_embedding {
-                filtered_entities.push(entity);
-                filtered_embeddings.push(embedding);
+                embedded_entities.push(EmbeddedEntity { entity, embedding });
             } else {
                 stats.entities_skipped_size += 1;
                 info!(
@@ -402,9 +391,9 @@ impl RepositoryIndexer {
         }
 
         // Only store entities that have embeddings
-        if !filtered_entities.is_empty() {
+        if !embedded_entities.is_empty() {
             storage_client
-                .bulk_load_entities(filtered_entities, filtered_embeddings)
+                .bulk_load_entities(embedded_entities)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
         }

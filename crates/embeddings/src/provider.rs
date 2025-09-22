@@ -15,8 +15,9 @@ pub trait EmbeddingProvider: Send + Sync {
     /// * `texts` - List of text strings to embed
     ///
     /// # Returns
-    /// A vector of embedding vectors (f32 for Qdrant compatibility), one for each input text
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>>;
+    /// A vector of Option embedding vectors (f32 for Qdrant compatibility), one for each input text.
+    /// Returns None for texts that exceed the model's context window.
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>>;
 
     /// Get the embedding dimension
     ///

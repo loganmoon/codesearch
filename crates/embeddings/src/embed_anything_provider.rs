@@ -132,7 +132,7 @@ impl EmbedAnythingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for EmbedAnythingProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -147,72 +147,98 @@ impl EmbeddingProvider for EmbedAnythingProvider {
             .collect();
 
         for chunk in chunks {
-            // Acquire semaphore permit for this embedding operation
-            let permit = self
-                .concurrency_limiter
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|e| {
-                    EmbeddingError::InferenceError(format!(
-                        "Failed to acquire concurrency permit: {e}"
-                    ))
-                })?;
+            // Check each text's length against context limit
+            let mut texts_to_embed = Vec::new();
+            let mut indices_to_embed = Vec::new();
+            let mut chunk_results = vec![None; chunk.len()];
 
-            // Clone necessary data for the async operation
-            let embedder = Arc::clone(&self.embedder);
-            let expected_dim = self.dimensions;
+            for (i, text) in chunk.iter().enumerate() {
+                if text.len() <= self.max_context {
+                    texts_to_embed.push(text.clone());
+                    indices_to_embed.push(i);
+                }
+                // Texts exceeding limit remain as None in chunk_results
+            }
 
-            // Perform embedding generation with controlled concurrency
-            let chunk_embeddings = tokio::spawn(async move {
-                // Keep the permit alive for the duration of the operation
-                let _permit = permit;
-
-                // Use embed_query for embedding generation
-                let embeddings = embed_query(
-                    &chunk.iter().map(String::as_str).collect::<Vec<_>>(),
-                    &embedder,
-                    None,
-                )
-                .await
-                .map_err(|e| {
-                    EmbeddingError::InferenceError(format!("Embedding generation failed: {e:?}"))
-                })?;
-
-                // Extract and convert embeddings
-                let mut chunk_results = Vec::with_capacity(embeddings.len());
-                for embed_data in embeddings {
-                    let dense_vec = embed_data.embedding.to_dense().map_err(|e| {
+            // Only process texts that fit within context window
+            if !texts_to_embed.is_empty() {
+                // Acquire semaphore permit for this embedding operation
+                let permit = self
+                    .concurrency_limiter
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| {
                         EmbeddingError::InferenceError(format!(
-                            "Failed to extract dense vector: {e:?}"
+                            "Failed to acquire concurrency permit: {e}"
                         ))
                     })?;
 
-                    // Validate dimensions
-                    if dense_vec.len() != expected_dim {
-                        return Err(EmbeddingError::InferenceError(format!(
-                            "Dimension mismatch: expected {expected_dim}, got {}",
-                            dense_vec.len()
-                        )));
+                // Clone necessary data for the async operation
+                let embedder = Arc::clone(&self.embedder);
+                let expected_dim = self.dimensions;
+
+                // Perform embedding generation with controlled concurrency
+                let embeddings = tokio::spawn(async move {
+                    // Keep the permit alive for the duration of the operation
+                    let _permit = permit;
+
+                    // Use embed_query for embedding generation
+                    let embeddings = embed_query(
+                        &texts_to_embed
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                        &embedder,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| {
+                        EmbeddingError::InferenceError(format!(
+                            "Embedding generation failed: {e:?}"
+                        ))
+                    })?;
+
+                    // Extract and convert embeddings
+                    let mut results = Vec::with_capacity(embeddings.len());
+                    for embed_data in embeddings {
+                        let dense_vec = embed_data.embedding.to_dense().map_err(|e| {
+                            EmbeddingError::InferenceError(format!(
+                                "Failed to extract dense vector: {e:?}"
+                            ))
+                        })?;
+
+                        // Validate dimensions
+                        if dense_vec.len() != expected_dim {
+                            return Err(EmbeddingError::InferenceError(format!(
+                                "Dimension mismatch: expected {expected_dim}, got {}",
+                                dense_vec.len()
+                            )));
+                        }
+
+                        results.push(dense_vec);
                     }
 
-                    chunk_results.push(dense_vec);
-                }
+                    Ok::<Vec<Vec<f32>>, EmbeddingError>(results)
+                })
+                .await
+                .map_err(|e| {
+                    if e.is_panic() {
+                        EmbeddingError::InferenceError("Embedding task panicked".to_string())
+                    } else {
+                        EmbeddingError::InferenceError(
+                            "Runtime shutting down during embedding".to_string(),
+                        )
+                    }
+                })??;
 
-                Ok::<Vec<Vec<f32>>, EmbeddingError>(chunk_results)
-            })
-            .await
-            .map_err(|e| {
-                if e.is_panic() {
-                    EmbeddingError::InferenceError("Embedding task panicked".to_string())
-                } else {
-                    EmbeddingError::InferenceError(
-                        "Runtime shutting down during embedding".to_string(),
-                    )
+                // Place embeddings at their original indices
+                for (embed_idx, orig_idx) in indices_to_embed.iter().enumerate() {
+                    chunk_results[*orig_idx] = Some(embeddings[embed_idx].clone());
                 }
-            })??;
+            }
 
-            all_embeddings.extend(chunk_embeddings);
+            all_embeddings.extend(chunk_results);
         }
 
         Ok(all_embeddings)

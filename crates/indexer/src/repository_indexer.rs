@@ -91,15 +91,9 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
         }
     }
 
-    // Add actual content if available (truncate for efficiency)
+    // Add actual content if available
     if let Some(content) = &entity.content {
-        // Take first 500 chars to avoid overly long embeddings
-        let truncated = if content.len() > 500 {
-            format!("{}...", &content[..500])
-        } else {
-            content.clone()
-        };
-        content_parts.push(truncated);
+        content_parts.push(content.clone());
     }
 
     content_parts.join(" ")
@@ -185,10 +179,18 @@ impl RepositoryIndexer {
         stats.processing_time_ms = start_time.elapsed().as_millis() as u64;
 
         info!(
-            "Indexing complete: {} files, {} entities, {} relationships in {:.2}s",
+            "Indexing complete: {} files, {} entities, {} relationships{} in {:.2}s",
             stats.total_files,
             stats.entities_extracted,
             stats.relationships_extracted,
+            if stats.entities_skipped_size > 0 {
+                format!(
+                    " ({} entities skipped due to size)",
+                    stats.entities_skipped_size
+                )
+            } else {
+                String::new()
+            },
             stats.processing_time_ms as f64 / 1000.0
         );
 
@@ -247,16 +249,46 @@ impl RepositoryIndexer {
                 .map(extract_embedding_content)
                 .collect();
 
-            let embeddings = self
+            let option_embeddings = self
                 .embedding_manager
                 .embed(embedding_texts)
                 .await
                 .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
-            storage_client
-                .bulk_load_entities(batch_entities, embeddings)
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+            // Filter entities with valid embeddings
+            let mut filtered_entities = Vec::new();
+            let mut filtered_embeddings = Vec::new();
+            let mut skipped_count = 0;
+
+            for (entity, opt_embedding) in batch_entities
+                .into_iter()
+                .zip(option_embeddings.into_iter())
+            {
+                if let Some(embedding) = opt_embedding {
+                    filtered_entities.push(entity);
+                    filtered_embeddings.push(embedding);
+                } else {
+                    skipped_count += 1;
+                    info!(
+                        "Skipped entity due to size: {} in {}",
+                        entity.name,
+                        entity.file_path.display()
+                    );
+                }
+            }
+
+            // Only store entities that have embeddings
+            if !filtered_entities.is_empty() {
+                storage_client
+                    .bulk_load_entities(filtered_entities, filtered_embeddings)
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+            }
+
+            if skipped_count > 0 {
+                info!("Skipped {} entities due to size limits", skipped_count);
+                stats.entities_skipped_size += skipped_count;
+            }
 
             debug!(
                 "Successfully bulk loaded batch of {} files",
@@ -344,16 +376,37 @@ impl RepositoryIndexer {
         // Generate embeddings for entities
         let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
 
-        let embeddings = self
+        let option_embeddings = self
             .embedding_manager
             .embed(embedding_texts)
             .await
             .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
-        storage_client
-            .bulk_load_entities(entities, embeddings)
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+        // Filter entities with valid embeddings
+        let mut filtered_entities = Vec::new();
+        let mut filtered_embeddings = Vec::new();
+
+        for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
+            if let Some(embedding) = opt_embedding {
+                filtered_entities.push(entity);
+                filtered_embeddings.push(embedding);
+            } else {
+                stats.entities_skipped_size += 1;
+                info!(
+                    "Skipped entity due to size: {} in {}",
+                    entity.name,
+                    entity.file_path.display()
+                );
+            }
+        }
+
+        // Only store entities that have embeddings
+        if !filtered_entities.is_empty() {
+            storage_client
+                .bulk_load_entities(filtered_entities, filtered_embeddings)
+                .await
+                .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+        }
 
         debug!("Successfully stored entities from {:?}", file_path);
 
@@ -462,9 +515,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for MockEmbeddingProvider {
-        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
             // Return dummy embeddings with 384 dimensions
-            Ok(texts.into_iter().map(|_| vec![0.0f32; 384]).collect())
+            Ok(texts.into_iter().map(|_| Some(vec![0.0f32; 384])).collect())
         }
 
         fn embedding_dimension(&self) -> usize {

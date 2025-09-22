@@ -43,7 +43,10 @@ async fn test_batch_size_validation() {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for TestProvider {
-        async fn embed(&self, texts: Vec<String>) -> codesearch_core::error::Result<Vec<Vec<f32>>> {
+        async fn embed(
+            &self,
+            texts: Vec<String>,
+        ) -> codesearch_core::error::Result<Vec<Option<Vec<f32>>>> {
             if texts.len() > self.max_batch {
                 return Err(EmbeddingError::BatchSizeExceeded {
                     requested: texts.len(),
@@ -51,7 +54,7 @@ async fn test_batch_size_validation() {
                 }
                 .into());
             }
-            Ok(texts.iter().map(|_| vec![0.0f32; 768]).collect())
+            Ok(texts.iter().map(|_| Some(vec![0.0f32; 768])).collect())
         }
 
         fn embedding_dimension(&self) -> usize {
@@ -76,4 +79,68 @@ async fn test_batch_size_validation() {
 
     let error = result.unwrap_err();
     assert!(error.to_string().contains("Batch size 3 exceeds maximum 2"));
+}
+
+#[tokio::test]
+async fn test_embedding_size_limits() {
+    use codesearch_core::error::Result;
+    use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
+
+    struct SizeLimitProvider {
+        max_context: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for SizeLimitProvider {
+        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
+            Ok(texts
+                .iter()
+                .map(|text| {
+                    if text.len() <= self.max_context {
+                        Some(vec![0.0f32; 768])
+                    } else {
+                        None
+                    }
+                })
+                .collect())
+        }
+
+        fn embedding_dimension(&self) -> usize {
+            768
+        }
+
+        fn max_sequence_length(&self) -> usize {
+            self.max_context
+        }
+    }
+
+    let provider = SizeLimitProvider { max_context: 100 };
+    let manager = EmbeddingManager::new(std::sync::Arc::new(provider));
+
+    // Test text under limit returns Some
+    let small_text = vec!["Small text".to_string()];
+    let result = manager.embed(small_text).await.unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_some());
+    assert_eq!(result[0].as_ref().unwrap().len(), 768);
+
+    // Test text over limit returns None
+    let large_text = vec!["x".repeat(150)];
+    let result = manager.embed(large_text).await.unwrap();
+    assert_eq!(result.len(), 1);
+    assert!(result[0].is_none());
+
+    // Test batch with mixed sizes
+    let mixed_texts = vec![
+        "Small".to_string(),
+        "x".repeat(150),
+        "Another small text".to_string(),
+        "y".repeat(200),
+    ];
+    let result = manager.embed(mixed_texts).await.unwrap();
+    assert_eq!(result.len(), 4);
+    assert!(result[0].is_some()); // Small
+    assert!(result[1].is_none()); // Large
+    assert!(result[2].is_some()); // Small
+    assert!(result[3].is_none()); // Large
 }

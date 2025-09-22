@@ -73,6 +73,8 @@ pub struct IndexStats {
     types_indexed: usize,
     /// Number of variables indexed
     variables_indexed: usize,
+    /// Number of entities skipped due to size limits
+    entities_skipped_size: usize,
     /// Processing time in milliseconds
     processing_time_ms: u64,
     /// Memory usage in bytes (approximate)
@@ -115,6 +117,11 @@ impl IndexStats {
         self.variables_indexed
     }
 
+    /// Get the number of entities skipped due to size limits
+    pub fn entities_skipped_size(&self) -> usize {
+        self.entities_skipped_size
+    }
+
     /// Get the processing time in milliseconds
     pub fn processing_time_ms(&self) -> u64 {
         self.processing_time_ms
@@ -134,6 +141,7 @@ impl IndexStats {
         self.functions_indexed += other.functions_indexed;
         self.types_indexed += other.types_indexed;
         self.variables_indexed += other.variables_indexed;
+        self.entities_skipped_size += other.entities_skipped_size;
         self.processing_time_ms += other.processing_time_ms;
 
         // For memory, take the max if both are present

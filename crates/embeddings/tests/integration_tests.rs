@@ -40,11 +40,16 @@ async fn test_embed_anything_provider_real_model() {
     assert_eq!(results.len(), 2);
     // Dynamic dimensions - just check they're consistent
     let dimensions = embeddings.embedding_dimension();
-    assert_eq!(results[0].len(), dimensions);
-    assert_eq!(results[1].len(), dimensions);
+
+    // Unwrap the Option values - these should all be Some since text is small
+    let embed1 = results[0].as_ref().unwrap();
+    let embed2 = results[1].as_ref().unwrap();
+
+    assert_eq!(embed1.len(), dimensions);
+    assert_eq!(embed2.len(), dimensions);
 
     // Check that embeddings are different for different code
-    let similarity = cosine_similarity(&results[0], &results[1]);
+    let similarity = cosine_similarity(embed1, embed2);
     assert!(similarity < 0.99); // Should not be identical
     assert!(similarity > 0.0); // Should have some similarity (both are code)
 }
@@ -77,7 +82,8 @@ async fn test_batch_processing() {
 
     // All embeddings should have correct dimension
     let dimensions = embeddings.embedding_dimension();
-    for embedding in &results {
+    for embedding_option in &results {
+        let embedding = embedding_option.as_ref().unwrap();
         assert_eq!(embedding.len(), dimensions);
     }
 }
@@ -124,7 +130,9 @@ async fn test_embedding_consistency() {
     let result2 = embeddings.embed(vec![code]).await.unwrap();
 
     // Should produce identical embeddings for identical input
-    let similarity = cosine_similarity(&result1[0], &result2[0]);
+    let embed1 = result1[0].as_ref().unwrap();
+    let embed2 = result2[0].as_ref().unwrap();
+    let similarity = cosine_similarity(embed1, embed2);
     assert!(
         similarity > 0.9999,
         "Embeddings should be nearly identical for same input"

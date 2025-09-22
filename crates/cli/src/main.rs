@@ -502,10 +502,13 @@ async fn search_code(
         .await
         .context("Failed to generate query embedding")?;
 
-    let query_embedding = query_embeddings
+    let query_embedding_option = query_embeddings
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("Failed to get query embedding"))?;
+
+    let query_embedding =
+        query_embedding_option.ok_or_else(|| anyhow!("Query text exceeds model context window"))?;
 
     // Step 6: Construct search filters if provided
     let filters = if entity_type.is_some() || language.is_some() || file_path.is_some() {

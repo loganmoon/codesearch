@@ -31,6 +31,6 @@ impl EmbeddingProvider for MockEmbeddingProvider {
     }
 
     fn max_sequence_length(&self) -> usize {
-        512  // Mock value
+        512 // Mock value
     }
 }

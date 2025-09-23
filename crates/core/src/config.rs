@@ -565,7 +565,7 @@ mod tests {
 
         assert_eq!(config.storage.collection_name, "test_collection");
         assert_eq!(config.embeddings.provider, "local");
-        assert_eq!(config.embeddings.model, "all-minilm-l6-v2");
+        assert_eq!(config.embeddings.model, "sfr-small");
     }
 
     #[test]

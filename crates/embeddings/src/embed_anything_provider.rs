@@ -3,16 +3,25 @@
 use crate::{config::EmbeddingConfig, error::EmbeddingError, provider::EmbeddingProvider};
 use async_trait::async_trait;
 use codesearch_core::error::Result;
-use embed_anything::embeddings::local::bert::BertEmbedder;
+use embed_anything::embeddings::local::jina::{JinaEmbed, JinaEmbedder};
+use embed_anything::embeddings::local::modernbert::ModernBertEmbedder;
 use embed_anything::{
     embed_query,
     embeddings::embed::{Embedder, TextEmbedder},
 };
-use hf_hub::api::tokio::Api;
+use hf_hub::api::tokio::ApiBuilder;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{debug, info};
+
+/// Supported model architectures
+#[derive(Debug, Clone)]
+enum ModelArchitecture {
+    ModernBert,
+    Jina,
+    Unknown(String),
+}
 
 /// HuggingFace model configuration structure
 #[derive(Deserialize, Debug)]
@@ -25,22 +34,34 @@ struct HuggingFaceConfig {
     num_hidden_layers: Option<usize>,
     #[allow(dead_code)]
     vocab_size: Option<usize>,
-    #[allow(dead_code)]
     model_type: Option<String>,
 }
 
-/// Model ID mappings for common aliases
-fn resolve_model_id(model: &str) -> &str {
-    match model {
-        "sfr-small" | "small" => "Salesforce/SFR-Embedding-Code-400M_R",
-        "sfr-large" | "large" => "Salesforce/SFR-Embedding-Code-2B_R",
-        custom => custom,
+/// Detect model architecture from HuggingFace config
+fn detect_architecture(config: &HuggingFaceConfig) -> ModelArchitecture {
+    match config.model_type.as_deref() {
+        Some("modernbert") => ModelArchitecture::ModernBert,
+        Some("jina_bert") | Some("jina") => ModelArchitecture::Jina,
+        Some(other) => {
+            // Try to detect based on model patterns
+            if other.contains("bert") && !other.contains("jina") {
+                ModelArchitecture::ModernBert
+            } else if other.contains("jina") {
+                ModelArchitecture::Jina
+            } else {
+                ModelArchitecture::Unknown(other.to_string())
+            }
+        }
+        None => ModelArchitecture::Unknown("unspecified".to_string()),
     }
 }
 
 /// Get model metadata from HuggingFace
-async fn get_model_metadata(model_id: &str) -> Result<(usize, usize)> {
-    let api = Api::new()
+async fn get_model_metadata(model_id: &str) -> Result<(usize, usize, ModelArchitecture)> {
+    // Fetch metadata dynamically from HuggingFace for all models
+    let api = ApiBuilder::new()
+        .with_progress(false)
+        .build()
         .map_err(|e| EmbeddingError::ModelLoadError(format!("Failed to initialize HF API: {e}")))?;
 
     let repo = api.model(model_id.to_string());
@@ -57,11 +78,15 @@ async fn get_model_metadata(model_id: &str) -> Result<(usize, usize)> {
     let config: HuggingFaceConfig = serde_json::from_str(&config_content)
         .map_err(|e| EmbeddingError::ModelLoadError(format!("Failed to parse config.json: {e}")))?;
 
+    let hidden_size = config.hidden_size;
+    let max_context = config.max_position_embeddings;
+    let architecture = detect_architecture(&config);
+
     info!(
-        "Model {model_id} metadata: hidden_size={}, max_position_embeddings={}",
-        config.hidden_size, config.max_position_embeddings
+        "Model {model_id} metadata: hidden_size={}, max_position_embeddings={}, architecture={:?}",
+        hidden_size, max_context, architecture
     );
-    Ok((config.hidden_size, config.max_position_embeddings))
+    Ok((hidden_size, max_context, architecture))
 }
 
 /// Flexible embeddings implementation using embed_anything
@@ -84,40 +109,78 @@ impl EmbedAnythingProvider {
 
         info!("Initializing embeddings with model: {}", config.model);
 
-        // Resolve model ID from aliases
-        let model_id = resolve_model_id(&config.model);
+        // Use model ID directly
+        let model_id = &config.model;
         debug!("Using model ID: {model_id}");
 
         // Get model metadata from HuggingFace config
-        let (dimensions, max_context) = get_model_metadata(model_id).await?;
+        let (dimensions, max_context, architecture) = get_model_metadata(model_id).await?;
 
-        // Create BertEmbedder with the specified model
-        let model_id_owned = model_id.to_string();
-        let bert_embedder = tokio::task::spawn_blocking(move || {
-            BertEmbedder::new(
-                model_id_owned,
-                None, // No specific revision
-                None, // No auth token
-            )
-        })
-        .await
-        .map_err(|e| {
-            if e.is_panic() {
-                EmbeddingError::ModelLoadError("Model loading panicked".to_string())
-            } else {
-                EmbeddingError::ModelLoadError(
-                    "Runtime shutting down during model load".to_string(),
-                )
+        // Create appropriate embedder based on detected architecture
+        let embedder = match architecture {
+            ModelArchitecture::ModernBert => {
+                let model_id_owned = model_id.to_string();
+                let modernbert_embedder = tokio::task::spawn_blocking(move || {
+                    ModernBertEmbedder::new(
+                        model_id_owned,
+                        None, // No specific revision
+                        None, // No auth token
+                        None, // No specific dtype
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    if e.is_panic() {
+                        EmbeddingError::ModelLoadError("Model loading panicked".to_string())
+                    } else {
+                        EmbeddingError::ModelLoadError(
+                            "Runtime shutting down during model load".to_string(),
+                        )
+                    }
+                })?
+                .map_err(|e| {
+                    EmbeddingError::ModelLoadError(format!(
+                        "Failed to load ModernBert model: {e:?}"
+                    ))
+                })?;
+
+                Arc::new(Embedder::Text(TextEmbedder::ModernBert(Box::new(
+                    modernbert_embedder,
+                ))))
             }
-        })?
-        .map_err(|e| EmbeddingError::ModelLoadError(format!("Failed to load model: {e:?}")))?;
+            ModelArchitecture::Jina => {
+                let model_id_owned = model_id.to_string();
+                let jina_embedder = tokio::task::spawn_blocking(move || {
+                    JinaEmbedder::new(&model_id_owned, None, None)
+                })
+                .await
+                .map_err(|e| {
+                    if e.is_panic() {
+                        EmbeddingError::ModelLoadError("Model loading panicked".to_string())
+                    } else {
+                        EmbeddingError::ModelLoadError(
+                            "Runtime shutting down during model load".to_string(),
+                        )
+                    }
+                })?
+                .map_err(|e| {
+                    EmbeddingError::ModelLoadError(format!("Failed to load Jina model: {e:?}"))
+                })?;
 
-        // Create embedder
-        let embedder = Arc::new(Embedder::Text(TextEmbedder::Bert(Box::new(bert_embedder))));
+                Arc::new(Embedder::Text(TextEmbedder::Jina(
+                    Box::new(jina_embedder) as Box<dyn JinaEmbed + Send + Sync>
+                )))
+            }
+            ModelArchitecture::Unknown(model_type) => {
+                return Err(EmbeddingError::ModelLoadError(format!(
+                    "Unsupported model architecture: {model_type}. Only ModernBert and Jina models are currently supported."
+                )))?;
+            }
+        };
 
         info!(
-            "Embeddings initialized with model '{}', {} dimensions, max context: {}",
-            model_id, dimensions, max_context
+            "Embeddings initialized with {:?} model '{}', {} dimensions, max context: {}",
+            architecture, model_id, dimensions, max_context
         );
 
         Ok(Self {

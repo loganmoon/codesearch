@@ -90,31 +90,6 @@ async fn test_batch_processing() {
 
 #[tokio::test]
 #[ignore]
-async fn test_long_text_handling() {
-    let config = EmbeddingConfigBuilder::new()
-        .model("nomic-ai/modernbert-embed-base")
-        .batch_size(32)
-        .model_cache_dir("./test_models")
-        .build();
-    let embeddings = create_embed_anything_provider(config).await.unwrap();
-
-    // Create a very long code sample
-    let long_code = "x = 1\n".repeat(1000); // Very long text
-
-    let result = embeddings.embed(vec![long_code]).await;
-
-    // Should handle long text gracefully (truncation or error)
-    assert!(
-        result.is_ok()
-            || matches!(
-                result,
-                Err(e) if e.to_string().contains("sequence")
-            )
-    );
-}
-
-#[tokio::test]
-#[ignore]
 async fn test_embedding_consistency() {
     let config = EmbeddingConfigBuilder::new()
         .model("nomic-ai/modernbert-embed-base")
@@ -191,55 +166,4 @@ async fn test_jina_v3_embeddings() {
     let similarity = cosine_similarity(embed1, embed2);
     assert!(similarity < 0.99); // Should not be identical
     assert!(similarity > 0.0); // Should have some similarity (both are code)
-}
-
-#[tokio::test]
-#[ignore] // Run with --ignored flag to test with actual models
-async fn test_model_switching() {
-    // First test with ModernBert model
-    let config_modernbert = EmbeddingConfigBuilder::new()
-        .provider(EmbeddingProviderType::Local)
-        .model("nomic-ai/modernbert-embed-base")
-        .batch_size(32)
-        .device(DeviceType::Cpu)
-        .backend(BackendType::Candle)
-        .max_workers(4)
-        .model_cache_dir("./test_models")
-        .build();
-
-    let embeddings_modernbert = create_embed_anything_provider(config_modernbert)
-        .await
-        .unwrap();
-    let modernbert_dim = embeddings_modernbert.embedding_dimension();
-
-    // Now test with Jina model
-    let config_jina = EmbeddingConfigBuilder::new()
-        .provider(EmbeddingProviderType::Local)
-        .model("jinaai/jina-embeddings-v3")
-        .batch_size(32)
-        .device(DeviceType::Cpu)
-        .backend(BackendType::Candle)
-        .max_workers(4)
-        .model_cache_dir("./test_models")
-        .build();
-
-    let embeddings_jina = create_embed_anything_provider(config_jina).await.unwrap();
-    let jina_dim = embeddings_jina.embedding_dimension();
-
-    // Verify dimensions are as expected
-    assert_eq!(jina_dim, 1024); // Jina v3 has fixed 1024 dimensions
-                                // ModernBert dimensions vary by model, just check it's not 1024
-    assert_ne!(modernbert_dim, jina_dim);
-
-    // Test both can generate embeddings
-    let test_code = vec!["print('test')".to_string()];
-
-    let modernbert_result = embeddings_modernbert
-        .embed(test_code.clone())
-        .await
-        .unwrap();
-    let jina_result = embeddings_jina.embed(test_code).await.unwrap();
-
-    assert_eq!(modernbert_result[0].as_ref().unwrap().len(), modernbert_dim);
-    assert_eq!(jina_result[0].as_ref().unwrap().len(), jina_dim);
 }

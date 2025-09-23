@@ -12,6 +12,7 @@ use embed_anything::{
 use hf_hub::api::tokio::ApiBuilder;
 use serde::Deserialize;
 use std::sync::Arc;
+use tokenizers::Tokenizer;
 use tokio::sync::Semaphore;
 use tracing::{debug, info};
 
@@ -92,6 +93,7 @@ async fn get_model_metadata(model_id: &str) -> Result<(usize, usize, ModelArchit
 /// Flexible embeddings implementation using embed_anything
 pub struct EmbedAnythingProvider {
     embedder: Arc<Embedder>,
+    tokenizer: Arc<Tokenizer>,
     dimensions: usize,
     max_context: usize,
     batch_size: usize,
@@ -117,7 +119,7 @@ impl EmbedAnythingProvider {
         let (dimensions, max_context, architecture) = get_model_metadata(model_id).await?;
 
         // Create appropriate embedder based on detected architecture
-        let embedder = match architecture {
+        let (embedder, tokenizer) = match architecture {
             ModelArchitecture::ModernBert => {
                 let model_id_owned = model_id.to_string();
                 let modernbert_embedder = tokio::task::spawn_blocking(move || {
@@ -144,9 +146,12 @@ impl EmbedAnythingProvider {
                     ))
                 })?;
 
-                Arc::new(Embedder::Text(TextEmbedder::ModernBert(Box::new(
+                // Clone tokenizer before moving embedder
+                let tokenizer = Arc::new(modernbert_embedder.tokenizer.clone());
+                let embedder = Arc::new(Embedder::Text(TextEmbedder::ModernBert(Box::new(
                     modernbert_embedder,
-                ))))
+                ))));
+                (embedder, tokenizer)
             }
             ModelArchitecture::Jina => {
                 let model_id_owned = model_id.to_string();
@@ -167,9 +172,12 @@ impl EmbedAnythingProvider {
                     EmbeddingError::ModelLoadError(format!("Failed to load Jina model: {e:?}"))
                 })?;
 
-                Arc::new(Embedder::Text(TextEmbedder::Jina(
-                    Box::new(jina_embedder) as Box<dyn JinaEmbed + Send + Sync>
-                )))
+                // Clone tokenizer before moving embedder
+                let tokenizer = Arc::new(jina_embedder.tokenizer.clone());
+                let embedder = Arc::new(Embedder::Text(TextEmbedder::Jina(
+                    Box::new(jina_embedder) as Box<dyn JinaEmbed + Send + Sync>,
+                )));
+                (embedder, tokenizer)
             }
             ModelArchitecture::Unknown(model_type) => {
                 return Err(EmbeddingError::ModelLoadError(format!(
@@ -185,6 +193,7 @@ impl EmbedAnythingProvider {
 
         Ok(Self {
             embedder,
+            tokenizer,
             dimensions,
             max_context,
             batch_size: config.batch_size,
@@ -216,11 +225,36 @@ impl EmbeddingProvider for EmbedAnythingProvider {
             let mut chunk_results = vec![None; chunk.len()];
 
             for (i, text) in chunk.iter().enumerate() {
-                if text.len() <= self.max_context {
-                    texts_to_embed.push(text.clone());
-                    indices_to_embed.push(i);
+                // Quick pre-filter for obviously too long texts
+                // Assuming worst case of ~5 characters per token
+                if text.chars().count() > self.max_context * 5 {
+                    debug!(
+                        "Text too long (chars: {}, max tokens: {}), skipping",
+                        text.chars().count(),
+                        self.max_context
+                    );
+                    continue; // Text is way too long, skip it
                 }
-                // Texts exceeding limit remain as None in chunk_results
+
+                // Accurate token counting for borderline cases
+                match self.tokenizer.encode(text.as_str(), false) {
+                    Ok(encoding) => {
+                        let token_count = encoding.get_ids().len();
+                        if token_count <= self.max_context {
+                            texts_to_embed.push(text.clone());
+                            indices_to_embed.push(i);
+                        } else {
+                            debug!(
+                                "Text exceeds token limit ({} > {}), skipping",
+                                token_count, self.max_context
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Failed to tokenize text: {e}, skipping");
+                        continue; // Tokenization failed, skip this text
+                    }
+                }
             }
 
             // Only process texts that fit within context window

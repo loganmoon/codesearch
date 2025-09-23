@@ -15,6 +15,7 @@ tracing = { workspace = true }
 
 # Embed Anything for flexible embeddings
 embed_anything = { version = "0.6.4", features = ["default"] }
+tokenizers = "0.21.4"
 
 # Additional dependencies
 serde = { workspace = true }

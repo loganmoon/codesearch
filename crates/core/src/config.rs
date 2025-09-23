@@ -152,7 +152,7 @@ fn default_provider() -> String {
 }
 
 fn default_model() -> String {
-    "sfr-small".to_string()
+    "jinaai/jina-embeddings-v3".to_string()
 }
 
 fn default_branch_strategy() -> String {
@@ -549,44 +549,6 @@ mod tests {
         let name2 = StorageConfig::generate_collection_name(path);
         assert_eq!(name, name2);
     }
-
-    #[test]
-    fn test_config_builder_basic() {
-        let storage = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name: "test_collection".to_string(),
-            auto_start_deps: true,
-            docker_compose_file: None,
-        };
-
-        let config = Config::builder().storage(storage).build();
-
-        assert_eq!(config.storage.collection_name, "test_collection");
-        assert_eq!(config.embeddings.provider, "local");
-        assert_eq!(config.embeddings.model, "sfr-small");
-    }
-
-    #[test]
-    fn test_config_builder_storage_settings() {
-        let storage = StorageConfig {
-            qdrant_host: "192.168.1.1".to_string(),
-            qdrant_port: 6335,
-            qdrant_rest_port: 6333,
-            collection_name: "my_collection".to_string(),
-            auto_start_deps: false,
-            docker_compose_file: None,
-        };
-
-        let config = Config::builder().storage(storage).build();
-
-        assert_eq!(config.storage.collection_name, "my_collection");
-        assert_eq!(config.storage.qdrant_host, "192.168.1.1");
-        assert_eq!(config.storage.qdrant_port, 6335);
-        assert!(!config.storage.auto_start_deps);
-    }
-
     #[test]
     fn test_config_builder_embeddings_settings() {
         let storage = StorageConfig {

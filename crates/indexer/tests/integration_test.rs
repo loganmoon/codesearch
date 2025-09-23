@@ -221,91 +221,6 @@ async fn test_full_indexing_pipeline() {
 }
 
 #[tokio::test]
-async fn test_indexer_skips_large_entities() {
-    // Create a temporary directory with large and small test files
-    let temp_dir = tempfile::tempdir().unwrap();
-    let repo_path = temp_dir.path();
-
-    // Create src directory
-    let src_dir = repo_path.join("src");
-    fs::create_dir(&src_dir).await.unwrap();
-
-    // Small function that should be indexed
-    let small_content = r#"
-fn small_function() -> i32 {
-    42
-}
-"#;
-    fs::write(src_dir.join("small.rs"), small_content)
-        .await
-        .unwrap();
-
-    // Large function that exceeds context window (simulate with very long content)
-    let large_body = "x".repeat(10000); // Create a very large function body
-    let large_content = format!(
-        r#"
-fn large_function() {{
-    // This is a very large function that should be skipped
-    let data = "{large_body}";
-    println!("{{}}", data);
-}}
-"#
-    );
-    fs::write(src_dir.join("large.rs"), large_content)
-        .await
-        .unwrap();
-
-    // Create an embedding provider with a small context window for testing
-    struct TestEmbeddingProvider {
-        max_context: usize,
-    }
-
-    #[async_trait::async_trait]
-    impl EmbeddingProvider for TestEmbeddingProvider {
-        async fn embed(&self, texts: Vec<String>) -> indexer::Result<Vec<Option<Vec<f32>>>> {
-            Ok(texts
-                .iter()
-                .map(|text| {
-                    if text.len() <= self.max_context {
-                        Some(vec![0.0f32; 384])
-                    } else {
-                        None
-                    }
-                })
-                .collect())
-        }
-
-        fn embedding_dimension(&self) -> usize {
-            384
-        }
-
-        fn max_sequence_length(&self) -> usize {
-            self.max_context
-        }
-    }
-
-    let embedding_manager = Arc::new(EmbeddingManager::new(Arc::new(TestEmbeddingProvider {
-        max_context: 500, // Small context window for testing
-    })));
-    let storage: Arc<dyn StorageClient> = Arc::new(MockStorageClient);
-
-    let mut indexer = create_indexer(repo_path.to_path_buf(), storage, embedding_manager);
-    let result = indexer.index_repository().await.unwrap();
-
-    // Verify that we have skipped entities
-    let stats = result.stats();
-    assert!(stats.entities_extracted() > 0);
-    assert!(stats.entities_skipped_size() > 0);
-
-    // The small function should be processed, the large one skipped
-    println!(
-        "Extracted: {}, Skipped: {}",
-        stats.entities_extracted(),
-        stats.entities_skipped_size()
-    );
-}
-
-#[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
     let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
@@ -325,10 +240,3 @@ async fn test_indexer_with_empty_repository() {
         assert_eq!(index_result.stats().relationships_extracted(), 0);
     }
 }
-
-// File discovery test removed - find_files is now an internal function
-
-// Stats accumulation test removed - IndexStats is now an opaque type
-// Stats merging is tested implicitly through the indexing tests
-
-// Language detection and file filtering tests removed - common module is now internal

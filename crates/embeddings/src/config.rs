@@ -218,7 +218,9 @@ impl EmbeddingConfigBuilder {
             batch_size: self.batch_size.unwrap_or(defaults.batch_size),
             api_base_url: self.api_base_url.unwrap_or(defaults.api_base_url),
             api_key: self.api_key.unwrap_or(defaults.api_key),
-            embedding_dimension: self.embedding_dimension.unwrap_or(defaults.embedding_dimension),
+            embedding_dimension: self
+                .embedding_dimension
+                .unwrap_or(defaults.embedding_dimension),
             device: self.device.unwrap_or(defaults.device),
             backend: self.backend.unwrap_or(defaults.backend),
             max_workers: self.max_workers.unwrap_or(defaults.max_workers),

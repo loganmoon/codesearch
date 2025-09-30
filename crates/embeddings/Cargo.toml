@@ -12,6 +12,7 @@ codesearch-core = { path = "../core" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+async-openai = "0.29"
 
 # Additional dependencies
 serde = { workspace = true }

@@ -35,7 +35,7 @@ impl OpenAiApiProvider {
         let base_url = config
             .api_base_url
             .clone()
-            .unwrap_or_else(|| "http://localhost:8000".to_string());
+            .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
 
         info!("  Base URL: {}", base_url);
 

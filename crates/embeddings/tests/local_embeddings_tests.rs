@@ -1,36 +1,8 @@
-//! Unit tests for EmbedAnythingProvider that don't require model downloads
+//! Unit tests for embedding providers that don't require external services
 
-use codesearch_embeddings::{
-    create_embed_anything_provider, BackendType, DeviceType, EmbeddingConfigBuilder,
-    EmbeddingError, EmbeddingProvider, EmbeddingProviderType,
-};
+use codesearch_embeddings::{EmbeddingError, EmbeddingProvider};
 
-#[tokio::test]
-#[ignore] // Model download required
-async fn test_invalid_model_path_error() {
-    let config = EmbeddingConfigBuilder::new()
-        .provider(EmbeddingProviderType::Local)
-        .model("nonexistent/model")
-        .batch_size(32)
-        .device(DeviceType::Cpu)
-        .backend(BackendType::Candle)
-        .max_workers(4)
-        .model_cache_dir("/tmp/nonexistent")
-        .build();
 
-    // Should fail when trying to load non-existent model
-    let result = create_embed_anything_provider(config).await;
-    assert!(result.is_err());
-
-    if let Err(error) = result {
-        let error_str = error.to_string();
-        assert!(
-            error_str.contains("model")
-                || error_str.contains("download")
-                || error_str.contains("Failed")
-        );
-    }
-}
 
 #[tokio::test]
 async fn test_batch_size_validation() {

@@ -13,9 +13,9 @@ use codesearch_embeddings::{
 async fn test_vllm_api_provider_basic() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-base-en-v1.5")
-        .api_base_url("http://localhost:8000")
-        .embedding_dimension(768)
+        .model("BAAI/bge-code-v1")
+        .api_base_url("http://localhost:8000/v1")
+        .embedding_dimension(1536)
         .batch_size(32)
         .max_workers(4)
         .build();
@@ -33,7 +33,7 @@ async fn test_vllm_api_provider_basic() {
     let results = provider.embed(code_samples).await.unwrap();
 
     assert_eq!(results.len(), 2);
-    assert_eq!(provider.embedding_dimension(), 768);
+    assert_eq!(provider.embedding_dimension(), 1536);
 
     // Check embeddings are valid
     let embed1 = results[0].as_ref().expect("First embedding should succeed");
@@ -41,8 +41,8 @@ async fn test_vllm_api_provider_basic() {
         .as_ref()
         .expect("Second embedding should succeed");
 
-    assert_eq!(embed1.len(), 768);
-    assert_eq!(embed2.len(), 768);
+    assert_eq!(embed1.len(), 1536);
+    assert_eq!(embed2.len(), 1536);
 
     // Check embeddings are different
     let similarity = cosine_similarity(embed1, embed2);
@@ -58,9 +58,9 @@ async fn test_vllm_api_provider_basic() {
 async fn test_api_provider_batch_processing() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-base-en-v1.5")
-        .api_base_url("http://localhost:8000")
-        .embedding_dimension(768)
+        .model("BAAI/bge-code-v1")
+        .api_base_url("http://localhost:8000/v1")
+        .embedding_dimension(1536)
         .batch_size(2) // Small batch for testing
         .max_workers(2)
         .build();
@@ -83,7 +83,7 @@ async fn test_api_provider_batch_processing() {
         assert!(result.is_some(), "Embedding {i} should succeed");
         assert_eq!(
             result.as_ref().unwrap().len(),
-            768,
+            1536,
             "Embedding {i} should have correct dimension"
         );
     }
@@ -94,9 +94,9 @@ async fn test_api_provider_batch_processing() {
 async fn test_api_provider_long_text() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-base-en-v1.5")
-        .api_base_url("http://localhost:8000")
-        .embedding_dimension(768)
+        .model("BAAI/bge-code-v1")
+        .api_base_url("http://localhost:8000/v1")
+        .embedding_dimension(1536)
         .batch_size(32)
         .build();
 
@@ -117,9 +117,9 @@ async fn test_api_provider_long_text() {
 async fn test_api_provider_consistency() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-base-en-v1.5")
-        .api_base_url("http://localhost:8000")
-        .embedding_dimension(768)
+        .model("BAAI/bge-code-v1")
+        .api_base_url("http://localhost:8000/v1")
+        .embedding_dimension(1536)
         .batch_size(32)
         .build();
 

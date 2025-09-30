@@ -44,10 +44,15 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
     ipc: host
     command:
       - "--model"
-      - "BAAI/bge-base-en-v1.5"
+      - "BAAI/bge-code-v1"
       - "--task"
       - "embed"
       - "--gpu-memory-utilization"
@@ -85,7 +90,7 @@ services:
       - seccomp=unconfined
     command:
       - "--model"
-      - "BAAI/bge-base-en-v1.5"
+      - "BAAI/bge-code-v1"
       - "--task"
       - "embed"
       - "--gpu-memory-utilization"

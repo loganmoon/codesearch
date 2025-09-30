@@ -167,11 +167,11 @@ fn default_model() -> String {
 }
 
 fn default_api_base_url() -> Option<String> {
-    Some("http://localhost:8000".to_string())
+    Some("http://localhost:8000/v1".to_string())
 }
 
 fn default_embedding_dimension() -> usize {
-    768
+    1536
 }
 
 fn default_branch_strategy() -> String {
@@ -632,6 +632,9 @@ mod tests {
             model: "text-embedding-ada-002".to_string(),
             batch_size: 64,
             device: "cuda".to_string(),
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: None,
+            embedding_dimension: 768,
         };
 
         let config = Config::builder()
@@ -709,6 +712,9 @@ mod tests {
             model: "embedding-001".to_string(),
             batch_size: 128,
             device: "metal".to_string(),
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: None,
+            embedding_dimension: 768,
         };
 
         let config = Config::builder()

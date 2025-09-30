@@ -30,7 +30,7 @@ pub struct Config {
 /// Configuration for embeddings generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsConfig {
-    /// Provider type: "local", "openai", "gemini"
+    /// Provider type: "localapi", "api", "mock"
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -45,6 +45,17 @@ pub struct EmbeddingsConfig {
     /// Device to use: "cuda" or "cpu"
     #[serde(default = "default_device")]
     pub device: String,
+
+    /// API base URL for LocalApi provider
+    #[serde(default = "default_api_base_url")]
+    pub api_base_url: Option<String>,
+
+    /// API key for authentication
+    pub api_key: Option<String>,
+
+    /// Embedding dimension size
+    #[serde(default = "default_embedding_dimension")]
+    pub embedding_dimension: usize,
 }
 
 /// Configuration for file watching
@@ -148,11 +159,19 @@ fn default_device() -> String {
 }
 
 fn default_provider() -> String {
-    "local".to_string()
+    "localapi".to_string()
 }
 
 fn default_model() -> String {
-    "sfr-small".to_string()
+    "BAAI/bge-code-v1".to_string()
+}
+
+fn default_api_base_url() -> Option<String> {
+    Some("http://localhost:8000".to_string())
+}
+
+fn default_embedding_dimension() -> usize {
+    768
 }
 
 fn default_branch_strategy() -> String {
@@ -199,6 +218,9 @@ impl Default for EmbeddingsConfig {
             model: default_model(),
             batch_size: default_batch_size(),
             device: default_device(),
+            api_base_url: default_api_base_url(),
+            api_key: None,
+            embedding_dimension: default_embedding_dimension(),
         }
     }
 }
@@ -331,7 +353,7 @@ impl Config {
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
         // Validate provider
-        let valid_providers = ["local", "openai", "gemini", "mock"];
+        let valid_providers = ["localapi", "api", "mock"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
                 "Invalid provider '{}'. Must be one of: {:?}",
@@ -346,6 +368,13 @@ impl Config {
                 "Invalid device '{}'. Must be one of: {:?}",
                 self.embeddings.device, valid_devices
             )));
+        }
+
+        // Validate embedding_dimension
+        if self.embeddings.embedding_dimension == 0 {
+            return Err(Error::config(
+                "embedding_dimension must be greater than 0".to_string(),
+            ));
         }
 
         Ok(())
@@ -564,8 +593,8 @@ mod tests {
         let config = Config::builder().storage(storage).build();
 
         assert_eq!(config.storage.collection_name, "test_collection");
-        assert_eq!(config.embeddings.provider, "local");
-        assert_eq!(config.embeddings.model, "all-minilm-l6-v2");
+        assert_eq!(config.embeddings.provider, "localapi");
+        assert_eq!(config.embeddings.model, "BAAI/bge-code-v1");
     }
 
     #[test]

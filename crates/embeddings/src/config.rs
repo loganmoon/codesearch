@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 /// Embedding provider type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EmbeddingProviderType {
-    /// Local embeddings using Candle
+    /// OpenAI-compatible API (vLLM or remote)
     #[default]
-    Local,
+    LocalApi,
     /// Mock provider for testing
     Mock,
 }
@@ -47,6 +47,15 @@ pub struct EmbeddingConfig {
     /// Batch size for processing
     pub(crate) batch_size: usize,
 
+    /// API base URL for LocalApi provider
+    pub(crate) api_base_url: Option<String>,
+
+    /// API key for authentication
+    pub(crate) api_key: Option<String>,
+
+    /// Embedding dimension size
+    pub(crate) embedding_dimension: usize,
+
     /// Device to use for computation
     pub(crate) device: DeviceType,
 
@@ -84,6 +93,9 @@ impl EmbeddingConfig {
         if self.model.is_empty() {
             return Err("Model name cannot be empty".to_string());
         }
+        if self.embedding_dimension == 0 {
+            return Err("embedding_dimension must be greater than 0".to_string());
+        }
         Ok(())
     }
 }
@@ -92,8 +104,11 @@ impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
             provider: EmbeddingProviderType::default(),
-            model: "sfr-small".to_string(), // Default to SFR small
+            model: "BAAI/bge-code-v1".to_string(),
             batch_size: 32,
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: None,
+            embedding_dimension: 768,
             device: DeviceType::default(),
             backend: BackendType::default(),
             max_workers: 4,
@@ -107,6 +122,9 @@ pub struct EmbeddingConfigBuilder {
     provider: Option<EmbeddingProviderType>,
     model: Option<String>,
     batch_size: Option<usize>,
+    api_base_url: Option<Option<String>>,
+    api_key: Option<Option<String>>,
+    embedding_dimension: Option<usize>,
     device: Option<DeviceType>,
     backend: Option<BackendType>,
     max_workers: Option<usize>,
@@ -120,6 +138,9 @@ impl EmbeddingConfigBuilder {
             provider: None,
             model: None,
             batch_size: None,
+            api_base_url: None,
+            api_key: None,
+            embedding_dimension: None,
             device: None,
             backend: None,
             max_workers: None,
@@ -142,6 +163,24 @@ impl EmbeddingConfigBuilder {
     /// Set the batch size
     pub fn batch_size(mut self, batch_size: usize) -> Self {
         self.batch_size = Some(batch_size);
+        self
+    }
+
+    /// Set the API base URL
+    pub fn api_base_url(mut self, url: impl Into<String>) -> Self {
+        self.api_base_url = Some(Some(url.into()));
+        self
+    }
+
+    /// Set the API key
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(Some(key.into()));
+        self
+    }
+
+    /// Set the embedding dimension
+    pub fn embedding_dimension(mut self, dimension: usize) -> Self {
+        self.embedding_dimension = Some(dimension);
         self
     }
 
@@ -177,6 +216,9 @@ impl EmbeddingConfigBuilder {
             provider: self.provider.unwrap_or(defaults.provider),
             model: self.model.unwrap_or(defaults.model),
             batch_size: self.batch_size.unwrap_or(defaults.batch_size),
+            api_base_url: self.api_base_url.unwrap_or(defaults.api_base_url),
+            api_key: self.api_key.unwrap_or(defaults.api_key),
+            embedding_dimension: self.embedding_dimension.unwrap_or(defaults.embedding_dimension),
             device: self.device.unwrap_or(defaults.device),
             backend: self.backend.unwrap_or(defaults.backend),
             max_workers: self.max_workers.unwrap_or(defaults.max_workers),

@@ -73,7 +73,7 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
         args.push(file);
     }
 
-    args.extend(["up", "-d", "qdrant"]);
+    args.extend(["up", "-d", "qdrant", "vllm-embeddings"]);
 
     info!("Starting containerized dependencies...");
 
@@ -138,10 +138,42 @@ pub fn is_qdrant_running() -> Result<bool> {
     Ok(stdout.contains("codesearch-qdrant"))
 }
 
+/// Check if vLLM container is running
+pub fn is_vllm_running() -> Result<bool> {
+    let output = Command::new("docker")
+        .args([
+            "ps",
+            "--filter",
+            "name=codesearch-vllm",
+            "--format",
+            "{{.Names}}",
+        ])
+        .output()
+        .context("Failed to check container status")?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.contains("codesearch-vllm"))
+}
+
 /// Check Qdrant health status
 pub async fn check_qdrant_health(config: &StorageConfig) -> Result<bool> {
     // Qdrant doesn't have a /health endpoint, but the root endpoint returns version info
     let url = format!("http://{}:{}/", config.qdrant_host, config.qdrant_rest_port);
+
+    match reqwest::get(&url).await {
+        Ok(response) => Ok(response.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Check vLLM health status
+pub async fn check_vllm_health(api_base_url: &str) -> Result<bool> {
+    // vLLM has a /health endpoint
+    let url = format!("{}/health", api_base_url.trim_end_matches("/v1"));
 
     match reqwest::get(&url).await {
         Ok(response) => Ok(response.status().is_success()),
@@ -171,41 +203,97 @@ pub async fn wait_for_qdrant(config: &StorageConfig, timeout: Duration) -> Resul
     ))
 }
 
+/// Wait for vLLM to become healthy
+pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> {
+    info!("Waiting for vLLM to become healthy...");
+
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if check_vllm_health(api_base_url).await? {
+            info!("vLLM is healthy");
+            return Ok(());
+        }
+
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    Err(anyhow!(
+        "vLLM failed to become healthy within {} seconds. \
+         Check logs with: docker logs codesearch-vllm",
+        timeout.as_secs()
+    ))
+}
+
 /// Ensure dependencies are running, starting them if necessary
-pub async fn ensure_dependencies_running(config: &StorageConfig) -> Result<()> {
-    // First check if Qdrant is already healthy
-    if check_qdrant_health(config).await? {
-        info!("Qdrant is already running and healthy");
+pub async fn ensure_dependencies_running(
+    config: &StorageConfig,
+    api_base_url: Option<&str>,
+) -> Result<()> {
+    let qdrant_healthy = check_qdrant_health(config).await?;
+    let vllm_healthy = if let Some(url) = api_base_url {
+        check_vllm_health(url).await?
+    } else {
+        true // Skip vLLM check if no API URL provided
+    };
+
+    // If both are healthy, we're done
+    if qdrant_healthy && vllm_healthy {
+        info!("All dependencies are already running and healthy");
         return Ok(());
     }
 
     // Check if auto-start is enabled
     if !config.auto_start_deps {
-        return Err(anyhow!(
-            "Qdrant is not running. Start it manually with: docker compose up -d qdrant\n\
-             Or enable auto_start_deps in your configuration"
-        ));
+        let mut msg = String::new();
+        if !qdrant_healthy {
+            msg.push_str("Qdrant is not running. ");
+        }
+        if !vllm_healthy {
+            msg.push_str("vLLM is not running. ");
+        }
+        msg.push_str("Start them manually with: docker compose up -d\n");
+        msg.push_str("Or enable auto_start_deps in your configuration");
+        return Err(anyhow!(msg));
     }
 
-    // Check if container exists but is not running
-    if !is_qdrant_running()? {
-        info!("Qdrant container is not running, starting it...");
+    // Check if containers exist but are not running
+    if !is_qdrant_running()? || (api_base_url.is_some() && !is_vllm_running()?) {
+        info!("Starting containerized dependencies...");
         start_dependencies(config.docker_compose_file.as_deref())?;
     }
 
     // Wait for health
-    wait_for_qdrant(config, Duration::from_secs(60)).await?;
+    if !qdrant_healthy {
+        wait_for_qdrant(config, Duration::from_secs(60)).await?;
+    }
+    if let Some(url) = api_base_url {
+        if !vllm_healthy {
+            wait_for_vllm(url, Duration::from_secs(60)).await?;
+        }
+    }
 
     Ok(())
 }
 
 /// Get status of dependencies
-pub async fn get_dependencies_status(config: &StorageConfig) -> Result<DependencyStatus> {
+pub async fn get_dependencies_status(
+    config: &StorageConfig,
+    api_base_url: Option<&str>,
+) -> Result<DependencyStatus> {
     let docker_available = is_docker_available();
     let compose_available = is_docker_compose_available();
     let qdrant_running = is_qdrant_running().unwrap_or(false);
     let qdrant_healthy = if qdrant_running {
         check_qdrant_health(config).await.unwrap_or(false)
+    } else {
+        false
+    };
+    let vllm_running = is_vllm_running().unwrap_or(false);
+    let vllm_healthy = if vllm_running && api_base_url.is_some() {
+        check_vllm_health(api_base_url.unwrap_or("http://localhost:8000/v1"))
+            .await
+            .unwrap_or(false)
     } else {
         false
     };
@@ -215,6 +303,8 @@ pub async fn get_dependencies_status(config: &StorageConfig) -> Result<Dependenc
         compose_available,
         qdrant_running,
         qdrant_healthy,
+        vllm_running,
+        vllm_healthy,
     })
 }
 
@@ -224,6 +314,8 @@ pub struct DependencyStatus {
     pub compose_available: bool,
     pub qdrant_running: bool,
     pub qdrant_healthy: bool,
+    pub vllm_running: bool,
+    pub vllm_healthy: bool,
 }
 
 impl std::fmt::Display for DependencyStatus {
@@ -260,6 +352,24 @@ impl std::fmt::Display for DependencyStatus {
             f,
             "  Qdrant Health:    {}",
             if self.qdrant_healthy {
+                "✓ Healthy"
+            } else {
+                "✗ Unhealthy"
+            }
+        )?;
+        writeln!(
+            f,
+            "  vLLM Container:   {}",
+            if self.vllm_running {
+                "✓ Running"
+            } else {
+                "✗ Not running"
+            }
+        )?;
+        writeln!(
+            f,
+            "  vLLM Health:      {}",
+            if self.vllm_healthy {
                 "✓ Healthy"
             } else {
                 "✗ Unhealthy"

@@ -4,9 +4,7 @@
 //! Start with: docker compose up -d vllm-embeddings
 //! Run with: cargo test --package codesearch-embeddings --test integration_tests -- --ignored
 
-use codesearch_embeddings::{
-    create_api_provider, EmbeddingConfigBuilder, EmbeddingProviderType,
-};
+use codesearch_embeddings::{create_api_provider, EmbeddingConfigBuilder, EmbeddingProviderType};
 
 #[tokio::test]
 #[ignore] // Requires vLLM running locally

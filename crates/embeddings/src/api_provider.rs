@@ -159,7 +159,7 @@ impl EmbeddingProvider for OpenAiApiProvider {
             let mut chunk_results = vec![None; chunk.len()];
 
             for (i, text) in chunk.iter().enumerate() {
-                if text.len() <= self.max_context {
+                if text.chars().count() <= self.max_context {
                     texts_to_embed.push(text.clone());
                     indices_to_embed.push(i);
                 } else {

@@ -239,7 +239,14 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage).await?;
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
 
     // Create embedding manager to get dimensions
@@ -387,7 +394,14 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     info!("Checking dependencies...");
 
     // Ensure dependencies are running
-    docker::ensure_dependencies_running(&config.storage).await?;
+    let api_base_url = if parse_provider_type(&config.embeddings.provider)
+        == codesearch_embeddings::EmbeddingProviderType::LocalApi
+    {
+        config.embeddings.api_base_url.as_deref()
+    } else {
+        None
+    };
+    docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
 
     println!("🚀 Starting MCP server on stdio...");
 
@@ -403,7 +417,14 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage)
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
     }
@@ -511,7 +532,14 @@ async fn search_code(
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage)
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
     }
@@ -702,7 +730,15 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                 Config::builder().storage(storage_config).build()
             };
 
-            let status = docker::get_dependencies_status(&config.storage).await?;
+            let api_base_url = if parse_provider_type(&config.embeddings.provider)
+                == codesearch_embeddings::EmbeddingProviderType::LocalApi
+            {
+                config.embeddings.api_base_url.as_deref()
+            } else {
+                None
+            };
+
+            let status = docker::get_dependencies_status(&config.storage, api_base_url).await?;
             println!("{status}");
             Ok(())
         }

@@ -2,8 +2,6 @@
 
 use codesearch_embeddings::{EmbeddingError, EmbeddingProvider};
 
-
-
 #[tokio::test]
 async fn test_batch_size_validation() {
     use codesearch_embeddings::EmbeddingManager;

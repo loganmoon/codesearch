@@ -95,6 +95,11 @@ fn extract_embedding_content(entity: &CodeEntity) -> String {
         }
     }
 
+    // Add the full entity content (most important for semantic search)
+    if let Some(entity_content) = &entity.content {
+        chain_delim(&mut content, entity_content);
+    }
+
     content
 }
 
@@ -268,10 +273,9 @@ impl RepositoryIndexer {
             {
                 if let Some(embedding) = opt_embedding {
                     embedded_entities.push(EmbeddedEntity { entity, embedding });
-                    // copy
                 } else {
+                    stats.entities_skipped_size += 1;
                     debug!(
-                        // debug log
                         "Skipped entity due to size: {} in {}",
                         entity.qualified_name,
                         entity.file_path.display()

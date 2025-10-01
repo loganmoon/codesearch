@@ -23,10 +23,10 @@ use tracing::{info, warn};
 
 /// Convert provider string to EmbeddingProviderType enum
 fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProviderType {
-    match provider {
-        "local" => codesearch_embeddings::EmbeddingProviderType::Local,
+    match provider.to_lowercase().as_str() {
+        "localapi" | "api" => codesearch_embeddings::EmbeddingProviderType::LocalApi,
         "mock" => codesearch_embeddings::EmbeddingProviderType::Mock,
-        _ => codesearch_embeddings::EmbeddingProviderType::Local, // Default to local
+        _ => codesearch_embeddings::EmbeddingProviderType::LocalApi, // Default to LocalApi
     }
 }
 
@@ -239,19 +239,41 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage).await?;
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
 
     // Create embedding manager to get dimensions
-    let embeddings_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+    let mut embeddings_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
         .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
+        .embedding_dimension(config.embeddings.embedding_dimension)
         .device(match config.embeddings.device.as_str() {
             "cuda" => codesearch_embeddings::DeviceType::Cuda,
             _ => codesearch_embeddings::DeviceType::Cpu,
-        })
-        .build();
+        });
+
+    if let Some(ref api_base_url) = config.embeddings.api_base_url {
+        embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = config
+        .embeddings
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        embeddings_config_builder = embeddings_config_builder.api_key(key);
+    }
+
+    let embeddings_config = embeddings_config_builder.build();
 
     let embedding_manager = codesearch_embeddings::EmbeddingManager::from_config(embeddings_config)
         .await
@@ -372,7 +394,14 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     info!("Checking dependencies...");
 
     // Ensure dependencies are running
-    docker::ensure_dependencies_running(&config.storage).await?;
+    let api_base_url = if parse_provider_type(&config.embeddings.provider)
+        == codesearch_embeddings::EmbeddingProviderType::LocalApi
+    {
+        config.embeddings.api_base_url.as_deref()
+    } else {
+        None
+    };
+    docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
 
     println!("🚀 Starting MCP server on stdio...");
 
@@ -388,7 +417,14 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage)
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
     }
@@ -410,15 +446,30 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     }
 
     // Step 3: Create embedding manager
-    let embedding_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+    let mut embedding_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
         .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
+        .embedding_dimension(config.embeddings.embedding_dimension)
         .device(match config.embeddings.device.as_str() {
             "cuda" => codesearch_embeddings::DeviceType::Cuda,
             _ => codesearch_embeddings::DeviceType::Cpu,
-        })
-        .build();
+        });
+
+    if let Some(ref api_base_url) = config.embeddings.api_base_url {
+        embedding_config_builder = embedding_config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = config
+        .embeddings
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        embedding_config_builder = embedding_config_builder.api_key(key);
+    }
+
+    let embedding_config = embedding_config_builder.build();
     let embedding_manager = Arc::new(
         EmbeddingManager::from_config(embedding_config)
             .await
@@ -481,7 +532,14 @@ async fn search_code(
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        docker::ensure_dependencies_running(&config.storage)
+        let api_base_url = if parse_provider_type(&config.embeddings.provider)
+            == codesearch_embeddings::EmbeddingProviderType::LocalApi
+        {
+            config.embeddings.api_base_url.as_deref()
+        } else {
+            None
+        };
+        docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
     }
@@ -508,15 +566,30 @@ async fn search_code(
         .context("Failed to create storage client")?;
 
     // Step 4: Create embedding manager
-    let embedding_config = codesearch_embeddings::EmbeddingConfigBuilder::default()
+    let mut embedding_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
         .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
+        .embedding_dimension(config.embeddings.embedding_dimension)
         .device(match config.embeddings.device.as_str() {
             "cuda" => codesearch_embeddings::DeviceType::Cuda,
             _ => codesearch_embeddings::DeviceType::Cpu,
-        })
-        .build();
+        });
+
+    if let Some(ref api_base_url) = config.embeddings.api_base_url {
+        embedding_config_builder = embedding_config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = config
+        .embeddings
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        embedding_config_builder = embedding_config_builder.api_key(key);
+    }
+
+    let embedding_config = embedding_config_builder.build();
     let embedding_manager = EmbeddingManager::from_config(embedding_config)
         .await
         .context("Failed to create embedding manager")?;
@@ -657,7 +730,15 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                 Config::builder().storage(storage_config).build()
             };
 
-            let status = docker::get_dependencies_status(&config.storage).await?;
+            let api_base_url = if parse_provider_type(&config.embeddings.provider)
+                == codesearch_embeddings::EmbeddingProviderType::LocalApi
+            {
+                config.embeddings.api_base_url.as_deref()
+            } else {
+                None
+            };
+
+            let status = docker::get_dependencies_status(&config.storage, api_base_url).await?;
             println!("{status}");
             Ok(())
         }

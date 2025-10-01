@@ -10,16 +10,16 @@
 use codesearch_core::error::Result;
 use std::sync::Arc;
 
+mod api_provider;
 pub mod config;
-mod embed_anything_provider;
 pub mod error;
 mod mock_provider;
 pub mod provider;
 
+pub use api_provider::create_api_provider;
 pub use config::{
     BackendType, DeviceType, EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType,
 };
-pub use embed_anything_provider::create_embed_anything_provider;
 pub use error::EmbeddingError;
 pub use provider::EmbeddingProvider;
 
@@ -37,12 +37,13 @@ impl EmbeddingManager {
     /// Initialize manager from configuration
     pub async fn from_config(config: EmbeddingConfig) -> Result<Self> {
         let provider = match config.provider {
-            EmbeddingProviderType::Local => {
-                let provider = create_embed_anything_provider(config).await?;
+            EmbeddingProviderType::LocalApi => {
+                let provider = create_api_provider(config).await?;
                 Arc::from(provider)
             }
             EmbeddingProviderType::Mock => {
-                let provider = mock_provider::MockEmbeddingProvider::new(384);
+                let provider =
+                    mock_provider::MockEmbeddingProvider::new(config.embedding_dimension);
                 Arc::new(provider) as Arc<dyn EmbeddingProvider>
             }
         };

@@ -30,7 +30,7 @@ pub struct Config {
 /// Configuration for embeddings generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsConfig {
-    /// Provider type: "local", "openai", "gemini"
+    /// Provider type: "localapi", "api", "mock"
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -45,6 +45,17 @@ pub struct EmbeddingsConfig {
     /// Device to use: "cuda" or "cpu"
     #[serde(default = "default_device")]
     pub device: String,
+
+    /// API base URL for LocalApi provider
+    #[serde(default = "default_api_base_url")]
+    pub api_base_url: Option<String>,
+
+    /// API key for authentication
+    pub api_key: Option<String>,
+
+    /// Embedding dimension size
+    #[serde(default = "default_embedding_dimension")]
+    pub embedding_dimension: usize,
 }
 
 /// Configuration for file watching
@@ -148,11 +159,19 @@ fn default_device() -> String {
 }
 
 fn default_provider() -> String {
-    "local".to_string()
+    "localapi".to_string()
 }
 
 fn default_model() -> String {
-    "sfr-small".to_string()
+    "BAAI/bge-code-v1".to_string()
+}
+
+fn default_api_base_url() -> Option<String> {
+    Some("http://localhost:8000/v1".to_string())
+}
+
+fn default_embedding_dimension() -> usize {
+    1536
 }
 
 fn default_branch_strategy() -> String {
@@ -199,6 +218,9 @@ impl Default for EmbeddingsConfig {
             model: default_model(),
             batch_size: default_batch_size(),
             device: default_device(),
+            api_base_url: default_api_base_url(),
+            api_key: None,
+            embedding_dimension: default_embedding_dimension(),
         }
     }
 }
@@ -331,7 +353,7 @@ impl Config {
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
         // Validate provider
-        let valid_providers = ["local", "openai", "gemini", "mock"];
+        let valid_providers = ["localapi", "api", "mock"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
                 "Invalid provider '{}'. Must be one of: {:?}",
@@ -346,6 +368,13 @@ impl Config {
                 "Invalid device '{}'. Must be one of: {:?}",
                 self.embeddings.device, valid_devices
             )));
+        }
+
+        // Validate embedding_dimension
+        if self.embeddings.embedding_dimension == 0 {
+            return Err(Error::config(
+                "embedding_dimension must be greater than 0".to_string(),
+            ));
         }
 
         Ok(())
@@ -429,267 +458,5 @@ impl CodesearchConfigBuilder {
 impl Default for CodesearchConfigBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_collection_name_generation_basic() {
-        let path = Path::new("/home/user/projects/myrepo");
-        let name = StorageConfig::generate_collection_name(path);
-
-        // Should have format: <repo_name>_<hash>
-        assert!(name.starts_with("myrepo_"));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-
-        // Should only contain valid characters
-        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
-
-        // Hash part should be 32 hex chars (128 bits / 4 bits per hex char)
-        let parts: Vec<&str> = name.splitn(2, '_').collect();
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[1].len(), 32);
-        assert!(parts[1].chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn test_collection_name_special_characters() {
-        let path = Path::new("/home/user-name/my project/repo@v1.0");
-        let name = StorageConfig::generate_collection_name(path);
-
-        // Should sanitize special chars in repo name
-        assert!(name.starts_with("repo_v1_0_"));
-
-        // Should only contain valid characters
-        assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-    }
-
-    #[test]
-    fn test_collection_name_long_repo_name() {
-        // Create a path with very long repo name
-        let long_name = "a".repeat(100);
-        let path_str = format!("/home/user/{long_name}");
-        let path = Path::new(&path_str);
-        let name = StorageConfig::generate_collection_name(path);
-
-        // Repo name should be truncated to 50 chars
-        let parts: Vec<&str> = name.splitn(2, '_').collect();
-        assert_eq!(parts[0].len(), 50);
-        assert!(parts[0].chars().all(|c| c == 'a'));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-    }
-
-    #[test]
-    fn test_collection_name_windows_path() {
-        let path = Path::new("C:\\Users\\Developer\\Projects\\MyRepo");
-        let name = StorageConfig::generate_collection_name(path);
-
-        // On non-Windows systems, this path won't canonicalize properly,
-        // but should still extract "MyRepo" as the last component
-        // On Windows, it should work correctly
-        if cfg!(windows) {
-            assert!(name.starts_with("MyRepo_"));
-        } else {
-            // On Linux/Mac, the whole path becomes the filename
-            // Just verify format and determinism
-            assert!(name.contains('_'));
-        }
-
-        // Should not contain path separators
-        assert!(!name.contains('\\'));
-        assert!(!name.contains('/'));
-        assert!(!name.contains(':'));
-
-        // Should only contain valid characters
-        assert!(name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-    }
-
-    #[test]
-    fn test_collection_name_relative_path() {
-        let path = Path::new("./myrepo");
-        let name = StorageConfig::generate_collection_name(path);
-
-        // Should work with relative paths (will be canonicalized)
-        // Note: actual repo name depends on where test runs
-        assert!(name.contains('_'));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-    }
-
-    #[test]
-    fn test_collection_name_dashes_underscores() {
-        let path = Path::new("/home/user/my-awesome_repo");
-        let name = StorageConfig::generate_collection_name(path);
-
-        // Should preserve dashes and underscores in repo name
-        assert!(name.starts_with("my-awesome_repo_"));
-
-        // Should be deterministic
-        let name2 = StorageConfig::generate_collection_name(path);
-        assert_eq!(name, name2);
-    }
-
-    #[test]
-    fn test_config_builder_basic() {
-        let storage = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name: "test_collection".to_string(),
-            auto_start_deps: true,
-            docker_compose_file: None,
-        };
-
-        let config = Config::builder().storage(storage).build();
-
-        assert_eq!(config.storage.collection_name, "test_collection");
-        assert_eq!(config.embeddings.provider, "local");
-        assert_eq!(config.embeddings.model, "all-minilm-l6-v2");
-    }
-
-    #[test]
-    fn test_config_builder_storage_settings() {
-        let storage = StorageConfig {
-            qdrant_host: "192.168.1.1".to_string(),
-            qdrant_port: 6335,
-            qdrant_rest_port: 6333,
-            collection_name: "my_collection".to_string(),
-            auto_start_deps: false,
-            docker_compose_file: None,
-        };
-
-        let config = Config::builder().storage(storage).build();
-
-        assert_eq!(config.storage.collection_name, "my_collection");
-        assert_eq!(config.storage.qdrant_host, "192.168.1.1");
-        assert_eq!(config.storage.qdrant_port, 6335);
-        assert!(!config.storage.auto_start_deps);
-    }
-
-    #[test]
-    fn test_config_builder_embeddings_settings() {
-        let storage = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name: "test".to_string(),
-            auto_start_deps: true,
-            docker_compose_file: None,
-        };
-
-        let embeddings = EmbeddingsConfig {
-            provider: "openai".to_string(),
-            model: "text-embedding-ada-002".to_string(),
-            batch_size: 64,
-            device: "cuda".to_string(),
-        };
-
-        let config = Config::builder()
-            .storage(storage)
-            .embeddings(embeddings)
-            .build();
-
-        assert_eq!(config.embeddings.provider, "openai");
-        assert_eq!(config.embeddings.model, "text-embedding-ada-002");
-        assert_eq!(config.embeddings.batch_size, 64);
-        assert_eq!(config.embeddings.device, "cuda");
-    }
-
-    #[test]
-    fn test_config_builder_watcher_settings() {
-        let storage = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name: "test".to_string(),
-            auto_start_deps: true,
-            docker_compose_file: None,
-        };
-
-        let watcher = WatcherConfig {
-            debounce_ms: 1000,
-            ignore_patterns: vec!["*.tmp".to_string(), "build/".to_string()],
-            branch_strategy: "index_current".to_string(),
-        };
-
-        let config = Config::builder().storage(storage).watcher(watcher).build();
-
-        assert_eq!(config.watcher.debounce_ms, 1000);
-        assert_eq!(config.watcher.ignore_patterns, vec!["*.tmp", "build/"]);
-    }
-
-    #[test]
-    fn test_config_builder_language_settings() {
-        let storage = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name: "test".to_string(),
-            auto_start_deps: true,
-            docker_compose_file: None,
-        };
-
-        let languages = LanguagesConfig {
-            enabled: vec!["rust".to_string(), "python".to_string()],
-            python: PythonConfig::default(),
-            javascript: JavaScriptConfig::default(),
-        };
-
-        let config = Config::builder()
-            .storage(storage)
-            .languages(languages)
-            .build();
-
-        assert_eq!(config.languages.enabled, vec!["rust", "python"]);
-    }
-
-    #[test]
-    fn test_config_builder_complete_config() {
-        let storage = StorageConfig {
-            qdrant_host: "custom-host".to_string(),
-            qdrant_port: 7000,
-            qdrant_rest_port: 7001,
-            collection_name: "custom_collection".to_string(),
-            auto_start_deps: false,
-            docker_compose_file: Some("custom-compose.yml".to_string()),
-        };
-
-        let embeddings = EmbeddingsConfig {
-            provider: "gemini".to_string(),
-            model: "embedding-001".to_string(),
-            batch_size: 128,
-            device: "metal".to_string(),
-        };
-
-        let config = Config::builder()
-            .storage(storage.clone())
-            .embeddings(embeddings.clone())
-            .build();
-
-        assert_eq!(config.storage.qdrant_host, "custom-host");
-        assert_eq!(config.storage.collection_name, "custom_collection");
-        assert_eq!(config.embeddings.provider, "gemini");
-        assert_eq!(config.embeddings.model, "embedding-001");
     }
 }

@@ -9,14 +9,7 @@
 //! - **Configuration**: System configuration management
 //! - **Error handling**: Unified error types
 //!
-//! # Example
-//!
-//! ```no_run
-//! use codesearch_core::Config;
-//!
-//! // Load configuration
-//! let config = Config::default();
-//! ```
+
 
 pub mod config;
 pub mod entities;

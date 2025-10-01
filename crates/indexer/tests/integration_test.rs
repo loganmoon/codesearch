@@ -251,6 +251,7 @@ fn large_function() {{
 }}
 "#
     );
+
     fs::write(src_dir.join("large.rs"), large_content)
         .await
         .unwrap();
@@ -266,7 +267,7 @@ fn large_function() {{
             Ok(texts
                 .iter()
                 .map(|text| {
-                    if text.len() <= self.max_context {
+                    if text.chars().count() <= self.max_context {
                         Some(vec![0.0f32; 384])
                     } else {
                         None
@@ -285,7 +286,7 @@ fn large_function() {{
     }
 
     let embedding_manager = Arc::new(EmbeddingManager::new(Arc::new(TestEmbeddingProvider {
-        max_context: 500, // Small context window for testing
+        max_context: 100, // Small context window for testing
     })));
     let storage: Arc<dyn StorageClient> = Arc::new(MockStorageClient);
 
@@ -296,13 +297,6 @@ fn large_function() {{
     let stats = result.stats();
     assert!(stats.entities_extracted() > 0);
     assert!(stats.entities_skipped_size() > 0);
-
-    // The small function should be processed, the large one skipped
-    println!(
-        "Extracted: {}, Skipped: {}",
-        stats.entities_extracted(),
-        stats.entities_skipped_size()
-    );
 }
 
 #[tokio::test]

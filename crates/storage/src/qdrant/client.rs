@@ -13,6 +13,7 @@ use qdrant_client::{
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Qdrant storage client implementing CRUD operations only
 pub(crate) struct QdrantStorageClient {
@@ -128,7 +129,8 @@ impl StorageClient for QdrantStorageClient {
         let points: Vec<PointStruct> = embedded_entities
             .iter()
             .map(|embedded| {
-                let id = PointId::from(embedded.entity.entity_id.clone());
+                // Generate a new UUID for the Qdrant point ID
+                let id = PointId::from(Uuid::new_v4().to_string());
                 PointStruct::new(
                     id,
                     embedded.embedding.clone(),
@@ -186,21 +188,38 @@ impl StorageClient for QdrantStorageClient {
     }
 
     async fn get_entity(&self, entity_id: &str) -> Result<Option<CodeEntity>> {
-        let point_id = PointId::from(entity_id.to_string());
+        // Search by entity_id in the payload, not by point ID
+        let filter = Filter {
+            must: vec![qdrant_client::qdrant::Condition {
+                condition_one_of: Some(qdrant_client::qdrant::condition::ConditionOneOf::Field(
+                    qdrant_client::qdrant::FieldCondition {
+                        key: "entity_id".to_string(),
+                        r#match: Some(qdrant_client::qdrant::Match {
+                            match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(
+                                entity_id.to_string(),
+                            )),
+                        }),
+                        ..Default::default()
+                    },
+                )),
+            }],
+            ..Default::default()
+        };
 
-        let response = self
+        // Use scroll to find the entity
+        let scroll_response = self
             .qdrant_client
-            .get_points(qdrant_client::qdrant::GetPoints::from(
-                qdrant_client::qdrant::GetPointsBuilder::new(
-                    self.collection_name.clone(),
-                    vec![point_id],
-                )
-                .with_payload(true),
-            ))
+            .scroll(qdrant_client::qdrant::ScrollPoints {
+                collection_name: self.collection_name.clone(),
+                filter: Some(filter),
+                limit: Some(1),
+                with_payload: Some(true.into()),
+                ..Default::default()
+            })
             .await
             .map_err(|e| Error::storage(e.to_string()))?;
 
-        if let Some(point) = response.result.first() {
+        if let Some(point) = scroll_response.result.first() {
             if !point.payload.is_empty() {
                 return Ok(Some(Self::payload_to_entity(&point.payload)?));
             }

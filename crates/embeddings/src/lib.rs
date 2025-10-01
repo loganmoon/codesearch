@@ -21,6 +21,7 @@ pub use config::{
     BackendType, DeviceType, EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType,
 };
 pub use error::EmbeddingError;
+pub use mock_provider::MockEmbeddingProvider;
 pub use provider::EmbeddingProvider;
 
 /// Manager for handling embedding generation with immutable configuration

@@ -18,7 +18,7 @@ use crate::rust::handlers::constants::{
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation, Visibility,
 };
-use codesearch_core::entity_id::ScopeContext;
+use codesearch_core::entity_id::{generate_entity_id_from_qualified_name, ScopeContext};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -226,8 +226,10 @@ fn build_entity_data(
     let documentation = extract_preceding_doc_comments(main_node, ctx.source);
     let qualified_name = ctx.scope_context.build_qualified_name(name);
 
+    let entity_id = generate_entity_id_from_qualified_name(&qualified_name, ctx.file_path);
+
     CodeEntityBuilder::default()
-        .entity_id(format!("{}#{qualified_name}", ctx.file_path.display()))
+        .entity_id(entity_id)
         .name(name.to_string())
         .qualified_name(qualified_name.clone())
         .entity_type(entity_type)

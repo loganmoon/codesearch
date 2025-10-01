@@ -66,7 +66,22 @@ impl Default for ScopeContext {
     }
 }
 
-/// Generate a unique entity ID based on name and context
+/// Generate a unique entity ID based on qualified name
+///
+/// For named entities, uses the qualified name from the scope context.
+/// The qualified name should already be built using `build_qualified_name`.
+pub fn generate_entity_id_from_qualified_name(
+    qualified_name: &str,
+    file_path: &Path,
+) -> String {
+    let unique_str = format!("{}:{}", file_path.display(), qualified_name);
+    format!(
+        "entity-{:032x}",
+        XxHash3_128::oneshot(unique_str.as_bytes())
+    )
+}
+
+/// Generate a unique entity ID based on name and context (with mutable context for anonymous entities)
 pub fn generate_entity_id(
     name: Option<&str>,
     entity_type: EntityType,
@@ -79,11 +94,7 @@ pub fn generate_entity_id(
         Some(n) if !n.is_empty() && n != "anonymous" => {
             // Named entity: use fully qualified name
             let qualified_name = scope_context.build_qualified_name(n);
-            let unique_str = format!("{}:{}", file_path.display(), qualified_name);
-            format!(
-                "entity-{:032x}",
-                XxHash3_128::oneshot(unique_str.as_bytes())
-            )
+            generate_entity_id_from_qualified_name(&qualified_name, file_path)
         }
         _ => {
             // Unnamed entity: use location + context + index

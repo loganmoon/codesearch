@@ -18,7 +18,7 @@ use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
     Visibility,
 };
-use codesearch_core::entity_id::ScopeContext;
+use codesearch_core::entity_id::{generate_entity_id_from_qualified_name, ScopeContext};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -236,12 +236,13 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         generics: components.generics.clone(),
     };
 
+    let entity_id = generate_entity_id_from_qualified_name(
+        &components.qualified_name,
+        &components.file_path,
+    );
+
     CodeEntityBuilder::default()
-        .entity_id(format!(
-            "{}#{}",
-            components.file_path.display(),
-            components.qualified_name
-        ))
+        .entity_id(entity_id)
         .name(components.name)
         .qualified_name(components.qualified_name)
         .entity_type(EntityType::Function)

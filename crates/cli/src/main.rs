@@ -486,22 +486,11 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
             .context("Failed to create embedding manager")?,
     );
 
-    // Step 4: Create storage client for the indexer
-    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+    // Step 4: Create postgres client (required for Phase 4+)
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
         .await
-        .context("Failed to create storage client")?;
-
-    // Step 4b: Create postgres client (optional)
-    let postgres_client = match codesearch_storage::create_postgres_client(&config.storage).await {
-        Ok(client) => {
-            info!("Successfully connected to Postgres metadata store");
-            Some(client)
-        }
-        Err(e) => {
-            warn!("Failed to connect to Postgres, continuing without metadata store: {e}");
-            None
-        }
-    };
+        .context("Failed to connect to Postgres (required for indexing)")?;
+    info!("Successfully connected to Postgres metadata store");
 
     // Step 5: Get repository path
     let repo_path = find_repository_root()?;
@@ -521,7 +510,6 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     // Step 6: Create and run indexer
     let mut indexer = RepositoryIndexer::new(
         repo_path.clone(),
-        storage_client,
         embedding_manager,
         postgres_client,
         git_repo,

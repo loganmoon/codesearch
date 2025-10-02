@@ -88,7 +88,7 @@ async fn benchmark_indexing_speed() -> Result<()> {
     let qdrant = TestQdrant::start().await?;
 
     // Create a repository with multiple files
-    let mut builder = TestRepositoryBuilder::new("benchmark");
+    let mut builder = TestRepositoryBuilder::new();
 
     // Add 20 Rust files
     for i in 0..20 {
@@ -264,7 +264,7 @@ async fn benchmark_large_repository() -> Result<()> {
     let qdrant = TestQdrant::start().await?;
 
     // Create a repository with 100 files
-    let mut builder = TestRepositoryBuilder::new("large_benchmark");
+    let mut builder = TestRepositoryBuilder::new();
 
     println!("Creating test repository with 100 files...");
     for i in 0..100 {

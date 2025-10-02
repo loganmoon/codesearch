@@ -1,10 +1,9 @@
 use codesearch_core::config::Config;
 use codesearch_core::error::Result;
-use codesearch_storage::postgres::{OutboxProcessor, PostgresClient};
+use codesearch_storage::postgres::OutboxProcessor;
 use codesearch_storage::{create_postgres_client, create_storage_client};
-use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,9 +26,7 @@ async fn main() -> Result<()> {
 
     info!(
         "Connecting to Qdrant at {}:{} (collection: {})",
-        config.storage.qdrant_host,
-        config.storage.qdrant_port,
-        config.storage.collection_name
+        config.storage.qdrant_host, config.storage.qdrant_port, config.storage.collection_name
     );
     let storage_client =
         create_storage_client(&config.storage, &config.storage.collection_name).await?;
@@ -74,15 +71,15 @@ fn load_config_from_env() -> Result<Config> {
 [indexer]
 
 [storage]
-qdrant_host = "{}"
-qdrant_port = {}
-collection_name = "{}"
+qdrant_host = "{qdrant_host}"
+qdrant_port = {qdrant_port}
+collection_name = "{collection_name}"
 auto_start_deps = false
-postgres_host = "{}"
-postgres_port = {}
-postgres_database = "{}"
-postgres_user = "{}"
-postgres_password = "{}"
+postgres_host = "{postgres_host}"
+postgres_port = {postgres_port}
+postgres_database = "{postgres_database}"
+postgres_user = "{postgres_user}"
+postgres_password = "{postgres_password}"
 
 [embeddings]
 provider = "mock"
@@ -94,15 +91,7 @@ branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust", "python", "javascript", "typescript", "go"]
-"#,
-        qdrant_host,
-        qdrant_port,
-        collection_name,
-        postgres_host,
-        postgres_port,
-        postgres_database,
-        postgres_user,
-        postgres_password
+"#
     );
 
     Config::from_toml_str(&config_toml)

@@ -305,54 +305,64 @@ impl RepositoryIndexer {
                     self.postgres_client.is_some()
                 );
 
-                // Store in Qdrant and get point IDs
-                debug!("Storing {} entities in Qdrant", embedded_entities.len());
-                let entity_point_map = storage_client
-                    .bulk_load_entities(embedded_entities)
-                    .await
-                    .map_err(|e| {
-                    Error::Storage(format!("Failed to bulk store entities: {e}"))
-                })?;
-
-                debug!("Successfully stored {} entities in Qdrant", entity_point_map.len());
-
-                // Create lookup map
-                let point_id_map: std::collections::HashMap<String, uuid::Uuid> =
-                    entity_point_map.into_iter().collect();
-
-                // Dual-write to Postgres with actual point IDs
+                // Write entities to Postgres outbox within transaction
                 if let Some(postgres) = &self.postgres_client {
                     let git_commit = self.current_git_commit().await.ok();
                     debug!(
-                        "Starting Postgres dual-write for {} entities (git commit: {:?})",
+                        "Writing {} entities to Postgres outbox (git commit: {:?})",
                         entities_with_embeddings.len(),
                         git_commit
                     );
 
-                    let mut postgres_success_count = 0;
                     for entity in &entities_with_embeddings {
-                        let point_id = point_id_map.get(&entity.entity_id).ok_or_else(|| {
-                            Error::Storage(format!(
-                                "Missing point ID for entity {}",
-                                entity.entity_id
-                            ))
-                        })?;
-
-                        postgres
-                            .store_entity_metadata(entity, *point_id, git_commit.clone())
+                        // Store metadata and version
+                        let version_id = postgres
+                            .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
                             .await
                             .map_err(|e| {
                                 error!(
-                                    "Failed to store entity {} in Postgres: {e}",
+                                    "Failed to store entity {} metadata in Postgres: {e}",
                                     entity.entity_id
                                 );
                                 e
                             })?;
-                        postgres_success_count += 1;
+
+                        // Write to outbox for Qdrant
+                        let payload = serde_json::to_value(entity).map_err(|e| {
+                            Error::Storage(format!("Failed to serialize entity: {e}"))
+                        })?;
+
+                        postgres
+                            .write_outbox_entry(
+                                &entity.entity_id,
+                                codesearch_storage::postgres::OutboxOperation::Insert,
+                                codesearch_storage::postgres::TargetStore::Qdrant,
+                                payload,
+                                version_id,
+                            )
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    "Failed to write outbox entry for entity {}: {e}",
+                                    entity.entity_id
+                                );
+                                e
+                            })?;
                     }
-                    debug!("Successfully wrote {} entities to Postgres", postgres_success_count);
+
+                    debug!(
+                        "Successfully wrote {} entities to Postgres outbox",
+                        entities_with_embeddings.len()
+                    );
                 } else {
-                    debug!("Skipping Postgres write (no postgres_client configured)");
+                    // Fallback: direct Qdrant write if no Postgres
+                    debug!("No Postgres client, falling back to direct Qdrant write");
+                    storage_client
+                        .bulk_load_entities(embedded_entities)
+                        .await
+                        .map_err(|e| {
+                            Error::Storage(format!("Failed to bulk store entities: {e}"))
+                        })?;
                 }
             }
 

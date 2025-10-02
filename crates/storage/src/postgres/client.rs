@@ -3,6 +3,52 @@ use codesearch_core::error::{Error, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy)]
+pub enum OutboxOperation {
+    Insert,
+    Update,
+    Delete,
+}
+
+impl std::fmt::Display for OutboxOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Insert => write!(f, "INSERT"),
+            Self::Update => write!(f, "UPDATE"),
+            Self::Delete => write!(f, "DELETE"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TargetStore {
+    Qdrant,
+    Neo4j,
+}
+
+impl std::fmt::Display for TargetStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Qdrant => write!(f, "qdrant"),
+            Self::Neo4j => write!(f, "neo4j"),
+        }
+    }
+}
+
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct OutboxEntry {
+    pub outbox_id: Uuid,
+    pub entity_id: String,
+    pub operation: String,
+    pub target_store: String,
+    pub payload: serde_json::Value,
+    pub version_id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub retry_count: i32,
+    pub last_error: Option<String>,
+}
+
 pub struct PostgresClient {
     pool: PgPool,
 }
@@ -101,7 +147,11 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
-        tracing::debug!("Successfully stored entity {} with version_id {}", entity.entity_id, version_id);
+        tracing::debug!(
+            "Successfully stored entity {} with version_id {}",
+            entity.entity_id,
+            version_id
+        );
 
         Ok(version_id)
     }
@@ -135,6 +185,83 @@ impl PostgresClient {
         .map_err(|e| Error::storage(format!("Failed to get entity versions: {e}")))?;
 
         Ok(versions)
+    }
+
+    /// Write outbox entry for entity operation
+    pub async fn write_outbox_entry(
+        &self,
+        entity_id: &str,
+        operation: OutboxOperation,
+        target_store: TargetStore,
+        payload: serde_json::Value,
+        version_id: Uuid,
+    ) -> Result<Uuid> {
+        let outbox_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO entity_outbox (
+                entity_id, operation, target_store, payload, version_id
+            ) VALUES ($1, $2, $3, $4, $5)
+            RETURNING outbox_id",
+        )
+        .bind(entity_id)
+        .bind(operation.to_string())
+        .bind(target_store.to_string())
+        .bind(payload)
+        .bind(version_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to write outbox entry: {e}")))?;
+
+        Ok(outbox_id)
+    }
+
+    /// Get unprocessed outbox entries for a target store
+    pub async fn get_unprocessed_outbox_entries(
+        &self,
+        target_store: TargetStore,
+        limit: i64,
+    ) -> Result<Vec<OutboxEntry>> {
+        let entries = sqlx::query_as::<_, OutboxEntry>(
+            "SELECT outbox_id, entity_id, operation, target_store, payload, version_id,
+                    created_at, processed_at, retry_count, last_error
+             FROM entity_outbox
+             WHERE target_store = $1 AND processed_at IS NULL
+             ORDER BY created_at ASC
+             LIMIT $2",
+        )
+        .bind(target_store.to_string())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get outbox entries: {e}")))?;
+
+        Ok(entries)
+    }
+
+    /// Mark outbox entry as processed
+    pub async fn mark_outbox_processed(&self, outbox_id: Uuid) -> Result<()> {
+        sqlx::query("UPDATE entity_outbox SET processed_at = NOW() WHERE outbox_id = $1")
+            .bind(outbox_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to mark outbox processed: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Increment retry count and record error
+    pub async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE entity_outbox
+             SET retry_count = retry_count + 1, last_error = $2
+             WHERE outbox_id = $1",
+        )
+        .bind(outbox_id)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to record outbox failure: {e}")))?;
+
+        Ok(())
     }
 }
 

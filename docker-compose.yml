@@ -54,6 +54,26 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  outbox-processor:
+    image: codesearch-outbox-processor:latest
+    container_name: codesearch-outbox-processor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - QDRANT_COLLECTION=codesearch
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: unless-stopped
+
   vllm-embeddings:
     image: vllm/vllm-openai:latest
     container_name: codesearch-vllm

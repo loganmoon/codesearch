@@ -112,14 +112,6 @@ pub struct CodeEntity {
     #[builder(default = "Vec::new()")]
     pub dependencies: Vec<String>,
 
-    /// Cyclomatic complexity metric (for functions/methods)
-    #[builder(default = "None")]
-    pub cyclomatic_complexity: Option<u32>,
-
-    /// Number of lines of code
-    #[builder(default = "0")]
-    pub lines_of_code: usize,
-
     /// Documentation summary extracted from comments
     #[builder(default = "None")]
     pub documentation_summary: Option<String>,

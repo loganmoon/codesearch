@@ -4,6 +4,7 @@
 //! indexed code entities and their relationships.
 
 mod collection_manager;
+pub mod postgres;
 mod qdrant;
 
 use async_trait::async_trait;
@@ -118,4 +119,26 @@ pub async fn create_collection_manager(
         qdrant::collection_manager::QdrantCollectionManager::new(Arc::new(qdrant_client)).await?;
 
     Ok(Arc::new(manager))
+}
+
+/// Factory function to create a Postgres metadata client
+pub async fn create_postgres_client(
+    config: &StorageConfig,
+) -> Result<Arc<postgres::PostgresClient>> {
+    let connection_string = format!(
+        "postgresql://{}:{}@{}:{}/{}",
+        config.postgres_user,
+        config.postgres_password,
+        config.postgres_host,
+        config.postgres_port,
+        config.postgres_database
+    );
+
+    let pool = sqlx::PgPool::connect(&connection_string)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
+        })?;
+
+    Ok(Arc::new(postgres::PostgresClient::new(pool)))
 }

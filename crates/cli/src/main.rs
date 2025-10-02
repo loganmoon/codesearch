@@ -202,6 +202,11 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
             collection_name,
             auto_start_deps: true,
             docker_compose_file: None,
+            postgres_host: "localhost".to_string(),
+            postgres_port: 5432,
+            postgres_database: "codesearch".to_string(),
+            postgres_user: "codesearch".to_string(),
+            postgres_password: "codesearch".to_string(),
         };
 
         let config = Config::builder().storage(storage_config).build();
@@ -381,6 +386,11 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
             collection_name,
             auto_start_deps: true,
             docker_compose_file: None,
+            postgres_host: "localhost".to_string(),
+            postgres_port: 5432,
+            postgres_database: "codesearch".to_string(),
+            postgres_user: "codesearch".to_string(),
+            postgres_password: "codesearch".to_string(),
         };
 
         Config::builder().storage(storage_config).build()
@@ -481,11 +491,28 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
         .await
         .context("Failed to create storage client")?;
 
+    // Step 4b: Create postgres client (optional)
+    let postgres_client = match codesearch_storage::create_postgres_client(&config.storage).await {
+        Ok(client) => {
+            info!("Successfully connected to Postgres metadata store");
+            Some(client)
+        }
+        Err(e) => {
+            warn!("Failed to connect to Postgres, continuing without metadata store: {e}");
+            None
+        }
+    };
+
     // Step 5: Get repository path
     let repo_path = find_repository_root()?;
 
     // Step 6: Create and run indexer
-    let mut indexer = RepositoryIndexer::new(repo_path.clone(), storage_client, embedding_manager);
+    let mut indexer = RepositoryIndexer::new(
+        repo_path.clone(),
+        storage_client,
+        embedding_manager,
+        postgres_client,
+    );
 
     // Step 7: Run indexing (it has built-in progress tracking)
     let result = indexer
@@ -713,6 +740,11 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                             collection_name: "codesearch".to_string(),
                             auto_start_deps: true,
                             docker_compose_file: None,
+                            postgres_host: "localhost".to_string(),
+                            postgres_port: 5432,
+                            postgres_database: "codesearch".to_string(),
+                            postgres_user: "codesearch".to_string(),
+                            postgres_password: "codesearch".to_string(),
                         };
                         Config::builder().storage(storage_config).build()
                     }
@@ -726,6 +758,11 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                     collection_name: "codesearch".to_string(),
                     auto_start_deps: true,
                     docker_compose_file: None,
+                    postgres_host: "localhost".to_string(),
+                    postgres_port: 5432,
+                    postgres_database: "codesearch".to_string(),
+                    postgres_user: "codesearch".to_string(),
+                    postgres_password: "codesearch".to_string(),
                 };
                 Config::builder().storage(storage_config).build()
             };

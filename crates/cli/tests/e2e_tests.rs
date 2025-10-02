@@ -229,6 +229,11 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         collection_name: collection_name.clone(),
         auto_start_deps: false,
         docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "codesearch".to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
     };
 
     let storage_client = create_storage_client(&storage_config, &collection_name).await?;
@@ -412,6 +417,11 @@ async fn test_programmatic_indexing_pipeline() -> Result<()> {
         collection_name: collection_name.clone(),
         auto_start_deps: false,
         docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "codesearch".to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
     };
 
     let collection_manager = create_collection_manager(&storage_config).await?;
@@ -424,7 +434,12 @@ async fn test_programmatic_indexing_pipeline() -> Result<()> {
     let embedding_manager = Arc::new(codesearch_embeddings::EmbeddingManager::new(mock_provider));
     let storage_client = create_storage_client(&storage_config, &collection_name).await?;
 
-    let mut indexer = create_indexer(repo.path().to_path_buf(), storage_client, embedding_manager);
+    let mut indexer = create_indexer(
+        repo.path().to_path_buf(),
+        storage_client,
+        embedding_manager,
+        None,
+    );
 
     // Run indexer
     let result = indexer.index_repository().await?;
@@ -576,6 +591,11 @@ fn broken( {
         collection_name: collection_name.clone(),
         auto_start_deps: false,
         docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "codesearch".to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
     };
     let collection_manager = create_collection_manager(&storage_config).await?;
     assert!(

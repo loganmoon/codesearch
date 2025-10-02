@@ -72,6 +72,9 @@ tree-sitter-typescript = "0.23"
 tree-sitter-rust = "0.23"
 tree-sitter-go = "0.23"
 
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "tls-rustls", "uuid", "chrono", "json"] }
+
 [profile.release]
 opt-level = 3
 lto = true

@@ -55,6 +55,7 @@ pub struct RepositoryIndexer {
     repository_path: PathBuf,
     storage_client: std::sync::Arc<dyn StorageClient>,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
+    postgres_client: Option<std::sync::Arc<codesearch_storage::postgres::PostgresClient>>,
 }
 
 /// Extract embeddable content from a CodeEntity
@@ -114,11 +115,13 @@ impl RepositoryIndexer {
         repository_path: PathBuf,
         storage_client: std::sync::Arc<dyn StorageClient>,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
+        postgres_client: Option<std::sync::Arc<codesearch_storage::postgres::PostgresClient>>,
     ) -> Self {
         Self {
             repository_path,
             storage_client,
             embedding_manager,
+            postgres_client,
         }
     }
 
@@ -266,12 +269,14 @@ impl RepositoryIndexer {
 
             // Filter entities with valid embeddings
             let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new(); // create destination
+            let mut entities_with_embeddings: Vec<CodeEntity> = Vec::new(); // track entities for postgres
 
             for (entity, opt_embedding) in batch_entities
                 .into_iter()
                 .zip(option_embeddings.into_iter())
             {
                 if let Some(embedding) = opt_embedding {
+                    entities_with_embeddings.push(entity.clone());
                     embedded_entities.push(EmbeddedEntity { entity, embedding });
                 } else {
                     stats.entities_skipped_size += 1;
@@ -290,6 +295,26 @@ impl RepositoryIndexer {
                     .await
                     // await
                     .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+
+                // Dual-write to Postgres if available
+                if let Some(postgres) = &self.postgres_client {
+                    for entity in &entities_with_embeddings {
+                        // Use placeholder UUID for now - Phase 3 will track actual point IDs
+                        let point_id = uuid::Uuid::new_v4();
+
+                        postgres
+                            .store_entity_metadata(
+                                entity,
+                                point_id,
+                                self.current_git_commit().await.ok(),
+                            )
+                            .await
+                            .map_err(|e| {
+                                tracing::warn!("Failed to store entity metadata in Postgres: {e}");
+                                e
+                            })?;
+                    }
+                }
             }
 
             debug!(
@@ -411,6 +436,12 @@ impl RepositoryIndexer {
         debug!("Successfully stored entities from {:?}", file_path);
 
         Ok(stats)
+    }
+
+    /// Get current Git commit hash (placeholder for Phase 2)
+    async fn current_git_commit(&self) -> Result<String> {
+        // TODO: Integrate with GitRepository from watcher crate in Phase 3
+        Ok("unknown".to_string())
     }
 }
 
@@ -544,6 +575,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             storage_client,
             embedding_manager,
+            None,
         );
         assert_eq!(indexer.repository_path(), temp_dir.path());
         Ok(())
@@ -559,6 +591,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             storage_client,
             embedding_manager,
+            None,
         );
 
         // This will fail because no storage server is running, but we can test the flow
@@ -587,6 +620,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             storage_client.clone(),
             embedding_manager,
+            None,
         );
 
         // This will fail without a running storage server, but tests the extraction

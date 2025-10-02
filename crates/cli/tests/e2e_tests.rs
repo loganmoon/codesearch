@@ -351,7 +351,11 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
 
     // Verify we can find at least one struct entity
-    let expected = ExpectedEntity::new("Calculator", codesearch_core::entities::EntityType::Struct, "main.rs");
+    let expected = ExpectedEntity::new(
+        "Calculator",
+        codesearch_core::entities::EntityType::Struct,
+        "main.rs",
+    );
     assert_entity_in_qdrant(&qdrant, &collection_name, &expected).await?;
 
     Ok(())

@@ -236,10 +236,8 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         generics: components.generics.clone(),
     };
 
-    let entity_id = generate_entity_id_from_qualified_name(
-        &components.qualified_name,
-        &components.file_path,
-    );
+    let entity_id =
+        generate_entity_id_from_qualified_name(&components.qualified_name, &components.file_path);
 
     CodeEntityBuilder::default()
         .entity_id(entity_id)

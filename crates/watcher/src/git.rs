@@ -70,6 +70,24 @@ impl GitRepository {
         Ok(!head.is_branch())
     }
 
+    /// Get current commit hash (full 40-char SHA-1)
+    pub fn current_commit_hash(&self) -> Result<String> {
+        let repo = self.open_repo()?;
+        let head = repo
+            .head()
+            .map_err(|e| Error::watcher(format!("Failed to get HEAD: {e}")))?;
+        let oid = head
+            .target()
+            .ok_or_else(|| Error::watcher("HEAD has no target (unborn branch)"))?;
+        Ok(oid.to_string())
+    }
+
+    /// Get current commit hash (8-char abbreviated)
+    pub fn current_commit_short_hash(&self) -> Result<String> {
+        let hash = self.current_commit_hash()?;
+        Ok(hash.chars().take(8).collect())
+    }
+
     /// List all local branches
     pub fn list_branches(&self) -> Result<Vec<String>> {
         let repo = self.open_repo()?;

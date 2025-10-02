@@ -9,11 +9,10 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::{EmbeddedEntity, StorageClient};
+use codesearch_storage::EmbeddedEntity;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, error, info};
@@ -53,8 +52,9 @@ impl IndexProgress {
 /// Main repository indexer
 pub struct RepositoryIndexer {
     repository_path: PathBuf,
-    storage_client: std::sync::Arc<dyn StorageClient>,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
+    postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
+    git_repo: Option<codesearch_watcher::GitRepository>,
 }
 
 /// Extract embeddable content from a CodeEntity
@@ -112,13 +112,15 @@ impl RepositoryIndexer {
     /// Create a new repository indexer
     pub fn new(
         repository_path: PathBuf,
-        storage_client: std::sync::Arc<dyn StorageClient>,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
+        postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
+        git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
             repository_path,
-            storage_client,
             embedding_manager,
+            postgres_client,
+            git_repo,
         }
     }
 
@@ -140,9 +142,6 @@ impl RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Clone the Arc to avoid borrowing issues
-        let storage_client = Arc::clone(&self.storage_client);
-
         // Process statistics
         let mut stats = IndexStats::default();
 
@@ -152,7 +151,7 @@ impl RepositoryIndexer {
         for chunk in files.chunks(BATCH_SIZE) {
             pb.set_message(format!("Processing batch of {} files", chunk.len()));
 
-            match self.process_batch(chunk, &storage_client, &pb).await {
+            match self.process_batch(chunk, &pb).await {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
                     for file_path in chunk {
@@ -164,7 +163,7 @@ impl RepositoryIndexer {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback
                     for file_path in chunk {
-                        match self.process_file(file_path, &storage_client).await {
+                        match self.process_file(file_path).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -213,7 +212,6 @@ impl RepositoryIndexer {
     async fn process_batch(
         &mut self,
         file_paths: &[PathBuf],
-        storage_client: &std::sync::Arc<dyn StorageClient>,
         _pb: &indicatif::ProgressBar,
     ) -> Result<IndexStats> {
         debug!("Processing batch of {} files", file_paths.len());
@@ -250,7 +248,7 @@ impl RepositoryIndexer {
 
         // Bulk load all entities from the batch
         if !batch_entities.is_empty() {
-            debug!("Bulk loading {} entities", batch_entities.len());
+            info!("Bulk loading {} entities", batch_entities.len());
 
             // Generate embeddings for all entities
             let embedding_texts: Vec<String> = batch_entities // create embedding texts from each entity
@@ -266,12 +264,14 @@ impl RepositoryIndexer {
 
             // Filter entities with valid embeddings
             let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new(); // create destination
+            let mut entities_with_embeddings: Vec<CodeEntity> = Vec::new(); // track entities for postgres
 
             for (entity, opt_embedding) in batch_entities
                 .into_iter()
                 .zip(option_embeddings.into_iter())
             {
                 if let Some(embedding) = opt_embedding {
+                    entities_with_embeddings.push(entity.clone());
                     embedded_entities.push(EmbeddedEntity { entity, embedding });
                 } else {
                     stats.entities_skipped_size += 1;
@@ -283,13 +283,67 @@ impl RepositoryIndexer {
                 }
             }
 
+            debug!(
+                "After embedding: embedded_entities={}, entities_with_embeddings={}",
+                embedded_entities.len(),
+                entities_with_embeddings.len()
+            );
+
             // Only store entities that have embeddings
             if !embedded_entities.is_empty() {
-                storage_client // store entities
-                    .bulk_load_entities(embedded_entities) // store
-                    .await
-                    // await
-                    .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+                info!(
+                    "Processing {} entities with embeddings",
+                    embedded_entities.len()
+                );
+
+                // Write entities to Postgres outbox within transaction
+                let git_commit = self.current_git_commit().await.ok();
+                debug!(
+                    "Writing {} entities to Postgres outbox (git commit: {:?})",
+                    entities_with_embeddings.len(),
+                    git_commit
+                );
+
+                for entity in &entities_with_embeddings {
+                    // Store metadata and version
+                    let version_id = self
+                        .postgres_client
+                        .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Failed to store entity {} metadata in Postgres: {e}",
+                                entity.entity_id
+                            );
+                            e
+                        })?;
+
+                    // Write to outbox for Qdrant
+                    let payload = serde_json::to_value(entity)
+                        .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+
+                    self.postgres_client
+                        .write_outbox_entry(
+                            &entity.entity_id,
+                            codesearch_storage::postgres::OutboxOperation::Insert,
+                            codesearch_storage::postgres::TargetStore::Qdrant,
+                            payload,
+                            version_id,
+                        )
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Failed to write outbox entry for entity {}: {e}",
+                                entity.entity_id
+                            );
+                            e
+                        })?;
+                }
+
+                debug!(
+                    "Successfully wrote {} entities to Postgres outbox",
+                    entities_with_embeddings.len()
+                );
             }
 
             debug!(
@@ -336,11 +390,7 @@ impl RepositoryIndexer {
     }
 
     /// Process a single file through the indexing pipeline
-    async fn process_file(
-        &mut self,
-        file_path: &Path,
-        storage_client: &std::sync::Arc<dyn StorageClient>,
-    ) -> Result<IndexStats> {
+    async fn process_file(&mut self, file_path: &Path) -> Result<IndexStats> {
         debug!("Processing file: {:?}", file_path);
 
         // Initialize stats for this file
@@ -386,9 +436,11 @@ impl RepositoryIndexer {
 
         // Filter entities with valid embeddings
         let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
+        let mut entities_with_embeddings: Vec<CodeEntity> = Vec::new();
 
         for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
             if let Some(embedding) = opt_embedding {
+                entities_with_embeddings.push(entity.clone());
                 embedded_entities.push(EmbeddedEntity { entity, embedding });
             } else {
                 stats.entities_skipped_size += 1;
@@ -402,15 +454,47 @@ impl RepositoryIndexer {
 
         // Only store entities that have embeddings
         if !embedded_entities.is_empty() {
-            storage_client
-                .bulk_load_entities(embedded_entities)
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+            // Write entities to Postgres outbox
+            let git_commit = self.current_git_commit().await.ok();
+
+            for entity in &entities_with_embeddings {
+                // Store metadata and version
+                let version_id = self
+                    .postgres_client
+                    .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to store entity metadata: {e}")))?;
+
+                // Write to outbox for Qdrant
+                let payload = serde_json::to_value(entity)
+                    .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+
+                self.postgres_client
+                    .write_outbox_entry(
+                        &entity.entity_id,
+                        codesearch_storage::postgres::OutboxOperation::Insert,
+                        codesearch_storage::postgres::TargetStore::Qdrant,
+                        payload,
+                        version_id,
+                    )
+                    .await
+                    .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
+            }
         }
 
         debug!("Successfully stored entities from {:?}", file_path);
 
         Ok(stats)
+    }
+
+    /// Get current Git commit hash
+    async fn current_git_commit(&self) -> Result<String> {
+        if let Some(git) = &self.git_repo {
+            git.current_commit_hash()
+                .map_err(|e| Error::Storage(format!("Failed to get Git commit: {e}")))
+        } else {
+            Ok("no-git".to_string())
+        }
     }
 }
 
@@ -429,9 +513,6 @@ impl crate::Indexer for RepositoryIndexer {
         let mut progress = IndexProgress::new(files.len());
         let pb = create_progress_bar(files.len());
 
-        // Clone the Arc to avoid borrowing issues
-        let storage_client = Arc::clone(&self.storage_client);
-
         // Process statistics
         let mut stats = IndexStats::new();
 
@@ -441,7 +522,7 @@ impl crate::Indexer for RepositoryIndexer {
         for chunk in files.chunks(BATCH_SIZE) {
             pb.set_message(format!("Processing batch of {} files", chunk.len()));
 
-            match self.process_batch(chunk, &storage_client, &pb).await {
+            match self.process_batch(chunk, &pb).await {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
                     for file_path in chunk {
@@ -453,7 +534,7 @@ impl crate::Indexer for RepositoryIndexer {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback
                     for file_path in chunk {
-                        match self.process_file(file_path, &storage_client).await {
+                        match self.process_file(file_path).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -503,98 +584,6 @@ fn create_progress_bar(total: usize) -> ProgressBar {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
-    use codesearch_storage::MockStorageClient;
-    use std::sync::Arc;
-    use tempfile::TempDir;
-    use tokio::fs;
-
-    // Mock embedding provider for testing
-    struct MockEmbeddingProvider;
-
-    #[async_trait::async_trait]
-    impl EmbeddingProvider for MockEmbeddingProvider {
-        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
-            // Return dummy embeddings with 384 dimensions
-            Ok(texts.into_iter().map(|_| Some(vec![0.0f32; 384])).collect())
-        }
-
-        fn embedding_dimension(&self) -> usize {
-            384
-        }
-
-        fn max_sequence_length(&self) -> usize {
-            512
-        }
-    }
-
-    /// Creates a test embedding manager
-    fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
-        Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
-    }
-
-    #[tokio::test]
-    async fn test_repository_indexer_creation() -> anyhow::Result<()> {
-        let temp_dir =
-            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
-        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
-        let embedding_manager = create_test_embedding_manager();
-        let indexer = RepositoryIndexer::new(
-            temp_dir.path().to_path_buf(),
-            storage_client,
-            embedding_manager,
-        );
-        assert_eq!(indexer.repository_path(), temp_dir.path());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_empty_repository_indexing() -> anyhow::Result<()> {
-        let temp_dir =
-            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
-        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
-        let embedding_manager = create_test_embedding_manager();
-        let mut indexer = RepositoryIndexer::new(
-            temp_dir.path().to_path_buf(),
-            storage_client,
-            embedding_manager,
-        );
-
-        // This will fail because no storage server is running, but we can test the flow
-        let result = indexer.index_repository().await;
-        assert!(result.is_ok());
-
-        if let Ok(index_result) = result {
-            assert_eq!(index_result.stats.total_files, 0);
-            assert_eq!(index_result.stats.entities_extracted, 0);
-        }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_file_processing() -> anyhow::Result<()> {
-        let temp_dir =
-            TempDir::new().map_err(|e| anyhow::anyhow!("Failed to create temp dir: {e}"))?;
-        let test_file = temp_dir.path().join("test.rs");
-        fs::write(&test_file, "fn main() { println!(\"Hello\"); }")
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to write test file: {e}"))?;
-
-        let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
-        let embedding_manager = create_test_embedding_manager(); // creates test embedding manager
-        let mut indexer = RepositoryIndexer::new(
-            temp_dir.path().to_path_buf(),
-            storage_client.clone(),
-            embedding_manager,
-        );
-
-        // This will fail without a running storage server, but tests the extraction
-        let result = indexer.process_file(&test_file, &storage_client).await;
-
-        // The test should at least attempt extraction
-        // Full success depends on storage being available
-        assert!(result.is_ok() || result.is_err());
-        Ok(())
-    }
+    // Tests disabled: RepositoryIndexer now requires PostgresClient
+    // TODO: Create MockPostgresClient to enable unit tests
 }

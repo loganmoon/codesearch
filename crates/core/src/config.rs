@@ -99,6 +99,26 @@ pub struct StorageConfig {
     /// Docker compose file path (optional)
     #[serde(default)]
     pub docker_compose_file: Option<String>,
+
+    /// Postgres host address
+    #[serde(default = "default_postgres_host")]
+    pub postgres_host: String,
+
+    /// Postgres port
+    #[serde(default = "default_postgres_port")]
+    pub postgres_port: u16,
+
+    /// Postgres database name
+    #[serde(default = "default_postgres_database")]
+    pub postgres_database: String,
+
+    /// Postgres username
+    #[serde(default = "default_postgres_user")]
+    pub postgres_user: String,
+
+    /// Postgres password
+    #[serde(default = "default_postgres_password")]
+    pub postgres_password: String,
 }
 
 /// Configuration for language support
@@ -209,6 +229,26 @@ fn default_qdrant_rest_port() -> u16 {
 
 fn default_auto_start_deps() -> bool {
     true
+}
+
+fn default_postgres_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_postgres_port() -> u16 {
+    5432
+}
+
+fn default_postgres_database() -> String {
+    "codesearch".to_string()
+}
+
+fn default_postgres_user() -> String {
+    "codesearch".to_string()
+}
+
+fn default_postgres_password() -> String {
+    "codesearch".to_string()
 }
 
 impl Default for EmbeddingsConfig {
@@ -334,6 +374,35 @@ impl Config {
             builder = builder
                 .set_override("storage.collection_name", collection)
                 .map_err(|e| Error::config(format!("Failed to set QDRANT_COLLECTION: {e}")))?;
+        }
+
+        // Support Postgres environment variables
+        if let Ok(host) = std::env::var("POSTGRES_HOST") {
+            builder = builder
+                .set_override("storage.postgres_host", host)
+                .map_err(|e| Error::config(format!("Failed to set POSTGRES_HOST: {e}")))?;
+        }
+        if let Ok(port) = std::env::var("POSTGRES_PORT") {
+            if let Ok(port_num) = port.parse::<u16>() {
+                builder = builder
+                    .set_override("storage.postgres_port", port_num)
+                    .map_err(|e| Error::config(format!("Failed to set POSTGRES_PORT: {e}")))?;
+            }
+        }
+        if let Ok(db) = std::env::var("POSTGRES_DATABASE") {
+            builder = builder
+                .set_override("storage.postgres_database", db)
+                .map_err(|e| Error::config(format!("Failed to set POSTGRES_DATABASE: {e}")))?;
+        }
+        if let Ok(user) = std::env::var("POSTGRES_USER") {
+            builder = builder
+                .set_override("storage.postgres_user", user)
+                .map_err(|e| Error::config(format!("Failed to set POSTGRES_USER: {e}")))?;
+        }
+        if let Ok(password) = std::env::var("POSTGRES_PASSWORD") {
+            builder = builder
+                .set_override("storage.postgres_password", password)
+                .map_err(|e| Error::config(format!("Failed to set POSTGRES_PASSWORD: {e}")))?;
         }
 
         let config = builder

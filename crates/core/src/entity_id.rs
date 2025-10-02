@@ -70,10 +70,7 @@ impl Default for ScopeContext {
 ///
 /// For named entities, uses the qualified name from the scope context.
 /// The qualified name should already be built using `build_qualified_name`.
-pub fn generate_entity_id_from_qualified_name(
-    qualified_name: &str,
-    file_path: &Path,
-) -> String {
+pub fn generate_entity_id_from_qualified_name(qualified_name: &str, file_path: &Path) -> String {
     let unique_str = format!("{}:{}", file_path.display(), qualified_name);
     format!(
         "entity-{:032x}",

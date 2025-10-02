@@ -202,6 +202,11 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
             collection_name,
             auto_start_deps: true,
             docker_compose_file: None,
+            postgres_host: "localhost".to_string(),
+            postgres_port: 5432,
+            postgres_database: "codesearch".to_string(),
+            postgres_user: "codesearch".to_string(),
+            postgres_password: "codesearch".to_string(),
         };
 
         let config = Config::builder().storage(storage_config).build();
@@ -381,6 +386,11 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
             collection_name,
             auto_start_deps: true,
             docker_compose_file: None,
+            postgres_host: "localhost".to_string(),
+            postgres_port: 5432,
+            postgres_database: "codesearch".to_string(),
+            postgres_user: "codesearch".to_string(),
+            postgres_password: "codesearch".to_string(),
         };
 
         Config::builder().storage(storage_config).build()
@@ -476,16 +486,34 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
             .context("Failed to create embedding manager")?,
     );
 
-    // Step 4: Create storage client for the indexer
-    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+    // Step 4: Create postgres client (required for Phase 4+)
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
         .await
-        .context("Failed to create storage client")?;
+        .context("Failed to connect to Postgres (required for indexing)")?;
+    info!("Successfully connected to Postgres metadata store");
 
     // Step 5: Get repository path
     let repo_path = find_repository_root()?;
 
+    // Step 5.5: Create GitRepository if possible
+    let git_repo = match codesearch_watcher::GitRepository::open(&repo_path) {
+        Ok(repo) => {
+            info!("Git repository detected");
+            Some(repo)
+        }
+        Err(e) => {
+            warn!("Not a Git repository or failed to open: {e}");
+            None
+        }
+    };
+
     // Step 6: Create and run indexer
-    let mut indexer = RepositoryIndexer::new(repo_path.clone(), storage_client, embedding_manager);
+    let mut indexer = RepositoryIndexer::new(
+        repo_path.clone(),
+        embedding_manager,
+        postgres_client,
+        git_repo,
+    );
 
     // Step 7: Run indexing (it has built-in progress tracking)
     let result = indexer
@@ -713,6 +741,11 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                             collection_name: "codesearch".to_string(),
                             auto_start_deps: true,
                             docker_compose_file: None,
+                            postgres_host: "localhost".to_string(),
+                            postgres_port: 5432,
+                            postgres_database: "codesearch".to_string(),
+                            postgres_user: "codesearch".to_string(),
+                            postgres_password: "codesearch".to_string(),
                         };
                         Config::builder().storage(storage_config).build()
                     }
@@ -726,6 +759,11 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                     collection_name: "codesearch".to_string(),
                     auto_start_deps: true,
                     docker_compose_file: None,
+                    postgres_host: "localhost".to_string(),
+                    postgres_port: 5432,
+                    postgres_database: "codesearch".to_string(),
+                    postgres_user: "codesearch".to_string(),
+                    postgres_password: "codesearch".to_string(),
                 };
                 Config::builder().storage(storage_config).build()
             };

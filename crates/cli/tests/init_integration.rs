@@ -36,11 +36,11 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{}:6334", port),
+                &format!("{port}:6334"),
                 "-p",
-                &format!("{}:6333", rest_port),
+                &format!("{rest_port}:6333"),
                 "-v",
-                &format!("{}:/qdrant/storage", temp_dir_name),
+                &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant",
             ])
             .output()

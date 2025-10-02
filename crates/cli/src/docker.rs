@@ -225,6 +225,48 @@ pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> 
     ))
 }
 
+/// Check Postgres health status
+pub async fn check_postgres_health(config: &StorageConfig) -> Result<bool> {
+    let connection_string = format!(
+        "postgresql://{}:{}@{}:{}/{}",
+        config.postgres_user,
+        config.postgres_password,
+        config.postgres_host,
+        config.postgres_port,
+        config.postgres_database
+    );
+
+    match sqlx::PgPool::connect(&connection_string).await {
+        Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        },
+        Err(_) => Ok(false),
+    }
+}
+
+/// Wait for Postgres to become healthy
+pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Result<()> {
+    info!("Waiting for Postgres to become healthy...");
+
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if check_postgres_health(config).await? {
+            info!("Postgres is healthy");
+            return Ok(());
+        }
+
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    Err(anyhow!(
+        "Postgres failed to become healthy within {} seconds. \
+         Check logs with: docker logs codesearch-postgres",
+        timeout.as_secs()
+    ))
+}
+
 /// Ensure dependencies are running, starting them if necessary
 pub async fn ensure_dependencies_running(
     config: &StorageConfig,
@@ -272,6 +314,7 @@ pub async fn ensure_dependencies_running(
             wait_for_vllm(url, Duration::from_secs(60)).await?;
         }
     }
+    wait_for_postgres(config, Duration::from_secs(30)).await?;
 
     Ok(())
 }

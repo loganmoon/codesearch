@@ -8,16 +8,14 @@ use tempfile::TempDir;
 
 /// Builder for creating test repositories with custom content
 pub struct TestRepositoryBuilder {
-    name: String,
     files: Vec<(PathBuf, String)>,
     init_git: bool,
 }
 
 impl TestRepositoryBuilder {
     /// Create a new test repository builder
-    pub fn new(name: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            name: name.to_string(),
             files: Vec::new(),
             init_git: true,
         }
@@ -34,12 +32,6 @@ impl TestRepositoryBuilder {
     pub fn with_rust_file(self, name: &str, content: &str) -> Self {
         let path = PathBuf::from("src").join(name);
         self.with_file(path, content)
-    }
-
-    /// Control whether to initialize git (default: true)
-    pub fn with_git_init(mut self, enabled: bool) -> Self {
-        self.init_git = enabled;
-        self
     }
 
     /// Build the test repository
@@ -122,7 +114,7 @@ impl ExpectedEntity {
 ///
 /// Expected: 2-3 functions, 1 struct (3-5 entities total)
 pub async fn simple_rust_repo() -> Result<TempDir> {
-    TestRepositoryBuilder::new("simple")
+    TestRepositoryBuilder::new()
         .with_rust_file(
             "main.rs",
             r#"
@@ -154,21 +146,11 @@ fn main() {
         .await
 }
 
-/// Expected entities for simple_rust_repo
-pub fn simple_rust_repo_expected_entities() -> Vec<ExpectedEntity> {
-    vec![
-        ExpectedEntity::new("greet", EntityType::Function, "main.rs"),
-        ExpectedEntity::new("Counter", EntityType::Struct, "main.rs"),
-        ExpectedEntity::new("Counter::new", EntityType::Method, "main.rs"),
-        ExpectedEntity::new("main", EntityType::Function, "main.rs"),
-    ]
-}
-
 /// Create a multi-file Rust repository with moderate complexity
 ///
 /// Expected: 10-15 entities across multiple files
 pub async fn multi_file_rust_repo() -> Result<TempDir> {
-    TestRepositoryBuilder::new("multi")
+    TestRepositoryBuilder::new()
         .with_rust_file(
             "main.rs",
             r#"
@@ -265,29 +247,11 @@ impl Formatter {
         .await
 }
 
-/// Expected entities for multi_file_rust_repo
-pub fn multi_file_rust_repo_expected_entities() -> Vec<ExpectedEntity> {
-    vec![
-        ExpectedEntity::new("main", EntityType::Function, "main.rs"),
-        ExpectedEntity::new("Calculator", EntityType::Struct, "main.rs"),
-        ExpectedEntity::new("Calculator::new", EntityType::Method, "main.rs"),
-        ExpectedEntity::new("Calculator::add", EntityType::Method, "main.rs"),
-        ExpectedEntity::new("Calculator::subtract", EntityType::Method, "main.rs"),
-        ExpectedEntity::new("process_data", EntityType::Function, "lib.rs"),
-        ExpectedEntity::new("Serialize", EntityType::Trait, "lib.rs"),
-        ExpectedEntity::new("reverse_string", EntityType::Function, "utils.rs"),
-        ExpectedEntity::new("is_even", EntityType::Function, "utils.rs"),
-        ExpectedEntity::new("Formatter", EntityType::Struct, "utils.rs"),
-        ExpectedEntity::new("Formatter::new", EntityType::Method, "utils.rs"),
-        ExpectedEntity::new("Formatter::format", EntityType::Method, "utils.rs"),
-    ]
-}
-
 /// Create a complex Rust repository with realistic project structure
 ///
 /// Expected: 20-30 entities with nested modules, traits, implementations
 pub async fn complex_rust_repo() -> Result<TempDir> {
-    TestRepositoryBuilder::new("complex")
+    TestRepositoryBuilder::new()
         .with_rust_file(
             "main.rs",
             r#"
@@ -445,35 +409,13 @@ pub fn health_check() -> &'static str {
         .await
 }
 
-/// Expected entities for complex_rust_repo
-pub fn complex_rust_repo_expected_entities() -> Vec<ExpectedEntity> {
-    vec![
-        ExpectedEntity::new("main", EntityType::Function, "main.rs"),
-        ExpectedEntity::new("User", EntityType::Struct, "models.rs"),
-        ExpectedEntity::new("User::new", EntityType::Method, "models.rs"),
-        ExpectedEntity::new("User::is_valid_email", EntityType::Method, "models.rs"),
-        ExpectedEntity::new("Post", EntityType::Struct, "models.rs"),
-        ExpectedEntity::new("Post::new", EntityType::Method, "models.rs"),
-        ExpectedEntity::new("Post::preview", EntityType::Method, "models.rs"),
-        ExpectedEntity::new("Database", EntityType::Struct, "database.rs"),
-        ExpectedEntity::new("Database::connect", EntityType::Method, "database.rs"),
-        ExpectedEntity::new("Database::save_user", EntityType::Method, "database.rs"),
-        ExpectedEntity::new("Database::get_user", EntityType::Method, "database.rs"),
-        ExpectedEntity::new("Database::save_post", EntityType::Method, "database.rs"),
-        ExpectedEntity::new("Persistable", EntityType::Trait, "database.rs"),
-        ExpectedEntity::new("create_user", EntityType::Function, "api.rs"),
-        ExpectedEntity::new("get_user", EntityType::Function, "api.rs"),
-        ExpectedEntity::new("health_check", EntityType::Function, "api.rs"),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_builder_creates_files() -> Result<()> {
-        let repo = TestRepositoryBuilder::new("test")
+        let repo = TestRepositoryBuilder::new()
             .with_file("test.txt", "content")
             .with_rust_file("lib.rs", "fn test() {}")
             .build()
@@ -518,8 +460,6 @@ mod tests {
             parent_scope: None,
             entity_type: EntityType::Function,
             dependencies: Vec::new(),
-            cyclomatic_complexity: None,
-            lines_of_code: 3,
             documentation_summary: None,
             file_path: PathBuf::from("/tmp/test/src/main.rs"),
             location: SourceLocation {

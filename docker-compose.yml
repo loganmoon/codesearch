@@ -34,6 +34,46 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  postgres:
+    image: postgres:17
+    container_name: codesearch-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      - POSTGRES_DB=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesearch -d codesearch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  outbox-processor:
+    image: codesearch-outbox-processor:latest
+    container_name: codesearch-outbox-processor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - QDRANT_COLLECTION=codesearch
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: unless-stopped
+
   vllm-embeddings:
     image: vllm/vllm-openai:latest
     container_name: codesearch-vllm
@@ -60,7 +100,14 @@ services:
       - "--gpu-memory-utilization"
       - "0.8"
       - "--dtype"
-      - "float16"
+      - "float32"
+      - "--max-model-len"
+      - "32768"
+      - "--max-num-batched-tokens"
+      - "32768"
+      - "--max-num-seqs"
+      - "1024"
+      - "--trust-remote-code"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -98,7 +145,14 @@ services:
       - "--gpu-memory-utilization"
       - "0.8"
       - "--dtype"
-      - "float16"
+      - "float32"
+      - "--max-model-len"
+      - "32768"
+      - "--max-num-batched-tokens"
+      - "32768"
+      - "--max-num-seqs"
+      - "1024"
+      - "--trust-remote-code"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -109,4 +163,6 @@ services:
 
 volumes:
   qdrant_data:
+    driver: local
+  postgres_data:
     driver: local

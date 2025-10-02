@@ -121,36 +121,47 @@ impl QdrantStorageClient {
 
 #[async_trait]
 impl StorageClient for QdrantStorageClient {
-    async fn bulk_load_entities(&self, embedded_entities: Vec<EmbeddedEntity>) -> Result<()> {
+    async fn bulk_load_entities(
+        &self,
+        embedded_entities: Vec<EmbeddedEntity>,
+    ) -> Result<Vec<(String, Uuid)>> {
         if embedded_entities.is_empty() {
-            return Ok(());
+            return Ok(vec![]);
         }
 
-        let points: Vec<PointStruct> = embedded_entities
-            .iter()
+        let points: Vec<_> = embedded_entities
+            .into_iter()
             .map(|embedded| {
-                // Generate a new UUID for the Qdrant point ID
-                let id = PointId::from(Uuid::new_v4().to_string());
-                PointStruct::new(
-                    id,
-                    embedded.embedding.clone(),
+                let point_id = Uuid::new_v4();
+                let entity_id = embedded.entity.entity_id.clone();
+                let point = PointStruct::new(
+                    PointId::from(point_id.to_string()),
+                    embedded.embedding,
                     Self::entity_to_payload(&embedded.entity),
-                )
+                );
+                (entity_id, point_id, point)
             })
             .collect();
+
+        let entity_point_map: Vec<(String, Uuid)> = points
+            .iter()
+            .map(|(eid, pid, _)| (eid.clone(), *pid))
+            .collect();
+
+        let qdrant_points: Vec<PointStruct> = points.into_iter().map(|(_, _, p)| p).collect();
 
         // Use upsert to handle duplicates gracefully
         self.qdrant_client
             .upsert_points(qdrant_client::qdrant::UpsertPoints::from(
                 qdrant_client::qdrant::UpsertPointsBuilder::new(
                     self.collection_name.clone(),
-                    points,
+                    qdrant_points,
                 ),
             ))
             .await
             .map_err(|e| Error::storage(e.to_string()))?;
 
-        Ok(())
+        Ok(entity_point_map)
     }
 
     async fn search_similar(

@@ -439,6 +439,7 @@ async fn test_programmatic_indexing_pipeline() -> Result<()> {
         storage_client,
         embedding_manager,
         None,
+        None,
     );
 
     // Run indexer

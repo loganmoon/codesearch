@@ -201,7 +201,13 @@ async fn test_full_indexing_pipeline() {
     // Create indexer
     let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
     let embedding_manager = create_test_embedding_manager();
-    let mut indexer = create_indexer(repo_path.clone(), storage_client, embedding_manager, None);
+    let mut indexer = create_indexer(
+        repo_path.clone(),
+        storage_client,
+        embedding_manager,
+        None,
+        None,
+    );
 
     // Verify repository path is set correctly
     // Repository path is now internal to the implementation
@@ -290,7 +296,13 @@ fn large_function() {{
     })));
     let storage: Arc<dyn StorageClient> = Arc::new(MockStorageClient);
 
-    let mut indexer = create_indexer(repo_path.to_path_buf(), storage, embedding_manager, None);
+    let mut indexer = create_indexer(
+        repo_path.to_path_buf(),
+        storage,
+        embedding_manager,
+        None,
+        None,
+    );
     let result = indexer.index_repository().await.unwrap();
 
     // Verify that we have skipped entities
@@ -308,6 +320,7 @@ async fn test_indexer_with_empty_repository() {
         temp_dir.path().to_path_buf(),
         storage_client,
         embedding_manager,
+        None,
         None,
     );
 

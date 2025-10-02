@@ -506,12 +506,25 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     // Step 5: Get repository path
     let repo_path = find_repository_root()?;
 
+    // Step 5.5: Create GitRepository if possible
+    let git_repo = match codesearch_watcher::GitRepository::open(&repo_path) {
+        Ok(repo) => {
+            info!("Git repository detected");
+            Some(repo)
+        }
+        Err(e) => {
+            warn!("Not a Git repository or failed to open: {e}");
+            None
+        }
+    };
+
     // Step 6: Create and run indexer
     let mut indexer = RepositoryIndexer::new(
         repo_path.clone(),
         storage_client,
         embedding_manager,
         postgres_client,
+        git_repo,
     );
 
     // Step 7: Run indexing (it has built-in progress tracking)

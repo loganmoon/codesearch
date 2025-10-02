@@ -15,3 +15,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["sync"] }
 sqlx = { workspace = true }
 chrono = "0.4"
+tracing = { workspace = true }

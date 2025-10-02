@@ -19,6 +19,13 @@ impl PostgresClient {
         qdrant_point_id: Uuid,
         git_commit_hash: Option<String>,
     ) -> Result<Uuid> {
+        tracing::debug!(
+            "Storing entity {} with point_id {} and git_commit {:?}",
+            entity.entity_id,
+            qdrant_point_id,
+            git_commit_hash
+        );
+
         let mut tx = self
             .pool
             .begin()
@@ -39,7 +46,7 @@ impl PostgresClient {
             "INSERT INTO entity_versions (
                 entity_id, version_number, git_commit_hash, file_path, qualified_name,
                 entity_type, language, entity_data, line_range
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int4range)
             RETURNING version_id",
         )
         .bind(&entity.entity_id)
@@ -53,7 +60,7 @@ impl PostgresClient {
         )
         .bind(&entity.qualified_name)
         .bind(entity.entity_type.to_string())
-        .bind(entity.language.to_string())
+        .bind(format!("{:?}", entity.language))
         .bind(
             serde_json::to_value(entity)
                 .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?,
@@ -83,7 +90,7 @@ impl PostgresClient {
         )
         .bind(&entity.qualified_name)
         .bind(entity.entity_type.to_string())
-        .bind(entity.language.to_string())
+        .bind(format!("{:?}", entity.language))
         .bind(qdrant_point_id)
         .bind(version_id)
         .execute(&mut *tx)
@@ -93,6 +100,8 @@ impl PostgresClient {
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        tracing::debug!("Successfully stored entity {} with version_id {}", entity.entity_id, version_id);
 
         Ok(version_id)
     }

@@ -56,6 +56,7 @@ pub struct RepositoryIndexer {
     storage_client: std::sync::Arc<dyn StorageClient>,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: Option<std::sync::Arc<codesearch_storage::postgres::PostgresClient>>,
+    git_repo: Option<codesearch_watcher::GitRepository>,
 }
 
 /// Extract embeddable content from a CodeEntity
@@ -116,12 +117,14 @@ impl RepositoryIndexer {
         storage_client: std::sync::Arc<dyn StorageClient>,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: Option<std::sync::Arc<codesearch_storage::postgres::PostgresClient>>,
+        git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
             repository_path,
             storage_client,
             embedding_manager,
             postgres_client,
+            git_repo,
         }
     }
 
@@ -253,7 +256,7 @@ impl RepositoryIndexer {
 
         // Bulk load all entities from the batch
         if !batch_entities.is_empty() {
-            debug!("Bulk loading {} entities", batch_entities.len());
+            info!("Bulk loading {} entities", batch_entities.len());
 
             // Generate embeddings for all entities
             let embedding_texts: Vec<String> = batch_entities // create embedding texts from each entity
@@ -288,32 +291,68 @@ impl RepositoryIndexer {
                 }
             }
 
+            debug!(
+                "After embedding: embedded_entities={}, entities_with_embeddings={}",
+                embedded_entities.len(),
+                entities_with_embeddings.len()
+            );
+
             // Only store entities that have embeddings
             if !embedded_entities.is_empty() {
-                storage_client // store entities
-                    .bulk_load_entities(embedded_entities) // store
-                    .await
-                    // await
-                    .map_err(|e| Error::Storage(format!("Failed to bulk store entities: {e}")))?;
+                info!(
+                    "Processing {} entities with embeddings (postgres_client present: {})",
+                    embedded_entities.len(),
+                    self.postgres_client.is_some()
+                );
 
-                // Dual-write to Postgres if available
+                // Store in Qdrant and get point IDs
+                debug!("Storing {} entities in Qdrant", embedded_entities.len());
+                let entity_point_map = storage_client
+                    .bulk_load_entities(embedded_entities)
+                    .await
+                    .map_err(|e| {
+                    Error::Storage(format!("Failed to bulk store entities: {e}"))
+                })?;
+
+                debug!("Successfully stored {} entities in Qdrant", entity_point_map.len());
+
+                // Create lookup map
+                let point_id_map: std::collections::HashMap<String, uuid::Uuid> =
+                    entity_point_map.into_iter().collect();
+
+                // Dual-write to Postgres with actual point IDs
                 if let Some(postgres) = &self.postgres_client {
+                    let git_commit = self.current_git_commit().await.ok();
+                    debug!(
+                        "Starting Postgres dual-write for {} entities (git commit: {:?})",
+                        entities_with_embeddings.len(),
+                        git_commit
+                    );
+
+                    let mut postgres_success_count = 0;
                     for entity in &entities_with_embeddings {
-                        // Use placeholder UUID for now - Phase 3 will track actual point IDs
-                        let point_id = uuid::Uuid::new_v4();
+                        let point_id = point_id_map.get(&entity.entity_id).ok_or_else(|| {
+                            Error::Storage(format!(
+                                "Missing point ID for entity {}",
+                                entity.entity_id
+                            ))
+                        })?;
 
                         postgres
-                            .store_entity_metadata(
-                                entity,
-                                point_id,
-                                self.current_git_commit().await.ok(),
-                            )
+                            .store_entity_metadata(entity, *point_id, git_commit.clone())
                             .await
                             .map_err(|e| {
-                                tracing::warn!("Failed to store entity metadata in Postgres: {e}");
+                                error!(
+                                    "Failed to store entity {} in Postgres: {e}",
+                                    entity.entity_id
+                                );
                                 e
                             })?;
+                        postgres_success_count += 1;
                     }
+                    debug!("Successfully wrote {} entities to Postgres", postgres_success_count);
+                } else {
+                    debug!("Skipping Postgres write (no postgres_client configured)");
                 }
             }
 
@@ -438,10 +477,14 @@ impl RepositoryIndexer {
         Ok(stats)
     }
 
-    /// Get current Git commit hash (placeholder for Phase 2)
+    /// Get current Git commit hash
     async fn current_git_commit(&self) -> Result<String> {
-        // TODO: Integrate with GitRepository from watcher crate in Phase 3
-        Ok("unknown".to_string())
+        if let Some(git) = &self.git_repo {
+            git.current_commit_hash()
+                .map_err(|e| Error::Storage(format!("Failed to get Git commit: {e}")))
+        } else {
+            Ok("no-git".to_string())
+        }
     }
 }
 
@@ -576,6 +619,7 @@ mod tests {
             storage_client,
             embedding_manager,
             None,
+            None,
         );
         assert_eq!(indexer.repository_path(), temp_dir.path());
         Ok(())
@@ -591,6 +635,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             storage_client,
             embedding_manager,
+            None,
             None,
         );
 
@@ -620,6 +665,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             storage_client.clone(),
             embedding_manager,
+            None,
             None,
         );
 

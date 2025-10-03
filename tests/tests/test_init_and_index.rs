@@ -16,13 +16,11 @@
 //! Run with: cargo test --test e2e_tests
 //! Verbose: CODESEARCH_TEST_LOG=debug cargo test --test e2e_tests
 
-mod e2e;
-
 use anyhow::{Context, Result};
 use codesearch_core::config::StorageConfig;
+use codesearch_e2e_tests::common::*;
 use codesearch_embeddings::{EmbeddingProvider, MockEmbeddingProvider};
 use codesearch_storage::{create_collection_manager, create_storage_client};
-use e2e::*;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;

@@ -9,6 +9,7 @@ members = [
     "crates/indexer",
     "crates/storage",
     "crates/outbox-processor",
+    "tests",
 ]
 
 [workspace.metadata]

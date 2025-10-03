@@ -1,9 +1,7 @@
 //! Integration tests for the init command
 
-mod e2e;
-
 use anyhow::{Context, Result};
-use e2e::containers::{TestPostgres, TestQdrant};
+use codesearch_e2e_tests::common::containers::{TestPostgres, TestQdrant};
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;

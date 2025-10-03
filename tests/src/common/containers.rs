@@ -24,7 +24,6 @@ pub fn ensure_outbox_processor_built() -> Result<PathBuf> {
 
     let workspace_root = manifest_dir
         .parent()
-        .and_then(|p| p.parent())
         .context("Failed to find workspace root")?;
 
     let binary_path = workspace_root

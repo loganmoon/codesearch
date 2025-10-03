@@ -12,6 +12,12 @@ pub struct TestRepositoryBuilder {
     init_git: bool,
 }
 
+impl Default for TestRepositoryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestRepositoryBuilder {
     /// Create a new test repository builder
     pub fn new() -> Self {

@@ -94,6 +94,23 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
         .context("Failed to run codesearch CLI")
 }
 
+/// Start outbox processor and wait for it to sync entities to Qdrant
+///
+/// The processor polls every 1 second, so we wait 3 seconds to ensure
+/// at least a few poll cycles have completed.
+async fn start_and_wait_for_outbox_sync(
+    postgres: &TestPostgres,
+    qdrant: &TestQdrant,
+    collection_name: &str,
+) -> Result<TestOutboxProcessor> {
+    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
+
+    // Give the processor time to start and process outbox entries
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    Ok(processor)
+}
+
 #[tokio::test]
 async fn test_init_creates_collection_in_qdrant() -> Result<()> {
     init_test_logging();
@@ -180,8 +197,13 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
         "Index command failed: stdout={stdout}, stderr={stderr}"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify entities were indexed (should have at least 10 entities)
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify collection exists
     assert_collection_exists(&qdrant, &collection_name).await?;
@@ -209,9 +231,13 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
 
     assert!(output.status.success(), "Index with mock embeddings failed");
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify at least some entities were indexed
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -232,6 +258,9 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         &["init", "--config", config_path.to_str().unwrap()],
     )?;
     run_cli(repo.path(), &["index"])?;
+
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
 
     // Create storage client for programmatic search
     let storage_config = StorageConfig {
@@ -280,6 +309,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         );
     }
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -353,8 +383,13 @@ enabled = ["rust"]
         "Index failed with real embeddings: stdout={stdout}, stderr={stderr}"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify substantial entities were indexed
     assert_min_point_count(&qdrant, &collection_name, 15).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify collection exists with correct dimensions for the model
     assert_collection_exists(&qdrant, &collection_name).await?;
@@ -380,9 +415,14 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     )?;
     run_cli(repo.path(), &["index"])?;
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify entities were indexed
     // Just check that we have a reasonable number of entities - at least 10
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify we can find at least one struct entity
     let expected = ExpectedEntity::new(
@@ -621,6 +661,9 @@ fn broken( {
         "Index should succeed with partial failures"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Should have indexed the valid file
     let storage_config = StorageConfig {
         qdrant_host: "localhost".to_string(),
@@ -643,6 +686,7 @@ fn broken( {
         "Collection should exist"
     );
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -724,10 +768,14 @@ fn large_function() {{
         "Index should succeed even with oversized entities"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Large entity should be skipped
     // (Collection may be empty or have other entities if any were extracted)
     assert_collection_exists(&qdrant, &collection_name).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -775,9 +823,13 @@ pub fn duplicate_name() -> i32 {
         "Index should handle duplicate entity names"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Should have indexed both (they'll have different entity_ids due to file paths)
     assert_min_point_count(&qdrant, &collection_name, 2).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -813,6 +865,9 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
         let repo_path = repo.path().to_path_buf();
         let collection_name_clone = collection_name.clone();
         let rest_url = qdrant.rest_url();
+        let postgres_port = postgres.port();
+        let qdrant_port = qdrant.port();
+        let qdrant_rest_port = qdrant.rest_port();
 
         let handle = tokio::spawn(async move {
             // Run init
@@ -854,6 +909,40 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
                 .expect("Failed to run index");
 
             assert!(index_output.status.success(), "Index failed");
+
+            // Start outbox processor and wait for sync
+            let manifest_path = std::env::var("CARGO_MANIFEST_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"))
+                .join("../../Cargo.toml");
+
+            let _processor = std::process::Command::new("cargo")
+                .args([
+                    "run",
+                    "--manifest-path",
+                    manifest_path.to_str().unwrap(),
+                    "--package",
+                    "codesearch",
+                    "--bin",
+                    "outbox_processor",
+                ])
+                .env("POSTGRES_HOST", "localhost")
+                .env("POSTGRES_PORT", postgres_port.to_string())
+                .env("POSTGRES_DATABASE", "codesearch")
+                .env("POSTGRES_USER", "codesearch")
+                .env("POSTGRES_PASSWORD", "codesearch")
+                .env("QDRANT_HOST", "localhost")
+                .env("QDRANT_PORT", qdrant_port.to_string())
+                .env("QDRANT_REST_PORT", qdrant_rest_port.to_string())
+                .env("QDRANT_COLLECTION", &collection_name_clone)
+                .env("RUST_LOG", "info")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("Failed to start outbox processor");
+
+            // Wait for sync
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
             // Verify collection exists
             let url = format!("{rest_url}/collections/{collection_name_clone}");

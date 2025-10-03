@@ -73,7 +73,7 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
         args.push(file);
     }
 
-    args.extend(["up", "-d", "qdrant", "postgres", "vllm-embeddings"]);
+    args.extend(["up", "-d", "qdrant", "postgres", "outbox-processor", "vllm-embeddings"]);
 
     info!("Starting containerized dependencies...");
 
@@ -178,6 +178,27 @@ pub fn is_postgres_running() -> Result<bool> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout.contains("codesearch-postgres"))
+}
+
+/// Check if Outbox Processor container is running
+pub fn is_outbox_processor_running() -> Result<bool> {
+    let output = Command::new("docker")
+        .args([
+            "ps",
+            "--filter",
+            "name=codesearch-outbox-processor",
+            "--format",
+            "{{.Names}}",
+        ])
+        .output()
+        .context("Failed to check container status")?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.contains("codesearch-outbox-processor"))
 }
 
 /// Check Qdrant health status
@@ -295,6 +316,7 @@ pub async fn ensure_dependencies_running(
 ) -> Result<()> {
     let qdrant_healthy = check_qdrant_health(config).await?;
     let postgres_healthy = check_postgres_health(config).await?;
+    let outbox_running = is_outbox_processor_running().unwrap_or(false);
     let vllm_healthy = if let Some(url) = api_base_url {
         check_vllm_health(url).await?
     } else {
@@ -302,7 +324,7 @@ pub async fn ensure_dependencies_running(
     };
 
     // If all are healthy, we're done
-    if qdrant_healthy && postgres_healthy && vllm_healthy {
+    if qdrant_healthy && postgres_healthy && outbox_running && vllm_healthy {
         info!("All dependencies are already running and healthy");
         return Ok(());
     }
@@ -316,6 +338,9 @@ pub async fn ensure_dependencies_running(
         if !postgres_healthy {
             msg.push_str("Postgres is not running. ");
         }
+        if !outbox_running {
+            msg.push_str("Outbox Processor is not running. ");
+        }
         if !vllm_healthy {
             msg.push_str("vLLM is not running. ");
         }
@@ -327,6 +352,7 @@ pub async fn ensure_dependencies_running(
     // Check if containers exist but are not running
     if !is_qdrant_running()?
         || !is_postgres_running()?
+        || !outbox_running
         || (api_base_url.is_some() && !is_vllm_running()?)
     {
         info!("Starting containerized dependencies...");
@@ -339,6 +365,11 @@ pub async fn ensure_dependencies_running(
     }
     if !postgres_healthy {
         wait_for_postgres(config, Duration::from_secs(30)).await?;
+    }
+    // Outbox processor doesn't have a health endpoint - just wait a bit for it to start
+    if !outbox_running {
+        info!("Waiting for outbox processor to start...");
+        sleep(Duration::from_secs(2)).await;
     }
     if let Some(url) = api_base_url {
         if !vllm_healthy {
@@ -368,6 +399,7 @@ pub async fn get_dependencies_status(
     } else {
         false
     };
+    let outbox_running = is_outbox_processor_running().unwrap_or(false);
     let vllm_running = is_vllm_running().unwrap_or(false);
     let vllm_healthy = if vllm_running && api_base_url.is_some() {
         check_vllm_health(api_base_url.unwrap_or("http://localhost:8000/v1"))
@@ -384,6 +416,7 @@ pub async fn get_dependencies_status(
         qdrant_healthy,
         postgres_running,
         postgres_healthy,
+        outbox_running,
         vllm_running,
         vllm_healthy,
     })
@@ -397,6 +430,7 @@ pub struct DependencyStatus {
     pub qdrant_healthy: bool,
     pub postgres_running: bool,
     pub postgres_healthy: bool,
+    pub outbox_running: bool,
     pub vllm_running: bool,
     pub vllm_healthy: bool,
 }
@@ -460,7 +494,16 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  vLLM Container:    {}",
+            "  Outbox Processor:   {}",
+            if self.outbox_running {
+                "✓ Running"
+            } else {
+                "✗ Not running"
+            }
+        )?;
+        writeln!(
+            f,
+            "  vLLM Container:     {}",
             if self.vllm_running {
                 "✓ Running"
             } else {
@@ -469,7 +512,7 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  vLLM Health:       {}",
+            "  vLLM Health:        {}",
             if self.vllm_healthy {
                 "✓ Healthy"
             } else {

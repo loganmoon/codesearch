@@ -63,6 +63,10 @@ fn load_config_from_env() -> Result<Config> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(6334);
+    let qdrant_rest_port = std::env::var("QDRANT_REST_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(6333);
     let collection_name =
         std::env::var("QDRANT_COLLECTION").unwrap_or_else(|_| "codesearch".to_string());
 
@@ -73,6 +77,7 @@ fn load_config_from_env() -> Result<Config> {
 [storage]
 qdrant_host = "{qdrant_host}"
 qdrant_port = {qdrant_port}
+qdrant_rest_port = {qdrant_rest_port}
 collection_name = "{collection_name}"
 auto_start_deps = false
 postgres_host = "{postgres_host}"

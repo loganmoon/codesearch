@@ -91,8 +91,9 @@ impl OutboxProcessor {
                     })?;
 
                 // Use placeholder embedding (all zeros) for Phase 4
-                // A proper implementation would need the embedding manager
-                let embedding = vec![0.0f32; 384];
+                // TODO: Store actual embedding in outbox payload or get dimensions from config
+                // Using 1536 dimensions for BAAI/bge-code-v1 model
+                let embedding = vec![0.0f32; 1536];
 
                 let embedded = EmbeddedEntity { entity, embedding };
                 self.qdrant_client

@@ -416,6 +416,84 @@ impl Drop for TestQdrantPool {
     }
 }
 
+/// Test Outbox Processor instance running as a subprocess
+pub struct TestOutboxProcessor {
+    process: std::process::Child,
+}
+
+impl TestOutboxProcessor {
+    /// Start a new outbox processor instance
+    ///
+    /// Connects to the provided Postgres and Qdrant instances
+    pub fn start(
+        postgres: &TestPostgres,
+        qdrant: &TestQdrant,
+        collection_name: &str,
+    ) -> Result<Self> {
+        // Find workspace manifest
+        let manifest_path = std::env::var("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"))
+            .join("../../Cargo.toml");
+
+        let process = std::process::Command::new("cargo")
+            .args([
+                "run",
+                "--manifest-path",
+                manifest_path.to_str().unwrap(),
+                "--package",
+                "codesearch",
+                "--bin",
+                "outbox_processor",
+            ])
+            .env("POSTGRES_HOST", "localhost")
+            .env("POSTGRES_PORT", postgres.port().to_string())
+            .env("POSTGRES_DATABASE", "codesearch")
+            .env("POSTGRES_USER", "codesearch")
+            .env("POSTGRES_PASSWORD", "codesearch")
+            .env("QDRANT_HOST", "localhost")
+            .env("QDRANT_PORT", qdrant.port().to_string())
+            .env("QDRANT_REST_PORT", qdrant.rest_port().to_string())
+            .env("QDRANT_COLLECTION", collection_name)
+            .env("RUST_LOG", "debug")
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .context("Failed to start outbox processor")?;
+
+        Ok(Self { process })
+    }
+
+    /// Get processor output for debugging
+    pub fn get_output(&mut self) -> Result<String> {
+        use std::io::Read;
+
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+
+        if let Some(ref mut out) = self.process.stdout {
+            let _ = out.read_to_string(&mut stdout);
+        }
+        if let Some(ref mut err) = self.process.stderr {
+            let _ = err.read_to_string(&mut stderr);
+        }
+
+        Ok(format!("STDOUT:\n{}\n\nSTDERR:\n{}", stdout, stderr))
+    }
+
+    /// Stop the outbox processor
+    fn cleanup(&mut self) {
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+    }
+}
+
+impl Drop for TestOutboxProcessor {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

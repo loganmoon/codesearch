@@ -55,7 +55,9 @@ services:
     restart: unless-stopped
 
   outbox-processor:
-    image: codesearch-outbox-processor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: codesearch-outbox-processor
     depends_on:
       postgres:
@@ -70,6 +72,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
+      - QDRANT_REST_PORT=6333
       - QDRANT_COLLECTION=codesearch
       - RUST_LOG=${RUST_LOG:-info}
     restart: unless-stopped

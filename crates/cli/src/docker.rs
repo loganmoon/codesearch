@@ -73,7 +73,14 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
         args.push(file);
     }
 
-    args.extend(["up", "-d", "qdrant", "postgres", "outbox-processor", "vllm-embeddings"]);
+    args.extend([
+        "up",
+        "-d",
+        "qdrant",
+        "postgres",
+        "outbox-processor",
+        "vllm-embeddings",
+    ]);
 
     info!("Starting containerized dependencies...");
 

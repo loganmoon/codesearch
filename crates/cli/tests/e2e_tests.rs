@@ -3,6 +3,16 @@
 //! These tests validate the full workflow: init → index → search
 //! using isolated Qdrant containers with temporary storage.
 //!
+//! ## Running Tests
+//!
+//! The outbox_processor binary is automatically built on first test run if needed.
+//! For best results when running tests in parallel:
+//!
+//! ```bash
+//! cargo build --bin outbox_processor  # Optional: pre-build to avoid first-run delay
+//! cargo test --workspace              # Tests can now run in parallel safely
+//! ```
+//!
 //! Run with: cargo test --test e2e_tests
 //! Verbose: CODESEARCH_TEST_LOG=debug cargo test --test e2e_tests
 
@@ -850,7 +860,7 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
     let repo2 = multi_file_rust_repo().await?;
     let repo3 = complex_rust_repo().await?;
 
-    let repos = vec![repo1, repo2, repo3];
+    let repos = [repo1, repo2, repo3];
     let mut handles = Vec::new();
 
     // Index all repositories concurrently
@@ -911,21 +921,11 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
             assert!(index_output.status.success(), "Index failed");
 
             // Start outbox processor and wait for sync
-            let manifest_path = std::env::var("CARGO_MANIFEST_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"))
-                .join("../../Cargo.toml");
+            // Use pre-built binary to avoid concurrent cargo build issues
+            let binary_path = ensure_outbox_processor_built()
+                .expect("Failed to ensure outbox_processor is built");
 
-            let _processor = std::process::Command::new("cargo")
-                .args([
-                    "run",
-                    "--manifest-path",
-                    manifest_path.to_str().unwrap(),
-                    "--package",
-                    "codesearch",
-                    "--bin",
-                    "outbox_processor",
-                ])
+            let mut processor = std::process::Command::new(binary_path)
                 .env("POSTGRES_HOST", "localhost")
                 .env("POSTGRES_PORT", postgres_port.to_string())
                 .env("POSTGRES_DATABASE", "codesearch")
@@ -948,6 +948,10 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
             let url = format!("{rest_url}/collections/{collection_name_clone}");
             let response = reqwest::get(&url).await.expect("Failed to query Qdrant");
             assert!(response.status().is_success(), "Collection should exist");
+
+            // Clean up processor
+            let _ = processor.kill();
+            let _ = processor.wait();
         });
 
         handles.push(handle);

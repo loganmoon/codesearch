@@ -3,8 +3,67 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Once;
 use std::time::Duration;
 use uuid::Uuid;
+
+/// Ensures the outbox_processor binary is built before tests run
+/// This prevents race conditions when multiple tests try to build it concurrently
+#[allow(dead_code)]
+static BUILD_OUTBOX_PROCESSOR: Once = Once::new();
+
+/// Build the outbox_processor binary if it doesn't exist or is stale
+///
+/// This is called automatically by TestOutboxProcessor::start(), but can also
+/// be called manually to ensure the binary is built before spawning processes.
+#[allow(dead_code)]
+pub fn ensure_outbox_processor_built() -> Result<PathBuf> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"));
+
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .context("Failed to find workspace root")?;
+
+    let binary_path = workspace_root
+        .join("target")
+        .join("debug")
+        .join("outbox_processor");
+
+    BUILD_OUTBOX_PROCESSOR.call_once(|| {
+        // Only build if binary doesn't exist
+        if !binary_path.exists() {
+            let manifest_path = workspace_root.join("Cargo.toml");
+
+            let output = Command::new("cargo")
+                .args([
+                    "build",
+                    "--manifest-path",
+                    manifest_path.to_str().unwrap(),
+                    "--bin",
+                    "outbox_processor",
+                ])
+                .output()
+                .expect("Failed to build outbox_processor");
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                panic!("Failed to build outbox_processor: {stderr}");
+            }
+        }
+    });
+
+    if !binary_path.exists() {
+        return Err(anyhow::anyhow!(
+            "outbox_processor binary not found at {}",
+            binary_path.display()
+        ));
+    }
+
+    Ok(binary_path)
+}
 
 /// Test Postgres container with temporary storage
 pub struct TestPostgres {
@@ -44,6 +103,66 @@ impl TestPostgres {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up container if it was created (even if it failed to start)
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
+            return Err(anyhow::anyhow!(
+                "Failed to start Postgres container: {stderr}"
+            ));
+        }
+
+        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let instance = Self {
+            container_id: container_id.clone(),
+            container_name,
+            port,
+        };
+
+        if let Err(e) = instance.wait_for_health().await {
+            let logs = instance.get_container_logs();
+            instance.cleanup();
+            return Err(anyhow::anyhow!(
+                "Postgres container failed to become healthy: {e}\nLogs: {logs}"
+            ));
+        }
+
+        Ok(instance)
+    }
+
+    /// Start a new Postgres instance with pre-allocated port
+    ///
+    /// This is used by TestPostgresPool to avoid port allocation race conditions.
+    pub async fn start_with_port(port: u16) -> Result<Self> {
+        let container_name = format!("postgres-test-{}", Uuid::new_v4());
+
+        // Start Postgres container with pre-allocated port
+        let output = Command::new("docker")
+            .args([
+                "run",
+                "-d",
+                "--name",
+                &container_name,
+                "-p",
+                &format!("{port}:5432"),
+                "-e",
+                "POSTGRES_DB=codesearch",
+                "-e",
+                "POSTGRES_USER=codesearch",
+                "-e",
+                "POSTGRES_PASSWORD=codesearch",
+                "postgres:17",
+            ])
+            .output()
+            .context("Failed to start Postgres container")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up container if it was created (even if it failed to start)
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
             return Err(anyhow::anyhow!(
                 "Failed to start Postgres container: {stderr}"
             ));
@@ -111,8 +230,7 @@ impl TestPostgres {
         }
 
         Err(anyhow::anyhow!(
-            "Postgres did not become healthy after {} attempts",
-            max_attempts
+            "Postgres did not become healthy after {max_attempts} attempts"
         ))
     }
 
@@ -159,11 +277,21 @@ pub struct TestPostgresPool {
 
 impl TestPostgresPool {
     /// Create a new pool with the specified number of containers
+    ///
+    /// Pre-allocates all ports before starting any containers to avoid race conditions.
     pub async fn new(size: usize) -> Result<Self> {
-        let mut containers = Vec::with_capacity(size);
-
+        // Pre-allocate all ports at once to avoid race conditions
+        let mut ports = Vec::with_capacity(size);
         for i in 0..size {
-            match TestPostgres::start().await {
+            let port = portpicker::pick_unused_port()
+                .ok_or_else(|| anyhow::anyhow!("No available port for Postgres container {i}"))?;
+            ports.push(port);
+        }
+
+        // Now start containers with pre-allocated ports
+        let mut containers = Vec::with_capacity(size);
+        for (i, port) in ports.into_iter().enumerate() {
+            match TestPostgres::start_with_port(port).await {
                 Ok(container) => containers.push(container),
                 Err(e) => {
                     drop(containers);
@@ -234,6 +362,77 @@ impl TestQdrant {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Clean up temp directory if container failed to start
             let _ = std::fs::remove_dir_all(&temp_dir);
+            // Clean up container if it was created (even if it failed to start)
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
+            return Err(anyhow::anyhow!(
+                "Failed to start Qdrant container: {stderr}"
+            ));
+        }
+
+        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // Poll for health instead of fixed sleep
+        let instance = Self {
+            container_id: container_id.clone(),
+            container_name,
+            temp_dir,
+            port,
+            rest_port,
+        };
+
+        if let Err(e) = instance.wait_for_health().await {
+            // Container failed to become healthy, capture logs
+            let logs = instance.get_container_logs();
+            instance.cleanup();
+            return Err(anyhow::anyhow!(
+                "Qdrant container failed to become healthy: {e}\nLogs: {logs}"
+            ));
+        }
+
+        Ok(instance)
+    }
+
+    /// Start a new Qdrant instance with pre-allocated ports
+    ///
+    /// This is used by TestQdrantPool to avoid port allocation race conditions.
+    /// Uses health check polling to ensure the container is ready before returning.
+    pub async fn start_with_ports(port: u16, rest_port: u16) -> Result<Self> {
+        let container_name = format!("qdrant-test-{}", Uuid::new_v4());
+        let temp_dir_name = format!("/tmp/qdrant-test-{}", Uuid::new_v4());
+        let temp_dir = PathBuf::from(&temp_dir_name);
+
+        // Create temp directory
+        std::fs::create_dir_all(&temp_dir)
+            .with_context(|| format!("Failed to create temp directory: {temp_dir_name}"))?;
+
+        // Start Qdrant container with pre-allocated ports
+        let output = Command::new("docker")
+            .args([
+                "run",
+                "-d",
+                "--name",
+                &container_name,
+                "-p",
+                &format!("{port}:6334"),
+                "-p",
+                &format!("{rest_port}:6333"),
+                "-v",
+                &format!("{temp_dir_name}:/qdrant/storage"),
+                "qdrant/qdrant:latest-unprivileged",
+            ])
+            .output()
+            .context("Failed to start Qdrant container")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up temp directory if container failed to start
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            // Clean up container if it was created (even if it failed to start)
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
             return Err(anyhow::anyhow!(
                 "Failed to start Qdrant container: {stderr}"
             ));
@@ -311,8 +510,7 @@ impl TestQdrant {
         }
 
         Err(anyhow::anyhow!(
-            "Qdrant did not become healthy after {} attempts",
-            max_attempts
+            "Qdrant did not become healthy after {max_attempts} attempts"
         ))
     }
 
@@ -350,7 +548,7 @@ impl TestQdrant {
             if std::fs::remove_dir_all(&self.temp_dir).is_err() {
                 // If that fails, try with sudo (for Docker-created files)
                 let _ = Command::new("sudo")
-                    .args(["rm", "-rf", &self.temp_dir.to_string_lossy().as_ref()])
+                    .args(["rm", "-rf", self.temp_dir.to_string_lossy().as_ref()])
                     .output();
             }
         }
@@ -370,11 +568,24 @@ pub struct TestQdrantPool {
 
 impl TestQdrantPool {
     /// Create a new pool with the specified number of containers
+    ///
+    /// Pre-allocates all ports before starting any containers to avoid race conditions.
     pub async fn new(size: usize) -> Result<Self> {
-        let mut containers = Vec::with_capacity(size);
-
+        // Pre-allocate all ports at once to avoid race conditions
+        let mut ports = Vec::with_capacity(size);
         for i in 0..size {
-            match TestQdrant::start().await {
+            let port = portpicker::pick_unused_port()
+                .ok_or_else(|| anyhow::anyhow!("No available port for Qdrant container {i}"))?;
+            let rest_port = portpicker::pick_unused_port().ok_or_else(|| {
+                anyhow::anyhow!("No available REST port for Qdrant container {i}")
+            })?;
+            ports.push((port, rest_port));
+        }
+
+        // Now start containers with pre-allocated ports
+        let mut containers = Vec::with_capacity(size);
+        for (i, (port, rest_port)) in ports.into_iter().enumerate() {
+            match TestQdrant::start_with_ports(port, rest_port).await {
                 Ok(container) => containers.push(container),
                 Err(e) => {
                     // Clean up any containers we've already created
@@ -424,28 +635,19 @@ pub struct TestOutboxProcessor {
 impl TestOutboxProcessor {
     /// Start a new outbox processor instance
     ///
-    /// Connects to the provided Postgres and Qdrant instances
+    /// Connects to the provided Postgres and Qdrant instances.
+    ///
+    /// This uses the pre-built binary from target/debug/outbox_processor
+    /// to avoid cargo build race conditions when tests run in parallel.
     pub fn start(
         postgres: &TestPostgres,
         qdrant: &TestQdrant,
         collection_name: &str,
     ) -> Result<Self> {
-        // Find workspace manifest
-        let manifest_path = std::env::var("CARGO_MANIFEST_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"))
-            .join("../../Cargo.toml");
+        // Ensure the binary is built (thread-safe, happens only once)
+        let binary_path = ensure_outbox_processor_built()?;
 
-        let process = std::process::Command::new("cargo")
-            .args([
-                "run",
-                "--manifest-path",
-                manifest_path.to_str().unwrap(),
-                "--package",
-                "codesearch",
-                "--bin",
-                "outbox_processor",
-            ])
+        let process = std::process::Command::new(binary_path)
             .env("POSTGRES_HOST", "localhost")
             .env("POSTGRES_PORT", postgres.port().to_string())
             .env("POSTGRES_DATABASE", "codesearch")
@@ -478,7 +680,7 @@ impl TestOutboxProcessor {
             let _ = err.read_to_string(&mut stderr);
         }
 
-        Ok(format!("STDOUT:\n{}\n\nSTDERR:\n{}", stdout, stderr))
+        Ok(format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}"))
     }
 
     /// Stop the outbox processor

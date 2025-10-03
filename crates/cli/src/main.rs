@@ -307,6 +307,18 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Storage backend verification failed")?;
 
+    // Create PostgresClient and run migrations
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to create PostgreSQL client")?;
+
+    postgres_client
+        .run_migrations()
+        .await
+        .context("Failed to run database migrations")?;
+
+    info!("✓ Database migrations completed");
+
     info!("✓ Repository initialized successfully");
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);

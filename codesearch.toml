@@ -1,0 +1,39 @@
+[indexer]
+
+[embeddings]
+provider = "mock"
+
+
+[watcher]
+debounce_ms = 500
+ignore_patterns = [
+    "*.log",
+    "node_modules",
+    "target",
+    ".git",
+    "*.pyc",
+    "__pycache__",
+]
+branch_strategy = "index_current"
+
+[storage]
+qdrant_host = "localhost"
+qdrant_port = 6334
+qdrant_rest_port = 6333
+auto_start_deps = false
+postgres_host = "localhost"
+postgres_port = 5432
+postgres_database = "codesearch"
+postgres_user = "codesearch"
+postgres_password = "codesearch"
+
+[languages]
+enabled = ["rust"]
+
+[languages.python]
+preserve_docstrings = false
+include_type_hints = false
+
+[languages.javascript]
+preserve_jsx = true
+typescript_enabled = true

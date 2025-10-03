@@ -58,6 +58,15 @@ impl PostgresClient {
         Self { pool }
     }
 
+    /// Run database migrations
+    pub async fn run_migrations(&self) -> Result<()> {
+        sqlx::migrate!("../../migrations")
+            .run(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to run migrations: {e}")))?;
+        Ok(())
+    }
+
     /// Store entity metadata and version (within existing transaction if provided)
     pub async fn store_entity_metadata(
         &self,

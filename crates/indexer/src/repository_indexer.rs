@@ -307,11 +307,22 @@ impl RepositoryIndexer {
                     git_commit
                 );
 
+                // Get repository_id as UUID
+                let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+                    .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
+                // Group entities by file for snapshot tracking
+                let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+
+                // Store each entity
                 for entity in &entities_with_embeddings {
-                    // Store metadata and version
-                    let version_id = self
-                        .postgres_client
-                        .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                    // Generate Qdrant point ID
+                    let point_id = uuid::Uuid::new_v4();
+
+                    // Store entity metadata (simplified - no version_id returned)
+                    self.postgres_client
+                        .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                         .await
                         .map_err(|e| {
                             error!(
@@ -321,17 +332,27 @@ impl RepositoryIndexer {
                             e
                         })?;
 
-                    // Write to outbox for Qdrant
+                    // Track for file snapshot
+                    let file_path_str = entity
+                        .file_path
+                        .to_str()
+                        .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
+                        .to_string();
+                    entities_by_file
+                        .entry(file_path_str.clone())
+                        .or_default()
+                        .push(entity.entity_id.clone());
+
+                    // Write INSERT to outbox (payload is full entity for Phase 4, will be minimal in Phase 5)
                     let payload = serde_json::to_value(entity)
                         .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
-
                     self.postgres_client
                         .write_outbox_entry(
+                            repository_id,
                             &entity.entity_id,
                             codesearch_storage::postgres::OutboxOperation::Insert,
                             codesearch_storage::postgres::TargetStore::Qdrant,
                             payload,
-                            version_id,
                         )
                         .await
                         .map_err(|e| {
@@ -341,6 +362,18 @@ impl RepositoryIndexer {
                             );
                             e
                         })?;
+                }
+
+                // Update file snapshots
+                for (file_path, entity_ids) in entities_by_file {
+                    self.postgres_client
+                        .update_file_snapshot(
+                            repository_id,
+                            &file_path,
+                            entity_ids,
+                            git_commit.clone(),
+                        )
+                        .await?;
                 }
 
                 debug!(
@@ -457,16 +490,37 @@ impl RepositoryIndexer {
 
         // Only store entities that have embeddings
         if !embedded_entities.is_empty() {
+            // Get repository_id as UUID
+            let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+                .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
             // Write entities to Postgres outbox
             let git_commit = self.current_git_commit().await.ok();
 
+            // Group entities by file for snapshot tracking
+            let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+
             for entity in &entities_with_embeddings {
-                // Store metadata and version
-                let version_id = self
-                    .postgres_client
-                    .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                // Generate Qdrant point ID
+                let point_id = uuid::Uuid::new_v4();
+
+                // Store entity metadata (simplified - no version_id returned)
+                self.postgres_client
+                    .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                     .await
                     .map_err(|e| Error::Storage(format!("Failed to store entity metadata: {e}")))?;
+
+                // Track for file snapshot
+                let file_path_str = entity
+                    .file_path
+                    .to_str()
+                    .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
+                    .to_string();
+                entities_by_file
+                    .entry(file_path_str.clone())
+                    .or_default()
+                    .push(entity.entity_id.clone());
 
                 // Write to outbox for Qdrant
                 let payload = serde_json::to_value(entity)
@@ -474,14 +528,21 @@ impl RepositoryIndexer {
 
                 self.postgres_client
                     .write_outbox_entry(
+                        repository_id,
                         &entity.entity_id,
                         codesearch_storage::postgres::OutboxOperation::Insert,
                         codesearch_storage::postgres::TargetStore::Qdrant,
                         payload,
-                        version_id,
                     )
                     .await
                     .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
+            }
+
+            // Update file snapshots
+            for (file_path, entity_ids) in entities_by_file {
+                self.postgres_client
+                    .update_file_snapshot(repository_id, &file_path, entity_ids, git_commit.clone())
+                    .await?;
             }
         }
 

@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handlers::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
     find_capture_node, node_to_text,
@@ -19,7 +20,6 @@ use codesearch_core::entities::{
     Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
-use crate::qualified_name::build_qualified_name_from_ast;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;

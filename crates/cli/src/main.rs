@@ -319,6 +319,14 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
 
     info!("✓ Database migrations completed");
 
+    // Register repository in Postgres
+    let repository_id = postgres_client
+        .ensure_repository(&repo_root, &config.storage.collection_name, None)
+        .await
+        .context("Failed to register repository")?;
+
+    info!("✓ Repository registered with ID: {}", repository_id);
+
     info!("✓ Repository initialized successfully");
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);

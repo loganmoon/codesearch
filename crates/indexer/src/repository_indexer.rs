@@ -52,6 +52,7 @@ impl IndexProgress {
 /// Main repository indexer
 pub struct RepositoryIndexer {
     repository_path: PathBuf,
+    repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
     git_repo: Option<codesearch_watcher::GitRepository>,
@@ -112,12 +113,14 @@ impl RepositoryIndexer {
     /// Create a new repository indexer
     pub fn new(
         repository_path: PathBuf,
+        repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
             repository_path,
+            repository_id,
             embedding_manager,
             postgres_client,
             git_repo,
@@ -365,7 +368,7 @@ impl RepositoryIndexer {
         let mut stats = IndexStats::default();
 
         // Create extractor for this file
-        let extractor = match create_extractor(file_path) {
+        let extractor = match create_extractor(file_path, &self.repository_id) {
             Some(ext) => ext,
             None => {
                 debug!("No extractor available for file: {:?}", file_path);
@@ -397,7 +400,7 @@ impl RepositoryIndexer {
         let mut stats = IndexStats::default();
 
         // Stage 1: Create extractor for file
-        let extractor = match create_extractor(file_path) {
+        let extractor = match create_extractor(file_path, &self.repository_id) {
             Some(ext) => ext,
             None => {
                 debug!("No extractor available for file: {:?}", file_path);

@@ -519,9 +519,24 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
         }
     };
 
+    // Step 5.6: Get repository_id from database
+    let repository_id = postgres_client
+        .get_repository_id(&config.storage.collection_name)
+        .await
+        .context("Failed to query repository")?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Repository not found for collection '{}'. Please run 'codesearch init' first.",
+                config.storage.collection_name
+            )
+        })?;
+
+    info!("Repository ID: {}", repository_id);
+
     // Step 6: Create and run indexer
     let mut indexer = RepositoryIndexer::new(
         repo_path.clone(),
+        repository_id.to_string(),
         embedding_manager,
         postgres_client,
         git_repo,

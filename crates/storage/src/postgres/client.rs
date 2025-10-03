@@ -67,6 +67,63 @@ impl PostgresClient {
         Ok(())
     }
 
+    /// Ensure repository exists, return repository_id
+    pub async fn ensure_repository(
+        &self,
+        repository_path: &std::path::Path,
+        collection_name: &str,
+        repository_name: Option<&str>,
+    ) -> Result<Uuid> {
+        let repo_path_str = repository_path
+            .to_str()
+            .ok_or_else(|| Error::storage("Invalid repository path"))?;
+
+        // Try to find existing repository
+        let existing: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT repository_id FROM repositories WHERE collection_name = $1",
+        )
+        .bind(collection_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
+
+        if let Some((repository_id,)) = existing {
+            return Ok(repository_id);
+        }
+
+        // Create new repository
+        let repo_name = repository_name
+            .or_else(|| repository_path.file_name()?.to_str())
+            .unwrap_or("unknown");
+
+        let (repository_id,): (Uuid,) = sqlx::query_as(
+            "INSERT INTO repositories (repository_path, repository_name, collection_name, created_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())
+             RETURNING repository_id",
+        )
+        .bind(repo_path_str)
+        .bind(repo_name)
+        .bind(collection_name)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to insert repository: {e}")))?;
+
+        Ok(repository_id)
+    }
+
+    /// Get repository by collection name
+    pub async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
+        let record: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT repository_id FROM repositories WHERE collection_name = $1",
+        )
+        .bind(collection_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
+
+        Ok(record.map(|(id,)| id))
+    }
+
     /// Store entity metadata and version (within existing transaction if provided)
     pub async fn store_entity_metadata(
         &self,

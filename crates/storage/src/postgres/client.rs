@@ -300,6 +300,46 @@ impl PostgresClient {
         Ok(entities)
     }
 
+    /// Mark entities as deleted (soft delete)
+    pub async fn mark_entities_deleted(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Build IN clause for batch update
+        let mut query = String::from(
+            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW()
+             WHERE repository_id = $1 AND entity_id IN (",
+        );
+
+        for (i, _) in entity_ids.iter().enumerate() {
+            if i > 0 {
+                query.push_str(", ");
+            }
+            query.push_str(&format!("${}", i + 2));
+        }
+        query.push(')');
+
+        // Execute batch update
+        let mut sql_query = sqlx::query(&query).bind(repository_id);
+        for entity_id in entity_ids {
+            sql_query = sql_query.bind(entity_id);
+        }
+
+        let result = sql_query
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
+
+        tracing::info!("Marked {} entities as deleted", result.rows_affected());
+
+        Ok(())
+    }
+
     /// Write outbox entry for entity operation
     pub async fn write_outbox_entry(
         &self,

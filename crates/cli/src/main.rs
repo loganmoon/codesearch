@@ -705,9 +705,7 @@ async fn search_code(
         })
         .collect();
 
-    let full_entities = postgres_client
-        .get_entities_by_ids(&entity_refs)
-        .await?;
+    let full_entities = postgres_client.get_entities_by_ids(&entity_refs).await?;
 
     // Create map for lookup
     let entity_map: std::collections::HashMap<String, codesearch_core::CodeEntity> = full_entities

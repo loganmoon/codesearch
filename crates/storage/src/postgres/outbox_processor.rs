@@ -102,7 +102,18 @@ impl OutboxProcessor {
                 Ok(())
             }
             "DELETE" => {
-                warn!("DELETE operation not yet implemented for Qdrant (Phase 5)");
+                // Extract entity IDs from payload
+                let entity_ids: Vec<String> = if let Some(ids) = entry.payload.get("entity_ids") {
+                    serde_json::from_value(ids.clone())
+                        .map_err(|e| Error::storage(format!("Invalid DELETE payload: {e}")))?
+                } else {
+                    vec![entry.entity_id.clone()]
+                };
+
+                // Delete from Qdrant by entity_id
+                self.qdrant_client.delete_entities(&entity_ids).await?;
+
+                tracing::info!("Deleted {} entities from Qdrant", entity_ids.len());
                 Ok(())
             }
             op => Err(Error::storage(format!("Unknown operation: {op}"))),

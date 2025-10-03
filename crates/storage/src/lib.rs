@@ -52,6 +52,9 @@ pub trait StorageClient: Send + Sync {
 
     /// Get entity by ID
     async fn get_entity(&self, entity_id: &str) -> Result<Option<CodeEntity>>;
+
+    /// Delete entities from vector store
+    async fn delete_entities(&self, entity_ids: &[String]) -> Result<()>;
 }
 
 /// Mock storage client for testing
@@ -93,6 +96,11 @@ impl StorageClient for MockStorageClient {
     async fn get_entity(&self, _entity_id: &str) -> Result<Option<CodeEntity>> {
         // Mock implementation - return None
         Ok(None)
+    }
+
+    async fn delete_entities(&self, _entity_ids: &[String]) -> Result<()> {
+        // Mock implementation - do nothing
+        Ok(())
     }
 }
 

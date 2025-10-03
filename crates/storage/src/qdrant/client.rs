@@ -16,6 +16,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct MinimalEntityPayload {
     entity_id: String,
     repository_id: String,
@@ -229,5 +230,70 @@ impl StorageClient for QdrantStorageClient {
         Err(Error::storage(
             "get_entity not supported for Qdrant storage - use Postgres client instead",
         ))
+    }
+
+    /// Delete entities from Qdrant by entity_id
+    async fn delete_entities(&self, entity_ids: &[String]) -> Result<()> {
+        use qdrant_client::qdrant::{
+            condition::ConditionOneOf, points_selector::PointsSelectorOneOf, r#match::MatchValue,
+            Condition, DeletePointsBuilder, FieldCondition, Filter, Match, PointsIdsList,
+            ScrollPoints,
+        };
+
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Search for points by entity_id to get point_ids
+        let mut point_ids_to_delete = Vec::new();
+
+        for entity_id in entity_ids {
+            let filter = Filter {
+                must: vec![Condition {
+                    condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                        key: "entity_id".to_string(),
+                        r#match: Some(Match {
+                            match_value: Some(MatchValue::Keyword(entity_id.clone())),
+                        }),
+                        ..Default::default()
+                    })),
+                }],
+                ..Default::default()
+            };
+
+            let search_result = self
+                .qdrant_client
+                .scroll(ScrollPoints {
+                    collection_name: self.collection_name.clone(),
+                    filter: Some(filter),
+                    limit: Some(10),
+                    with_payload: Some(false.into()),
+                    with_vectors: Some(false.into()),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| Error::storage(e.to_string()))?;
+
+            for point in search_result.result {
+                if let Some(id) = point.id {
+                    point_ids_to_delete.push(id);
+                }
+            }
+        }
+
+        if !point_ids_to_delete.is_empty() {
+            self.qdrant_client
+                .delete_points(
+                    DeletePointsBuilder::new(self.collection_name.clone())
+                        .points(PointsSelectorOneOf::Points(PointsIdsList {
+                            ids: point_ids_to_delete,
+                        }))
+                        .build(),
+                )
+                .await
+                .map_err(|e| Error::storage(e.to_string()))?;
+        }
+
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::{Error, Result};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
@@ -252,6 +252,52 @@ impl PostgresClient {
         .map_err(|e| Error::storage(format!("Failed to update file snapshot: {e}")))?;
 
         Ok(())
+    }
+
+    /// Batch fetch entities by (repository_id, entity_id) pairs
+    pub async fn get_entities_by_ids(
+        &self,
+        entity_refs: &[(Uuid, String)],
+    ) -> Result<Vec<CodeEntity>> {
+        if entity_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build VALUES clause for batch query
+        let mut query = String::from(
+            "SELECT entity_data FROM entity_metadata WHERE (repository_id, entity_id) IN (",
+        );
+
+        for (i, _) in entity_refs.iter().enumerate() {
+            if i > 0 {
+                query.push_str(", ");
+            }
+            query.push_str(&format!("(${}, ${})", i * 2 + 1, i * 2 + 2));
+        }
+        query.push_str(") AND deleted_at IS NULL");
+
+        // Build query dynamically
+        let mut sql_query = sqlx::query(&query);
+        for (repo_id, entity_id) in entity_refs {
+            sql_query = sql_query.bind(repo_id).bind(entity_id);
+        }
+
+        let rows = sql_query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch entities: {e}")))?;
+
+        let mut entities = Vec::new();
+        for row in rows {
+            let entity_json: serde_json::Value = row
+                .try_get("entity_data")
+                .map_err(|e| Error::storage(format!("Failed to extract entity_data: {e}")))?;
+            let entity: CodeEntity = serde_json::from_value(entity_json)
+                .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
+            entities.push(entity);
+        }
+
+        Ok(entities)
     }
 
     /// Write outbox entry for entity operation

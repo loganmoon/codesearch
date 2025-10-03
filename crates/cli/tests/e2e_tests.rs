@@ -13,7 +13,6 @@ use codesearch_core::config::StorageConfig;
 use codesearch_embeddings::{EmbeddingProvider, MockEmbeddingProvider};
 use codesearch_storage::{create_collection_manager, create_storage_client};
 use e2e::*;
-use indexer::create_indexer;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -84,6 +83,8 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
             "--manifest-path",
             workspace_manifest().to_str().unwrap(),
             "--package",
+            "codesearch",
+            "--bin",
             "codesearch",
             "--",
         ])
@@ -823,6 +824,8 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
                     workspace_manifest().to_str().unwrap(),
                     "--package",
                     "codesearch",
+                    "--bin",
+                    "codesearch",
                     "--",
                     "init",
                     "--config",
@@ -841,6 +844,8 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
                     "--manifest-path",
                     workspace_manifest().to_str().unwrap(),
                     "--package",
+                    "codesearch",
+                    "--bin",
                     "codesearch",
                     "--",
                     "index",

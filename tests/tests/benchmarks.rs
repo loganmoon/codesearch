@@ -4,10 +4,8 @@
 //!
 //! Run with: cargo test --test e2e_benchmarks -- --ignored --nocapture
 
-mod e2e;
-
 use anyhow::{Context, Result};
-use e2e::*;
+use codesearch_e2e_tests::common::*;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -17,8 +15,6 @@ use uuid::Uuid;
 fn workspace_manifest() -> std::path::PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
         .parent()
         .unwrap()
         .join("Cargo.toml")

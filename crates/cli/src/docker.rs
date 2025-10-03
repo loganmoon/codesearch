@@ -73,7 +73,14 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
         args.push(file);
     }
 
-    args.extend(["up", "-d", "qdrant", "vllm-embeddings"]);
+    args.extend([
+        "up",
+        "-d",
+        "qdrant",
+        "postgres",
+        "outbox-processor",
+        "vllm-embeddings",
+    ]);
 
     info!("Starting containerized dependencies...");
 
@@ -157,6 +164,48 @@ pub fn is_vllm_running() -> Result<bool> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(stdout.contains("codesearch-vllm"))
+}
+
+/// Check if Postgres container is running
+pub fn is_postgres_running() -> Result<bool> {
+    let output = Command::new("docker")
+        .args([
+            "ps",
+            "--filter",
+            "name=codesearch-postgres",
+            "--format",
+            "{{.Names}}",
+        ])
+        .output()
+        .context("Failed to check container status")?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.contains("codesearch-postgres"))
+}
+
+/// Check if Outbox Processor container is running
+pub fn is_outbox_processor_running() -> Result<bool> {
+    let output = Command::new("docker")
+        .args([
+            "ps",
+            "--filter",
+            "name=codesearch-outbox-processor",
+            "--format",
+            "{{.Names}}",
+        ])
+        .output()
+        .context("Failed to check container status")?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.contains("codesearch-outbox-processor"))
 }
 
 /// Check Qdrant health status
@@ -273,14 +322,16 @@ pub async fn ensure_dependencies_running(
     api_base_url: Option<&str>,
 ) -> Result<()> {
     let qdrant_healthy = check_qdrant_health(config).await?;
+    let postgres_healthy = check_postgres_health(config).await?;
+    let outbox_running = is_outbox_processor_running().unwrap_or(false);
     let vllm_healthy = if let Some(url) = api_base_url {
         check_vllm_health(url).await?
     } else {
         true // Skip vLLM check if no API URL provided
     };
 
-    // If both are healthy, we're done
-    if qdrant_healthy && vllm_healthy {
+    // If all are healthy, we're done
+    if qdrant_healthy && postgres_healthy && outbox_running && vllm_healthy {
         info!("All dependencies are already running and healthy");
         return Ok(());
     }
@@ -291,6 +342,12 @@ pub async fn ensure_dependencies_running(
         if !qdrant_healthy {
             msg.push_str("Qdrant is not running. ");
         }
+        if !postgres_healthy {
+            msg.push_str("Postgres is not running. ");
+        }
+        if !outbox_running {
+            msg.push_str("Outbox Processor is not running. ");
+        }
         if !vllm_healthy {
             msg.push_str("vLLM is not running. ");
         }
@@ -300,7 +357,11 @@ pub async fn ensure_dependencies_running(
     }
 
     // Check if containers exist but are not running
-    if !is_qdrant_running()? || (api_base_url.is_some() && !is_vllm_running()?) {
+    if !is_qdrant_running()?
+        || !is_postgres_running()?
+        || !outbox_running
+        || (api_base_url.is_some() && !is_vllm_running()?)
+    {
         info!("Starting containerized dependencies...");
         start_dependencies(config.docker_compose_file.as_deref())?;
     }
@@ -309,12 +370,19 @@ pub async fn ensure_dependencies_running(
     if !qdrant_healthy {
         wait_for_qdrant(config, Duration::from_secs(60)).await?;
     }
+    if !postgres_healthy {
+        wait_for_postgres(config, Duration::from_secs(30)).await?;
+    }
+    // Outbox processor doesn't have a health endpoint - just wait a bit for it to start
+    if !outbox_running {
+        info!("Waiting for outbox processor to start...");
+        sleep(Duration::from_secs(2)).await;
+    }
     if let Some(url) = api_base_url {
         if !vllm_healthy {
             wait_for_vllm(url, Duration::from_secs(60)).await?;
         }
     }
-    wait_for_postgres(config, Duration::from_secs(30)).await?;
 
     Ok(())
 }
@@ -332,6 +400,13 @@ pub async fn get_dependencies_status(
     } else {
         false
     };
+    let postgres_running = is_postgres_running().unwrap_or(false);
+    let postgres_healthy = if postgres_running {
+        check_postgres_health(config).await.unwrap_or(false)
+    } else {
+        false
+    };
+    let outbox_running = is_outbox_processor_running().unwrap_or(false);
     let vllm_running = is_vllm_running().unwrap_or(false);
     let vllm_healthy = if vllm_running && api_base_url.is_some() {
         check_vllm_health(api_base_url.unwrap_or("http://localhost:8000/v1"))
@@ -346,6 +421,9 @@ pub async fn get_dependencies_status(
         compose_available,
         qdrant_running,
         qdrant_healthy,
+        postgres_running,
+        postgres_healthy,
+        outbox_running,
         vllm_running,
         vllm_healthy,
     })
@@ -357,6 +435,9 @@ pub struct DependencyStatus {
     pub compose_available: bool,
     pub qdrant_running: bool,
     pub qdrant_healthy: bool,
+    pub postgres_running: bool,
+    pub postgres_healthy: bool,
+    pub outbox_running: bool,
     pub vllm_running: bool,
     pub vllm_healthy: bool,
 }
@@ -366,7 +447,7 @@ impl std::fmt::Display for DependencyStatus {
         writeln!(f, "Dependency Status:")?;
         writeln!(
             f,
-            "  Docker:          {}",
+            "  Docker:            {}",
             if self.docker_available {
                 "✓ Available"
             } else {
@@ -375,7 +456,7 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  Docker Compose:  {}",
+            "  Docker Compose:    {}",
             if self.compose_available {
                 "✓ Available"
             } else {
@@ -384,7 +465,7 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  Qdrant Container: {}",
+            "  Qdrant Container:  {}",
             if self.qdrant_running {
                 "✓ Running"
             } else {
@@ -393,7 +474,7 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  Qdrant Health:    {}",
+            "  Qdrant Health:     {}",
             if self.qdrant_healthy {
                 "✓ Healthy"
             } else {
@@ -402,7 +483,34 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  vLLM Container:   {}",
+            "  Postgres Container: {}",
+            if self.postgres_running {
+                "✓ Running"
+            } else {
+                "✗ Not running"
+            }
+        )?;
+        writeln!(
+            f,
+            "  Postgres Health:    {}",
+            if self.postgres_healthy {
+                "✓ Healthy"
+            } else {
+                "✗ Unhealthy"
+            }
+        )?;
+        writeln!(
+            f,
+            "  Outbox Processor:   {}",
+            if self.outbox_running {
+                "✓ Running"
+            } else {
+                "✗ Not running"
+            }
+        )?;
+        writeln!(
+            f,
+            "  vLLM Container:     {}",
             if self.vllm_running {
                 "✓ Running"
             } else {
@@ -411,7 +519,7 @@ impl std::fmt::Display for DependencyStatus {
         )?;
         writeln!(
             f,
-            "  vLLM Health:      {}",
+            "  vLLM Health:        {}",
             if self.vllm_healthy {
                 "✓ Healthy"
             } else {

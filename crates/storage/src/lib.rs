@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 // Re-export only the trait
 pub use collection_manager::CollectionManager;
+pub use uuid::Uuid;
 
 /// Search filters for querying entities
 #[derive(Debug, Default, Clone)]
@@ -40,16 +41,20 @@ pub trait StorageClient: Send + Sync {
         embedded_entities: Vec<EmbeddedEntity>,
     ) -> Result<Vec<(String, uuid::Uuid)>>;
 
-    /// Search for similar entities
+    /// Search returns (entity_id, repository_id, score) tuples
+    /// Caller must fetch full entities from Postgres
     async fn search_similar(
         &self,
         query_embedding: Vec<f32>,
         limit: usize,
         filters: Option<SearchFilters>,
-    ) -> Result<Vec<(CodeEntity, f32)>>;
+    ) -> Result<Vec<(String, String, f32)>>;
 
     /// Get entity by ID
     async fn get_entity(&self, entity_id: &str) -> Result<Option<CodeEntity>>;
+
+    /// Delete entities from vector store
+    async fn delete_entities(&self, entity_ids: &[String]) -> Result<()>;
 }
 
 /// Mock storage client for testing
@@ -83,7 +88,7 @@ impl StorageClient for MockStorageClient {
         _query_embedding: Vec<f32>,
         _limit: usize,
         _filters: Option<SearchFilters>,
-    ) -> Result<Vec<(CodeEntity, f32)>> {
+    ) -> Result<Vec<(String, String, f32)>> {
         // Mock implementation - return empty results
         Ok(vec![])
     }
@@ -91,6 +96,11 @@ impl StorageClient for MockStorageClient {
     async fn get_entity(&self, _entity_id: &str) -> Result<Option<CodeEntity>> {
         // Mock implementation - return None
         Ok(None)
+    }
+
+    async fn delete_entities(&self, _entity_ids: &[String]) -> Result<()> {
+        // Mock implementation - do nothing
+        Ok(())
     }
 }
 

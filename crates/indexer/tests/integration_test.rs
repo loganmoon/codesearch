@@ -4,13 +4,9 @@
 //!
 //! NOTE: Tests disabled - RepositoryIndexer now requires PostgresClient.
 //! TODO: Add integration tests with real Postgres database or MockPostgresClient.
-
-#[allow(dead_code)]
-use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
-#[allow(dead_code)]
-use tempfile::TempDir;
-#[allow(dead_code)]
-use tokio::fs;
+//!
+//! For now, see crates/cli/tests/e2e_tests.rs for end-to-end integration testing
+//! that includes the complete indexing pipeline with Postgres and Qdrant.
 
 /* Tests disabled - require PostgresClient
 

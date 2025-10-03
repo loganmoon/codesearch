@@ -52,6 +52,7 @@ impl IndexProgress {
 /// Main repository indexer
 pub struct RepositoryIndexer {
     repository_path: PathBuf,
+    repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
     git_repo: Option<codesearch_watcher::GitRepository>,
@@ -112,12 +113,14 @@ impl RepositoryIndexer {
     /// Create a new repository indexer
     pub fn new(
         repository_path: PathBuf,
+        repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
             repository_path,
+            repository_id,
             embedding_manager,
             postgres_client,
             git_repo,
@@ -304,11 +307,25 @@ impl RepositoryIndexer {
                     git_commit
                 );
 
-                for entity in &entities_with_embeddings {
-                    // Store metadata and version
-                    let version_id = self
-                        .postgres_client
-                        .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                // Get repository_id as UUID
+                let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+                    .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
+                // Group entities by file for snapshot tracking
+                let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+
+                // Store each entity with its embedding
+                for embedded_entity in &embedded_entities {
+                    let entity = &embedded_entity.entity;
+                    let embedding = &embedded_entity.embedding;
+
+                    // Generate Qdrant point ID
+                    let point_id = uuid::Uuid::new_v4();
+
+                    // Store entity metadata (simplified - no version_id returned)
+                    self.postgres_client
+                        .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                         .await
                         .map_err(|e| {
                             error!(
@@ -318,17 +335,29 @@ impl RepositoryIndexer {
                             e
                         })?;
 
-                    // Write to outbox for Qdrant
-                    let payload = serde_json::to_value(entity)
-                        .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+                    // Track for file snapshot
+                    let file_path_str = entity
+                        .file_path
+                        .to_str()
+                        .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
+                        .to_string();
+                    entities_by_file
+                        .entry(file_path_str.clone())
+                        .or_default()
+                        .push(entity.entity_id.clone());
 
+                    // Write INSERT to outbox with both entity and embedding
+                    let payload = serde_json::json!({
+                        "entity": entity,
+                        "embedding": embedding
+                    });
                     self.postgres_client
                         .write_outbox_entry(
+                            repository_id,
                             &entity.entity_id,
                             codesearch_storage::postgres::OutboxOperation::Insert,
                             codesearch_storage::postgres::TargetStore::Qdrant,
                             payload,
-                            version_id,
                         )
                         .await
                         .map_err(|e| {
@@ -338,6 +367,17 @@ impl RepositoryIndexer {
                             );
                             e
                         })?;
+                }
+
+                // Detect and handle stale entities per file
+                for (file_path, entity_ids) in entities_by_file {
+                    self.handle_file_change(
+                        repository_id,
+                        Path::new(&file_path),
+                        entity_ids,
+                        git_commit.clone(),
+                    )
+                    .await?;
                 }
 
                 debug!(
@@ -365,7 +405,7 @@ impl RepositoryIndexer {
         let mut stats = IndexStats::default();
 
         // Create extractor for this file
-        let extractor = match create_extractor(file_path) {
+        let extractor = match create_extractor(file_path, &self.repository_id) {
             Some(ext) => ext,
             None => {
                 debug!("No extractor available for file: {:?}", file_path);
@@ -397,7 +437,7 @@ impl RepositoryIndexer {
         let mut stats = IndexStats::default();
 
         // Stage 1: Create extractor for file
-        let extractor = match create_extractor(file_path) {
+        let extractor = match create_extractor(file_path, &self.repository_id) {
             Some(ext) => ext,
             None => {
                 debug!("No extractor available for file: {:?}", file_path);
@@ -454,16 +494,37 @@ impl RepositoryIndexer {
 
         // Only store entities that have embeddings
         if !embedded_entities.is_empty() {
+            // Get repository_id as UUID
+            let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+                .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
             // Write entities to Postgres outbox
             let git_commit = self.current_git_commit().await.ok();
 
+            // Group entities by file for snapshot tracking
+            let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+
             for entity in &entities_with_embeddings {
-                // Store metadata and version
-                let version_id = self
-                    .postgres_client
-                    .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                // Generate Qdrant point ID
+                let point_id = uuid::Uuid::new_v4();
+
+                // Store entity metadata (simplified - no version_id returned)
+                self.postgres_client
+                    .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                     .await
                     .map_err(|e| Error::Storage(format!("Failed to store entity metadata: {e}")))?;
+
+                // Track for file snapshot
+                let file_path_str = entity
+                    .file_path
+                    .to_str()
+                    .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
+                    .to_string();
+                entities_by_file
+                    .entry(file_path_str.clone())
+                    .or_default()
+                    .push(entity.entity_id.clone());
 
                 // Write to outbox for Qdrant
                 let payload = serde_json::to_value(entity)
@@ -471,20 +532,96 @@ impl RepositoryIndexer {
 
                 self.postgres_client
                     .write_outbox_entry(
+                        repository_id,
                         &entity.entity_id,
                         codesearch_storage::postgres::OutboxOperation::Insert,
                         codesearch_storage::postgres::TargetStore::Qdrant,
                         payload,
-                        version_id,
                     )
                     .await
                     .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
+            }
+
+            // Detect and handle stale entities per file
+            for (file_path, entity_ids) in entities_by_file {
+                self.handle_file_change(
+                    repository_id,
+                    Path::new(&file_path),
+                    entity_ids,
+                    git_commit.clone(),
+                )
+                .await?;
             }
         }
 
         debug!("Successfully stored entities from {:?}", file_path);
 
         Ok(stats)
+    }
+
+    /// Detect and mark stale entities when re-indexing a file
+    async fn handle_file_change(
+        &self,
+        repository_id: uuid::Uuid,
+        file_path: &Path,
+        new_entity_ids: Vec<String>,
+        git_commit: Option<String>,
+    ) -> Result<()> {
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+
+        // Get previous snapshot
+        let old_entity_ids = self
+            .postgres_client
+            .get_file_snapshot(repository_id, file_path_str)
+            .await?
+            .unwrap_or_default();
+
+        // Find stale entities (in old but not in new)
+        let stale_ids: Vec<String> = old_entity_ids
+            .iter()
+            .filter(|old_id| !new_entity_ids.contains(old_id))
+            .cloned()
+            .collect();
+
+        if !stale_ids.is_empty() {
+            tracing::info!(
+                "Found {} stale entities in {}",
+                stale_ids.len(),
+                file_path_str
+            );
+
+            // Mark entities as deleted
+            self.postgres_client
+                .mark_entities_deleted(repository_id, &stale_ids)
+                .await?;
+
+            // Write DELETE entries to outbox
+            for entity_id in &stale_ids {
+                let payload = serde_json::json!({
+                    "entity_ids": [entity_id],
+                    "reason": "file_change"
+                });
+
+                self.postgres_client
+                    .write_outbox_entry(
+                        repository_id,
+                        entity_id,
+                        codesearch_storage::postgres::OutboxOperation::Delete,
+                        codesearch_storage::postgres::TargetStore::Qdrant,
+                        payload,
+                    )
+                    .await?;
+            }
+        }
+
+        // Update snapshot with current state
+        self.postgres_client
+            .update_file_snapshot(repository_id, file_path_str, new_entity_ids, git_commit)
+            .await?;
+
+        Ok(())
     }
 
     /// Get current Git commit hash

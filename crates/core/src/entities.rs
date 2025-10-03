@@ -95,6 +95,9 @@ pub struct CodeEntity {
     /// Unique identifier for the entity
     pub entity_id: String,
 
+    /// Repository identifier (UUID)
+    pub repository_id: String,
+
     /// Simple name of the entity
     pub name: String,
 

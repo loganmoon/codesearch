@@ -1,0 +1,27 @@
+[package]
+name = "codesearch-e2e-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Workspace crates
+codesearch-core = { path = "../crates/core" }
+codesearch-storage = { path = "../crates/storage" }
+indexer = { path = "../crates/indexer" }
+codesearch-embeddings = { path = "../crates/embeddings" }
+codesearch-watcher = { path = "../crates/watcher" }
+
+# Test dependencies
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tempfile = { workspace = true }
+uuid = { version = "1.11", features = ["v4"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+portpicker = "0.1"
+sqlx = { workspace = true }
+glob = { workspace = true }

@@ -14,7 +14,7 @@ use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch};
 
 /// Handler function type for processing query matches into entities
 pub type EntityHandler =
-    Box<dyn Fn(&QueryMatch, &Query, &str, &Path) -> Result<Vec<CodeEntity>> + Send + Sync>;
+    Box<dyn Fn(&QueryMatch, &Query, &str, &Path, &str) -> Result<Vec<CodeEntity>> + Send + Sync>;
 
 /// Defines how to extract a specific type of entity
 struct EntityExtractor {
@@ -142,17 +142,24 @@ pub struct GenericExtractor<'a> {
 
     /// Parser instance
     parser: Parser,
+
+    /// Repository ID for entity generation
+    repository_id: String,
 }
 
 impl<'a> GenericExtractor<'a> {
     /// Create a new generic extractor with the given configuration
-    pub fn new(config: &'a LanguageConfiguration) -> Result<Self> {
+    pub fn new(config: &'a LanguageConfiguration, repository_id: String) -> Result<Self> {
         let mut parser = Parser::new();
         parser
             .set_language(&config.language)
             .map_err(|e| anyhow::anyhow!("Failed to set language: {e}"))?;
 
-        Ok(Self { config, parser })
+        Ok(Self {
+            config,
+            parser,
+            repository_id,
+        })
     }
 
     /// Extract entities from source code
@@ -197,8 +204,14 @@ impl<'a> GenericExtractor<'a> {
                         .iter()
                         .find(|e| e.name == extractor_name)
                     {
-                        // Call the handler
-                        let entities = (extractor.handler)(query_match, query, source, file_path)?;
+                        // Call the handler with repository_id
+                        let entities = (extractor.handler)(
+                            query_match,
+                            query,
+                            source,
+                            file_path,
+                            &self.repository_id,
+                        )?;
                         all_entities.extend(entities);
                         processed = true;
                     }

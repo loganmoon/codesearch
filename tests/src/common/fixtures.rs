@@ -12,6 +12,12 @@ pub struct TestRepositoryBuilder {
     init_git: bool,
 }
 
+impl Default for TestRepositoryBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestRepositoryBuilder {
     /// Create a new test repository builder
     pub fn new() -> Self {
@@ -455,6 +461,7 @@ mod tests {
 
         let entity = CodeEntity {
             entity_id: "test::greet".to_string(),
+            repository_id: "test-repo-id".to_string(),
             name: "greet".to_string(),
             qualified_name: "test::greet".to_string(),
             parent_scope: None,

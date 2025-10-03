@@ -315,8 +315,11 @@ impl RepositoryIndexer {
                 let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
                     std::collections::HashMap::new();
 
-                // Store each entity
-                for entity in &entities_with_embeddings {
+                // Store each entity with its embedding
+                for embedded_entity in &embedded_entities {
+                    let entity = &embedded_entity.entity;
+                    let embedding = &embedded_entity.embedding;
+
                     // Generate Qdrant point ID
                     let point_id = uuid::Uuid::new_v4();
 
@@ -343,9 +346,11 @@ impl RepositoryIndexer {
                         .or_default()
                         .push(entity.entity_id.clone());
 
-                    // Write INSERT to outbox (payload is full entity for Phase 4, will be minimal in Phase 5)
-                    let payload = serde_json::to_value(entity)
-                        .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+                    // Write INSERT to outbox with both entity and embedding
+                    let payload = serde_json::json!({
+                        "entity": entity,
+                        "embedding": embedding
+                    });
                     self.postgres_client
                         .write_outbox_entry(
                             repository_id,

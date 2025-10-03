@@ -1,7 +1,9 @@
+mod processor;
+
 use codesearch_core::config::Config;
 use codesearch_core::error::Result;
-use codesearch_storage::postgres::OutboxProcessor;
 use codesearch_storage::{create_postgres_client, create_storage_client};
+use processor::OutboxProcessor;
 use std::time::Duration;
 use tracing::info;
 

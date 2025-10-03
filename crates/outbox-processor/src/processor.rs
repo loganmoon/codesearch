@@ -1,6 +1,6 @@
-use super::client::{OutboxEntry, PostgresClient, TargetStore};
-use crate::{EmbeddedEntity, StorageClient};
 use codesearch_core::error::{Error, Result};
+use codesearch_storage::postgres::{OutboxEntry, PostgresClient, TargetStore};
+use codesearch_storage::{EmbeddedEntity, StorageClient};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -85,15 +85,32 @@ impl OutboxProcessor {
     async fn process_qdrant_entry(&self, entry: &OutboxEntry) -> Result<()> {
         match entry.operation.as_str() {
             "INSERT" | "UPDATE" => {
-                let entity: codesearch_core::entities::CodeEntity =
-                    serde_json::from_value(entry.payload.clone()).map_err(|e| {
-                        Error::storage(format!("Failed to deserialize entity: {e}"))
-                    })?;
+                // Extract both entity and embedding from payload
+                let entity: codesearch_core::entities::CodeEntity = serde_json::from_value(
+                    entry
+                        .payload
+                        .get("entity")
+                        .ok_or_else(|| Error::storage("Missing entity in payload"))?
+                        .clone(),
+                )
+                .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
 
-                // Use placeholder embedding (all zeros) for Phase 4
-                // TODO: Store actual embedding in outbox payload or get dimensions from config
-                // Using 1536 dimensions for BAAI/bge-code-v1 model
-                let embedding = vec![0.0f32; 1536];
+                let embedding: Vec<f32> = serde_json::from_value(
+                    entry
+                        .payload
+                        .get("embedding")
+                        .ok_or_else(|| Error::storage("Missing embedding in payload"))?
+                        .clone(),
+                )
+                .map_err(|e| Error::storage(format!("Failed to deserialize embedding: {e}")))?;
+
+                // Validate embedding dimensions
+                if embedding.len() != 1536 {
+                    return Err(Error::storage(format!(
+                        "Invalid embedding dimensions: {} (expected 1536)",
+                        embedding.len()
+                    )));
+                }
 
                 let embedded = EmbeddedEntity { entity, embedding };
                 self.qdrant_client

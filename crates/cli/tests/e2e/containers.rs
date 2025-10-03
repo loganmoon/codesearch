@@ -30,7 +30,7 @@ pub fn ensure_outbox_processor_built() -> Result<PathBuf> {
     let binary_path = workspace_root
         .join("target")
         .join("debug")
-        .join("outbox_processor");
+        .join("outbox-processor");
 
     BUILD_OUTBOX_PROCESSOR.call_once(|| {
         // Only build if binary doesn't exist
@@ -42,22 +42,24 @@ pub fn ensure_outbox_processor_built() -> Result<PathBuf> {
                     "build",
                     "--manifest-path",
                     manifest_path.to_str().unwrap(),
+                    "--package",
+                    "codesearch-outbox-processor",
                     "--bin",
-                    "outbox_processor",
+                    "outbox-processor",
                 ])
                 .output()
-                .expect("Failed to build outbox_processor");
+                .expect("Failed to build outbox-processor");
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                panic!("Failed to build outbox_processor: {stderr}");
+                panic!("Failed to build outbox-processor: {stderr}");
             }
         }
     });
 
     if !binary_path.exists() {
         return Err(anyhow::anyhow!(
-            "outbox_processor binary not found at {}",
+            "outbox-processor binary not found at {}",
             binary_path.display()
         ));
     }

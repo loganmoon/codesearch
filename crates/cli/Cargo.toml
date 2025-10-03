@@ -11,10 +11,6 @@ repository.workspace = true
 name = "codesearch"
 path = "src/main.rs"
 
-[[bin]]
-name = "outbox_processor"
-path = "src/bin/outbox_processor.rs"
-
 [dependencies]
 codesearch-core = { path = "../core" }
 codesearch-storage = { path = "../storage" }

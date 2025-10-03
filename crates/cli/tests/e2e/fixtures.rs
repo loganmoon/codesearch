@@ -455,6 +455,7 @@ mod tests {
 
         let entity = CodeEntity {
             entity_id: "test::greet".to_string(),
+            repository_id: "test-repo-id".to_string(),
             name: "greet".to_string(),
             qualified_name: "test::greet".to_string(),
             parent_scope: None,

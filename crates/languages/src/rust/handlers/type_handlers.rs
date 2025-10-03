@@ -18,7 +18,8 @@ use crate::rust::handlers::constants::{
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation, Visibility,
 };
-use codesearch_core::entity_id::{generate_entity_id_from_qualified_name, ScopeContext};
+use codesearch_core::entity_id::generate_entity_id;
+use crate::qualified_name::build_qualified_name_from_ast;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -34,7 +35,7 @@ struct ExtractionContext<'a, 'b> {
     query: &'a Query,
     source: &'a str,
     file_path: &'a Path,
-    scope_context: ScopeContext,
+    repository_id: &'a str,
 }
 
 impl<'a, 'b> ExtractionContext<'a, 'b> {
@@ -44,13 +45,14 @@ impl<'a, 'b> ExtractionContext<'a, 'b> {
         query: &'a Query,
         source: &'a str,
         file_path: &'a Path,
+        repository_id: &'a str,
     ) -> Self {
         Self {
             query_match,
             query,
             source,
             file_path,
-            scope_context: ScopeContext::new(),
+            repository_id,
         }
     }
 }
@@ -84,8 +86,9 @@ pub fn handle_struct(
     query: &Query,
     source: &str,
     file_path: &Path,
+    repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path);
+    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -123,8 +126,9 @@ pub fn handle_enum(
     query: &Query,
     source: &str,
     file_path: &Path,
+    repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path);
+    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -155,8 +159,9 @@ pub fn handle_trait(
     query: &Query,
     source: &str,
     file_path: &Path,
+    repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path);
+    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         let generics = extract_generics(ctx);
         let bounds = extract_trait_bounds(ctx);
@@ -224,14 +229,28 @@ fn build_entity_data(
     let content = node_to_text(main_node, ctx.source).ok();
     let visibility = extract_visibility(ctx.query_match, ctx.query);
     let documentation = extract_preceding_doc_comments(main_node, ctx.source);
-    let qualified_name = ctx.scope_context.build_qualified_name(name);
 
-    let entity_id = generate_entity_id_from_qualified_name(&qualified_name, ctx.file_path);
+    // Build qualified name via parent traversal
+    let parent_scope = build_qualified_name_from_ast(main_node, ctx.source, "rust");
+    let qualified_name = if parent_scope.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent_scope}::{name}")
+    };
+
+    // Generate entity_id from repository + qualified name
+    let entity_id = generate_entity_id(ctx.repository_id, &qualified_name);
 
     CodeEntityBuilder::default()
         .entity_id(entity_id)
+        .repository_id(ctx.repository_id.to_string())
         .name(name.to_string())
-        .qualified_name(qualified_name.clone())
+        .qualified_name(qualified_name)
+        .parent_scope(if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        })
         .entity_type(entity_type)
         .location(location.clone())
         .visibility(visibility)

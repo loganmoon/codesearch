@@ -10,6 +10,9 @@ mod extraction_framework;
 mod generic_entities;
 mod rust;
 
+// Public module for qualified name building
+pub mod qualified_name;
+
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {
     /// Extract entities from source code
@@ -19,11 +22,11 @@ pub trait Extractor: Send + Sync {
 /// Create an appropriate extractor for a file based on its extension
 ///
 /// Returns None if the file type is not supported
-pub fn create_extractor(file_path: &Path) -> Option<Box<dyn Extractor>> {
+pub fn create_extractor(file_path: &Path, repository_id: &str) -> Option<Box<dyn Extractor>> {
     let extension = file_path.extension()?.to_str()?;
 
     match extension.to_lowercase().as_str() {
-        "rs" => match rust::RustExtractor::new() {
+        "rs" => match rust::RustExtractor::new(repository_id.to_string()) {
             Ok(extractor) => Some(Box::new(extractor)),
             Err(e) => {
                 tracing::error!("Failed to create Rust extractor: {}", e);
@@ -31,10 +34,10 @@ pub fn create_extractor(file_path: &Path) -> Option<Box<dyn Extractor>> {
             }
         },
         // Future language support can be added here:
-        // "py" => create_python_extractor(),
-        // "js" | "jsx" => create_javascript_extractor(),
-        // "ts" | "tsx" => create_typescript_extractor(),
-        // "go" => create_go_extractor(),
+        // "py" => create_python_extractor(repository_id),
+        // "js" | "jsx" => create_javascript_extractor(repository_id),
+        // "ts" | "tsx" => create_typescript_extractor(repository_id),
+        // "go" => create_go_extractor(repository_id),
         _ => None,
     }
 }

@@ -21,7 +21,7 @@ pub use entities::{
     CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,
     RelationshipType, SourceLocation, Visibility,
 };
-pub use entity_id::{generate_entity_id, generate_entity_id_with_separator, ScopeContext};
+pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};
 
 /// Version of the core library

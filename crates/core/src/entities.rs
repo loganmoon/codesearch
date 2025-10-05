@@ -125,9 +125,6 @@ pub struct CodeEntity {
     /// Source location in the file
     pub location: SourceLocation,
 
-    /// Line range in the source file (start, end) - 1-indexed
-    pub line_range: (usize, usize),
-
     /// Visibility modifier
     #[builder(default = "Visibility::Public")]
     pub visibility: Visibility,

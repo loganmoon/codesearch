@@ -269,7 +269,6 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         .signature(Some(signature))
         .language(Language::Rust)
         .file_path(components.file_path)
-        .line_range((components.location.start_line, components.location.end_line))
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }

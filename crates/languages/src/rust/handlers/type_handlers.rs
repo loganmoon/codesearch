@@ -259,7 +259,6 @@ fn build_entity_data(
         .metadata(metadata)
         .language(Language::Rust)
         .file_path(ctx.file_path.to_path_buf())
-        .line_range((location.start_line, location.end_line))
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }

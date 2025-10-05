@@ -62,8 +62,14 @@ impl QdrantStorageClient {
             "file_path".to_string(),
             json!(entity.file_path.display().to_string()),
         );
-        map.insert("line_range_start".to_string(), json!(entity.line_range.0));
-        map.insert("line_range_end".to_string(), json!(entity.line_range.1));
+        map.insert(
+            "line_range_start".to_string(),
+            json!(entity.location.start_line),
+        );
+        map.insert(
+            "line_range_end".to_string(),
+            json!(entity.location.end_line),
+        );
 
         // DO NOT include: content, signature, dependencies, metadata, documentation_summary
 

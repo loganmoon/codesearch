@@ -1,6 +1,6 @@
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::{Error, Result};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
@@ -178,7 +178,10 @@ impl PostgresClient {
                 .to_str()
                 .ok_or_else(|| Error::storage("Invalid file path"))?,
         )
-        .bind(format!("[{},{})", entity.line_range.0, entity.line_range.1))
+        .bind(format!(
+            "[{},{})",
+            entity.location.start_line, entity.location.end_line
+        ))
         .bind(format!("{:?}", entity.visibility))
         .bind(entity_json)
         .bind(git_commit_hash)
@@ -273,26 +276,17 @@ impl PostgresClient {
             )));
         }
 
-        // Build VALUES clause for batch query
-        let mut query = String::from(
-            "SELECT entity_data FROM entity_metadata WHERE (repository_id, entity_id) IN (",
+        // Build query using QueryBuilder for type safety
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT entity_data FROM entity_metadata WHERE deleted_at IS NULL AND (repository_id, entity_id) IN "
         );
 
-        for (i, _) in entity_refs.iter().enumerate() {
-            if i > 0 {
-                query.push_str(", ");
-            }
-            query.push_str(&format!("(${}, ${})", i * 2 + 1, i * 2 + 2));
-        }
-        query.push_str(") AND deleted_at IS NULL");
+        query_builder.push_tuples(entity_refs, |mut b, (repo_id, entity_id)| {
+            b.push_bind(repo_id).push_bind(entity_id);
+        });
 
-        // Build query dynamically
-        let mut sql_query = sqlx::query(&query);
-        for (repo_id, entity_id) in entity_refs {
-            sql_query = sql_query.bind(repo_id).bind(entity_id);
-        }
-
-        let rows = sql_query
+        let rows = query_builder
+            .build()
             .fetch_all(&self.pool)
             .await
             .map_err(|e| Error::storage(format!("Failed to fetch entities: {e}")))?;
@@ -330,27 +324,22 @@ impl PostgresClient {
             )));
         }
 
-        // Build IN clause for batch update
-        let mut query = String::from(
-            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW()
-             WHERE repository_id = $1 AND entity_id IN (",
+        // Build query using QueryBuilder for type safety
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW() WHERE repository_id = "
         );
 
-        for (i, _) in entity_ids.iter().enumerate() {
-            if i > 0 {
-                query.push_str(", ");
-            }
-            query.push_str(&format!("${}", i + 2));
-        }
-        query.push(')');
+        query_builder.push_bind(repository_id);
+        query_builder.push(" AND entity_id IN (");
 
-        // Execute batch update
-        let mut sql_query = sqlx::query(&query).bind(repository_id);
+        let mut separated = query_builder.separated(", ");
         for entity_id in entity_ids {
-            sql_query = sql_query.bind(entity_id);
+            separated.push_bind(entity_id);
         }
+        separated.push_unseparated(")");
 
-        let result = sql_query
+        let result = query_builder
+            .build()
             .execute(&self.pool)
             .await
             .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;

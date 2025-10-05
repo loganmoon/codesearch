@@ -475,7 +475,6 @@ mod tests {
                 start_column: 0,
                 end_column: 0,
             },
-            line_range: (1, 3),
             visibility: Visibility::Public,
             language: Language::Rust,
             signature: None,

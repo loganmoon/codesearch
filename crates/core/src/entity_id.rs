@@ -64,11 +64,12 @@ impl Default for ScopeContext {
     }
 }
 
-/// Generate a unique entity ID based on repository and qualified name
+/// Generate a unique entity ID based on repository, file path, and qualified name
 ///
-/// Uses repository_id instead of file_path for stable IDs across file moves.
-pub fn generate_entity_id(repository_id: &str, qualified_name: &str) -> String {
-    let unique_str = format!("{repository_id}:{qualified_name}");
+/// Includes file_path to ensure entities in different files are always unique,
+/// even if they have the same qualified name.
+pub fn generate_entity_id(repository_id: &str, file_path: &str, qualified_name: &str) -> String {
+    let unique_str = format!("{repository_id}:{file_path}:{qualified_name}");
     format!(
         "entity-{:032x}",
         XxHash3_128::oneshot(unique_str.as_bytes())
@@ -134,21 +135,25 @@ mod tests {
         let repo_id = "test-repo-uuid";
 
         // Named entity
-        let id1 = generate_entity_id(repo_id, "module::my_function");
+        let id1 = generate_entity_id(repo_id, "src/module.rs", "module::my_function");
         assert!(id1.starts_with("entity-"));
         assert!(!id1.contains("anon"));
 
-        // Same qualified name produces same ID (stable)
-        let id2 = generate_entity_id(repo_id, "module::my_function");
+        // Same qualified name and file path produces same ID (stable)
+        let id2 = generate_entity_id(repo_id, "src/module.rs", "module::my_function");
         assert_eq!(id1, id2);
 
         // Different qualified name produces different ID
-        let id3 = generate_entity_id(repo_id, "module::other_function");
+        let id3 = generate_entity_id(repo_id, "src/module.rs", "module::other_function");
         assert_ne!(id1, id3);
 
         // Different repository produces different ID
-        let id4 = generate_entity_id("other-repo-uuid", "module::my_function");
+        let id4 = generate_entity_id("other-repo-uuid", "src/module.rs", "module::my_function");
         assert_ne!(id1, id4);
+
+        // Different file path produces different ID (even with same qualified name)
+        let id5 = generate_entity_id(repo_id, "src/other.rs", "module::my_function");
+        assert_ne!(id1, id5);
     }
 
     #[test]

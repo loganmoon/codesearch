@@ -29,6 +29,7 @@ pub struct SearchFilters {
 pub struct EmbeddedEntity {
     pub entity: CodeEntity,
     pub embedding: Vec<f32>,
+    pub qdrant_point_id: Uuid,
 }
 
 /// Trait for storage clients (CRUD operations only)

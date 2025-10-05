@@ -9,7 +9,6 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::EmbeddedEntity;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
@@ -54,7 +53,7 @@ pub struct RepositoryIndexer {
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
-    postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 }
 
@@ -115,7 +114,7 @@ impl RepositoryIndexer {
         repository_path: PathBuf,
         repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
-        postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
+        postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
@@ -154,6 +153,9 @@ impl RepositoryIndexer {
             extraction_results.push(result);
         }
 
+        // Track all processed file paths for stale entity detection
+        let mut processed_files: Vec<PathBuf> = Vec::new();
+
         // Process each extraction result
         for (file_path, result) in file_paths.iter().zip(extraction_results) {
             match result {
@@ -161,6 +163,7 @@ impl RepositoryIndexer {
                     // Just add entities directly to batch without transformation
                     batch_entities.extend(entities);
                     stats.merge(file_stats);
+                    processed_files.push(file_path.clone());
                 }
                 Err(e) => {
                     error!("Failed to extract from {:?}: {}", file_path, e);
@@ -169,6 +172,15 @@ impl RepositoryIndexer {
                 }
             }
         }
+
+        // Get repository_id and git_commit for all files
+        let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+            .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+        let git_commit = self.current_git_commit().await.ok();
+
+        // Track entities by file (will be empty for files with no entities)
+        let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
 
         // Bulk load all entities from the batch
         if !batch_entities.is_empty() {
@@ -187,16 +199,15 @@ impl RepositoryIndexer {
                 .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
 
             // Filter entities with valid embeddings
-            let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new(); // create destination
-            let mut entities_with_embeddings: Vec<CodeEntity> = Vec::new(); // track entities for postgres
+            // Pair entities with their embeddings
+            let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> = Vec::new();
 
             for (entity, opt_embedding) in batch_entities
                 .into_iter()
                 .zip(option_embeddings.into_iter())
             {
                 if let Some(embedding) = opt_embedding {
-                    entities_with_embeddings.push(entity.clone());
-                    embedded_entities.push(EmbeddedEntity { entity, embedding });
+                    entity_embedding_pairs.push((entity, embedding));
                 } else {
                     stats.entities_skipped_size += 1;
                     debug!(
@@ -208,43 +219,65 @@ impl RepositoryIndexer {
             }
 
             debug!(
-                "After embedding: embedded_entities={}, entities_with_embeddings={}",
-                embedded_entities.len(),
-                entities_with_embeddings.len()
+                "After embedding: entity_embedding_pairs={}",
+                entity_embedding_pairs.len()
             );
 
             // Only store entities that have embeddings
-            if !embedded_entities.is_empty() {
+            if !entity_embedding_pairs.is_empty() {
                 info!(
                     "Processing {} entities with embeddings",
-                    embedded_entities.len()
+                    entity_embedding_pairs.len()
                 );
-
-                // Write entities to Postgres outbox within transaction
-                let git_commit = self.current_git_commit().await.ok();
-                debug!(
-                    "Writing {} entities to Postgres outbox (git commit: {:?})",
-                    entities_with_embeddings.len(),
-                    git_commit
-                );
-
-                // Get repository_id as UUID
-                let repository_id = uuid::Uuid::parse_str(&self.repository_id)
-                    .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
-
-                // Group entities by file for snapshot tracking
-                let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
-                    std::collections::HashMap::new();
 
                 // Store each entity with its embedding
-                for embedded_entity in &embedded_entities {
-                    let entity = &embedded_entity.entity;
-                    let embedding = &embedded_entity.embedding;
+                for (entity, embedding) in &entity_embedding_pairs {
+                    // Check if entity already exists
+                    let existing_metadata = self
+                        .postgres_client
+                        .get_entity_metadata(repository_id, &entity.entity_id)
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Failed to check existing entity metadata for {}: {e}",
+                                entity.entity_id
+                            );
+                            e
+                        })?;
 
-                    // Generate Qdrant point ID
-                    let point_id = uuid::Uuid::new_v4();
+                    let (point_id, operation) =
+                        if let Some((existing_point_id, deleted_at)) = existing_metadata {
+                            // Entity exists - reuse point_id and use UPDATE
+                            if deleted_at.is_some() {
+                                // Was deleted, now being re-added - use INSERT with new point_id
+                                (
+                                    uuid::Uuid::new_v4(),
+                                    codesearch_storage::postgres::OutboxOperation::Insert,
+                                )
+                            } else {
+                                // Still active - use UPDATE with existing point_id
+                                (
+                                    existing_point_id,
+                                    codesearch_storage::postgres::OutboxOperation::Update,
+                                )
+                            }
+                        } else {
+                            // New entity - generate new point_id and use INSERT
+                            (
+                                uuid::Uuid::new_v4(),
+                                codesearch_storage::postgres::OutboxOperation::Insert,
+                            )
+                        };
 
-                    // Store entity metadata (simplified - no version_id returned)
+                    debug!(
+                        "Entity {}: operation={:?}, point_id={}, existing={:?}",
+                        entity.entity_id,
+                        operation,
+                        point_id,
+                        existing_metadata.is_some()
+                    );
+
+                    // Store entity metadata
                     self.postgres_client
                         .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                         .await
@@ -267,16 +300,17 @@ impl RepositoryIndexer {
                         .or_default()
                         .push(entity.entity_id.clone());
 
-                    // Write INSERT to outbox with both entity and embedding
+                    // Write operation (INSERT or UPDATE) to outbox
                     let payload = serde_json::json!({
                         "entity": entity,
-                        "embedding": embedding
+                        "embedding": embedding,
+                        "qdrant_point_id": point_id.to_string()
                     });
                     self.postgres_client
                         .write_outbox_entry(
                             repository_id,
                             &entity.entity_id,
-                            codesearch_storage::postgres::OutboxOperation::Insert,
+                            operation,
                             codesearch_storage::postgres::TargetStore::Qdrant,
                             payload,
                         )
@@ -290,20 +324,9 @@ impl RepositoryIndexer {
                         })?;
                 }
 
-                // Detect and handle stale entities per file
-                for (file_path, entity_ids) in entities_by_file {
-                    self.handle_file_change(
-                        repository_id,
-                        Path::new(&file_path),
-                        entity_ids,
-                        git_commit.clone(),
-                    )
-                    .await?;
-                }
-
                 debug!(
                     "Successfully wrote {} entities to Postgres outbox",
-                    entities_with_embeddings.len()
+                    entity_embedding_pairs.len()
                 );
             }
 
@@ -311,6 +334,20 @@ impl RepositoryIndexer {
                 "Successfully bulk loaded batch of {} files",
                 file_paths.len()
             );
+        }
+
+        // Detect and handle stale entities for ALL processed files (even empty ones)
+        for file_path in processed_files {
+            let file_path_str = file_path
+                .to_str()
+                .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+            let entity_ids = entities_by_file
+                .get(file_path_str)
+                .cloned()
+                .unwrap_or_default();
+
+            self.handle_file_change(repository_id, &file_path, entity_ids, git_commit.clone())
+                .await?;
         }
 
         Ok(stats)
@@ -514,7 +551,416 @@ fn create_progress_bar(total: usize) -> ProgressBar {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
 mod tests {
-    // Tests disabled: RepositoryIndexer now requires PostgresClient
-    // TODO: Create MockPostgresClient to enable unit tests
+    use super::*;
+    use codesearch_core::entities::{
+        EntityMetadata, EntityType, Language, SourceLocation, Visibility,
+    };
+    use codesearch_embeddings::MockEmbeddingProvider;
+    use codesearch_storage::postgres::mock::MockPostgresClient;
+    use codesearch_storage::postgres::PostgresClientTrait;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    fn create_test_entity(
+        name: &str,
+        entity_id: &str,
+        file_path: &str,
+        repo_id: &str,
+    ) -> CodeEntity {
+        CodeEntity {
+            entity_id: entity_id.to_string(),
+            repository_id: repo_id.to_string(),
+            name: name.to_string(),
+            qualified_name: name.to_string(),
+            entity_type: EntityType::Function,
+            language: Language::Rust,
+            file_path: PathBuf::from(file_path),
+            location: SourceLocation {
+                start_line: 1,
+                end_line: 10,
+                start_column: 0,
+                end_column: 10,
+            },
+            visibility: Visibility::Public,
+            parent_scope: None,
+            dependencies: Vec::new(),
+            signature: None,
+            documentation_summary: None,
+            content: Some(format!("fn {name}() {{}}")),
+            metadata: EntityMetadata::default(),
+        }
+    }
+
+    fn create_test_indexer(
+        temp_dir: &TempDir,
+        repository_id: &str,
+        postgres_client: std::sync::Arc<MockPostgresClient>,
+    ) -> RepositoryIndexer {
+        let embedding_manager = std::sync::Arc::new(EmbeddingManager::new(std::sync::Arc::new(
+            MockEmbeddingProvider::new(384),
+        )));
+
+        RepositoryIndexer::new(
+            temp_dir.path().to_path_buf(),
+            repository_id.to_string(),
+            embedding_manager,
+            postgres_client,
+            None,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_detects_stale_entities() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Setup: store entities in mock database
+        let entity1 = create_test_entity("entity1", "entity1", file_path, &repo_id);
+        let entity2 = create_test_entity("entity2", "entity2", file_path, &repo_id);
+        postgres
+            .store_entity_metadata(repo_uuid, &entity1, None, Uuid::new_v4())
+            .await
+            .unwrap();
+        postgres
+            .store_entity_metadata(repo_uuid, &entity2, None, Uuid::new_v4())
+            .await
+            .unwrap();
+
+        // Setup: previous snapshot had two entities
+        let old_entities = vec!["entity1".to_string(), "entity2".to_string()];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, old_entities, None)
+            .await
+            .unwrap();
+
+        // New state: only entity1 remains
+        let new_entities = vec!["entity1".to_string()];
+
+        // Run handle_file_change
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Verify entity2 was marked as deleted
+        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
+        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
+
+        // Verify snapshot was updated
+        let snapshot = postgres
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap();
+        assert_eq!(snapshot, Some(new_entities));
+
+        // Verify DELETE outbox entry was created
+        assert_eq!(postgres.unprocessed_outbox_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_detects_renamed_function() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Setup: store old entity
+        let old_entity = create_test_entity("old_name", "entity_old_name", file_path, &repo_id);
+        postgres
+            .store_entity_metadata(repo_uuid, &old_entity, None, Uuid::new_v4())
+            .await
+            .unwrap();
+
+        // Old snapshot: function named "old_name"
+        let old_entities = vec!["entity_old_name".to_string()];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, old_entities, None)
+            .await
+            .unwrap();
+
+        // New state: function renamed to "new_name" (different entity ID)
+        let new_entities = vec!["entity_new_name".to_string()];
+
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Old entity should be marked deleted
+        assert!(postgres.is_entity_deleted(repo_uuid, "entity_old_name"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_handles_added_entities() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Old snapshot: one entity
+        let old_entities = vec!["entity1".to_string()];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, old_entities, None)
+            .await
+            .unwrap();
+
+        // New state: added entity2
+        let new_entities = vec!["entity1".to_string(), "entity2".to_string()];
+
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // No entities should be marked as deleted
+        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
+        assert!(!postgres.is_entity_deleted(repo_uuid, "entity2"));
+
+        // Snapshot should be updated
+        let snapshot = postgres
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap();
+        assert_eq!(snapshot, Some(new_entities));
+
+        // No DELETE outbox entries
+        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Setup: store entities
+        for i in 1..=3 {
+            let entity = create_test_entity(
+                &format!("entity{i}"),
+                &format!("entity{i}"),
+                file_path,
+                &repo_id,
+            );
+            postgres
+                .store_entity_metadata(repo_uuid, &entity, None, Uuid::new_v4())
+                .await
+                .unwrap();
+        }
+
+        // Old snapshot: three entities
+        let old_entities = vec![
+            "entity1".to_string(),
+            "entity2".to_string(),
+            "entity3".to_string(),
+        ];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, old_entities, None)
+            .await
+            .unwrap();
+
+        // New state: file is now empty (all entities removed)
+        let new_entities = vec![];
+
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // All entities should be marked as deleted
+        assert!(postgres.is_entity_deleted(repo_uuid, "entity1"));
+        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
+        assert!(postgres.is_entity_deleted(repo_uuid, "entity3"));
+
+        // Should have 3 DELETE outbox entries
+        assert_eq!(postgres.unprocessed_outbox_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_no_previous_snapshot() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // No previous snapshot
+        let new_entities = vec!["entity1".to_string(), "entity2".to_string()];
+
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // No entities should be deleted (first time indexing)
+        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+
+        // Snapshot should be created
+        let snapshot = postgres
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap();
+        assert_eq!(snapshot, Some(new_entities));
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_no_changes() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Old snapshot
+        let entities = vec!["entity1".to_string(), "entity2".to_string()];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, entities.clone(), None)
+            .await
+            .unwrap();
+
+        // Re-index with same entities
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                entities.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // No entities deleted
+        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+
+        // Snapshot still updated (for git commit tracking)
+        let snapshot = postgres
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap();
+        assert_eq!(snapshot, Some(entities));
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_writes_delete_to_outbox() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+
+        // Setup with entities
+        let old_entities = vec!["stale_entity".to_string()];
+        postgres
+            .update_file_snapshot(repo_uuid, file_path, old_entities, None)
+            .await
+            .unwrap();
+
+        // Remove entity
+        indexer
+            .handle_file_change(repo_uuid, std::path::Path::new(file_path), vec![], None)
+            .await
+            .unwrap();
+
+        // Verify outbox entry
+        let entries = postgres
+            .get_unprocessed_outbox_entries(codesearch_storage::postgres::TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].entity_id, "stale_entity");
+        assert_eq!(entries[0].operation, "DELETE");
+        assert_eq!(entries[0].target_store, "qdrant");
+
+        // Verify payload contains reason
+        let payload = &entries[0].payload;
+        assert_eq!(payload["reason"], "file_change");
+        assert!(payload["entity_ids"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_change_updates_snapshot_with_git_commit() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_uuid = Uuid::new_v4();
+        let repo_id = repo_uuid.to_string();
+        let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        let indexer = create_test_indexer(&temp_dir, &repo_id, postgres.clone());
+
+        let file_path = "test.rs";
+        let git_commit = Some("abc123".to_string());
+        let new_entities = vec!["entity1".to_string()];
+
+        indexer
+            .handle_file_change(
+                repo_uuid,
+                std::path::Path::new(file_path),
+                new_entities.clone(),
+                git_commit.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Snapshot should be stored with git commit
+        let snapshot = postgres
+            .get_snapshot_sync(repo_uuid, file_path)
+            .expect("Snapshot should exist");
+        assert_eq!(snapshot, new_entities);
+    }
 }

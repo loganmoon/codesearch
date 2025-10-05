@@ -158,6 +158,18 @@ impl OutboxProcessor {
         )
         .map_err(|e| Error::storage(format!("Failed to deserialize embedding: {e}")))?;
 
+        let qdrant_point_id: String = serde_json::from_value(
+            entry
+                .payload
+                .get("qdrant_point_id")
+                .ok_or_else(|| Error::storage("Missing qdrant_point_id in payload"))?
+                .clone(),
+        )
+        .map_err(|e| Error::storage(format!("Failed to deserialize qdrant_point_id: {e}")))?;
+
+        let qdrant_point_id = codesearch_storage::Uuid::parse_str(&qdrant_point_id)
+            .map_err(|e| Error::storage(format!("Invalid qdrant_point_id: {e}")))?;
+
         // Validate embedding dimensions (prevent memory exhaustion)
         const MAX_EMBEDDING_DIM: usize = 100_000;
         if embedding.len() > MAX_EMBEDDING_DIM {
@@ -175,7 +187,11 @@ impl OutboxProcessor {
             )));
         }
 
-        Ok(EmbeddedEntity { entity, embedding })
+        Ok(EmbeddedEntity {
+            entity,
+            embedding,
+            qdrant_point_id,
+        })
     }
 
     /// Process a DELETE outbox entry

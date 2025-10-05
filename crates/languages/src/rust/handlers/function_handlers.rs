@@ -51,8 +51,11 @@ pub fn handle_function(
         format!("{parent_scope}::{name}")
     };
 
-    // Generate entity_id from repository + qualified name
-    let entity_id = generate_entity_id(repository_id, &qualified_name);
+    // Generate entity_id from repository + file_path + qualified name
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
 
     // Extract visibility by checking AST structure
     let visibility = extract_visibility(query_match, query);

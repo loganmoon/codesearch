@@ -55,12 +55,8 @@ pub async fn assert_point_count(
     Ok(())
 }
 
-/// Assert that a collection has at least the minimum number of points
-pub async fn assert_min_point_count(
-    qdrant: &TestQdrant,
-    collection_name: &str,
-    minimum: usize,
-) -> Result<()> {
+/// Get the current point count for a collection
+pub async fn get_point_count(qdrant: &TestQdrant, collection_name: &str) -> Result<usize> {
     let url = format!("{}/collections/{}", qdrant.rest_url(), collection_name);
     let response = reqwest::get(&url)
         .await
@@ -78,7 +74,16 @@ pub async fn assert_min_point_count(
         .await
         .context("Failed to parse collection info")?;
 
-    let actual = info.result.points_count;
+    Ok(info.result.points_count)
+}
+
+/// Assert that a collection has at least the minimum number of points
+pub async fn assert_min_point_count(
+    qdrant: &TestQdrant,
+    collection_name: &str,
+    minimum: usize,
+) -> Result<()> {
+    let actual = get_point_count(qdrant, collection_name).await?;
     if actual < minimum {
         return Err(anyhow::anyhow!(
             "Expected at least {minimum} points but found {actual} in collection '{collection_name}'"

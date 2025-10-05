@@ -211,7 +211,7 @@ pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
-    postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(

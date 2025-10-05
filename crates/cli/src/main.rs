@@ -15,7 +15,7 @@ use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::entities::EntityType;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
-use indexer::RepositoryIndexer;
+use indexer::{Indexer, RepositoryIndexer};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -307,6 +307,26 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Storage backend verification failed")?;
 
+    // Create PostgresClient and run migrations
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to create PostgreSQL client")?;
+
+    postgres_client
+        .run_migrations()
+        .await
+        .context("Failed to run database migrations")?;
+
+    info!("✓ Database migrations completed");
+
+    // Register repository in Postgres
+    let repository_id = postgres_client
+        .ensure_repository(&repo_root, &config.storage.collection_name, None)
+        .await
+        .context("Failed to register repository")?;
+
+    info!("✓ Repository registered with ID: {}", repository_id);
+
     info!("✓ Repository initialized successfully");
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);
@@ -507,9 +527,24 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
         }
     };
 
+    // Step 5.6: Get repository_id from database
+    let repository_id = postgres_client
+        .get_repository_id(&config.storage.collection_name)
+        .await
+        .context("Failed to query repository")?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Repository not found for collection '{}'. Please run 'codesearch init' first.",
+                config.storage.collection_name
+            )
+        })?;
+
+    info!("Repository ID: {}", repository_id);
+
     // Step 6: Create and run indexer
     let mut indexer = RepositoryIndexer::new(
         repo_path.clone(),
+        repository_id.to_string(),
         embedding_manager,
         postgres_client,
         git_repo,
@@ -652,20 +687,46 @@ async fn search_code(
         None
     };
 
-    // Step 7: Search for similar entities
-    let results = storage_client
+    // Step 7: Create Postgres client for fetching full entities
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to connect to Postgres")?;
+
+    // Step 8: Search for similar entities (returns IDs only)
+    let search_results = storage_client
         .search_similar(query_embedding, limit, filters)
         .await
         .context("Failed to search for similar entities")?;
 
-    // Step 8: Display results
-    if results.is_empty() {
+    if search_results.is_empty() {
         println!("No results found for query: {query}");
-    } else {
-        println!("\n📊 Found {} results:\n", results.len());
-        println!("{}", "─".repeat(80));
+        return Ok(());
+    }
 
-        for (idx, (entity, score)) in results.iter().enumerate() {
+    // Step 9: Batch fetch full entities from Postgres
+    let entity_refs: Vec<(codesearch_storage::Uuid, String)> = search_results
+        .iter()
+        .filter_map(|(entity_id, repo_id, _score)| {
+            codesearch_storage::Uuid::parse_str(repo_id)
+                .ok()
+                .map(|uuid| (uuid, entity_id.clone()))
+        })
+        .collect();
+
+    let full_entities = postgres_client.get_entities_by_ids(&entity_refs).await?;
+
+    // Create map for lookup
+    let entity_map: std::collections::HashMap<String, codesearch_core::CodeEntity> = full_entities
+        .into_iter()
+        .map(|e| (e.entity_id.clone(), e))
+        .collect();
+
+    // Step 9: Display results with scores
+    println!("\n📊 Found {} results:\n", search_results.len());
+    println!("{}", "─".repeat(80));
+
+    for (idx, (entity_id, _repo_id, score)) in search_results.iter().enumerate() {
+        if let Some(entity) = entity_map.get(entity_id) {
             let similarity_percent = (score * 100.0) as u32;
 
             println!(
@@ -691,13 +752,13 @@ async fn search_code(
                 println!("   Preview: {}", preview.replace('\n', "\n            "));
             }
 
-            if idx < results.len() - 1 {
+            if idx < search_results.len() - 1 {
                 println!("{}", "─".repeat(80));
             }
         }
-        println!("{}", "─".repeat(80));
-        println!("\n✅ Search completed successfully");
     }
+    println!("{}", "─".repeat(80));
+    println!("\n✅ Search completed successfully");
 
     Ok(())
 }

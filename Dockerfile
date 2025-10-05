@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# Build the outbox_processor binary
-RUN cargo build --release --bin outbox_processor
+# Build the outbox-processor binary
+RUN cargo build --release --bin outbox-processor
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/outbox_processor /usr/local/bin/outbox_processor
+COPY --from=builder /app/target/release/outbox-processor /usr/local/bin/outbox-processor
 
 # Set the entrypoint
-ENTRYPOINT ["/usr/local/bin/outbox_processor"]
+ENTRYPOINT ["/usr/local/bin/outbox-processor"]

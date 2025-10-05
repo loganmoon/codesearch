@@ -3,17 +3,24 @@
 //! These tests validate the full workflow: init → index → search
 //! using isolated Qdrant containers with temporary storage.
 //!
+//! ## Running Tests
+//!
+//! The outbox_processor binary is automatically built on first test run if needed.
+//! For best results when running tests in parallel:
+//!
+//! ```bash
+//! cargo build --bin outbox_processor  # Optional: pre-build to avoid first-run delay
+//! cargo test --workspace              # Tests can now run in parallel safely
+//! ```
+//!
 //! Run with: cargo test --test e2e_tests
 //! Verbose: CODESEARCH_TEST_LOG=debug cargo test --test e2e_tests
 
-mod e2e;
-
 use anyhow::{Context, Result};
 use codesearch_core::config::StorageConfig;
+use codesearch_e2e_tests::common::*;
 use codesearch_embeddings::{EmbeddingProvider, MockEmbeddingProvider};
 use codesearch_storage::{create_collection_manager, create_storage_client};
-use e2e::*;
-use indexer::create_indexer;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -25,15 +32,14 @@ fn workspace_manifest() -> std::path::PathBuf {
     Path::new(&manifest_dir)
         .parent()
         .unwrap()
-        .parent()
-        .unwrap()
         .join("Cargo.toml")
 }
 
-/// Create a test config file for the given repository and Qdrant instance
+/// Create a test config file for the given repository and test instances
 fn create_test_config(
     repo_path: &Path,
     qdrant: &TestQdrant,
+    postgres: &TestPostgres,
     collection_name: Option<&str>,
 ) -> Result<std::path::PathBuf> {
     let config_content = format!(
@@ -46,6 +52,11 @@ qdrant_port = {}
 qdrant_rest_port = {}
 collection_name = "{}"
 auto_start_deps = false
+postgres_host = "localhost"
+postgres_port = {}
+postgres_database = "codesearch"
+postgres_user = "codesearch"
+postgres_password = "codesearch"
 
 [embeddings]
 provider = "mock"
@@ -60,7 +71,8 @@ enabled = ["rust"]
 "#,
         qdrant.port(),
         qdrant.rest_port(),
-        collection_name.unwrap_or("")
+        collection_name.unwrap_or(""),
+        postgres.port()
     );
 
     let config_path = repo_path.join("codesearch.toml");
@@ -78,6 +90,8 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
             workspace_manifest().to_str().unwrap(),
             "--package",
             "codesearch",
+            "--bin",
+            "codesearch",
             "--",
         ])
         .args(args)
@@ -86,15 +100,33 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
         .context("Failed to run codesearch CLI")
 }
 
+/// Start outbox processor and wait for it to sync entities to Qdrant
+///
+/// The processor polls every 1 second, so we wait 3 seconds to ensure
+/// at least a few poll cycles have completed.
+async fn start_and_wait_for_outbox_sync(
+    postgres: &TestPostgres,
+    qdrant: &TestQdrant,
+    collection_name: &str,
+) -> Result<TestOutboxProcessor> {
+    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
+
+    // Give the processor time to start and process outbox entries
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    Ok(processor)
+}
+
 #[tokio::test]
 async fn test_init_creates_collection_in_qdrant() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = simple_rust_repo().await?;
 
-    // Create config pointing to test Qdrant
-    let config_path = create_test_config(repo.path(), &qdrant, None)?;
+    // Create config pointing to test instances
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, None)?;
 
     // Run init command
     let output = run_cli(
@@ -147,10 +179,11 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init first
     let init_output = run_cli(
@@ -170,8 +203,13 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
         "Index command failed: stdout={stdout}, stderr={stderr}"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify entities were indexed (should have at least 10 entities)
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify collection exists
     assert_collection_exists(&qdrant, &collection_name).await?;
@@ -184,10 +222,11 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init and index
     run_cli(
@@ -198,9 +237,13 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
 
     assert!(output.status.success(), "Index with mock embeddings failed");
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify at least some entities were indexed
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -209,10 +252,11 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Init and index the repository
     run_cli(
@@ -220,6 +264,9 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         &["init", "--config", config_path.to_str().unwrap()],
     )?;
     run_cli(repo.path(), &["index"])?;
+
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
 
     // Create storage client for programmatic search
     let storage_config = StorageConfig {
@@ -230,7 +277,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
-        postgres_port: 5432,
+        postgres_port: postgres.port(),
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
@@ -248,7 +295,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         .context("Failed to get query embedding")?
         .context("Embedding was None")?;
 
-    // Perform search
+    // Perform search - now returns (entity_id, repository_id, score) tuples
     let results = storage_client
         .search_similar(query_embedding, 5, None)
         .await?;
@@ -259,6 +306,16 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         "Search should return at least some results"
     );
 
+    // Verify we got entity_id and repository_id from search
+    for (entity_id, repository_id, _score) in &results {
+        assert!(!entity_id.is_empty(), "Entity ID should not be empty");
+        assert!(
+            !repository_id.is_empty(),
+            "Repository ID should not be empty"
+        );
+    }
+
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -268,6 +325,7 @@ async fn test_complete_pipeline_with_real_embeddings() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = complex_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -283,6 +341,11 @@ qdrant_port = {}
 qdrant_rest_port = {}
 collection_name = "{}"
 auto_start_deps = false
+postgres_host = "localhost"
+postgres_port = {}
+postgres_database = "codesearch"
+postgres_user = "codesearch"
+postgres_password = "codesearch"
 
 [embeddings]
 provider = "local_api"
@@ -299,7 +362,8 @@ enabled = ["rust"]
 "#,
         qdrant.port(),
         qdrant.rest_port(),
-        collection_name
+        collection_name,
+        postgres.port()
     );
 
     let config_path = repo.path().join("codesearch.toml");
@@ -325,8 +389,13 @@ enabled = ["rust"]
         "Index failed with real embeddings: stdout={stdout}, stderr={stderr}"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify substantial entities were indexed
     assert_min_point_count(&qdrant, &collection_name, 15).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify collection exists with correct dimensions for the model
     assert_collection_exists(&qdrant, &collection_name).await?;
@@ -339,10 +408,11 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Init and index
     run_cli(
@@ -351,9 +421,14 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     )?;
     run_cli(repo.path(), &["index"])?;
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Verify entities were indexed
     // Just check that we have a reasonable number of entities - at least 10
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
+
+    drop(processor); // Clean up processor
 
     // Verify we can find at least one struct entity
     let expected = ExpectedEntity::new(
@@ -371,10 +446,11 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init first time
     let output1 = run_cli(
@@ -408,6 +484,7 @@ async fn test_programmatic_indexing_pipeline() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -472,11 +549,12 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
     let repo = simple_rust_repo().await?;
 
     // Create config but don't run init
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Try to index without init
     let output = run_cli(repo.path(), &["index"])?;
@@ -549,6 +627,7 @@ async fn test_index_with_invalid_files_continues() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
 
     // Create repo with valid and invalid Rust files
     let repo = TestRepositoryBuilder::new()
@@ -573,7 +652,7 @@ fn broken( {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init and index
     run_cli(
@@ -587,6 +666,9 @@ fn broken( {
         output.status.success(),
         "Index should succeed with partial failures"
     );
+
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
 
     // Should have indexed the valid file
     let storage_config = StorageConfig {
@@ -610,6 +692,7 @@ fn broken( {
         "Collection should exist"
     );
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -622,12 +705,13 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
 
     // Create empty repository with just git
     let repo = TestRepositoryBuilder::new().build().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init
     let init_output = run_cli(
@@ -657,6 +741,7 @@ async fn test_large_entity_is_skipped() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
 
     // Create file with very large entity (exceeds context window)
     let large_content = format!(
@@ -674,7 +759,7 @@ fn large_function() {{
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init and index
     run_cli(
@@ -689,10 +774,14 @@ fn large_function() {{
         "Index should succeed even with oversized entities"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Large entity should be skipped
     // (Collection may be empty or have other entities if any were extracted)
     assert_collection_exists(&qdrant, &collection_name).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -701,6 +790,7 @@ async fn test_duplicate_entity_ids_handled() -> Result<()> {
     init_test_logging();
 
     let qdrant = TestQdrant::start().await?;
+    let postgres = TestPostgres::start().await?;
 
     // Create repo with two files that have identically named functions
     let repo = TestRepositoryBuilder::new()
@@ -724,7 +814,7 @@ pub fn duplicate_name() -> i32 {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, Some(&collection_name))?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, Some(&collection_name))?;
 
     // Run init and index
     run_cli(
@@ -739,9 +829,13 @@ pub fn duplicate_name() -> i32 {
         "Index should handle duplicate entity names"
     );
 
+    // Start outbox processor and wait for sync
+    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+
     // Should have indexed both (they'll have different entity_ids due to file paths)
     assert_min_point_count(&qdrant, &collection_name, 2).await?;
 
+    drop(processor); // Clean up processor
     Ok(())
 }
 
@@ -753,27 +847,33 @@ pub fn duplicate_name() -> i32 {
 async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
     init_test_logging();
 
-    // Create pool of 3 containers
-    let pool = TestQdrantPool::new(3).await?;
+    // Create pools of 3 containers
+    let qdrant_pool = TestQdrantPool::new(3).await?;
+    let postgres_pool = TestPostgresPool::new(3).await?;
 
     // Create 3 different repositories
     let repo1 = simple_rust_repo().await?;
     let repo2 = multi_file_rust_repo().await?;
     let repo3 = complex_rust_repo().await?;
 
-    let repos = vec![repo1, repo2, repo3];
+    let repos = [repo1, repo2, repo3];
     let mut handles = Vec::new();
 
     // Index all repositories concurrently
     for (i, repo) in repos.iter().enumerate() {
-        let qdrant = pool.get(i).unwrap();
+        let qdrant = qdrant_pool.get(i).unwrap();
+        let postgres = postgres_pool.get(i).unwrap();
         let collection_name = format!("test_collection_{}", Uuid::new_v4());
-        let config_path = create_test_config(repo.path(), qdrant, Some(&collection_name))?;
+        let config_path =
+            create_test_config(repo.path(), qdrant, postgres, Some(&collection_name))?;
 
         // Clone values for async move
         let repo_path = repo.path().to_path_buf();
         let collection_name_clone = collection_name.clone();
         let rest_url = qdrant.rest_url();
+        let postgres_port = postgres.port();
+        let qdrant_port = qdrant.port();
+        let qdrant_rest_port = qdrant.rest_port();
 
         let handle = tokio::spawn(async move {
             // Run init
@@ -784,6 +884,8 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
                     "--manifest-path",
                     workspace_manifest().to_str().unwrap(),
                     "--package",
+                    "codesearch",
+                    "--bin",
                     "codesearch",
                     "--",
                     "init",
@@ -804,6 +906,8 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
                     workspace_manifest().to_str().unwrap(),
                     "--package",
                     "codesearch",
+                    "--bin",
+                    "codesearch",
                     "--",
                     "index",
                 ])
@@ -812,10 +916,38 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
 
             assert!(index_output.status.success(), "Index failed");
 
+            // Start outbox processor and wait for sync
+            // Use pre-built binary to avoid concurrent cargo build issues
+            let binary_path = ensure_outbox_processor_built()
+                .expect("Failed to ensure outbox_processor is built");
+
+            let mut processor = std::process::Command::new(binary_path)
+                .env("POSTGRES_HOST", "localhost")
+                .env("POSTGRES_PORT", postgres_port.to_string())
+                .env("POSTGRES_DATABASE", "codesearch")
+                .env("POSTGRES_USER", "codesearch")
+                .env("POSTGRES_PASSWORD", "codesearch")
+                .env("QDRANT_HOST", "localhost")
+                .env("QDRANT_PORT", qdrant_port.to_string())
+                .env("QDRANT_REST_PORT", qdrant_rest_port.to_string())
+                .env("QDRANT_COLLECTION", &collection_name_clone)
+                .env("RUST_LOG", "info")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("Failed to start outbox processor");
+
+            // Wait for sync
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
             // Verify collection exists
             let url = format!("{rest_url}/collections/{collection_name_clone}");
             let response = reqwest::get(&url).await.expect("Failed to query Qdrant");
             assert!(response.status().is_success(), "Collection should exist");
+
+            // Clean up processor
+            let _ = processor.kill();
+            let _ = processor.wait();
         });
 
         handles.push(handle);

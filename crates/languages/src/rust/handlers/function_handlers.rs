@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handlers::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
     find_capture_node, node_to_text,
@@ -18,7 +19,7 @@ use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
     Visibility,
 };
-use codesearch_core::entity_id::{generate_entity_id_from_qualified_name, ScopeContext};
+use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -31,13 +32,27 @@ pub fn handle_function(
     query: &Query,
     source: &str,
     file_path: &Path,
+    repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let scope_context = ScopeContext::new();
-
     // Extract function name
     let name = find_capture_node(query_match, query, capture_names::NAME)
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
+
+    // Get the function node for location and content
+    let function_node = find_capture_node(query_match, query, capture_names::FUNCTION)
+        .ok_or_else(|| Error::entity_extraction("Function node not found"))?;
+
+    // Build qualified name via parent traversal
+    let parent_scope = build_qualified_name_from_ast(function_node, source, "rust");
+    let qualified_name = if parent_scope.is_empty() {
+        name.clone()
+    } else {
+        format!("{parent_scope}::{name}")
+    };
+
+    // Generate entity_id from repository + qualified name
+    let entity_id = generate_entity_id(repository_id, &qualified_name);
 
     // Extract visibility by checking AST structure
     let visibility = extract_visibility(query_match, query);
@@ -57,23 +72,23 @@ pub fn handle_function(
     let return_type = find_capture_node(query_match, query, capture_names::RETURN)
         .and_then(|node| node_to_text(node, source).ok());
 
-    // Get the function node for location and content
-    let function_node = find_capture_node(query_match, query, capture_names::FUNCTION)
-        .ok_or_else(|| Error::entity_extraction("Function node not found"))?;
-
     let location = SourceLocation::from_tree_sitter_node(function_node);
     let content = node_to_text(function_node, source)?.to_string();
 
     // Extract doc comments if any
     let documentation = extract_preceding_doc_comments(function_node, source);
 
-    // Build qualified name
-    let qualified_name = scope_context.build_qualified_name(&name);
-
     // Build the entity using a dedicated function
     let entity = build_function_entity(FunctionEntityComponents {
+        entity_id,
+        repository_id: repository_id.to_string(),
         name,
         qualified_name,
+        parent_scope: if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        },
         file_path: file_path.to_path_buf(),
         location,
         visibility,
@@ -192,8 +207,11 @@ fn extract_function_modifiers(query_match: &QueryMatch, query: &Query) -> (bool,
 /// Components for building a function entity
 #[allow(dead_code)]
 struct FunctionEntityComponents {
+    entity_id: String,
+    repository_id: String,
     name: String,
     qualified_name: String,
+    parent_scope: Option<String>,
     file_path: std::path::PathBuf,
     location: SourceLocation,
     visibility: Visibility,
@@ -236,13 +254,12 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         generics: components.generics.clone(),
     };
 
-    let entity_id =
-        generate_entity_id_from_qualified_name(&components.qualified_name, &components.file_path);
-
     CodeEntityBuilder::default()
-        .entity_id(entity_id)
+        .entity_id(components.entity_id)
+        .repository_id(components.repository_id)
         .name(components.name)
         .qualified_name(components.qualified_name)
+        .parent_scope(components.parent_scope)
         .entity_type(EntityType::Function)
         .location(components.location.clone())
         .visibility(components.visibility)
@@ -252,7 +269,6 @@ fn build_function_entity(components: FunctionEntityComponents) -> Result<CodeEnt
         .signature(Some(signature))
         .language(Language::Rust)
         .file_path(components.file_path)
-        .line_range((components.location.start_line, components.location.end_line))
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }

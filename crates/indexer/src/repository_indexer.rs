@@ -52,6 +52,7 @@ impl IndexProgress {
 /// Main repository indexer
 pub struct RepositoryIndexer {
     repository_path: PathBuf,
+    repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
     git_repo: Option<codesearch_watcher::GitRepository>,
@@ -112,12 +113,14 @@ impl RepositoryIndexer {
     /// Create a new repository indexer
     pub fn new(
         repository_path: PathBuf,
+        repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
             repository_path,
+            repository_id,
             embedding_manager,
             postgres_client,
             git_repo,
@@ -127,85 +130,6 @@ impl RepositoryIndexer {
     /// Get the repository path
     pub fn repository_path(&self) -> &Path {
         &self.repository_path
-    }
-
-    /// Index the entire repository
-    pub async fn index_repository(&mut self) -> Result<IndexResult> {
-        info!("Starting repository indexing: {:?}", self.repository_path);
-        let start_time = Instant::now();
-
-        // Find all files to process
-        let files = find_files(&self.repository_path)?;
-        info!("Found {} files to process", files.len());
-
-        // Create progress tracking
-        let mut progress = IndexProgress::new(files.len());
-        let pb = create_progress_bar(files.len());
-
-        // Process statistics
-        let mut stats = IndexStats::default();
-
-        // Process files in batches for better performance
-        const BATCH_SIZE: usize = 100; // Configurable batch size
-
-        for chunk in files.chunks(BATCH_SIZE) {
-            pb.set_message(format!("Processing batch of {} files", chunk.len()));
-
-            match self.process_batch(chunk, &pb).await {
-                Ok(batch_stats) => {
-                    stats.merge(batch_stats);
-                    for file_path in chunk {
-                        progress.update(&file_path.to_string_lossy(), true);
-                        pb.inc(1);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to process batch: {}", e);
-                    // Process failed batch files individually as fallback
-                    for file_path in chunk {
-                        match self.process_file(file_path).await {
-                            Ok(file_stats) => {
-                                stats.merge(file_stats);
-                                progress.update(&file_path.to_string_lossy(), true);
-                            }
-                            Err(e) => {
-                                error!("Failed to process file {:?}: {}", file_path, e);
-                                stats.increment_failed_files();
-                                progress.update(&file_path.to_string_lossy(), false);
-                            }
-                        }
-                        pb.inc(1);
-                    }
-                }
-            }
-        }
-
-        pb.finish_with_message("Indexing complete");
-
-        // Calculate final statistics
-        stats.total_files = files.len();
-        stats.processing_time_ms = start_time.elapsed().as_millis() as u64;
-
-        info!(
-            "Indexing complete: {} files, {} entities, {} relationships{} in {:.2}s",
-            stats.total_files,
-            stats.entities_extracted,
-            stats.relationships_extracted,
-            if stats.entities_skipped_size > 0 {
-                format!(
-                    " ({} entities skipped due to size)",
-                    stats.entities_skipped_size
-                )
-            } else {
-                String::new()
-            },
-            stats.processing_time_ms as f64 / 1000.0
-        );
-
-        Ok(IndexResult {
-            stats,
-            errors: Vec::new(),
-        })
     }
 
     /// Process a batch of files for better performance
@@ -304,11 +228,25 @@ impl RepositoryIndexer {
                     git_commit
                 );
 
-                for entity in &entities_with_embeddings {
-                    // Store metadata and version
-                    let version_id = self
-                        .postgres_client
-                        .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
+                // Get repository_id as UUID
+                let repository_id = uuid::Uuid::parse_str(&self.repository_id)
+                    .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
+                // Group entities by file for snapshot tracking
+                let mut entities_by_file: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+
+                // Store each entity with its embedding
+                for embedded_entity in &embedded_entities {
+                    let entity = &embedded_entity.entity;
+                    let embedding = &embedded_entity.embedding;
+
+                    // Generate Qdrant point ID
+                    let point_id = uuid::Uuid::new_v4();
+
+                    // Store entity metadata (simplified - no version_id returned)
+                    self.postgres_client
+                        .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
                         .await
                         .map_err(|e| {
                             error!(
@@ -318,17 +256,29 @@ impl RepositoryIndexer {
                             e
                         })?;
 
-                    // Write to outbox for Qdrant
-                    let payload = serde_json::to_value(entity)
-                        .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+                    // Track for file snapshot
+                    let file_path_str = entity
+                        .file_path
+                        .to_str()
+                        .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
+                        .to_string();
+                    entities_by_file
+                        .entry(file_path_str.clone())
+                        .or_default()
+                        .push(entity.entity_id.clone());
 
+                    // Write INSERT to outbox with both entity and embedding
+                    let payload = serde_json::json!({
+                        "entity": entity,
+                        "embedding": embedding
+                    });
                     self.postgres_client
                         .write_outbox_entry(
+                            repository_id,
                             &entity.entity_id,
                             codesearch_storage::postgres::OutboxOperation::Insert,
                             codesearch_storage::postgres::TargetStore::Qdrant,
                             payload,
-                            version_id,
                         )
                         .await
                         .map_err(|e| {
@@ -338,6 +288,17 @@ impl RepositoryIndexer {
                             );
                             e
                         })?;
+                }
+
+                // Detect and handle stale entities per file
+                for (file_path, entity_ids) in entities_by_file {
+                    self.handle_file_change(
+                        repository_id,
+                        Path::new(&file_path),
+                        entity_ids,
+                        git_commit.clone(),
+                    )
+                    .await?;
                 }
 
                 debug!(
@@ -365,7 +326,7 @@ impl RepositoryIndexer {
         let mut stats = IndexStats::default();
 
         // Create extractor for this file
-        let extractor = match create_extractor(file_path) {
+        let extractor = match create_extractor(file_path, &self.repository_id) {
             Some(ext) => ext,
             None => {
                 debug!("No extractor available for file: {:?}", file_path);
@@ -389,102 +350,69 @@ impl RepositoryIndexer {
         Ok((entities, stats))
     }
 
-    /// Process a single file through the indexing pipeline
-    async fn process_file(&mut self, file_path: &Path) -> Result<IndexStats> {
-        debug!("Processing file: {:?}", file_path);
+    /// Detect and mark stale entities when re-indexing a file
+    async fn handle_file_change(
+        &self,
+        repository_id: uuid::Uuid,
+        file_path: &Path,
+        new_entity_ids: Vec<String>,
+        git_commit: Option<String>,
+    ) -> Result<()> {
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
 
-        // Initialize stats for this file
-        let mut stats = IndexStats::default();
+        // Get previous snapshot
+        let old_entity_ids = self
+            .postgres_client
+            .get_file_snapshot(repository_id, file_path_str)
+            .await?
+            .unwrap_or_default();
 
-        // Stage 1: Create extractor for file
-        let extractor = match create_extractor(file_path) {
-            Some(ext) => ext,
-            None => {
-                debug!("No extractor available for file: {:?}", file_path);
-                return Ok(stats);
-            }
-        };
+        // Find stale entities (in old but not in new)
+        let stale_ids: Vec<String> = old_entity_ids
+            .iter()
+            .filter(|old_id| !new_entity_ids.contains(old_id))
+            .cloned()
+            .collect();
 
-        // Read file
-        let content = fs::read_to_string(file_path)
-            .await
-            .map_err(|e| Error::parse(file_path.display().to_string(), e.to_string()))?;
+        if !stale_ids.is_empty() {
+            tracing::info!(
+                "Found {} stale entities in {}",
+                stale_ids.len(),
+                file_path_str
+            );
 
-        // Extract entities
-        let entities = extractor.extract(&content, file_path)?;
-        debug!("Extracted {} entities from {:?}", entities.len(), file_path);
+            // Mark entities as deleted
+            self.postgres_client
+                .mark_entities_deleted(repository_id, &stale_ids)
+                .await?;
 
-        if entities.is_empty() {
-            return Ok(stats);
-        }
-
-        // Update extraction stats
-        stats.entities_extracted = entities.len();
-        // Note: Relationships are not directly exposed in CodeEntity yet
-
-        // Stage 2: Store - Bulk load to storage
-        debug!("Storing {} entities", entities.len());
-
-        // Generate embeddings for entities
-        let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
-
-        let option_embeddings = self
-            .embedding_manager
-            .embed(embedding_texts)
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
-
-        // Filter entities with valid embeddings
-        let mut embedded_entities: Vec<EmbeddedEntity> = Vec::new();
-        let mut entities_with_embeddings: Vec<CodeEntity> = Vec::new();
-
-        for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
-            if let Some(embedding) = opt_embedding {
-                entities_with_embeddings.push(entity.clone());
-                embedded_entities.push(EmbeddedEntity { entity, embedding });
-            } else {
-                stats.entities_skipped_size += 1;
-                info!(
-                    "Skipped entity due to size: {} in {}",
-                    entity.name,
-                    entity.file_path.display()
-                );
-            }
-        }
-
-        // Only store entities that have embeddings
-        if !embedded_entities.is_empty() {
-            // Write entities to Postgres outbox
-            let git_commit = self.current_git_commit().await.ok();
-
-            for entity in &entities_with_embeddings {
-                // Store metadata and version
-                let version_id = self
-                    .postgres_client
-                    .store_entity_metadata(entity, uuid::Uuid::new_v4(), git_commit.clone())
-                    .await
-                    .map_err(|e| Error::Storage(format!("Failed to store entity metadata: {e}")))?;
-
-                // Write to outbox for Qdrant
-                let payload = serde_json::to_value(entity)
-                    .map_err(|e| Error::Storage(format!("Failed to serialize entity: {e}")))?;
+            // Write DELETE entries to outbox
+            for entity_id in &stale_ids {
+                let payload = serde_json::json!({
+                    "entity_ids": [entity_id],
+                    "reason": "file_change"
+                });
 
                 self.postgres_client
                     .write_outbox_entry(
-                        &entity.entity_id,
-                        codesearch_storage::postgres::OutboxOperation::Insert,
+                        repository_id,
+                        entity_id,
+                        codesearch_storage::postgres::OutboxOperation::Delete,
                         codesearch_storage::postgres::TargetStore::Qdrant,
                         payload,
-                        version_id,
                     )
-                    .await
-                    .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
+                    .await?;
             }
         }
 
-        debug!("Successfully stored entities from {:?}", file_path);
+        // Update snapshot with current state
+        self.postgres_client
+            .update_file_snapshot(repository_id, file_path_str, new_entity_ids, git_commit)
+            .await?;
 
-        Ok(stats)
+        Ok(())
     }
 
     /// Get current Git commit hash
@@ -532,9 +460,9 @@ impl crate::Indexer for RepositoryIndexer {
                 }
                 Err(e) => {
                     error!("Failed to process batch: {}", e);
-                    // Process failed batch files individually as fallback
+                    // Process failed batch files individually as fallback (batch size of 1)
                     for file_path in chunk {
-                        match self.process_file(file_path).await {
+                        match self.process_batch(std::slice::from_ref(file_path), &pb).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);

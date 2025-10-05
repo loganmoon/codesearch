@@ -15,6 +15,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct MinimalEntityPayload {
+    entity_id: String,
+    repository_id: String,
+    name: String,
+    qualified_name: String,
+    entity_type: String,
+    file_path: String,
+    line_range_start: usize,
+    line_range_end: usize,
+}
+
 /// Qdrant storage client implementing CRUD operations only
 pub(crate) struct QdrantStorageClient {
     qdrant_client: Arc<Qdrant>,
@@ -30,32 +43,51 @@ impl QdrantStorageClient {
         })
     }
 
-    /// Convert CodeEntity to Qdrant point payload
-    fn entity_to_payload(entity: &CodeEntity) -> Payload {
-        // Serialize the entire entity as JSON, then convert to Qdrant Value
-        if let Ok(json) = serde_json::to_value(entity) {
-            if let Ok(map) =
-                serde_json::from_value::<serde_json::Map<String, serde_json::Value>>(json)
-            {
-                return Payload::from(map);
-            }
-        }
+    /// Convert entity to minimal Qdrant payload (display fields only)
+    fn entity_to_minimal_payload(entity: &CodeEntity) -> Payload {
+        let mut map = serde_json::Map::new();
 
-        Payload::from(serde_json::Map::new())
+        // Core identifiers
+        map.insert("entity_id".to_string(), json!(entity.entity_id));
+        map.insert("repository_id".to_string(), json!(entity.repository_id));
+
+        // Display fields for search results
+        map.insert("name".to_string(), json!(entity.name));
+        map.insert("qualified_name".to_string(), json!(entity.qualified_name));
+        map.insert(
+            "entity_type".to_string(),
+            json!(format!("{:?}", entity.entity_type)),
+        );
+        map.insert(
+            "file_path".to_string(),
+            json!(entity.file_path.display().to_string()),
+        );
+        map.insert(
+            "line_range_start".to_string(),
+            json!(entity.location.start_line),
+        );
+        map.insert(
+            "line_range_end".to_string(),
+            json!(entity.location.end_line),
+        );
+
+        // DO NOT include: content, signature, dependencies, metadata, documentation_summary
+
+        Payload::from(map)
     }
 
-    /// Convert Qdrant payload back to CodeEntity
-    fn payload_to_entity(payload: &HashMap<String, QdrantValue>) -> Result<CodeEntity> {
-        // Convert Qdrant Values to serde_json Values
+    /// Convert Qdrant payload to minimal entity payload
+    fn payload_to_minimal_entity(
+        payload: &HashMap<String, QdrantValue>,
+    ) -> Result<MinimalEntityPayload> {
         let mut json_map = serde_json::Map::new();
         for (key, value) in payload {
             if let Ok(json_value) = Self::qdrant_value_to_json(value) {
                 json_map.insert(key.clone(), json_value);
             }
         }
-
         serde_json::from_value(serde_json::Value::Object(json_map))
-            .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))
+            .map_err(|e| Error::storage(format!("Failed to deserialize minimal payload: {e}")))
     }
 
     /// Convert Qdrant Value to serde_json Value
@@ -137,7 +169,7 @@ impl StorageClient for QdrantStorageClient {
                 let point = PointStruct::new(
                     PointId::from(point_id.to_string()),
                     embedded.embedding,
-                    Self::entity_to_payload(&embedded.entity),
+                    Self::entity_to_minimal_payload(&embedded.entity),
                 );
                 (entity_id, point_id, point)
             })
@@ -169,7 +201,7 @@ impl StorageClient for QdrantStorageClient {
         query_embedding: Vec<f32>,
         limit: usize,
         filters: Option<SearchFilters>,
-    ) -> Result<Vec<(CodeEntity, f32)>> {
+    ) -> Result<Vec<(String, String, f32)>> {
         let filter = filters.and_then(|f| Self::build_filter(&f));
 
         let search_result = self
@@ -189,8 +221,8 @@ impl StorageClient for QdrantStorageClient {
         let mut results = Vec::new();
         for point in search_result.result {
             if !point.payload.is_empty() {
-                if let Ok(entity) = Self::payload_to_entity(&point.payload) {
-                    results.push((entity, point.score));
+                if let Ok(payload) = Self::payload_to_minimal_entity(&point.payload) {
+                    results.push((payload.entity_id, payload.repository_id, point.score));
                 }
             }
         }
@@ -198,44 +230,76 @@ impl StorageClient for QdrantStorageClient {
         Ok(results)
     }
 
-    async fn get_entity(&self, entity_id: &str) -> Result<Option<CodeEntity>> {
-        // Search by entity_id in the payload, not by point ID
+    async fn get_entity(&self, _entity_id: &str) -> Result<Option<CodeEntity>> {
+        // Not implemented - entities should be fetched from Postgres
+        // Qdrant only stores minimal payload for search
+        Err(Error::storage(
+            "get_entity not supported for Qdrant storage - use Postgres client instead",
+        ))
+    }
+
+    /// Delete entities from Qdrant by entity_id
+    async fn delete_entities(&self, entity_ids: &[String]) -> Result<()> {
+        use qdrant_client::qdrant::{
+            condition::ConditionOneOf, points_selector::PointsSelectorOneOf, r#match::MatchValue,
+            Condition, DeletePointsBuilder, FieldCondition, Filter, Match, PointsIdsList,
+            ScrollPoints,
+        };
+
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Search for points by entity_id to get point_ids
+        // Use a single batched filter with OR conditions instead of N queries
         let filter = Filter {
-            must: vec![qdrant_client::qdrant::Condition {
-                condition_one_of: Some(qdrant_client::qdrant::condition::ConditionOneOf::Field(
-                    qdrant_client::qdrant::FieldCondition {
+            should: entity_ids
+                .iter()
+                .map(|entity_id| Condition {
+                    condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                         key: "entity_id".to_string(),
-                        r#match: Some(qdrant_client::qdrant::Match {
-                            match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(
-                                entity_id.to_string(),
-                            )),
+                        r#match: Some(Match {
+                            match_value: Some(MatchValue::Keyword(entity_id.clone())),
                         }),
                         ..Default::default()
-                    },
-                )),
-            }],
+                    })),
+                })
+                .collect(),
             ..Default::default()
         };
 
-        // Use scroll to find the entity
-        let scroll_response = self
+        let search_result = self
             .qdrant_client
-            .scroll(qdrant_client::qdrant::ScrollPoints {
+            .scroll(ScrollPoints {
                 collection_name: self.collection_name.clone(),
                 filter: Some(filter),
-                limit: Some(1),
-                with_payload: Some(true.into()),
+                limit: Some(entity_ids.len() as u32),
+                with_payload: Some(false.into()),
+                with_vectors: Some(false.into()),
                 ..Default::default()
             })
             .await
             .map_err(|e| Error::storage(e.to_string()))?;
 
-        if let Some(point) = scroll_response.result.first() {
-            if !point.payload.is_empty() {
-                return Ok(Some(Self::payload_to_entity(&point.payload)?));
-            }
+        let point_ids_to_delete: Vec<_> = search_result
+            .result
+            .into_iter()
+            .filter_map(|point| point.id)
+            .collect();
+
+        if !point_ids_to_delete.is_empty() {
+            self.qdrant_client
+                .delete_points(
+                    DeletePointsBuilder::new(self.collection_name.clone())
+                        .points(PointsSelectorOneOf::Points(PointsIdsList {
+                            ids: point_ids_to_delete,
+                        }))
+                        .build(),
+                )
+                .await
+                .map_err(|e| Error::storage(e.to_string()))?;
         }
 
-        Ok(None)
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::{Error, Result};
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
@@ -38,11 +38,11 @@ impl std::fmt::Display for TargetStore {
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct OutboxEntry {
     pub outbox_id: Uuid,
+    pub repository_id: Uuid,
     pub entity_id: String,
     pub operation: String,
     pub target_store: String,
     pub payload: serde_json::Value,
-    pub version_id: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub retry_count: i32,
@@ -58,102 +58,138 @@ impl PostgresClient {
         Self { pool }
     }
 
-    /// Store entity metadata and version (within existing transaction if provided)
+    /// Run database migrations
+    pub async fn run_migrations(&self) -> Result<()> {
+        sqlx::migrate!("../../migrations")
+            .run(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to run migrations: {e}")))?;
+        Ok(())
+    }
+
+    /// Ensure repository exists, return repository_id
+    pub async fn ensure_repository(
+        &self,
+        repository_path: &std::path::Path,
+        collection_name: &str,
+        repository_name: Option<&str>,
+    ) -> Result<Uuid> {
+        let repo_path_str = repository_path
+            .to_str()
+            .ok_or_else(|| Error::storage("Invalid repository path"))?;
+
+        // Try to find existing repository
+        let existing: Option<(Uuid,)> =
+            sqlx::query_as("SELECT repository_id FROM repositories WHERE collection_name = $1")
+                .bind(collection_name)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
+
+        if let Some((repository_id,)) = existing {
+            return Ok(repository_id);
+        }
+
+        // Create new repository
+        let repo_name = repository_name
+            .or_else(|| repository_path.file_name()?.to_str())
+            .unwrap_or("unknown");
+
+        let (repository_id,): (Uuid,) = sqlx::query_as(
+            "INSERT INTO repositories (repository_path, repository_name, collection_name, created_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())
+             RETURNING repository_id",
+        )
+        .bind(repo_path_str)
+        .bind(repo_name)
+        .bind(collection_name)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to insert repository: {e}")))?;
+
+        Ok(repository_id)
+    }
+
+    /// Get repository by collection name
+    pub async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
+        let record: Option<(Uuid,)> =
+            sqlx::query_as("SELECT repository_id FROM repositories WHERE collection_name = $1")
+                .bind(collection_name)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
+
+        Ok(record.map(|(id,)| id))
+    }
+
+    /// Store or update entity metadata (simplified - no version history)
     pub async fn store_entity_metadata(
         &self,
+        repository_id: Uuid,
         entity: &CodeEntity,
-        qdrant_point_id: Uuid,
         git_commit_hash: Option<String>,
-    ) -> Result<Uuid> {
-        tracing::debug!(
-            "Storing entity {} with point_id {} and git_commit {:?}",
-            entity.entity_id,
-            qdrant_point_id,
-            git_commit_hash
-        );
-
+        qdrant_point_id: Uuid,
+    ) -> Result<()> {
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
-        // Get next version number
-        let version_number: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM entity_versions WHERE entity_id = $1",
-        )
-        .bind(&entity.entity_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to get version number: {e}")))?;
+        // Serialize entity to JSONB
+        let entity_json = serde_json::to_value(entity)
+            .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
-        // Insert version
-        let version_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO entity_versions (
-                entity_id, version_number, git_commit_hash, file_path, qualified_name,
-                entity_type, language, entity_data, line_range
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int4range)
-            RETURNING version_id",
-        )
-        .bind(&entity.entity_id)
-        .bind(version_number)
-        .bind(&git_commit_hash)
-        .bind(
-            entity
-                .file_path
-                .to_str()
-                .ok_or_else(|| Error::storage("Invalid file path"))?,
-        )
-        .bind(&entity.qualified_name)
-        .bind(entity.entity_type.to_string())
-        .bind(format!("{:?}", entity.language))
-        .bind(
-            serde_json::to_value(entity)
-                .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?,
-        )
-        .bind(format!("[{},{})", entity.line_range.0, entity.line_range.1))
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to insert version: {e}")))?;
-
-        // Upsert metadata
+        // Upsert entity_metadata
         sqlx::query(
             "INSERT INTO entity_metadata (
-                entity_id, file_path, qualified_name, entity_type, language,
-                qdrant_point_id, current_version_id, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-            ON CONFLICT (entity_id) DO UPDATE SET
+                entity_id, repository_id, qualified_name, name, parent_scope,
+                entity_type, language, file_path, visibility,
+                entity_data, git_commit_hash, qdrant_point_id,
+                indexed_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+            ON CONFLICT (repository_id, entity_id)
+            DO UPDATE SET
+                qualified_name = EXCLUDED.qualified_name,
+                name = EXCLUDED.name,
+                parent_scope = EXCLUDED.parent_scope,
+                entity_type = EXCLUDED.entity_type,
+                language = EXCLUDED.language,
+                file_path = EXCLUDED.file_path,
+                visibility = EXCLUDED.visibility,
+                entity_data = EXCLUDED.entity_data,
+                git_commit_hash = EXCLUDED.git_commit_hash,
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
-                current_version_id = EXCLUDED.current_version_id,
-                updated_at = NOW()",
+                updated_at = NOW(),
+                deleted_at = NULL",
         )
         .bind(&entity.entity_id)
+        .bind(repository_id)
+        .bind(&entity.qualified_name)
+        .bind(&entity.name)
+        .bind(&entity.parent_scope)
+        .bind(format!("{:?}", entity.entity_type))
+        .bind(entity.language.to_string())
         .bind(
             entity
                 .file_path
                 .to_str()
                 .ok_or_else(|| Error::storage("Invalid file path"))?,
         )
-        .bind(&entity.qualified_name)
-        .bind(entity.entity_type.to_string())
-        .bind(format!("{:?}", entity.language))
+        .bind(format!("{:?}", entity.visibility))
+        .bind(entity_json)
+        .bind(git_commit_hash)
         .bind(qdrant_point_id)
-        .bind(version_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| Error::storage(format!("Failed to upsert metadata: {e}")))?;
+        .map_err(|e| Error::storage(format!("Failed to upsert entity metadata: {e}")))?;
 
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
-        tracing::debug!(
-            "Successfully stored entity {} with version_id {}",
-            entity.entity_id,
-            version_id
-        );
-
-        Ok(version_id)
+        Ok(())
     }
 
     /// Get all entity IDs for a file path
@@ -169,44 +205,165 @@ impl PostgresClient {
         Ok(entity_ids)
     }
 
-    /// Get entity version history
-    pub async fn get_entity_versions(&self, entity_id: &str) -> Result<Vec<EntityVersionRow>> {
-        let versions = sqlx::query_as::<_, EntityVersionRow>(
-            "SELECT version_id, entity_id, version_number, indexed_at, git_commit_hash,
-                    file_path, qualified_name, entity_type, language, entity_data,
-                    lower(line_range) as line_start, upper(line_range) as line_end
-             FROM entity_versions
-             WHERE entity_id = $1
-             ORDER BY version_number DESC",
+    /// Get file snapshot (list of entity IDs in file)
+    pub async fn get_file_snapshot(
+        &self,
+        repository_id: Uuid,
+        file_path: &str,
+    ) -> Result<Option<Vec<String>>> {
+        let record: Option<(Vec<String>,)> = sqlx::query_as(
+            "SELECT entity_ids FROM file_entity_snapshots
+             WHERE repository_id = $1 AND file_path = $2",
         )
-        .bind(entity_id)
-        .fetch_all(&self.pool)
+        .bind(repository_id)
+        .bind(file_path)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e| Error::storage(format!("Failed to get entity versions: {e}")))?;
+        .map_err(|e| Error::storage(format!("Failed to get file snapshot: {e}")))?;
 
-        Ok(versions)
+        Ok(record.map(|(ids,)| ids))
+    }
+
+    /// Update file snapshot with current entity IDs
+    pub async fn update_file_snapshot(
+        &self,
+        repository_id: Uuid,
+        file_path: &str,
+        entity_ids: Vec<String>,
+        git_commit_hash: Option<String>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO file_entity_snapshots (repository_id, file_path, entity_ids, git_commit_hash, indexed_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (repository_id, file_path)
+             DO UPDATE SET
+                entity_ids = EXCLUDED.entity_ids,
+                git_commit_hash = EXCLUDED.git_commit_hash,
+                indexed_at = NOW()",
+        )
+        .bind(repository_id)
+        .bind(file_path)
+        .bind(&entity_ids)
+        .bind(git_commit_hash)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to update file snapshot: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Batch fetch entities by (repository_id, entity_id) pairs
+    pub async fn get_entities_by_ids(
+        &self,
+        entity_refs: &[(Uuid, String)],
+    ) -> Result<Vec<CodeEntity>> {
+        if entity_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_refs.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_refs.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        // Build query using QueryBuilder for type safety
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT entity_data FROM entity_metadata WHERE deleted_at IS NULL AND (repository_id, entity_id) IN "
+        );
+
+        query_builder.push_tuples(entity_refs, |mut b, (repo_id, entity_id)| {
+            b.push_bind(repo_id).push_bind(entity_id);
+        });
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch entities: {e}")))?;
+
+        let mut entities = Vec::new();
+        for row in rows {
+            let entity_json: serde_json::Value = row
+                .try_get("entity_data")
+                .map_err(|e| Error::storage(format!("Failed to extract entity_data: {e}")))?;
+            let entity: CodeEntity = serde_json::from_value(entity_json)
+                .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
+            entities.push(entity);
+        }
+
+        Ok(entities)
+    }
+
+    /// Mark entities as deleted (soft delete)
+    pub async fn mark_entities_deleted(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_ids.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_ids.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        // Build query using QueryBuilder for type safety
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW() WHERE repository_id = "
+        );
+
+        query_builder.push_bind(repository_id);
+        query_builder.push(" AND entity_id IN (");
+
+        let mut separated = query_builder.separated(", ");
+        for entity_id in entity_ids {
+            separated.push_bind(entity_id);
+        }
+        separated.push_unseparated(")");
+
+        let result = query_builder
+            .build()
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
+
+        tracing::info!("Marked {} entities as deleted", result.rows_affected());
+
+        Ok(())
     }
 
     /// Write outbox entry for entity operation
     pub async fn write_outbox_entry(
         &self,
+        repository_id: Uuid,
         entity_id: &str,
         operation: OutboxOperation,
         target_store: TargetStore,
         payload: serde_json::Value,
-        version_id: Uuid,
     ) -> Result<Uuid> {
         let outbox_id: Uuid = sqlx::query_scalar(
             "INSERT INTO entity_outbox (
-                entity_id, operation, target_store, payload, version_id
-            ) VALUES ($1, $2, $3, $4, $5)
+                repository_id, entity_id, operation, target_store, payload, created_at
+            ) VALUES ($1, $2, $3, $4, $5, NOW())
             RETURNING outbox_id",
         )
+        .bind(repository_id)
         .bind(entity_id)
         .bind(operation.to_string())
         .bind(target_store.to_string())
         .bind(payload)
-        .bind(version_id)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to write outbox entry: {e}")))?;
@@ -221,7 +378,7 @@ impl PostgresClient {
         limit: i64,
     ) -> Result<Vec<OutboxEntry>> {
         let entries = sqlx::query_as::<_, OutboxEntry>(
-            "SELECT outbox_id, entity_id, operation, target_store, payload, version_id,
+            "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
                     created_at, processed_at, retry_count, last_error
              FROM entity_outbox
              WHERE target_store = $1 AND processed_at IS NULL
@@ -263,20 +420,4 @@ impl PostgresClient {
 
         Ok(())
     }
-}
-
-#[derive(sqlx::FromRow)]
-pub struct EntityVersionRow {
-    pub version_id: Uuid,
-    pub entity_id: String,
-    pub version_number: i32,
-    pub indexed_at: chrono::DateTime<chrono::Utc>,
-    pub git_commit_hash: Option<String>,
-    pub file_path: String,
-    pub qualified_name: String,
-    pub entity_type: String,
-    pub language: String,
-    pub entity_data: serde_json::Value,
-    pub line_start: i32,
-    pub line_end: i32,
 }

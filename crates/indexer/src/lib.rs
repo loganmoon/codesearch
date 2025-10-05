@@ -209,12 +209,14 @@ impl IndexStats {
 /// Create a new repository indexer
 pub fn create_indexer(
     repository_path: PathBuf,
+    repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
     postgres_client: std::sync::Arc<codesearch_storage::postgres::PostgresClient>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(
         repository_path,
+        repository_id,
         embedding_manager,
         postgres_client,
         git_repo,

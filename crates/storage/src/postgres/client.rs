@@ -144,11 +144,11 @@ impl PostgresClient {
         sqlx::query(
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
-                entity_type, language, file_path, line_range, visibility,
+                entity_type, language, file_path, visibility,
                 entity_data, git_commit_hash, qdrant_point_id,
                 indexed_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::int4range, $10, $11, $12, $13, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
             ON CONFLICT (repository_id, entity_id)
             DO UPDATE SET
                 qualified_name = EXCLUDED.qualified_name,
@@ -157,7 +157,6 @@ impl PostgresClient {
                 entity_type = EXCLUDED.entity_type,
                 language = EXCLUDED.language,
                 file_path = EXCLUDED.file_path,
-                line_range = EXCLUDED.line_range,
                 visibility = EXCLUDED.visibility,
                 entity_data = EXCLUDED.entity_data,
                 git_commit_hash = EXCLUDED.git_commit_hash,
@@ -178,10 +177,6 @@ impl PostgresClient {
                 .to_str()
                 .ok_or_else(|| Error::storage("Invalid file path"))?,
         )
-        .bind(format!(
-            "[{},{})",
-            entity.location.start_line, entity.location.end_line
-        ))
         .bind(format!("{:?}", entity.visibility))
         .bind(entity_json)
         .bind(git_commit_hash)

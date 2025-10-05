@@ -30,12 +30,11 @@ CREATE TABLE entity_metadata (
     entity_type VARCHAR(32) NOT NULL,
     language VARCHAR(32) NOT NULL,
     file_path TEXT NOT NULL,
-    line_range INT4RANGE NOT NULL,
     visibility VARCHAR(32) NOT NULL,
-    entity_data JSONB NOT NULL,
+    entity_data JSONB NOT NULL,  -- Contains full SourceLocation with line/column info
     git_commit_hash VARCHAR(40),
     qdrant_point_id UUID,
-    neo4j_node_id BIGINT,
+    neo4j_node_id BIGINT,  -- Reserved for future graph database integration
     indexed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,

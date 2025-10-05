@@ -466,6 +466,379 @@ impl Config {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn create_temp_config_file(content: &str) -> Result<NamedTempFile> {
+        let mut file = tempfile::Builder::new()
+            .suffix(".toml")
+            .tempfile()
+            .map_err(|e| Error::config(format!("Failed to create temp file: {e}")))?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| Error::config(format!("Failed to write temp file: {e}")))?;
+        file.flush()
+            .map_err(|e| Error::config(format!("Failed to flush temp file: {e}")))?;
+        Ok(file)
+    }
+
+    fn with_env_var<F, T>(key: &str, value: &str, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        std::env::set_var(key, value);
+        let result = f();
+        std::env::remove_var(key);
+        result
+    }
+
+    #[test]
+    fn test_from_toml_str_valid() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "localapi"
+            model = "nomic-embed-text-v1.5"
+            device = "cpu"
+            embedding_dimension = 768
+
+            [watcher]
+
+            [storage]
+            collection_name = "test_collection"
+            qdrant_host = "localhost"
+            qdrant_port = 6334
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse valid TOML");
+        assert_eq!(config.embeddings.provider, "localapi");
+        assert_eq!(config.embeddings.embedding_dimension, 768);
+        assert_eq!(config.storage.collection_name, "test_collection");
+    }
+
+    #[test]
+    fn test_from_toml_str_minimal() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+            collection_name = "minimal_test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse minimal TOML");
+        // Check defaults are applied
+        assert_eq!(config.embeddings.provider, "localapi");
+        assert_eq!(config.embeddings.device, "cpu");
+        assert_eq!(config.storage.collection_name, "minimal_test");
+    }
+
+    #[test]
+    fn test_from_toml_str_invalid_syntax() {
+        let toml = r#"
+            [embeddings
+            provider = "localapi"
+        "#;
+
+        let result = Config::from_toml_str(toml);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to parse TOML"));
+    }
+
+    #[test]
+    fn test_validate_valid_config() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "localapi"
+            device = "cpu"
+            embedding_dimension = 1536
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_invalid_provider() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "invalid_provider"
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid provider"));
+    }
+
+    #[test]
+    fn test_validate_invalid_device() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "localapi"
+            device = "gpu"
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid device"));
+    }
+
+    #[test]
+    fn test_validate_zero_embedding_dimension() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "localapi"
+            device = "cpu"
+            embedding_dimension = 0
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("embedding_dimension must be greater than 0"));
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip() -> Result<()> {
+        let original_toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "mock"
+            model = "test-model"
+            device = "cpu"
+            embedding_dimension = 384
+
+            [watcher]
+
+            [storage]
+            collection_name = "roundtrip_test"
+            qdrant_host = "testhost"
+            qdrant_port = 7777
+        "#;
+
+        let config = Config::from_toml_str(original_toml)?;
+
+        // Save to temp file
+        let temp_file = NamedTempFile::new()
+            .map_err(|e| Error::config(format!("Failed to create temp file: {e}")))?;
+        config.save(temp_file.path())?;
+
+        // Load from temp file
+        let loaded_content = std::fs::read_to_string(temp_file.path())
+            .map_err(|e| Error::config(format!("Failed to read temp file: {e}")))?;
+        let loaded_config = Config::from_toml_str(&loaded_content)?;
+
+        // Verify roundtrip
+        assert_eq!(
+            config.embeddings.provider,
+            loaded_config.embeddings.provider
+        );
+        assert_eq!(config.embeddings.model, loaded_config.embeddings.model);
+        assert_eq!(
+            config.embeddings.embedding_dimension,
+            loaded_config.embeddings.embedding_dimension
+        );
+        assert_eq!(
+            config.storage.collection_name,
+            loaded_config.storage.collection_name
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_file_loads_successfully() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "mock"
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
+
+        let config = Config::from_file(temp_file.path()).expect("Failed to load config from file");
+        assert_eq!(config.embeddings.provider, "mock");
+        assert_eq!(config.storage.collection_name, "test");
+    }
+
+    #[test]
+    fn test_from_file_backward_compat_qdrant() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
+
+        with_env_var("QDRANT_HOST", "remote.example.com", || {
+            with_env_var("QDRANT_PORT", "7334", || {
+                let config =
+                    Config::from_file(temp_file.path()).expect("Failed to load config from file");
+                assert_eq!(config.storage.qdrant_host, "remote.example.com");
+                assert_eq!(config.storage.qdrant_port, 7334);
+            });
+        });
+    }
+
+    #[test]
+    fn test_from_file_backward_compat_postgres() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+            collection_name = "test"
+        "#;
+
+        let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
+
+        with_env_var("POSTGRES_HOST", "db.example.com", || {
+            with_env_var("POSTGRES_DATABASE", "testdb", || {
+                let config =
+                    Config::from_file(temp_file.path()).expect("Failed to load config from file");
+                assert_eq!(config.storage.postgres_host, "db.example.com");
+                assert_eq!(config.storage.postgres_database, "testdb");
+            });
+        });
+    }
+
+    #[test]
+    fn test_save_creates_valid_toml() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+            provider = "mock"
+            model = "test-model"
+
+            [watcher]
+
+            [storage]
+            collection_name = "save_test"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+
+        // Save to temp file
+        let temp_file = NamedTempFile::new()
+            .map_err(|e| Error::config(format!("Failed to create temp file: {e}")))
+            .expect("Failed to create temp file");
+        config
+            .save(temp_file.path())
+            .expect("Failed to save config");
+
+        // Verify file was created and is valid TOML
+        assert!(temp_file.path().exists());
+        let saved_content =
+            std::fs::read_to_string(temp_file.path()).expect("Failed to read saved config");
+        assert!(saved_content.contains("[embeddings]"));
+        assert!(saved_content.contains("[storage]"));
+    }
+
+    #[test]
+    fn test_generate_collection_name() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let collection_name = StorageConfig::generate_collection_name(temp_dir.path());
+
+        // Verify format: name_hash
+        assert!(collection_name.contains('_'));
+
+        // Verify length is reasonable (50 + 1 + 32 = 83 max)
+        assert!(collection_name.len() <= 83);
+
+        // Verify only contains valid characters
+        assert!(collection_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn test_generate_collection_name_special_chars() {
+        let temp_base = tempfile::tempdir().expect("Failed to create temp dir");
+        let special_path = temp_base.path().join("my repo (v2.0)!");
+
+        // Create the directory
+        std::fs::create_dir(&special_path).expect("Failed to create dir");
+
+        let collection_name = StorageConfig::generate_collection_name(&special_path);
+
+        // Special characters should be replaced with underscores
+        assert!(!collection_name.contains('('));
+        assert!(!collection_name.contains(')'));
+        assert!(!collection_name.contains('!'));
+        assert!(!collection_name.contains(' '));
+    }
+
+    #[test]
+    fn test_generate_collection_name_deterministic() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let name1 = StorageConfig::generate_collection_name(temp_dir.path());
+        let name2 = StorageConfig::generate_collection_name(temp_dir.path());
+
+        // Same path should generate same name
+        assert_eq!(name1, name2);
+    }
+}
+
 /// Builder for Config with fluent API
 #[derive(Debug, Clone)]
 pub struct CodesearchConfigBuilder {

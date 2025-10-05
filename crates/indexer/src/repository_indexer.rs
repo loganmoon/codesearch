@@ -462,7 +462,10 @@ impl crate::Indexer for RepositoryIndexer {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback (batch size of 1)
                     for file_path in chunk {
-                        match self.process_batch(std::slice::from_ref(file_path), &pb).await {
+                        match self
+                            .process_batch(std::slice::from_ref(file_path), &pb)
+                            .await
+                        {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);

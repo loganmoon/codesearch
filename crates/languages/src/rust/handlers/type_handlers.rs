@@ -238,8 +238,12 @@ fn build_entity_data(
         format!("{parent_scope}::{name}")
     };
 
-    // Generate entity_id from repository + qualified name
-    let entity_id = generate_entity_id(ctx.repository_id, &qualified_name);
+    // Generate entity_id from repository + file_path + qualified name
+    let file_path_str = ctx
+        .file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
 
     CodeEntityBuilder::default()
         .entity_id(entity_id)

@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::{Error, Result};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
@@ -203,6 +204,25 @@ impl PostgresClient {
         .map_err(|e| Error::storage(format!("Failed to get entities for file: {e}")))?;
 
         Ok(entity_ids)
+    }
+
+    /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
+    pub async fn get_entity_metadata(
+        &self,
+        repository_id: Uuid,
+        entity_id: &str,
+    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
+        let record: Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+            "SELECT qdrant_point_id, deleted_at FROM entity_metadata
+             WHERE repository_id = $1 AND entity_id = $2",
+        )
+        .bind(repository_id)
+        .bind(entity_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get entity metadata: {e}")))?;
+
+        Ok(record)
     }
 
     /// Get file snapshot (list of entity IDs in file)
@@ -419,5 +439,109 @@ impl PostgresClient {
         .map_err(|e| Error::storage(format!("Failed to record outbox failure: {e}")))?;
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl super::PostgresClientTrait for PostgresClient {
+    async fn run_migrations(&self) -> Result<()> {
+        self.run_migrations().await
+    }
+
+    async fn ensure_repository(
+        &self,
+        repository_path: &std::path::Path,
+        collection_name: &str,
+        repository_name: Option<&str>,
+    ) -> Result<Uuid> {
+        self.ensure_repository(repository_path, collection_name, repository_name)
+            .await
+    }
+
+    async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
+        self.get_repository_id(collection_name).await
+    }
+
+    async fn store_entity_metadata(
+        &self,
+        repository_id: Uuid,
+        entity: &CodeEntity,
+        git_commit_hash: Option<String>,
+        qdrant_point_id: Uuid,
+    ) -> Result<()> {
+        self.store_entity_metadata(repository_id, entity, git_commit_hash, qdrant_point_id)
+            .await
+    }
+
+    async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>> {
+        self.get_entities_for_file(file_path).await
+    }
+
+    async fn get_entity_metadata(
+        &self,
+        repository_id: Uuid,
+        entity_id: &str,
+    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
+        self.get_entity_metadata(repository_id, entity_id).await
+    }
+
+    async fn get_file_snapshot(
+        &self,
+        repository_id: Uuid,
+        file_path: &str,
+    ) -> Result<Option<Vec<String>>> {
+        self.get_file_snapshot(repository_id, file_path).await
+    }
+
+    async fn update_file_snapshot(
+        &self,
+        repository_id: Uuid,
+        file_path: &str,
+        entity_ids: Vec<String>,
+        git_commit_hash: Option<String>,
+    ) -> Result<()> {
+        self.update_file_snapshot(repository_id, file_path, entity_ids, git_commit_hash)
+            .await
+    }
+
+    async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
+        self.get_entities_by_ids(entity_refs).await
+    }
+
+    async fn mark_entities_deleted(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        self.mark_entities_deleted(repository_id, entity_ids).await
+    }
+
+    async fn write_outbox_entry(
+        &self,
+        repository_id: Uuid,
+        entity_id: &str,
+        operation: OutboxOperation,
+        target_store: TargetStore,
+        payload: serde_json::Value,
+    ) -> Result<Uuid> {
+        self.write_outbox_entry(repository_id, entity_id, operation, target_store, payload)
+            .await
+    }
+
+    async fn get_unprocessed_outbox_entries(
+        &self,
+        target_store: TargetStore,
+        limit: i64,
+    ) -> Result<Vec<OutboxEntry>> {
+        self.get_unprocessed_outbox_entries(target_store, limit)
+            .await
+    }
+
+    async fn mark_outbox_processed(&self, outbox_id: Uuid) -> Result<()> {
+        self.mark_outbox_processed(outbox_id).await
+    }
+
+    async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()> {
+        self.record_outbox_failure(outbox_id, error).await
     }
 }

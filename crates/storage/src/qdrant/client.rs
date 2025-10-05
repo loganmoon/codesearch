@@ -164,7 +164,7 @@ impl StorageClient for QdrantStorageClient {
         let points: Vec<_> = embedded_entities
             .into_iter()
             .map(|embedded| {
-                let point_id = Uuid::new_v4();
+                let point_id = embedded.qdrant_point_id;
                 let entity_id = embedded.entity.entity_id.clone();
                 let point = PointStruct::new(
                     PointId::from(point_id.to_string()),

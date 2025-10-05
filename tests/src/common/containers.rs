@@ -691,6 +691,68 @@ impl TestOutboxProcessor {
     }
 }
 
+/// Wait for the outbox table to be empty (all entries processed)
+///
+/// Polls the outbox table every 100ms until all unprocessed entries are gone
+/// or the timeout is reached.
+pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -> Result<()> {
+    use sqlx::PgPool;
+
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/codesearch",
+        postgres.port()
+    );
+
+    let pool = PgPool::connect(&connection_url)
+        .await
+        .context("Failed to connect to Postgres for outbox polling")?;
+
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(100);
+
+    loop {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+                .fetch_one(&pool)
+                .await
+                .context("Failed to query outbox table")?;
+
+        if count == 0 {
+            pool.close().await;
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            pool.close().await;
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for outbox to be empty. {count} unprocessed entries remain after {timeout:?}"
+            ));
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+/// Start an outbox processor and wait for it to sync all pending entries
+///
+/// This is a convenience function that starts the processor and waits for
+/// the outbox table to be empty with a configurable timeout (default 10 seconds).
+pub async fn start_and_wait_for_outbox_sync(
+    postgres: &TestPostgres,
+    qdrant: &TestQdrant,
+    collection_name: &str,
+) -> Result<TestOutboxProcessor> {
+    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
+
+    // Give the processor a moment to start up
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Wait for outbox to be empty (10 second timeout)
+    wait_for_outbox_empty(postgres, Duration::from_secs(10)).await?;
+
+    Ok(processor)
+}
+
 impl Drop for TestOutboxProcessor {
     fn drop(&mut self) {
         self.cleanup();

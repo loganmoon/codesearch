@@ -15,7 +15,7 @@ use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::entities::EntityType;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
-use indexer::RepositoryIndexer;
+use indexer::{Indexer, RepositoryIndexer};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

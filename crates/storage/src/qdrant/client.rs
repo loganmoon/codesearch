@@ -245,11 +245,11 @@ impl StorageClient for QdrantStorageClient {
         }
 
         // Search for points by entity_id to get point_ids
-        let mut point_ids_to_delete = Vec::new();
-
-        for entity_id in entity_ids {
-            let filter = Filter {
-                must: vec![Condition {
+        // Use a single batched filter with OR conditions instead of N queries
+        let filter = Filter {
+            should: entity_ids
+                .iter()
+                .map(|entity_id| Condition {
                     condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                         key: "entity_id".to_string(),
                         r#match: Some(Match {
@@ -257,29 +257,29 @@ impl StorageClient for QdrantStorageClient {
                         }),
                         ..Default::default()
                     })),
-                }],
-                ..Default::default()
-            };
-
-            let search_result = self
-                .qdrant_client
-                .scroll(ScrollPoints {
-                    collection_name: self.collection_name.clone(),
-                    filter: Some(filter),
-                    limit: Some(10),
-                    with_payload: Some(false.into()),
-                    with_vectors: Some(false.into()),
-                    ..Default::default()
                 })
-                .await
-                .map_err(|e| Error::storage(e.to_string()))?;
+                .collect(),
+            ..Default::default()
+        };
 
-            for point in search_result.result {
-                if let Some(id) = point.id {
-                    point_ids_to_delete.push(id);
-                }
-            }
-        }
+        let search_result = self
+            .qdrant_client
+            .scroll(ScrollPoints {
+                collection_name: self.collection_name.clone(),
+                filter: Some(filter),
+                limit: Some(entity_ids.len() as u32),
+                with_payload: Some(false.into()),
+                with_vectors: Some(false.into()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| Error::storage(e.to_string()))?;
+
+        let point_ids_to_delete: Vec<_> = search_result
+            .result
+            .into_iter()
+            .filter_map(|point| point.id)
+            .collect();
 
         if !point_ids_to_delete.is_empty() {
             self.qdrant_client

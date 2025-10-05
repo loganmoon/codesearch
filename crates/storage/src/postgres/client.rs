@@ -263,6 +263,16 @@ impl PostgresClient {
             return Ok(Vec::new());
         }
 
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_refs.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_refs.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
         // Build VALUES clause for batch query
         let mut query = String::from(
             "SELECT entity_data FROM entity_metadata WHERE (repository_id, entity_id) IN (",
@@ -308,6 +318,16 @@ impl PostgresClient {
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
+        }
+
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_ids.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_ids.len(),
+                MAX_BATCH_SIZE
+            )));
         }
 
         // Build IN clause for batch update

@@ -26,6 +26,9 @@ async fn main() -> Result<()> {
     );
     let postgres_client = create_postgres_client(&config.storage).await?;
 
+    info!("Running database migrations");
+    postgres_client.run_migrations().await?;
+
     info!(
         "Connecting to Qdrant at {}:{} (collection: {})",
         config.storage.qdrant_host, config.storage.qdrant_port, config.storage.collection_name

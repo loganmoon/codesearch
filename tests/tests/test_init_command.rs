@@ -80,8 +80,6 @@ enabled = ["rust"]
     let workspace_manifest = Path::new(&manifest_path)
         .parent()
         .unwrap()
-        .parent()
-        .unwrap()
         .join("Cargo.toml");
 
     let output = Command::new("cargo")
@@ -182,8 +180,6 @@ enabled = ["rust"]
     // Run init command first time using cargo run with manifest path
     let manifest_path = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     let workspace_manifest = Path::new(&manifest_path)
-        .parent()
-        .unwrap()
         .parent()
         .unwrap()
         .join("Cargo.toml");

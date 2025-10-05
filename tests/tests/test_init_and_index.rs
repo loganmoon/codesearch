@@ -32,8 +32,6 @@ fn workspace_manifest() -> std::path::PathBuf {
     Path::new(&manifest_dir)
         .parent()
         .unwrap()
-        .parent()
-        .unwrap()
         .join("Cargo.toml")
 }
 

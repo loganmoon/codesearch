@@ -23,7 +23,9 @@ use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolResult, Content, ErrorCode, ErrorData as McpError, InitializeRequestParam,
-        InitializeResult, ProtocolVersion, ServerCapabilities,
+        InitializeResult, ListResourcesResult, PaginatedRequestParam, ProtocolVersion,
+        ReadResourceRequestParam, ReadResourceResult, ResourceContents, ResourcesCapability,
+        ServerCapabilities,
     },
     schemars::JsonSchema,
     service::RequestContext,
@@ -326,6 +328,10 @@ impl ServerHandler for CodeSearchMcpServer {
                 tools: Some(rmcp::model::ToolsCapability {
                     list_changed: None,
                 }),
+                resources: Some(ResourcesCapability {
+                    subscribe: None,
+                    list_changed: None,
+                }),
                 ..Default::default()
             },
             server_info: rmcp::model::Implementation {
@@ -337,6 +343,72 @@ impl ServerHandler for CodeSearchMcpServer {
             },
             ..Default::default()
         })
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        Ok(ListResourcesResult {
+            resources: vec![rmcp::model::Annotated::new(
+                rmcp::model::RawResource {
+                    uri: "codesearch://repo/info".to_string(),
+                    name: "Repository Information".to_string(),
+                    title: None,
+                    description: Some(
+                        "Current repository metadata and configuration".to_string(),
+                    ),
+                    mime_type: Some("application/json".to_string()),
+                    size: None,
+                    icons: None,
+                },
+                None,
+            )],
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, McpError> {
+        let contents = match request.uri.as_str() {
+            "codesearch://repo/info" => {
+                let info = serde_json::json!({
+                    "repository_root": self.repository_root.display().to_string(),
+                    "collection_name": self.collection_name,
+                    "repository_id": self.repository_id.to_string(),
+                    "languages_supported": ["rust", "python", "javascript", "typescript", "go"],
+                });
+
+                let text = serde_json::to_string_pretty(&info).map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to serialize resource: {e}"),
+                        None,
+                    )
+                })?;
+
+                vec![ResourceContents::TextResourceContents {
+                    uri: request.uri.clone(),
+                    mime_type: Some("application/json".to_string()),
+                    text,
+                    meta: None,
+                }]
+            }
+
+            _ => {
+                return Err(McpError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("Unknown resource URI: {}", request.uri),
+                    None,
+                ))
+            }
+        };
+
+        Ok(ReadResourceResult { contents })
     }
 }
 

@@ -163,9 +163,11 @@ fn default_limit() -> Option<usize> {
 
 #[tool_router]
 impl CodeSearchMcpServer {
-    #[tool(description = "Search for code entities semantically using natural language queries. \
+    #[tool(
+        description = "Search for code entities semantically using natural language queries. \
                           Returns similar functions, classes, and other code constructs with full \
-                          details including content, documentation, and signature.")]
+                          details including content, documentation, and signature."
+    )]
     async fn search_code(
         &self,
         Parameters(request): Parameters<SearchCodeRequest>,
@@ -186,17 +188,13 @@ impl CodeSearchMcpServer {
                 )
             })?;
 
-        let query_embedding = embeddings
-            .into_iter()
-            .next()
-            .flatten()
-            .ok_or_else(|| {
-                McpError::new(
-                    ErrorCode::INTERNAL_ERROR,
-                    "Failed to generate embedding".to_string(),
-                    None,
-                )
-            })?;
+        let query_embedding = embeddings.into_iter().next().flatten().ok_or_else(|| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                "Failed to generate embedding".to_string(),
+                None,
+            )
+        })?;
 
         // Parse entity type filter
         let entity_type = request
@@ -217,7 +215,11 @@ impl CodeSearchMcpServer {
             .search_similar(query_embedding, limit, Some(filters))
             .await
             .map_err(|e| {
-                McpError::new(ErrorCode::INTERNAL_ERROR, format!("Search failed: {e}"), None)
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Search failed: {e}"),
+                    None,
+                )
             })?;
 
         // Batch fetch from Postgres
@@ -317,9 +319,7 @@ impl ServerHandler for CodeSearchMcpServer {
         Ok(InitializeResult {
             protocol_version: ProtocolVersion::default(),
             capabilities: ServerCapabilities {
-                tools: Some(rmcp::model::ToolsCapability {
-                    list_changed: None,
-                }),
+                tools: Some(rmcp::model::ToolsCapability { list_changed: None }),
                 resources: Some(ResourcesCapability {
                     subscribe: None,
                     list_changed: None,
@@ -348,9 +348,7 @@ impl ServerHandler for CodeSearchMcpServer {
                     uri: "codesearch://repo/info".to_string(),
                     name: "Repository Information".to_string(),
                     title: None,
-                    description: Some(
-                        "Current repository metadata and configuration".to_string(),
-                    ),
+                    description: Some("Current repository metadata and configuration".to_string()),
                     mime_type: Some("application/json".to_string()),
                     size: None,
                     icons: None,

@@ -34,14 +34,13 @@ tracing-subscriber = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
-schemars = "0.8"
 toml = { workspace = true }
 
 # Progress indicators
 indicatif = { workspace = true }
 
 # MCP protocol support
-rmcp = { version = "0.6", features = ["server"] }
+rmcp = { version = "0.8", features = ["server"] }
 
 # File system utilities
 glob = { workspace = true }

@@ -17,13 +17,19 @@ use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::postgres::PostgresClient;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
 use indexer::{Indexer, RepositoryIndexer};
+use rmcp::schemars;
 use rmcp::serde_json;
 use rmcp::{
-    handler::server::router::tool::ToolRouter,
-    model::{InitializeRequestParam, InitializeResult, ProtocolVersion, ServerCapabilities},
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{
+        CallToolResult, Content, ErrorCode, ErrorData as McpError, InitializeRequestParam,
+        InitializeResult, ProtocolVersion, ServerCapabilities,
+    },
+    schemars::JsonSchema,
     service::RequestContext,
-    RoleServer, ServerHandler, ServiceExt,
+    tool, tool_handler, tool_router, RoleServer, ServerHandler, ServiceExt,
 };
+use serde::Deserialize;
 use sqlx::types::uuid;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -137,7 +143,156 @@ struct CodeSearchMcpServer {
     tool_router: ToolRouter<Self>,
 }
 
+/// Request parameters for search_code tool
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SearchCodeRequest {
+    /// Semantic search query describing the code you're looking for
+    query: String,
+
+    /// Maximum number of results (1-100)
+    #[serde(default = "default_limit")]
+    limit: Option<usize>,
+
+    /// Filter by entity type (e.g., function, method, class, struct)
+    entity_type: Option<String>,
+
+    /// Filter by programming language (e.g., rust, python, javascript)
+    language: Option<String>,
+
+    /// Filter by file path pattern
+    file_path: Option<String>,
+}
+
+fn default_limit() -> Option<usize> {
+    Some(10)
+}
+
+#[tool_router]
 impl CodeSearchMcpServer {
+    #[tool(description = "Search for code entities semantically using natural language queries. \
+                          Returns similar functions, classes, and other code constructs with full \
+                          details including content, documentation, and signature.")]
+    async fn search_code(
+        &self,
+        Parameters(request): Parameters<SearchCodeRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Validate limit
+        let limit = request.limit.unwrap_or(10).clamp(1, 100);
+
+        // Generate query embedding
+        let embeddings = self
+            .embedding_manager
+            .embed(vec![request.query.clone()])
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to generate embedding: {e}"),
+                    None,
+                )
+            })?;
+
+        let query_embedding = embeddings
+            .into_iter()
+            .next()
+            .flatten()
+            .ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "Failed to generate embedding".to_string(),
+                    None,
+                )
+            })?;
+
+        // Parse entity type filter
+        let entity_type = request
+            .entity_type
+            .as_ref()
+            .and_then(|s| EntityType::try_from(s.as_str()).ok());
+
+        // Build filters
+        let filters = SearchFilters {
+            entity_type,
+            language: request.language.clone(),
+            file_path: request.file_path.as_ref().map(PathBuf::from),
+        };
+
+        // Search Qdrant
+        let results = self
+            .storage_client
+            .search_similar(query_embedding, limit, Some(filters))
+            .await
+            .map_err(|e| {
+                McpError::new(ErrorCode::INTERNAL_ERROR, format!("Search failed: {e}"), None)
+            })?;
+
+        // Batch fetch from Postgres
+        let entity_refs: Vec<_> = results
+            .iter()
+            .map(|(eid, _rid, _)| (self.repository_id, eid.to_string()))
+            .collect();
+
+        let entities_vec = self
+            .postgres_client
+            .get_entities_by_ids(&entity_refs)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to fetch entities: {e}"),
+                    None,
+                )
+            })?;
+
+        // Convert to HashMap for efficient lookup
+        let entities_map: std::collections::HashMap<String, _> = entities_vec
+            .into_iter()
+            .map(|e| (e.entity_id.clone(), e))
+            .collect();
+
+        // Format results with full entity details
+        let formatted_results: Vec<_> = results
+            .into_iter()
+            .filter_map(|(entity_id, _repo_id, score)| {
+                entities_map.get(&entity_id).map(|entity| {
+                    serde_json::json!({
+                        "entity_id": entity_id,
+                        "similarity_percent": (score * 100.0).round() as i32,
+                        "name": entity.name,
+                        "qualified_name": entity.qualified_name,
+                        "entity_type": format!("{:?}", entity.entity_type),
+                        "language": format!("{:?}", entity.language),
+                        "file_path": entity.file_path.display().to_string(),
+                        "line_range": {
+                            "start": entity.location.start_line,
+                            "end": entity.location.end_line,
+                        },
+                        "content": entity.content,
+                        "documentation_summary": entity.documentation_summary,
+                        "signature": entity.signature.as_ref().map(|s| format!("{s:?}")),
+                        "visibility": format!("{:?}", entity.visibility),
+                    })
+                })
+            })
+            .collect();
+
+        let response = serde_json::json!({
+            "results": formatted_results,
+            "total": formatted_results.len(),
+            "query": request.query,
+        });
+
+        let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                format!("Failed to serialize response: {e}"),
+                None,
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![Content::text(response_str)]))
+    }
+
     fn new(
         repository_id: uuid::Uuid,
         repository_root: PathBuf,
@@ -153,11 +308,12 @@ impl CodeSearchMcpServer {
             embedding_manager,
             storage_client,
             postgres_client,
-            tool_router: ToolRouter::default(),
+            tool_router: Self::tool_router(),
         }
     }
 }
 
+#[tool_handler]
 impl ServerHandler for CodeSearchMcpServer {
     async fn initialize(
         &self,
@@ -166,7 +322,12 @@ impl ServerHandler for CodeSearchMcpServer {
     ) -> Result<InitializeResult, rmcp::model::ErrorData> {
         Ok(InitializeResult {
             protocol_version: ProtocolVersion::default(),
-            capabilities: ServerCapabilities::default(),
+            capabilities: ServerCapabilities {
+                tools: Some(rmcp::model::ToolsCapability {
+                    list_changed: None,
+                }),
+                ..Default::default()
+            },
             server_info: rmcp::model::Implementation {
                 name: "codesearch".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),

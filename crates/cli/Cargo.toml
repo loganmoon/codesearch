@@ -34,6 +34,7 @@ tracing-subscriber = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
+schemars = "0.8"
 toml = { workspace = true }
 
 # Progress indicators

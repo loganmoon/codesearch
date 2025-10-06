@@ -14,9 +14,16 @@ use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::entities::EntityType;
 use codesearch_embeddings::EmbeddingManager;
+use codesearch_storage::postgres::PostgresClient;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
 use indexer::{Indexer, RepositoryIndexer};
 use rmcp::serde_json;
+use rmcp::{
+    handler::server::router::tool::ToolRouter,
+    model::{InitializeRequestParam, InitializeResult, ProtocolVersion, ServerCapabilities},
+    service::RequestContext,
+    RoleServer, ServerHandler, ServiceExt,
+};
 use sqlx::types::uuid;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -115,6 +122,61 @@ enum DepsCommands {
     },
     /// Check status of dependencies
     Status,
+}
+
+/// MCP server for codesearch semantic code search
+#[derive(Clone)]
+#[allow(dead_code)]
+struct CodeSearchMcpServer {
+    repository_id: uuid::Uuid,
+    repository_root: PathBuf,
+    collection_name: String,
+    embedding_manager: Arc<EmbeddingManager>,
+    storage_client: Arc<dyn codesearch_storage::StorageClient>,
+    postgres_client: Arc<PostgresClient>,
+    tool_router: ToolRouter<Self>,
+}
+
+impl CodeSearchMcpServer {
+    fn new(
+        repository_id: uuid::Uuid,
+        repository_root: PathBuf,
+        collection_name: String,
+        embedding_manager: Arc<EmbeddingManager>,
+        storage_client: Arc<dyn codesearch_storage::StorageClient>,
+        postgres_client: Arc<PostgresClient>,
+    ) -> Self {
+        Self {
+            repository_id,
+            repository_root,
+            collection_name,
+            embedding_manager,
+            storage_client,
+            postgres_client,
+            tool_router: ToolRouter::default(),
+        }
+    }
+}
+
+impl ServerHandler for CodeSearchMcpServer {
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, rmcp::model::ErrorData> {
+        Ok(InitializeResult {
+            protocol_version: ProtocolVersion::default(),
+            capabilities: ServerCapabilities::default(),
+            server_info: rmcp::model::Implementation {
+                name: "codesearch".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                title: None,
+                website_url: None,
+                icons: None,
+            },
+            ..Default::default()
+        })
+    }
 }
 
 #[tokio::main]
@@ -629,7 +691,7 @@ fn should_index_file(file_path: &Path) -> bool {
 async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     info!("Checking dependencies...");
 
-    // Ensure dependencies are running
+    // Step 1: Ensure dependencies are running
     let api_base_url = if parse_provider_type(&config.embeddings.provider)
         == codesearch_embeddings::EmbeddingProviderType::LocalApi
     {
@@ -639,12 +701,115 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     };
     docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
 
+    // Step 2: Verify collection exists
+    let collection_manager = create_collection_manager(&config.storage)
+        .await
+        .context("Failed to create collection manager")?;
+
+    if !collection_manager
+        .collection_exists(&config.storage.collection_name)
+        .await
+        .context("Failed to check if collection exists")?
+    {
+        return Err(anyhow!(
+            "Collection '{}' does not exist. Please run 'codesearch init' first.",
+            config.storage.collection_name
+        ));
+    }
+
+    // Step 3: Create storage client
+    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+        .await
+        .context("Failed to create storage client")?;
+
+    // Step 4: Create embedding manager
+    let mut embedding_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
+        .provider(parse_provider_type(&config.embeddings.provider))
+        .model(config.embeddings.model.clone())
+        .batch_size(config.embeddings.batch_size)
+        .embedding_dimension(config.embeddings.embedding_dimension)
+        .device(match config.embeddings.device.as_str() {
+            "cuda" => codesearch_embeddings::DeviceType::Cuda,
+            _ => codesearch_embeddings::DeviceType::Cpu,
+        });
+
+    if let Some(ref api_base_url) = config.embeddings.api_base_url {
+        embedding_config_builder = embedding_config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = config
+        .embeddings
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        embedding_config_builder = embedding_config_builder.api_key(key);
+    }
+
+    let embedding_config = embedding_config_builder.build();
+    let embedding_manager = Arc::new(
+        EmbeddingManager::from_config(embedding_config)
+            .await
+            .context("Failed to create embedding manager")?,
+    );
+
+    // Step 5: Create postgres client
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to connect to Postgres")?;
+
+    // Step 6: Get repository metadata
+    let repo_root = find_repository_root()?;
+    let repository_id = postgres_client
+        .get_repository_id(&config.storage.collection_name)
+        .await
+        .context("Failed to query repository")?
+        .ok_or_else(|| {
+            anyhow!(
+                "Repository not found for collection '{}'. Run 'codesearch init' first.",
+                config.storage.collection_name
+            )
+        })?;
+
+    info!("Repository ID: {repository_id}");
+
+    // Step 7: Run catch-up indexing
+    info!("Checking for offline changes...");
+    let git_repo = codesearch_watcher::GitRepository::open(&repo_root)
+        .context("Failed to open git repository")?;
+
+    catch_up_index(
+        &repo_root,
+        repository_id,
+        &postgres_client,
+        &embedding_manager,
+        &git_repo,
+    )
+    .await
+    .context("Catch-up indexing failed")?;
+
+    // Step 8: Create MCP server
+    let mcp_server = CodeSearchMcpServer::new(
+        repository_id,
+        repo_root.clone(),
+        config.storage.collection_name.clone(),
+        embedding_manager.clone(),
+        storage_client,
+        postgres_client,
+    );
+
+    // Step 9: Start MCP server on stdio
     println!("🚀 Starting MCP server on stdio...");
+    let transport = (tokio::io::stdin(), tokio::io::stdout());
+    let server = mcp_server.serve(transport).await?;
 
-    // TODO: Initialize storage connection
-    // TODO: Start MCP server on stdio
+    info!("MCP server connected and running");
 
-    todo!("MCP server implementation")
+    // Step 10: Wait for shutdown
+    let quit_reason = server.waiting().await?;
+    info!("MCP server shut down. Reason: {quit_reason:?}");
+
+    Ok(())
 }
 
 /// Index the repository

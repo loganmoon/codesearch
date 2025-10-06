@@ -45,7 +45,9 @@ pub use debouncer::{BatchProcessor, EventDebouncer};
 pub use events::{
     ChangeType, DebouncedEvent, DiffStats, EntityId, FileChange, FileMetadata, LineRange,
 };
-pub use git::{BranchChange, BranchWatcher, GitDetector, GitRepository};
+pub use git::{
+    BranchChange, BranchWatcher, FileDiffChangeType, FileDiffStatus, GitDetector, GitRepository,
+};
 pub use ignore::{CompositeLanguageFilter, IgnoreFilter, LanguageFilter};
 pub use watcher::{FileWatcher, PollingWatcher};
 

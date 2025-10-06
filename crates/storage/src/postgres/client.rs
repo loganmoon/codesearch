@@ -625,6 +625,44 @@ impl PostgresClient {
 
         Ok(())
     }
+
+    /// Get the last indexed commit for a repository
+    pub async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let record: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT last_indexed_commit FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    Error::storage(format!(
+                        "Failed to get last indexed commit for repository {repository_id}: {e}"
+                    ))
+                })?;
+
+        Ok(record.and_then(|(commit,)| commit))
+    }
+
+    /// Set the last indexed commit for a repository
+    pub async fn set_last_indexed_commit(
+        &self,
+        repository_id: Uuid,
+        commit_hash: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE repositories SET last_indexed_commit = $2, updated_at = NOW() WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .bind(commit_hash)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to set last indexed commit for repository {repository_id}: {e}"
+            ))
+        })?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]

@@ -313,6 +313,95 @@ impl GitRepository {
         Ok(false)
     }
 
+    /// Get changed files between two commits
+    ///
+    /// Returns a list of file changes with their status (added, modified, deleted).
+    /// If `from_commit` is None, uses the first commit in the repository.
+    pub fn get_changed_files_between_commits(
+        &self,
+        from_commit: Option<&str>,
+        to_commit: &str,
+    ) -> Result<Vec<FileDiffStatus>> {
+        let repo = self.open_repo()?;
+
+        // Resolve "to" commit
+        let to_oid = repo
+            .revparse_single(to_commit)
+            .map_err(|e| Error::watcher(format!("Failed to resolve commit {to_commit}: {e}")))?
+            .id();
+        let to_commit = repo
+            .find_commit(to_oid)
+            .map_err(|e| Error::watcher(format!("Failed to find commit: {e}")))?;
+        let to_tree = to_commit
+            .tree()
+            .map_err(|e| Error::watcher(format!("Failed to get tree: {e}")))?;
+
+        // Resolve "from" commit (optional)
+        let from_tree = if let Some(from_commit) = from_commit {
+            let from_oid = repo
+                .revparse_single(from_commit)
+                .map_err(|e| {
+                    Error::watcher(format!("Failed to resolve commit {from_commit}: {e}"))
+                })?
+                .id();
+            let from_commit = repo
+                .find_commit(from_oid)
+                .map_err(|e| Error::watcher(format!("Failed to find commit: {e}")))?;
+            Some(
+                from_commit
+                    .tree()
+                    .map_err(|e| Error::watcher(format!("Failed to get tree: {e}")))?,
+            )
+        } else {
+            None
+        };
+
+        // Compute diff
+        let diff = repo
+            .diff_tree_to_tree(from_tree.as_ref(), Some(&to_tree), None)
+            .map_err(|e| Error::watcher(format!("Failed to compute diff: {e}")))?;
+
+        let mut changes = Vec::new();
+        diff.foreach(
+            &mut |delta, _progress| {
+                let status = match delta.status() {
+                    git2::Delta::Added => FileDiffChangeType::Added,
+                    git2::Delta::Modified => FileDiffChangeType::Modified,
+                    git2::Delta::Deleted => FileDiffChangeType::Deleted,
+                    git2::Delta::Renamed => {
+                        // For renamed files, treat as delete + add
+                        if let Some(old_file) = delta.old_file().path() {
+                            changes.push(FileDiffStatus {
+                                path: self.repo_path.join(old_file),
+                                change_type: FileDiffChangeType::Deleted,
+                            });
+                        }
+                        FileDiffChangeType::Added
+                    }
+                    _ => return true, // Skip other types (typechange, copied, etc.)
+                };
+
+                if let Some(new_file) = delta.new_file().path() {
+                    let abs_path = self.repo_path.join(new_file);
+                    changes.push(FileDiffStatus {
+                        path: abs_path,
+                        change_type: status,
+                    });
+                }
+
+                true
+            },
+            None,
+            None,
+            None,
+        )
+        .map_err(|e| Error::watcher(format!("Failed to iterate diff: {e}")))?;
+
+        info!("Found {} changed files between commits", changes.len());
+
+        Ok(changes)
+    }
+
     /// Detect branch changes by monitoring HEAD
     pub async fn watch_for_branch_changes(&self) -> Result<BranchWatcher> {
         BranchWatcher::new(self.repo_path.clone()).await
@@ -354,6 +443,26 @@ impl FileStatus {
     pub fn is_renamed(&self) -> bool {
         self.status.contains(Status::WT_RENAMED) || self.status.contains(Status::INDEX_RENAMED)
     }
+}
+
+/// File diff status between commits
+#[derive(Debug, Clone)]
+pub struct FileDiffStatus {
+    /// Absolute path to the file
+    pub path: PathBuf,
+    /// Type of change
+    pub change_type: FileDiffChangeType,
+}
+
+/// Type of file change in a diff
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileDiffChangeType {
+    /// File was added
+    Added,
+    /// File was modified
+    Modified,
+    /// File was deleted
+    Deleted,
 }
 
 /// Watches for branch changes in a Git repository

@@ -16,6 +16,8 @@ use codesearch_core::entities::EntityType;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
 use indexer::{Indexer, RepositoryIndexer};
+use rmcp::serde_json;
+use sqlx::types::uuid;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -417,6 +419,210 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
     };
 
     Ok(config)
+}
+
+/// Catch up the index by processing changes between last indexed commit and current HEAD
+#[allow(dead_code)]
+async fn catch_up_index(
+    repo_root: &Path,
+    repository_id: uuid::Uuid,
+    postgres_client: &codesearch_storage::postgres::PostgresClient,
+    embedding_manager: &Arc<EmbeddingManager>,
+    git_repo: &codesearch_watcher::GitRepository,
+) -> Result<()> {
+    // Get last indexed commit from database
+    let last_indexed_commit = postgres_client
+        .get_last_indexed_commit(repository_id)
+        .await
+        .context("Failed to get last indexed commit")?;
+
+    // Get current HEAD commit
+    let current_commit = git_repo
+        .current_commit_hash()
+        .context("Failed to get current commit")?;
+
+    // Check if we need to catch up
+    if let Some(ref last_commit) = last_indexed_commit {
+        if last_commit == &current_commit {
+            info!("Index is up-to-date at commit {}", &current_commit[..8]);
+            return Ok(());
+        }
+
+        info!(
+            "Catching up index from {}..{} ({})",
+            &last_commit[..8],
+            &current_commit[..8],
+            if last_commit.len() >= 8 && current_commit.len() >= 8 {
+                "git diff"
+            } else {
+                "full scan"
+            }
+        );
+    } else {
+        info!(
+            "No previous index found, will update to commit {}",
+            &current_commit[..8]
+        );
+    }
+
+    // Get changed files using git diff
+    let changed_files = git_repo
+        .get_changed_files_between_commits(last_indexed_commit.as_deref(), &current_commit)
+        .context("Failed to get changed files from git")?;
+
+    if changed_files.is_empty() {
+        info!("No file changes detected");
+        postgres_client
+            .set_last_indexed_commit(repository_id, &current_commit)
+            .await
+            .context("Failed to update last indexed commit")?;
+        return Ok(());
+    }
+
+    info!("Found {} changed files to process", changed_files.len());
+
+    // Process each changed file
+    for file_diff in changed_files {
+        match file_diff.change_type {
+            codesearch_watcher::FileDiffChangeType::Added
+            | codesearch_watcher::FileDiffChangeType::Modified => {
+                // Re-index the file
+                if let Err(e) = reindex_single_file(
+                    repo_root,
+                    repository_id,
+                    &file_diff.path,
+                    postgres_client,
+                    embedding_manager,
+                )
+                .await
+                {
+                    warn!("Failed to reindex file {}: {}", file_diff.path.display(), e);
+                }
+            }
+            codesearch_watcher::FileDiffChangeType::Deleted => {
+                // Mark all entities in the file as deleted
+                if let Err(e) =
+                    handle_file_deletion(repository_id, &file_diff.path, postgres_client).await
+                {
+                    warn!(
+                        "Failed to handle deletion of file {}: {}",
+                        file_diff.path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    // Update last indexed commit
+    postgres_client
+        .set_last_indexed_commit(repository_id, &current_commit)
+        .await
+        .context("Failed to update last indexed commit")?;
+
+    info!(
+        "✅ Catch-up indexing completed at commit {}",
+        &current_commit[..8]
+    );
+    Ok(())
+}
+
+/// Re-index a single file
+#[allow(dead_code)]
+async fn reindex_single_file(
+    _repo_root: &Path,
+    _repository_id: uuid::Uuid,
+    file_path: &Path,
+    _postgres_client: &codesearch_storage::postgres::PostgresClient,
+    _embedding_manager: &Arc<EmbeddingManager>,
+) -> Result<()> {
+    // Check if file should be indexed (language support, etc.)
+    if !should_index_file(file_path) {
+        return Ok(());
+    }
+
+    info!("Re-indexing file: {}", file_path.display());
+
+    // TODO: Implement full file re-indexing logic
+    // This will require:
+    // 1. Reading and parsing the file with language-specific extractors
+    // 2. Generating embeddings for extracted entities
+    // 3. Storing entities with outbox entries
+    // 4. Updating file snapshots
+    //
+    // For now, this is a placeholder that logs the intent
+    warn!(
+        "File re-indexing not yet fully implemented, file will be indexed on next full index run"
+    );
+
+    Ok(())
+}
+
+/// Handle deletion of a file
+#[allow(dead_code)]
+async fn handle_file_deletion(
+    repository_id: uuid::Uuid,
+    file_path: &Path,
+    postgres_client: &codesearch_storage::postgres::PostgresClient,
+) -> Result<()> {
+    info!("Handling deletion of file: {}", file_path.display());
+
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid file path"))?;
+
+    // Get entities for this file
+    let entity_ids = postgres_client
+        .get_file_snapshot(repository_id, file_path_str)
+        .await
+        .context("Failed to get file snapshot")?
+        .unwrap_or_default();
+
+    if entity_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Mark entities as deleted
+    postgres_client
+        .mark_entities_deleted(repository_id, &entity_ids)
+        .await
+        .context("Failed to mark entities as deleted")?;
+
+    // Write DELETE outbox entries
+    for entity_id in &entity_ids {
+        let payload = serde_json::json!({
+            "entity_ids": [entity_id],
+            "reason": "file_deleted"
+        });
+
+        postgres_client
+            .write_outbox_entry(
+                repository_id,
+                entity_id,
+                codesearch_storage::postgres::OutboxOperation::Delete,
+                codesearch_storage::postgres::TargetStore::Qdrant,
+                payload,
+            )
+            .await
+            .context("Failed to write outbox entry")?;
+    }
+
+    info!("Marked {} entities as deleted", entity_ids.len());
+    Ok(())
+}
+
+/// Check if a file should be indexed based on extension
+#[allow(dead_code)]
+fn should_index_file(file_path: &Path) -> bool {
+    let Some(extension) = file_path.extension() else {
+        return false;
+    };
+
+    let ext_str = extension.to_string_lossy();
+    matches!(
+        ext_str.as_ref(),
+        "rs" | "py" | "js" | "ts" | "jsx" | "tsx" | "go"
+    )
 }
 
 /// Start the MCP server

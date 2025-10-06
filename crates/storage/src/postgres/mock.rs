@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-use super::{OutboxEntry, OutboxOperation, PostgresClientTrait, TargetStore};
+use super::{EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 
 /// In-memory entity metadata
 #[derive(Debug, Clone)]
@@ -317,6 +317,67 @@ impl PostgresClientTrait for MockPostgresClient {
         }
 
         Ok(())
+    }
+
+    async fn store_entities_with_outbox_batch(
+        &self,
+        repository_id: Uuid,
+        entities: &[EntityOutboxBatchEntry<'_>],
+    ) -> Result<Vec<Uuid>> {
+        if entities.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entities.len() > MAX_BATCH_SIZE {
+            return Err(codesearch_core::error::Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entities.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        let mut data = self.data.lock().unwrap();
+        let mut outbox_ids = Vec::with_capacity(entities.len());
+        let now = chrono::Utc::now();
+
+        for (entity, embedding, operation, point_id, target_store, git_commit_hash) in entities {
+            // Store entity metadata
+            data.entities.insert(
+                (repository_id, entity.entity_id.clone()),
+                EntityMetadata {
+                    entity: (*entity).clone(),
+                    git_commit_hash: git_commit_hash.clone(),
+                    qdrant_point_id: *point_id,
+                    deleted_at: None,
+                },
+            );
+
+            // Write outbox entry
+            let outbox_id = Uuid::new_v4();
+            let payload = serde_json::json!({
+                "entity": entity,
+                "embedding": embedding,
+                "qdrant_point_id": point_id.to_string()
+            });
+
+            data.outbox.push(MockOutboxEntry {
+                outbox_id,
+                repository_id,
+                entity_id: entity.entity_id.clone(),
+                operation: *operation,
+                target_store: *target_store,
+                payload,
+                created_at: now,
+                processed_at: None,
+                retry_count: 0,
+                last_error: None,
+            });
+
+            outbox_ids.push(outbox_id);
+        }
+
+        Ok(outbox_ids)
     }
 
     async fn write_outbox_entry(

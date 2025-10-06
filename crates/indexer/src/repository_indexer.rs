@@ -230,7 +230,20 @@ impl RepositoryIndexer {
                     entity_embedding_pairs.len()
                 );
 
-                // Store each entity with its embedding
+                // Type alias for batch data entries
+                type BatchEntry = (
+                    CodeEntity,
+                    Vec<f32>,
+                    codesearch_storage::postgres::OutboxOperation,
+                    uuid::Uuid,
+                    codesearch_storage::postgres::TargetStore,
+                    Option<String>,
+                );
+
+                // Prepare batch data for transactional insert
+                let mut batch_data: Vec<BatchEntry> = Vec::with_capacity(entity_embedding_pairs.len());
+
+                // Check existing metadata and determine operations for each entity
                 for (entity, embedding) in &entity_embedding_pairs {
                     // Check if entity already exists
                     let existing_metadata = self
@@ -277,18 +290,6 @@ impl RepositoryIndexer {
                         existing_metadata.is_some()
                     );
 
-                    // Store entity metadata
-                    self.postgres_client
-                        .store_entity_metadata(repository_id, entity, git_commit.clone(), point_id)
-                        .await
-                        .map_err(|e| {
-                            error!(
-                                "Failed to store entity {} metadata in Postgres: {e}",
-                                entity.entity_id
-                            );
-                            e
-                        })?;
-
                     // Track for file snapshot
                     let file_path_str = entity
                         .file_path
@@ -300,32 +301,42 @@ impl RepositoryIndexer {
                         .or_default()
                         .push(entity.entity_id.clone());
 
-                    // Write operation (INSERT or UPDATE) to outbox
-                    let payload = serde_json::json!({
-                        "entity": entity,
-                        "embedding": embedding,
-                        "qdrant_point_id": point_id.to_string()
-                    });
-                    self.postgres_client
-                        .write_outbox_entry(
-                            repository_id,
-                            &entity.entity_id,
-                            operation,
-                            codesearch_storage::postgres::TargetStore::Qdrant,
-                            payload,
-                        )
-                        .await
-                        .map_err(|e| {
-                            error!(
-                                "Failed to write outbox entry for entity {}: {e}",
-                                entity.entity_id
-                            );
-                            e
-                        })?;
+                    // Add to batch
+                    batch_data.push((
+                        entity.clone(),
+                        embedding.clone(),
+                        operation,
+                        point_id,
+                        codesearch_storage::postgres::TargetStore::Qdrant,
+                        git_commit.clone(),
+                    ));
                 }
 
+                // Store all entities with outbox entries in a single transaction
+                let batch_refs: Vec<_> = batch_data
+                    .iter()
+                    .map(|(entity, embedding, op, point_id, target, git_commit)| {
+                        (
+                            entity,
+                            embedding.as_slice(),
+                            *op,
+                            *point_id,
+                            *target,
+                            git_commit.clone(),
+                        )
+                    })
+                    .collect();
+
+                self.postgres_client
+                    .store_entities_with_outbox_batch(repository_id, &batch_refs)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to store entities batch: {e}");
+                        e
+                    })?;
+
                 debug!(
-                    "Successfully wrote {} entities to Postgres outbox",
+                    "Successfully wrote {} entities to Postgres with outbox in single transaction",
                     entity_embedding_pairs.len()
                 );
             }

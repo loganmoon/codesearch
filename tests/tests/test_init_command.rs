@@ -1,8 +1,10 @@
 //! Integration tests for the init command
 
 use anyhow::{Context, Result};
-use codesearch_e2e_tests::common::containers::{TestPostgres, TestQdrant};
-use std::path::Path;
+use codesearch_e2e_tests::common::{
+    codesearch_binary,
+    containers::{TestPostgres, TestQdrant},
+};
 use std::process::Command;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -75,28 +77,10 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command using cargo run with manifest path
-    let manifest_path = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let workspace_manifest = Path::new(&manifest_path)
-        .parent()
-        .unwrap()
-        .join("Cargo.toml");
-
-    let output = Command::new("cargo")
+    // Run init command using pre-built binary
+    let output = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest.to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .env("RUST_LOG", "info")
         .output()
         .context("Failed to run init command")?;
@@ -177,49 +161,19 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command first time using cargo run with manifest path
-    let manifest_path = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let workspace_manifest = Path::new(&manifest_path)
-        .parent()
-        .unwrap()
-        .join("Cargo.toml");
-
-    let output1 = Command::new("cargo")
+    // Run init command first time using pre-built binary
+    let output1 = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest.to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .output()
         .context("Failed to run first init command")?;
 
     assert!(output1.status.success(), "First init failed");
 
     // Run init command again - should handle existing collection gracefully
-    let output2 = Command::new("cargo")
+    let output2 = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest.to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-            "init",
-            "--config",
-            config_path.to_str().unwrap(),
-        ])
+        .args(["init", "--config", config_path.to_str().unwrap()])
         .env("RUST_LOG", "info")
         .output()
         .context("Failed to run second init command")?;

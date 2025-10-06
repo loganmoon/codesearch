@@ -26,15 +26,6 @@ use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Get the workspace manifest path for cargo run commands
-fn workspace_manifest() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .join("Cargo.toml")
-}
-
 /// Create a test config file for the given repository and test instances
 fn create_test_config(
     repo_path: &Path,
@@ -82,18 +73,8 @@ enabled = ["rust"]
 
 /// Run the codesearch CLI with the given arguments
 fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new("cargo")
+    Command::new(codesearch_binary())
         .current_dir(repo_path)
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest().to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-        ])
         .args(args)
         .env("RUST_LOG", "info")
         .output()

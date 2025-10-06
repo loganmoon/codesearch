@@ -241,7 +241,8 @@ impl RepositoryIndexer {
                 );
 
                 // Prepare batch data for transactional insert
-                let mut batch_data: Vec<BatchEntry> = Vec::with_capacity(entity_embedding_pairs.len());
+                let mut batch_data: Vec<BatchEntry> =
+                    Vec::with_capacity(entity_embedding_pairs.len());
 
                 // Check existing metadata and determine operations for each entity
                 for (entity, embedding) in &entity_embedding_pairs {

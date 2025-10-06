@@ -6,7 +6,9 @@ use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use uuid::Uuid;
 
-pub use client::{EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore};
+pub use client::{
+    EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
+};
 
 /// Trait for PostgreSQL metadata operations
 #[async_trait]

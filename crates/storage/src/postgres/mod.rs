@@ -6,7 +6,9 @@ use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use uuid::Uuid;
 
-pub use client::{OutboxEntry, OutboxOperation, PostgresClient, TargetStore};
+pub use client::{
+    EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
+};
 
 /// Trait for PostgreSQL metadata operations
 #[async_trait]
@@ -66,6 +68,13 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Mark entities as deleted (soft delete)
     async fn mark_entities_deleted(&self, repository_id: Uuid, entity_ids: &[String])
         -> Result<()>;
+
+    /// Store entities with outbox entries in a single transaction (batch operation)
+    async fn store_entities_with_outbox_batch(
+        &self,
+        repository_id: Uuid,
+        entities: &[EntityOutboxBatchEntry<'_>],
+    ) -> Result<Vec<Uuid>>;
 
     /// Write outbox entry for entity operation
     async fn write_outbox_entry(

@@ -26,15 +26,6 @@ use std::process::Command;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Get the workspace manifest path for cargo run commands
-fn workspace_manifest() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .join("Cargo.toml")
-}
-
 /// Create a test config file for the given repository and test instances
 fn create_test_config(
     repo_path: &Path,
@@ -82,39 +73,12 @@ enabled = ["rust"]
 
 /// Run the codesearch CLI with the given arguments
 fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new("cargo")
+    Command::new(codesearch_binary())
         .current_dir(repo_path)
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest().to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-        ])
         .args(args)
         .env("RUST_LOG", "info")
         .output()
         .context("Failed to run codesearch CLI")
-}
-
-/// Start outbox processor and wait for it to sync entities to Qdrant
-///
-/// The processor polls every 1 second, so we wait 3 seconds to ensure
-/// at least a few poll cycles have completed.
-async fn start_and_wait_for_outbox_sync(
-    postgres: &TestPostgres,
-    qdrant: &TestQdrant,
-    collection_name: &str,
-) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
-
-    // Give the processor time to start and process outbox entries
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-    Ok(processor)
 }
 
 #[tokio::test]
@@ -916,26 +880,43 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
 
             assert!(index_output.status.success(), "Index failed");
 
-            // Start outbox processor and wait for sync
-            // Use pre-built binary to avoid concurrent cargo build issues
-            let binary_path = ensure_outbox_processor_built()
-                .expect("Failed to ensure outbox_processor is built");
+            // Start outbox processor container and wait for sync
+            let container_name = format!("outbox-processor-test-{}", Uuid::new_v4());
 
-            let mut processor = std::process::Command::new(binary_path)
-                .env("POSTGRES_HOST", "localhost")
-                .env("POSTGRES_PORT", postgres_port.to_string())
-                .env("POSTGRES_DATABASE", "codesearch")
-                .env("POSTGRES_USER", "codesearch")
-                .env("POSTGRES_PASSWORD", "codesearch")
-                .env("QDRANT_HOST", "localhost")
-                .env("QDRANT_PORT", qdrant_port.to_string())
-                .env("QDRANT_REST_PORT", qdrant_rest_port.to_string())
-                .env("QDRANT_COLLECTION", &collection_name_clone)
-                .env("RUST_LOG", "info")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .expect("Failed to start outbox processor");
+            let output = Command::new("docker")
+                .args([
+                    "run",
+                    "-d",
+                    "--name",
+                    &container_name,
+                    "--add-host",
+                    "host.docker.internal:host-gateway",
+                    "-e",
+                    "POSTGRES_HOST=host.docker.internal",
+                    "-e",
+                    &format!("POSTGRES_PORT={postgres_port}"),
+                    "-e",
+                    "POSTGRES_DATABASE=codesearch",
+                    "-e",
+                    "POSTGRES_USER=codesearch",
+                    "-e",
+                    "POSTGRES_PASSWORD=codesearch",
+                    "-e",
+                    "QDRANT_HOST=host.docker.internal",
+                    "-e",
+                    &format!("QDRANT_PORT={qdrant_port}"),
+                    "-e",
+                    &format!("QDRANT_REST_PORT={qdrant_rest_port}"),
+                    "-e",
+                    &format!("QDRANT_COLLECTION={collection_name_clone}"),
+                    "-e",
+                    "RUST_LOG=info",
+                    "codesearch-outbox:test",
+                ])
+                .output()
+                .expect("Failed to start outbox processor container");
+
+            assert!(output.status.success(), "Failed to start outbox processor");
 
             // Wait for sync
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -945,9 +926,13 @@ async fn test_concurrent_indexing_with_separate_containers() -> Result<()> {
             let response = reqwest::get(&url).await.expect("Failed to query Qdrant");
             assert!(response.status().is_success(), "Collection should exist");
 
-            // Clean up processor
-            let _ = processor.kill();
-            let _ = processor.wait();
+            // Clean up processor container
+            let _ = Command::new("docker")
+                .args(["stop", &container_name])
+                .output();
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
         });
 
         handles.push(handle);

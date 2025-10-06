@@ -11,15 +11,6 @@ use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
 
-/// Get the workspace manifest path for cargo run commands
-fn workspace_manifest() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    Path::new(&manifest_dir)
-        .parent()
-        .unwrap()
-        .join("Cargo.toml")
-}
-
 /// Create a test config file
 fn create_test_config(
     repo_path: &Path,
@@ -67,18 +58,8 @@ enabled = ["rust"]
 
 /// Run the codesearch CLI
 fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new("cargo")
+    Command::new(codesearch_binary())
         .current_dir(repo_path)
-        .args([
-            "run",
-            "--manifest-path",
-            workspace_manifest().to_str().unwrap(),
-            "--package",
-            "codesearch",
-            "--bin",
-            "codesearch",
-            "--",
-        ])
         .args(args)
         .env("RUST_LOG", "info")
         .output()
@@ -325,15 +306,4 @@ pub fn calculate() -> i32 {
 
     drop(processor);
     Ok(())
-}
-
-/// Helper to start outbox processor and wait for sync
-async fn start_and_wait_for_outbox_sync(
-    postgres: &TestPostgres,
-    qdrant: &TestQdrant,
-    collection_name: &str,
-) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    Ok(processor)
 }

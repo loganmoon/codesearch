@@ -56,11 +56,13 @@ The main binary is `codesearch` which provides init, serve, index, and watch com
 ```bash
 cargo build --workspace --all-targets       # Build all debug targets
 cargo build --release --workspace --all-targets  # Build all release targets
+
 cargo test --workspace                    # Run all tests
 cargo test --package <crate-name>         # Run tests for specific crate
 cargo test --test <test-name>             # Run specific integration test
+
 cargo clippy --workspace                  # Lint with strict rules
-cargo fmt                      # Format code
+cargo fmt                                 # Format code
 ```
 
 **Running:**

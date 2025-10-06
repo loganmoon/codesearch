@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 # Copy workspace files
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY tests/Cargo.toml ./tests/Cargo.toml
+COPY tests/src ./tests/src
+COPY migrations ./migrations
 
 # Build the outbox-processor binary
 RUN cargo build --release --bin outbox-processor

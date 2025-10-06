@@ -326,14 +326,3 @@ pub fn calculate() -> i32 {
     drop(processor);
     Ok(())
 }
-
-/// Helper to start outbox processor and wait for sync
-async fn start_and_wait_for_outbox_sync(
-    postgres: &TestPostgres,
-    qdrant: &TestQdrant,
-    collection_name: &str,
-) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    Ok(processor)
-}

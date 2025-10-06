@@ -3,67 +3,166 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Once;
+use std::sync::{Mutex, Once};
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Ensures the outbox_processor binary is built before tests run
-/// This prevents race conditions when multiple tests try to build it concurrently
-#[allow(dead_code)]
-static BUILD_OUTBOX_PROCESSOR: Once = Once::new();
+/// Global registry of test resources for cleanup
+static RESOURCE_REGISTRY: Mutex<Option<ResourceRegistry>> = Mutex::new(None);
+static INIT_CLEANUP: Once = Once::new();
 
-/// Build the outbox_processor binary if it doesn't exist or is stale
-///
-/// This is called automatically by TestOutboxProcessor::start(), but can also
-/// be called manually to ensure the binary is built before spawning processes.
-#[allow(dead_code)]
-pub fn ensure_outbox_processor_built() -> Result<PathBuf> {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"));
+struct ResourceRegistry {
+    container_names: Vec<String>,
+    process_ids: Vec<u32>,
+}
 
-    let workspace_root = manifest_dir
-        .parent()
-        .context("Failed to find workspace root")?;
+impl ResourceRegistry {
+    fn new() -> Self {
+        Self {
+            container_names: Vec::new(),
+            process_ids: Vec::new(),
+        }
+    }
 
-    let binary_path = workspace_root
-        .join("target")
-        .join("debug")
-        .join("outbox-processor");
+    fn register_container(&mut self, name: String) {
+        self.container_names.push(name);
+    }
 
-    BUILD_OUTBOX_PROCESSOR.call_once(|| {
-        // Only build if binary doesn't exist
-        if !binary_path.exists() {
-            let manifest_path = workspace_root.join("Cargo.toml");
+    fn register_process(&mut self, pid: u32) {
+        self.process_ids.push(pid);
+    }
 
-            let output = Command::new("cargo")
-                .args([
-                    "build",
-                    "--manifest-path",
-                    manifest_path.to_str().unwrap(),
-                    "--package",
-                    "codesearch-outbox-processor",
-                    "--bin",
-                    "outbox-processor",
-                ])
-                .output()
-                .expect("Failed to build outbox-processor");
+    fn unregister_container(&mut self, name: &str) {
+        self.container_names.retain(|n| n != name);
+    }
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                panic!("Failed to build outbox-processor: {stderr}");
+    fn unregister_process(&mut self, pid: u32) {
+        self.process_ids.retain(|p| *p != pid);
+    }
+
+    fn cleanup_all(&mut self) {
+        // Kill all processes
+        for pid in &self.process_ids {
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{self, Signal};
+                use nix::unistd::Pid;
+                let _ = signal::kill(Pid::from_raw(*pid as i32), Signal::SIGKILL);
             }
+        }
+
+        // Stop all containers
+        if !self.container_names.is_empty() {
+            let _ = Command::new("docker")
+                .arg("stop")
+                .args(&self.container_names)
+                .output();
+            let _ = Command::new("docker")
+                .arg("rm")
+                .arg("-f")
+                .args(&self.container_names)
+                .output();
+        }
+
+        self.container_names.clear();
+        self.process_ids.clear();
+    }
+}
+
+fn init_cleanup_handler() {
+    INIT_CLEANUP.call_once(|| {
+        {
+            let mut registry = RESOURCE_REGISTRY.lock().unwrap();
+            *registry = Some(ResourceRegistry::new());
+        }
+
+        // Register cleanup on process exit
+        let _ = std::panic::catch_unwind(|| {
+            ctrlc::set_handler(move || {
+                eprintln!("\n🧹 Caught Ctrl+C, cleaning up test resources...");
+                if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
+                    if let Some(reg) = registry.as_mut() {
+                        reg.cleanup_all();
+                    }
+                }
+                std::process::exit(130); // Standard exit code for SIGINT
+            })
+            .expect("Error setting Ctrl-C handler");
+        });
+    });
+}
+
+fn register_container(name: String) {
+    init_cleanup_handler();
+    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
+        if let Some(reg) = registry.as_mut() {
+            reg.register_container(name);
+        }
+    }
+}
+
+fn unregister_container(name: &str) {
+    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
+        if let Some(reg) = registry.as_mut() {
+            reg.unregister_container(name);
+        }
+    }
+}
+
+fn register_process(pid: u32) {
+    init_cleanup_handler();
+    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
+        if let Some(reg) = registry.as_mut() {
+            reg.register_process(pid);
+        }
+    }
+}
+
+fn unregister_process(pid: u32) {
+    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
+        if let Some(reg) = registry.as_mut() {
+            reg.unregister_process(pid);
+        }
+    }
+}
+
+/// Ensures the outbox_processor Docker image is built before tests run
+/// This prevents race conditions when multiple tests try to build it concurrently
+static BUILD_OUTBOX_IMAGE: Once = Once::new();
+
+/// Build the outbox_processor Docker image if it doesn't exist
+///
+/// This is called automatically by TestOutboxProcessor::start()
+fn ensure_outbox_image_built() -> Result<()> {
+    BUILD_OUTBOX_IMAGE.call_once(|| {
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"));
+
+        let workspace_root = manifest_dir
+            .parent()
+            .expect("Failed to find workspace root");
+
+        let output = Command::new("docker")
+            .args([
+                "build",
+                "-t",
+                "codesearch-outbox:test",
+                "-f",
+                "Dockerfile.outbox-processor",
+                ".",
+            ])
+            .current_dir(workspace_root)
+            .output()
+            .expect("Failed to build outbox-processor image");
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            panic!("Failed to build outbox-processor Docker image: {stderr}");
         }
     });
 
-    if !binary_path.exists() {
-        return Err(anyhow::anyhow!(
-            "outbox-processor binary not found at {}",
-            binary_path.display()
-        ));
-    }
-
-    Ok(binary_path)
+    Ok(())
 }
 
 /// Test Postgres container with temporary storage
@@ -129,6 +228,9 @@ impl TestPostgres {
             ));
         }
 
+        // Register for global cleanup
+        register_container(instance.container_name.clone());
+
         Ok(instance)
     }
 
@@ -184,6 +286,9 @@ impl TestPostgres {
                 "Postgres container failed to become healthy: {e}\nLogs: {logs}"
             ));
         }
+
+        // Register for global cleanup
+        register_container(instance.container_name.clone());
 
         Ok(instance)
     }
@@ -253,6 +358,9 @@ impl TestPostgres {
 
     /// Stop and clean up the Postgres instance
     fn cleanup(&self) {
+        // Unregister from global cleanup
+        unregister_container(&self.container_name);
+
         // Stop container
         let _ = Command::new("docker")
             .args(["stop", &self.container_name])
@@ -392,6 +500,9 @@ impl TestQdrant {
             ));
         }
 
+        // Register for global cleanup
+        register_container(instance.container_name.clone());
+
         Ok(instance)
     }
 
@@ -458,6 +569,9 @@ impl TestQdrant {
                 "Qdrant container failed to become healthy: {e}\nLogs: {logs}"
             ));
         }
+
+        // Register for global cleanup
+        register_container(instance.container_name.clone());
 
         Ok(instance)
     }
@@ -533,6 +647,9 @@ impl TestQdrant {
 
     /// Stop and clean up the Qdrant instance
     fn cleanup(&self) {
+        // Unregister from global cleanup
+        unregister_container(&self.container_name);
+
         // Stop container (ignore errors, container might already be stopped)
         let _ = Command::new("docker")
             .args(["stop", &self.container_name])
@@ -628,9 +745,10 @@ impl Drop for TestQdrantPool {
     }
 }
 
-/// Test Outbox Processor instance running as a subprocess
+/// Test Outbox Processor instance running as a container
 pub struct TestOutboxProcessor {
-    process: std::process::Child,
+    container_id: String,
+    container_name: String,
 }
 
 impl TestOutboxProcessor {
@@ -638,56 +756,106 @@ impl TestOutboxProcessor {
     ///
     /// Connects to the provided Postgres and Qdrant instances.
     ///
-    /// This uses the pre-built binary from target/debug/outbox_processor
-    /// to avoid cargo build race conditions when tests run in parallel.
+    /// This uses a Docker container built from Dockerfile.outbox-processor
     pub fn start(
         postgres: &TestPostgres,
         qdrant: &TestQdrant,
         collection_name: &str,
     ) -> Result<Self> {
-        // Ensure the binary is built (thread-safe, happens only once)
-        let binary_path = ensure_outbox_processor_built()?;
+        // Ensure the Docker image is built (thread-safe, happens only once)
+        ensure_outbox_image_built()?;
 
-        let process = std::process::Command::new(binary_path)
-            .env("POSTGRES_HOST", "localhost")
-            .env("POSTGRES_PORT", postgres.port().to_string())
-            .env("POSTGRES_DATABASE", "codesearch")
-            .env("POSTGRES_USER", "codesearch")
-            .env("POSTGRES_PASSWORD", "codesearch")
-            .env("QDRANT_HOST", "localhost")
-            .env("QDRANT_PORT", qdrant.port().to_string())
-            .env("QDRANT_REST_PORT", qdrant.rest_port().to_string())
-            .env("QDRANT_COLLECTION", collection_name)
-            .env("RUST_LOG", "debug")
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
-            .context("Failed to start outbox processor")?;
+        let container_name = format!("outbox-processor-test-{}", Uuid::new_v4());
 
-        Ok(Self { process })
+        // Start container with connection to host services
+        // Use host.docker.internal to access services running on the host
+        let output = Command::new("docker")
+            .args([
+                "run",
+                "-d",
+                "--name",
+                &container_name,
+                "--add-host",
+                "host.docker.internal:host-gateway",
+                "-e",
+                "POSTGRES_HOST=host.docker.internal",
+                "-e",
+                &format!("POSTGRES_PORT={}", postgres.port()),
+                "-e",
+                "POSTGRES_DATABASE=codesearch",
+                "-e",
+                "POSTGRES_USER=codesearch",
+                "-e",
+                "POSTGRES_PASSWORD=codesearch",
+                "-e",
+                "QDRANT_HOST=host.docker.internal",
+                "-e",
+                &format!("QDRANT_PORT={}", qdrant.port()),
+                "-e",
+                &format!("QDRANT_REST_PORT={}", qdrant.rest_port()),
+                "-e",
+                &format!("QDRANT_COLLECTION={collection_name}"),
+                "-e",
+                "RUST_LOG=debug",
+                "codesearch-outbox:test",
+            ])
+            .output()
+            .context("Failed to start outbox processor container")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up container if it was created
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_name])
+                .output();
+            return Err(anyhow::anyhow!(
+                "Failed to start outbox processor container: {stderr}"
+            ));
+        }
+
+        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let instance = Self {
+            container_id,
+            container_name: container_name.clone(),
+        };
+
+        // Register for global cleanup
+        register_container(container_name);
+
+        Ok(instance)
     }
 
-    /// Get processor output for debugging
-    pub fn get_output(&mut self) -> Result<String> {
-        use std::io::Read;
+    /// Get container logs for debugging
+    pub fn get_logs(&self) -> String {
+        let output = Command::new("docker")
+            .args(["logs", "--tail", "100", &self.container_id])
+            .output();
 
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-
-        if let Some(ref mut out) = self.process.stdout {
-            let _ = out.read_to_string(&mut stdout);
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}")
+            }
+            Err(e) => format!("Failed to get logs: {e}"),
         }
-        if let Some(ref mut err) = self.process.stderr {
-            let _ = err.read_to_string(&mut stderr);
-        }
-
-        Ok(format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}"))
     }
 
     /// Stop the outbox processor
-    fn cleanup(&mut self) {
-        let _ = self.process.kill();
-        let _ = self.process.wait();
+    fn cleanup(&self) {
+        // Unregister from global cleanup
+        unregister_container(&self.container_name);
+
+        // Stop container
+        let _ = Command::new("docker")
+            .args(["stop", &self.container_name])
+            .output();
+
+        // Remove container
+        let _ = Command::new("docker")
+            .args(["rm", "-f", &self.container_name])
+            .output();
     }
 }
 
@@ -736,7 +904,7 @@ pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -
 /// Start an outbox processor and wait for it to sync all pending entries
 ///
 /// This is a convenience function that starts the processor and waits for
-/// the outbox table to be empty with a configurable timeout (default 10 seconds).
+/// the outbox table to be empty with a 10-second timeout
 pub async fn start_and_wait_for_outbox_sync(
     postgres: &TestPostgres,
     qdrant: &TestQdrant,

@@ -57,7 +57,7 @@ services:
   outbox-processor:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.outbox-processor
     container_name: codesearch-outbox-processor
     depends_on:
       postgres:

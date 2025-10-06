@@ -68,16 +68,8 @@ struct Cli {
 enum Commands {
     /// Initialize codesearch in the current repository
     Init,
-    /// Start the MCP (Model Context Protocol) server for client integration
-    Serve {
-        /// Port to bind to
-        #[arg(short, long, default_value = "8699")]
-        port: u16,
-
-        /// Host to bind to
-        #[arg(long, default_value = "localhost")]
-        host: String,
-    },
+    /// Start MCP server with semantic code search
+    Serve,
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -422,12 +414,12 @@ async fn main() -> Result<()> {
     // Execute commands
     match cli.command {
         Some(Commands::Init) => init_repository(cli.config.as_deref()).await,
-        Some(Commands::Serve { port, host }) => {
+        Some(Commands::Serve) => {
             // Find repository root
             let repo_root = find_repository_root()?;
             // Load configuration
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
-            serve(config, host, port).await
+            serve(config).await
         }
         Some(Commands::Index { force, progress }) => {
             // Find repository root
@@ -920,8 +912,61 @@ fn should_index_file(file_path: &Path) -> bool {
     )
 }
 
+/// Handle a single file change event from the watcher
+async fn handle_file_change_event(
+    event: codesearch_watcher::FileChange,
+    repo_root: &Path,
+    repository_id: uuid::Uuid,
+    embedding_manager: &Arc<EmbeddingManager>,
+    postgres_client: &Arc<PostgresClient>,
+) -> Result<()> {
+    match event {
+        codesearch_watcher::FileChange::Created(path, _)
+        | codesearch_watcher::FileChange::Modified(path, _) => {
+            info!("Re-indexing file: {}", path.display());
+
+            // Re-index the single file (reuse from catch-up)
+            reindex_single_file(
+                repo_root,
+                repository_id,
+                &path,
+                postgres_client,
+                embedding_manager,
+            )
+            .await?;
+        }
+
+        codesearch_watcher::FileChange::Deleted(path) => {
+            info!("File deleted: {}", path.display());
+
+            handle_file_deletion(repository_id, &path, postgres_client).await?;
+        }
+
+        codesearch_watcher::FileChange::Renamed { from, to } => {
+            info!("File renamed: {} -> {}", from.display(), to.display());
+
+            // Treat as delete + create
+            handle_file_deletion(repository_id, &from, postgres_client).await?;
+            reindex_single_file(
+                repo_root,
+                repository_id,
+                &to,
+                postgres_client,
+                embedding_manager,
+            )
+            .await?;
+        }
+
+        codesearch_watcher::FileChange::PermissionsChanged(_) => {
+            // Ignore permission changes
+        }
+    }
+
+    Ok(())
+}
+
 /// Start the MCP server
-async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
+async fn serve(config: Config) -> Result<()> {
     info!("Checking dependencies...");
 
     // Step 1: Ensure dependencies are running
@@ -1021,7 +1066,66 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     .await
     .context("Catch-up indexing failed")?;
 
-    // Step 8: Create MCP server
+    // Step 8: Initialize and start file watcher
+    info!("Starting filesystem watcher...");
+    let watcher_config = codesearch_watcher::WatcherConfig::builder()
+        .debounce_ms(500)
+        .max_file_size(10 * 1024 * 1024) // 10MB
+        .batch_size(100)
+        .build();
+
+    let mut watcher = codesearch_watcher::FileWatcher::new(watcher_config)
+        .context("Failed to create file watcher")?;
+
+    let mut event_rx = watcher
+        .watch(&repo_root)
+        .await
+        .context("Failed to start watching repository")?;
+
+    // Clone dependencies for watcher task
+    let watcher_repo_root = repo_root.clone();
+    let watcher_repo_id = repository_id;
+    let watcher_embedding_mgr = embedding_manager.clone();
+    let watcher_postgres = Arc::new(postgres_client.clone());
+
+    // Spawn background task to handle file changes
+    let watcher_task = tokio::spawn(async move {
+        info!("File watcher task started");
+
+        while let Some(event) = event_rx.recv().await {
+            if let Err(e) = handle_file_change_event(
+                event,
+                &watcher_repo_root,
+                watcher_repo_id,
+                &watcher_embedding_mgr,
+                &watcher_postgres,
+            )
+            .await
+            {
+                // Log error but don't crash watcher
+                tracing::error!("Error handling file change: {e}");
+            }
+        }
+
+        tracing::warn!("File watcher task stopped");
+    });
+
+    // Step 9: Setup signal handler for graceful shutdown
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    tokio::spawn(async move {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                info!("Received Ctrl+C, initiating graceful shutdown");
+                let _ = shutdown_tx.send(()).await;
+            }
+            Err(e) => {
+                tracing::error!("Error setting up signal handler: {e}");
+            }
+        }
+    });
+
+    // Step 10: Create MCP server
     let mcp_server = CodeSearchMcpServer::new(
         repository_id,
         repo_root.clone(),
@@ -1031,16 +1135,34 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
         postgres_client,
     );
 
-    // Step 9: Start MCP server on stdio
+    // Step 11: Start MCP server on stdio
     println!("🚀 Starting MCP server on stdio...");
     let transport = (tokio::io::stdin(), tokio::io::stdout());
     let server = mcp_server.serve(transport).await?;
 
     info!("MCP server connected and running");
 
-    // Step 10: Wait for shutdown
-    let quit_reason = server.waiting().await?;
-    info!("MCP server shut down. Reason: {quit_reason:?}");
+    // Step 12: Run server with shutdown handling
+    tokio::select! {
+        quit_reason = server.waiting() => {
+            match quit_reason {
+                Ok(reason) => info!("MCP server stopped normally. Reason: {reason:?}"),
+                Err(e) => tracing::error!("MCP server error: {e}"),
+            }
+        }
+        _ = shutdown_rx.recv() => {
+            info!("Shutdown signal received");
+        }
+    }
+
+    // Step 13: Cleanup
+    info!("Stopping file watcher...");
+    watcher.stop().await?;
+    if let Err(e) = watcher_task.await {
+        tracing::error!("Watcher task error: {e}");
+    }
+
+    info!("Codesearch MCP server shut down successfully");
 
     Ok(())
 }

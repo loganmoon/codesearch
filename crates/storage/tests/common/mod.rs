@@ -60,6 +60,7 @@ pub fn create_storage_config(
     qdrant_rest_port: u16,
     postgres_port: u16,
     collection_name: &str,
+    postgres_database: &str,
 ) -> StorageConfig {
     StorageConfig {
         qdrant_host: "localhost".to_string(),
@@ -70,7 +71,7 @@ pub fn create_storage_config(
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
         postgres_port,
-        postgres_database: "codesearch".to_string(),
+        postgres_database: postgres_database.to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
     }

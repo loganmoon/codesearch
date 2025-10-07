@@ -4,7 +4,9 @@ mod common;
 
 use anyhow::Result;
 use codesearch_core::entities::EntityType;
-use codesearch_e2e_tests::common::{with_timeout, TestPostgres};
+use codesearch_e2e_tests::common::{
+    create_test_database, drop_test_database, get_shared_postgres, with_timeout,
+};
 use codesearch_storage::{
     create_postgres_client,
     postgres::{OutboxOperation, TargetStore},
@@ -15,24 +17,33 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Setup helper: Start Postgres and run migrations
+/// Setup helper: Use shared Postgres instance and create unique database
 async fn setup_postgres() -> Result<(
-    TestPostgres,
+    &'static codesearch_e2e_tests::common::TestPostgres,
+    String,
     Arc<codesearch_storage::postgres::PostgresClient>,
 )> {
-    let postgres = TestPostgres::start().await?;
-    let config = create_storage_config(6334, 6333, postgres.port(), "test_collection");
+    let postgres = get_shared_postgres().await?;
+    let db_name = create_test_database(postgres).await?;
+
+    let config = create_storage_config(
+        6334, // Qdrant not needed for Postgres tests
+        6333,
+        postgres.port(),
+        "test_collection",
+        &db_name,
+    );
 
     let client = create_postgres_client(&config).await?;
     client.run_migrations().await?;
 
-    Ok((postgres, client))
+    Ok((postgres, db_name, client))
 }
 
 #[tokio::test]
 async fn test_connection_pool_exhaustion() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -65,6 +76,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
             assert!(result.is_ok(), "Concurrent operations should succeed");
         }
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -73,10 +85,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
 #[tokio::test]
 async fn test_store_entity_during_connection_loss() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        // This test verifies behavior when Postgres becomes unavailable
-        // In practice, we'd stop the container mid-operation, but that's complex
-        // Instead, we verify that invalid connections are detected
-        let config = create_storage_config(6334, 6333, 9999, "test");
+        let config = create_storage_config(6334, 6333, 9999, "test", "codesearch");
         let result = create_postgres_client(&config).await;
 
         assert!(
@@ -92,7 +101,7 @@ async fn test_store_entity_during_connection_loss() -> Result<()> {
 #[tokio::test]
 async fn test_concurrent_writes_same_entity() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -100,7 +109,6 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
             .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
-        // Create entity with same ID for concurrent updates
         let entity_id = format!("concurrent_entity_{}", Uuid::new_v4());
         let entity1 = {
             let mut e =
@@ -141,7 +149,6 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         assert!(result1.is_ok(), "First concurrent write should succeed");
         assert!(result2.is_ok(), "Second concurrent write should succeed");
 
-        // Verify only one entity exists
         let entities = client
             .get_entities_by_ids(&[(repository_id, entity_id)])
             .await?;
@@ -151,6 +158,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
             "Should have exactly one entity (upserted)"
         );
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -159,7 +167,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
 #[tokio::test]
 async fn test_concurrent_snapshot_updates() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -194,13 +202,13 @@ async fn test_concurrent_snapshot_updates() -> Result<()> {
             assert!(result.is_ok(), "Concurrent snapshot updates should succeed");
         }
 
-        // Verify snapshot exists
         let snapshot = client.get_file_snapshot(repository_id, "main.rs").await?;
         assert!(
             snapshot.is_some(),
             "Snapshot should exist after concurrent updates"
         );
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -209,7 +217,7 @@ async fn test_concurrent_snapshot_updates() -> Result<()> {
 #[tokio::test]
 async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -234,6 +242,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
             "Deleting non-existent entities should not error"
         );
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -242,7 +251,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
 #[tokio::test]
 async fn test_get_entities_by_ids_some_missing() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -250,7 +259,6 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
             .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
-        // Store 3 entities
         let entities: Vec<_> = (0..3)
             .map(|i| {
                 create_test_entity(
@@ -285,6 +293,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
             "Should return only existing entities (no error for missing)"
         );
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -293,7 +302,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
 #[tokio::test]
 async fn test_outbox_concurrent_writes() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -341,12 +350,12 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
         let unique_ids: std::collections::HashSet<_> = outbox_ids.iter().collect();
         assert_eq!(unique_ids.len(), 10, "All outbox IDs should be unique");
 
-        // Verify all are retrievable
         let entries = client
             .get_unprocessed_outbox_entries(TargetStore::Qdrant, 20)
             .await?;
         assert_eq!(entries.len(), 10, "Should retrieve all 10 entries");
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -355,7 +364,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
 #[tokio::test]
 async fn test_outbox_mark_processed_twice() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
@@ -363,7 +372,6 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
             .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
-        // Create entity and write outbox entry atomically using batch API
         let entity =
             create_test_entity("entity1", EntityType::Function, &repository_id.to_string());
         let embedding = vec![0.1_f32; 384];
@@ -393,7 +401,6 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
             "Marking processed twice should be idempotent"
         );
 
-        // Verify still processed
         let entries = client
             .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
             .await?;
@@ -403,6 +410,7 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
             "Entry should still be marked processed"
         );
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -411,14 +419,13 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
 #[tokio::test]
 async fn test_migration_already_applied() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
-        let (_postgres, client) = setup_postgres().await?;
+        let (postgres, db_name, client) = setup_postgres().await?;
 
         // Migrations already run in setup
         // Run them again - should be idempotent
         let result = client.run_migrations().await;
         assert!(result.is_ok(), "Re-running migrations should be idempotent");
 
-        // Verify schema still works
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
@@ -427,6 +434,7 @@ async fn test_migration_already_applied() -> Result<()> {
 
         assert!(!repository_id.is_nil(), "Schema should still be functional");
 
+        drop_test_database(postgres, &db_name).await?;
         Ok(())
     })
     .await

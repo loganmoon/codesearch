@@ -3,6 +3,8 @@
 //! This module provides the main file watcher using the notify crate
 //! with cross-platform support and comprehensive error handling.
 
+#![allow(dead_code)]
+
 use crate::{
     config::{RecoveryConfig, WatcherConfig},
     debouncer::EventDebouncer,
@@ -65,11 +67,6 @@ impl FileWatcher {
 
     /// Initialize Git integration for the given path
     pub async fn init_git(&mut self, path: &Path) -> Result<()> {
-        if !self.config.branch_strategy.is_enabled() {
-            info!("Git integration disabled by configuration");
-            return Ok(());
-        }
-
         match GitRepository::open(path) {
             Ok(repo) => {
                 info!("Initialized Git repository at {:?}", repo.root_path());
@@ -301,8 +298,6 @@ impl FileWatcher {
 
     /// Start monitoring for branch changes
     fn start_branch_monitor(&self, branch_watcher: Arc<RwLock<BranchWatcher>>) {
-        let config = Arc::clone(&self.config);
-
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
 
@@ -313,11 +308,8 @@ impl FileWatcher {
                 match watcher.has_branch_changed().await {
                     Ok(Some(change)) => {
                         info!("Branch changed from {} to {}", change.from, change.to);
-
-                        if config.branch_strategy.should_index_current() {
-                            // TODO: Trigger reindexing
-                            debug!("Would trigger reindexing for branch change");
-                        }
+                        // TODO: Trigger reindexing
+                        debug!("Would trigger reindexing for branch change");
                     }
                     Ok(None) => {
                         // No change

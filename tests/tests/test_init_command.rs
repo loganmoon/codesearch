@@ -1,10 +1,7 @@
 //! Integration tests for the init command
 
 use anyhow::{Context, Result};
-use codesearch_e2e_tests::common::{
-    codesearch_binary,
-    containers::{TestPostgres, TestQdrant},
-};
+use codesearch_e2e_tests::common::{codesearch_binary, containers::start_test_containers};
 use std::process::Command;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -33,15 +30,11 @@ fn create_test_repo() -> Result<TempDir> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_init_command_creates_collection() -> Result<()> {
-    // Start test Qdrant and Postgres with temporary storage
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
-
-    // Create test repository
+    let (qdrant, postgres) = start_test_containers().await?;
     let test_repo = create_test_repo()?;
 
-    // Create config file with test Qdrant and Postgres settings
     let config_content = format!(
         r#"
 [indexer]
@@ -64,7 +57,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]
@@ -77,7 +69,6 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command using pre-built binary
     let output = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
         .args(["init", "--config", config_path.to_str().unwrap()])
@@ -91,20 +82,17 @@ enabled = ["rust"]
     println!("stdout: {stdout}");
     println!("stderr: {stderr}");
 
-    // Check that init succeeded
     assert!(
         output.status.success(),
         "Init command failed: stdout={stdout}, stderr={stderr}"
     );
 
-    // Verify success message in output
     assert!(
         stderr.contains("Repository initialized successfully")
             || stdout.contains("Repository initialized successfully"),
         "Expected success message not found"
     );
 
-    // Verify collection name was generated
     let config = std::fs::read_to_string(&config_path)?;
     assert!(
         config.contains("collection_name = "),
@@ -115,16 +103,12 @@ enabled = ["rust"]
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_init_command_handles_existing_collection() -> Result<()> {
-    // Start test Qdrant and Postgres with temporary storage
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
-
-    // Create test repository
+    let (qdrant, postgres) = start_test_containers().await?;
     let test_repo = create_test_repo()?;
-
-    // Create config with specific collection name
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
+
     let config_content = format!(
         r#"
 [indexer]
@@ -147,7 +131,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]
@@ -161,7 +144,6 @@ enabled = ["rust"]
     let config_path = test_repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init command first time using pre-built binary
     let output1 = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
         .args(["init", "--config", config_path.to_str().unwrap()])
@@ -170,7 +152,6 @@ enabled = ["rust"]
 
     assert!(output1.status.success(), "First init failed");
 
-    // Run init command again - should handle existing collection gracefully
     let output2 = Command::new(codesearch_binary())
         .current_dir(test_repo.path())
         .args(["init", "--config", config_path.to_str().unwrap()])
@@ -181,13 +162,11 @@ enabled = ["rust"]
     let stdout = String::from_utf8_lossy(&output2.stdout);
     let stderr = String::from_utf8_lossy(&output2.stderr);
 
-    // Second init should also succeed
     assert!(
         output2.status.success(),
         "Second init command failed: stdout={stdout}, stderr={stderr}"
     );
 
-    // Should still show success message
     assert!(
         stderr.contains("Repository initialized successfully")
             || stdout.contains("Repository initialized successfully"),

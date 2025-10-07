@@ -14,8 +14,8 @@ use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::entities::EntityType;
 use codesearch_embeddings::EmbeddingManager;
+use codesearch_indexer::{Indexer, RepositoryIndexer};
 use codesearch_storage::{create_collection_manager, create_storage_client, SearchFilters};
-use indexer::{Indexer, RepositoryIndexer};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +28,40 @@ fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProvid
         "mock" => codesearch_embeddings::EmbeddingProviderType::Mock,
         _ => codesearch_embeddings::EmbeddingProviderType::LocalApi, // Default to LocalApi
     }
+}
+
+/// Helper function to create an embedding manager from configuration
+async fn create_embedding_manager(config: &Config) -> Result<Arc<EmbeddingManager>> {
+    let mut embeddings_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
+        .provider(parse_provider_type(&config.embeddings.provider))
+        .model(config.embeddings.model.clone())
+        .batch_size(config.embeddings.batch_size)
+        .embedding_dimension(config.embeddings.embedding_dimension)
+        .device(match config.embeddings.device.as_str() {
+            "cuda" => codesearch_embeddings::DeviceType::Cuda,
+            _ => codesearch_embeddings::DeviceType::Cpu,
+        });
+
+    if let Some(ref api_base_url) = config.embeddings.api_base_url {
+        embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = config
+        .embeddings
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        embeddings_config_builder = embeddings_config_builder.api_key(key);
+    }
+
+    let embeddings_config = embeddings_config_builder.build();
+
+    let embedding_manager = codesearch_embeddings::EmbeddingManager::from_config(embeddings_config)
+        .await
+        .context("Failed to create embedding manager")?;
+
+    Ok(Arc::new(embedding_manager))
 }
 
 #[derive(Parser)]
@@ -51,16 +85,8 @@ struct Cli {
 enum Commands {
     /// Initialize codesearch in the current repository
     Init,
-    /// Start the MCP (Model Context Protocol) server for client integration
-    Serve {
-        /// Port to bind to
-        #[arg(short, long, default_value = "8699")]
-        port: u16,
-
-        /// Host to bind to
-        #[arg(long, default_value = "localhost")]
-        host: String,
-    },
+    /// Start MCP server with semantic code search
+    Serve,
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -125,12 +151,12 @@ async fn main() -> Result<()> {
     // Execute commands
     match cli.command {
         Some(Commands::Init) => init_repository(cli.config.as_deref()).await,
-        Some(Commands::Serve { port, host }) => {
+        Some(Commands::Serve) => {
             // Find repository root
             let repo_root = find_repository_root()?;
             // Load configuration
             let config = load_config(&repo_root, cli.config.as_deref()).await?;
-            serve(config, host, port).await
+            serve(config).await
         }
         Some(Commands::Index { force, progress }) => {
             // Find repository root
@@ -255,34 +281,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
     }
 
     // Create embedding manager to get dimensions
-    let mut embeddings_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
-        .provider(parse_provider_type(&config.embeddings.provider))
-        .model(config.embeddings.model.clone())
-        .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension)
-        .device(match config.embeddings.device.as_str() {
-            "cuda" => codesearch_embeddings::DeviceType::Cuda,
-            _ => codesearch_embeddings::DeviceType::Cpu,
-        });
-
-    if let Some(ref api_base_url) = config.embeddings.api_base_url {
-        embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());
-    }
-
-    let api_key = config
-        .embeddings
-        .api_key
-        .clone()
-        .or_else(|| std::env::var("VLLM_API_KEY").ok());
-    if let Some(key) = api_key {
-        embeddings_config_builder = embeddings_config_builder.api_key(key);
-    }
-
-    let embeddings_config = embeddings_config_builder.build();
-
-    let embedding_manager = codesearch_embeddings::EmbeddingManager::from_config(embeddings_config)
-        .await
-        .context("Failed to create embedding manager")?;
+    let embedding_manager = create_embedding_manager(&config).await?;
 
     // Get embedding dimensions from the provider
     let dimensions = embedding_manager.provider().embedding_dimension();
@@ -420,10 +419,10 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
 }
 
 /// Start the MCP server
-async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
+async fn serve(config: Config) -> Result<()> {
     info!("Checking dependencies...");
 
-    // Ensure dependencies are running
+    // Determine if vLLM is needed based on provider type
     let api_base_url = if parse_provider_type(&config.embeddings.provider)
         == codesearch_embeddings::EmbeddingProviderType::LocalApi
     {
@@ -431,14 +430,16 @@ async fn serve(config: Config, _host: String, _port: u16) -> Result<()> {
     } else {
         None
     };
+
+    // Ensure Docker dependencies are running
     docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
 
-    println!("🚀 Starting MCP server on stdio...");
+    info!("Starting MCP server...");
 
-    // TODO: Initialize storage connection
-    // TODO: Start MCP server on stdio
-
-    todo!("MCP server implementation")
+    // Delegate to server crate
+    codesearch_server::run_server(config)
+        .await
+        .map_err(|e| anyhow!("MCP server error: {e}"))
 }
 
 /// Index the repository
@@ -476,35 +477,7 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     }
 
     // Step 3: Create embedding manager
-    let mut embedding_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
-        .provider(parse_provider_type(&config.embeddings.provider))
-        .model(config.embeddings.model.clone())
-        .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension)
-        .device(match config.embeddings.device.as_str() {
-            "cuda" => codesearch_embeddings::DeviceType::Cuda,
-            _ => codesearch_embeddings::DeviceType::Cpu,
-        });
-
-    if let Some(ref api_base_url) = config.embeddings.api_base_url {
-        embedding_config_builder = embedding_config_builder.api_base_url(api_base_url.clone());
-    }
-
-    let api_key = config
-        .embeddings
-        .api_key
-        .clone()
-        .or_else(|| std::env::var("VLLM_API_KEY").ok());
-    if let Some(key) = api_key {
-        embedding_config_builder = embedding_config_builder.api_key(key);
-    }
-
-    let embedding_config = embedding_config_builder.build();
-    let embedding_manager = Arc::new(
-        EmbeddingManager::from_config(embedding_config)
-            .await
-            .context("Failed to create embedding manager")?,
-    );
+    let embedding_manager = create_embedding_manager(&config).await?;
 
     // Step 4: Create postgres client (required for Phase 4+)
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
@@ -629,33 +602,9 @@ async fn search_code(
         .context("Failed to create storage client")?;
 
     // Step 4: Create embedding manager
-    let mut embedding_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
-        .provider(parse_provider_type(&config.embeddings.provider))
-        .model(config.embeddings.model.clone())
-        .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension)
-        .device(match config.embeddings.device.as_str() {
-            "cuda" => codesearch_embeddings::DeviceType::Cuda,
-            _ => codesearch_embeddings::DeviceType::Cpu,
-        });
-
-    if let Some(ref api_base_url) = config.embeddings.api_base_url {
-        embedding_config_builder = embedding_config_builder.api_base_url(api_base_url.clone());
-    }
-
-    let api_key = config
-        .embeddings
-        .api_key
-        .clone()
-        .or_else(|| std::env::var("VLLM_API_KEY").ok());
-    if let Some(key) = api_key {
-        embedding_config_builder = embedding_config_builder.api_key(key);
-    }
-
-    let embedding_config = embedding_config_builder.build();
-    let embedding_manager = EmbeddingManager::from_config(embedding_config)
-        .await
-        .context("Failed to create embedding manager")?;
+    let embedding_manager = create_embedding_manager(&config).await?;
+    let embedding_manager =
+        Arc::into_inner(embedding_manager).ok_or_else(|| anyhow!("Failed to unwrap Arc"))?;
 
     // Step 5: Generate query embedding
     let query_embeddings = embedding_manager

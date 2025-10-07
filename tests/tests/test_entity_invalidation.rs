@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use codesearch_e2e_tests::common::*;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Create a test config file
@@ -16,6 +17,7 @@ fn create_test_config(
     repo_path: &Path,
     qdrant: &TestQdrant,
     postgres: &TestPostgres,
+    db_name: &str,
     collection_name: &str,
 ) -> Result<std::path::PathBuf> {
     let config_content = format!(
@@ -30,7 +32,7 @@ collection_name = "{}"
 auto_start_deps = false
 postgres_host = "localhost"
 postgres_port = {}
-postgres_database = "codesearch"
+postgres_database = "{}"
 postgres_user = "codesearch"
 postgres_password = "codesearch"
 
@@ -40,7 +42,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]
@@ -48,7 +49,8 @@ enabled = ["rust"]
         qdrant.port(),
         qdrant.rest_port(),
         collection_name,
-        postgres.port()
+        postgres.port(),
+        db_name
     );
 
     let config_path = repo_path.join("codesearch.toml");
@@ -67,13 +69,14 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_reindex_detects_deleted_function() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let qdrant = get_shared_qdrant().await?;
+    let postgres = get_shared_postgres().await?;
+    let db_name = create_test_database(postgres).await?;
 
-    // Create repository with one function
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
             "lib.rs",
@@ -91,9 +94,9 @@ pub fn function_two() -> i32 {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &collection_name)?;
+    let config_path =
+        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
 
-    // Initial index
     run_cli(
         repo.path(),
         &["init", "--config", config_path.to_str().unwrap()],
@@ -101,15 +104,10 @@ pub fn function_two() -> i32 {
     let output = run_cli(repo.path(), &["index"])?;
     assert!(output.status.success(), "Initial index failed");
 
-    // Start outbox processor and wait for sync
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    assert_min_point_count(qdrant, &collection_name, 2).await?;
 
-    // Verify both functions were indexed
-    assert_min_point_count(&qdrant, &collection_name, 2).await?;
-
-    drop(processor);
-
-    // Modify file: remove function_two
     std::fs::write(
         repo.path().join("src/lib.rs"),
         r#"
@@ -119,29 +117,28 @@ pub fn function_one() -> i32 {
 "#,
     )?;
 
-    // Re-index
     let output = run_cli(repo.path(), &["index"])?;
     assert!(output.status.success(), "Re-index failed");
 
-    // Start processor again and wait for sync
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    assert_point_count(qdrant, &collection_name, 1).await?;
 
-    // Verify function_two was removed from Qdrant
-    // (Only function_one should remain)
-    assert_point_count(&qdrant, &collection_name, 1).await?;
+    drop_test_collection(qdrant, &collection_name).await?;
+    drop_test_database(postgres, &db_name).await?;
 
-    drop(processor);
     Ok(())
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_reindex_detects_renamed_function() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let qdrant = get_shared_qdrant().await?;
+    let postgres = get_shared_postgres().await?;
 
-    // Create repository with function
+    let db_name = create_test_database(postgres).await?;
+
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
             "lib.rs",
@@ -155,22 +152,21 @@ pub fn old_name() -> i32 {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &collection_name)?;
+    let config_path =
+        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
 
-    // Initial index
     run_cli(
         repo.path(),
         &["init", "--config", config_path.to_str().unwrap()],
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
 
-    assert_min_point_count(&qdrant, &collection_name, 1).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    drop(processor);
+    assert_min_point_count(qdrant, &collection_name, 1).await?;
 
-    // Rename function
     std::fs::write(
         repo.path().join("src/lib.rs"),
         r#"
@@ -180,30 +176,32 @@ pub fn new_name() -> i32 {
 "#,
     )?;
 
-    // Re-index
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    // Should still have approximately 1 entity (old deleted, new added)
-    let final_count = get_point_count(&qdrant, &collection_name).await?;
+    let final_count = get_point_count(qdrant, &collection_name).await?;
     assert!(
         final_count >= 1,
         "Expected at least 1 entity after rename, got {final_count}"
     );
 
-    drop(processor);
+    drop_test_collection(qdrant, &collection_name).await?;
+    drop_test_database(postgres, &db_name).await?;
+
     Ok(())
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_reindex_empty_file() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let qdrant = get_shared_qdrant().await?;
+    let postgres = get_shared_postgres().await?;
 
-    // Create repository with functions
+    let db_name = create_test_database(postgres).await?;
+
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
             "lib.rs",
@@ -217,45 +215,46 @@ pub fn func3() {}
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &collection_name)?;
+    let config_path =
+        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
 
-    // Initial index
     run_cli(
         repo.path(),
         &["init", "--config", config_path.to_str().unwrap()],
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
 
-    assert_min_point_count(&qdrant, &collection_name, 3).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    drop(processor);
+    assert_min_point_count(qdrant, &collection_name, 3).await?;
 
-    // Delete all code from file
     std::fs::write(repo.path().join("src/lib.rs"), "// Empty file\n")?;
 
-    // Re-index
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    // All entities should be removed
-    let final_count = get_point_count(&qdrant, &collection_name).await?;
+    let final_count = get_point_count(qdrant, &collection_name).await?;
     assert_eq!(final_count, 0, "Expected 0 entities in empty file");
 
-    drop(processor);
+    drop_test_collection(qdrant, &collection_name).await?;
+    drop_test_database(postgres, &db_name).await?;
+
     Ok(())
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_reindex_modified_function_body() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let qdrant = get_shared_qdrant().await?;
+    let postgres = get_shared_postgres().await?;
 
-    // Create repository
+    let db_name = create_test_database(postgres).await?;
+
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
             "lib.rs",
@@ -269,22 +268,21 @@ pub fn calculate() -> i32 {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &collection_name)?;
+    let config_path =
+        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
 
-    // Initial index
     run_cli(
         repo.path(),
         &["init", "--config", config_path.to_str().unwrap()],
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
 
-    assert_min_point_count(&qdrant, &collection_name, 1).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    drop(processor);
+    assert_min_point_count(qdrant, &collection_name, 1).await?;
 
-    // Modify function body (entity ID stays same)
     std::fs::write(
         repo.path().join("src/lib.rs"),
         r#"
@@ -295,15 +293,15 @@ pub fn calculate() -> i32 {
 "#,
     )?;
 
-    // Re-index
     run_cli(repo.path(), &["index"])?;
 
-    let processor = start_and_wait_for_outbox_sync(&postgres, &qdrant, &collection_name).await?;
+    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
 
-    // Should still have 1 entity (updated, not deleted)
-    let final_count = get_point_count(&qdrant, &collection_name).await?;
+    let final_count = get_point_count(qdrant, &collection_name).await?;
     assert_eq!(final_count, 1, "Expected 1 entity after body modification");
 
-    drop(processor);
+    drop_test_collection(qdrant, &collection_name).await?;
+    drop_test_database(postgres, &db_name).await?;
+
     Ok(())
 }

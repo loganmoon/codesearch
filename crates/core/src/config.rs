@@ -68,10 +68,6 @@ pub struct WatcherConfig {
     /// Patterns to ignore
     #[serde(default = "default_ignore_patterns")]
     pub ignore_patterns: Vec<String>,
-
-    /// Branch strategy: "index_current", "index_all", "track_changes"
-    #[serde(default = "default_branch_strategy")]
-    pub branch_strategy: String,
 }
 
 /// Configuration for storage backend
@@ -194,10 +190,6 @@ fn default_embedding_dimension() -> usize {
     1536
 }
 
-fn default_branch_strategy() -> String {
-    "index_current".to_string()
-}
-
 fn default_true() -> bool {
     true
 }
@@ -270,7 +262,6 @@ impl Default for WatcherConfig {
         Self {
             debounce_ms: default_debounce_ms(),
             ignore_patterns: default_ignore_patterns(),
-            branch_strategy: default_branch_strategy(),
         }
     }
 }

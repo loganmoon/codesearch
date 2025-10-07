@@ -5,11 +5,18 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 /// Global registry of test resources for cleanup
 static RESOURCE_REGISTRY: Mutex<Option<ResourceRegistry>> = Mutex::new(None);
 static INIT_CLEANUP: Once = Once::new();
+
+/// Global shared Qdrant instance for all tests (Phase 2 optimization)
+static SHARED_QDRANT: OnceCell<TestQdrant> = OnceCell::const_new();
+
+/// Global shared Postgres instance for all tests (Phase 2 optimization)
+static SHARED_POSTGRES: OnceCell<TestPostgres> = OnceCell::const_new();
 
 struct ResourceRegistry {
     container_names: Vec<String>,
@@ -182,6 +189,7 @@ impl TestPostgres {
             .ok_or_else(|| anyhow::anyhow!("No available port for Postgres"))?;
 
         // Start Postgres container
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -189,7 +197,7 @@ impl TestPostgres {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:5432"),
+                &format!("127.0.0.1:{port}:5432"),
                 "-e",
                 "POSTGRES_DB=codesearch",
                 "-e",
@@ -248,7 +256,7 @@ impl TestPostgres {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:5432"),
+                &format!("127.0.0.1:{port}:5432"),
                 "-e",
                 "POSTGRES_DB=codesearch",
                 "-e",
@@ -298,13 +306,15 @@ impl TestPostgres {
         self.port
     }
 
-    /// Wait for Postgres to become healthy
+    /// Wait for Postgres to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 30;
-        let delay = Duration::from_millis(100);
+        let max_attempts = 20;
+        let initial_delay = Duration::from_millis(10);
+        let max_delay = Duration::from_millis(500);
+
+        let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
-            // Check if container is still running
             let status = Command::new("docker")
                 .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
                 .output()
@@ -318,7 +328,6 @@ impl TestPostgres {
                 return Err(anyhow::anyhow!("Container stopped unexpectedly"));
             }
 
-            // Try to connect to Postgres
             let connection_string = format!(
                 "postgresql://codesearch:codesearch@localhost:{}/codesearch",
                 self.port
@@ -332,6 +341,7 @@ impl TestPostgres {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay * 2, max_delay);
             }
         }
 
@@ -377,6 +387,98 @@ impl Drop for TestPostgres {
     fn drop(&mut self) {
         self.cleanup();
     }
+}
+
+/// Start test containers in parallel for faster setup
+///
+/// This starts both Qdrant and Postgres containers concurrently,
+/// which is much faster than starting them sequentially.
+pub async fn start_test_containers() -> Result<(TestQdrant, TestPostgres)> {
+    let (qdrant_result, postgres_result) = tokio::join!(TestQdrant::start(), TestPostgres::start());
+
+    Ok((qdrant_result?, postgres_result?))
+}
+
+/// Get or create the shared Qdrant instance (Phase 2 optimization)
+///
+/// Returns a reference to a global shared Qdrant container that is created once
+/// and reused across all tests. Tests maintain isolation by using unique collection names.
+pub async fn get_shared_qdrant() -> Result<&'static TestQdrant> {
+    SHARED_QDRANT
+        .get_or_try_init(|| async {
+            eprintln!("🚀 Starting shared Qdrant instance for all tests...");
+            TestQdrant::start().await
+        })
+        .await
+}
+
+/// Get or create the shared Postgres instance (Phase 2 optimization)
+///
+/// Returns a reference to a global shared Postgres container that is created once
+/// and reused across all tests. Tests maintain isolation by creating unique databases.
+pub async fn get_shared_postgres() -> Result<&'static TestPostgres> {
+    SHARED_POSTGRES
+        .get_or_try_init(|| async {
+            eprintln!("🚀 Starting shared Postgres instance for all tests...");
+            TestPostgres::start().await
+        })
+        .await
+}
+
+/// Create an isolated test database in the shared Postgres instance
+///
+/// Each test gets its own database to maintain isolation while sharing the container.
+/// The database name includes a UUID to ensure uniqueness.
+pub async fn create_test_database(postgres: &TestPostgres) -> Result<String> {
+    let db_name = format!("test_db_{}", Uuid::new_v4().simple());
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        postgres.port()
+    );
+
+    let pool = sqlx::PgPool::connect(&connection_url).await?;
+    sqlx::query(&format!("CREATE DATABASE {db_name}"))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok(db_name)
+}
+
+/// Drop a test database from the shared Postgres instance
+///
+/// Terminates all connections to the database before dropping it to avoid errors.
+pub async fn drop_test_database(postgres: &TestPostgres, db_name: &str) -> Result<()> {
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        postgres.port()
+    );
+
+    let pool = sqlx::PgPool::connect(&connection_url).await?;
+
+    // Terminate all connections to the database first
+    sqlx::query(&format!(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}'"
+    ))
+    .execute(&pool)
+    .await?;
+
+    // Now drop the database
+    sqlx::query(&format!("DROP DATABASE IF EXISTS {db_name}"))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok(())
+}
+
+/// Clean up a test collection from Qdrant
+///
+/// Deletes the collection to clean up after a test while keeping the container running.
+pub async fn drop_test_collection(qdrant: &TestQdrant, collection_name: &str) -> Result<()> {
+    let url = format!("{}/collections/{collection_name}", qdrant.rest_url());
+    let _ = reqwest::Client::new().delete(&url).send().await?;
+    Ok(())
 }
 
 /// Pool of test Postgres containers for concurrent testing
@@ -450,6 +552,7 @@ impl TestQdrant {
 
         // Start Qdrant container with temporary storage using unprivileged image
         // This runs as a non-root user, so cleanup won't require sudo
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -457,9 +560,9 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:6334"),
+                &format!("127.0.0.1:{port}:6334"),
                 "-p",
-                &format!("{rest_port}:6333"),
+                &format!("127.0.0.1:{rest_port}:6333"),
                 "-v",
                 &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant:latest-unprivileged",
@@ -520,6 +623,7 @@ impl TestQdrant {
             .with_context(|| format!("Failed to create temp directory: {temp_dir_name}"))?;
 
         // Start Qdrant container with pre-allocated ports
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -527,9 +631,9 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:6334"),
+                &format!("127.0.0.1:{port}:6334"),
                 "-p",
-                &format!("{rest_port}:6333"),
+                &format!("127.0.0.1:{rest_port}:6333"),
                 "-v",
                 &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant:latest-unprivileged",
@@ -591,13 +695,15 @@ impl TestQdrant {
         format!("http://localhost:{}", self.rest_port)
     }
 
-    /// Wait for Qdrant to become healthy
+    /// Wait for Qdrant to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 30;
-        let delay = Duration::from_millis(100);
+        let max_attempts = 20;
+        let initial_delay = Duration::from_millis(10);
+        let max_delay = Duration::from_millis(500);
+
+        let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
-            // Check if container is still running
             let status = Command::new("docker")
                 .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
                 .output()
@@ -611,7 +717,6 @@ impl TestQdrant {
                 return Err(anyhow::anyhow!("Container stopped unexpectedly"));
             }
 
-            // Try to connect to health endpoint
             let health_url = format!("{}/healthz", self.rest_url());
             if let Ok(response) = reqwest::get(&health_url).await {
                 if response.status().is_success() {
@@ -621,6 +726,7 @@ impl TestQdrant {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay * 2, max_delay);
             }
         }
 
@@ -760,6 +866,7 @@ impl TestOutboxProcessor {
     pub fn start(
         postgres: &TestPostgres,
         qdrant: &TestQdrant,
+        db_name: &str,
         collection_name: &str,
     ) -> Result<Self> {
         // Ensure the Docker image is built (thread-safe, happens only once)
@@ -767,38 +874,43 @@ impl TestOutboxProcessor {
 
         let container_name = format!("outbox-processor-test-{}", Uuid::new_v4());
 
-        // Start container with connection to host services
-        // Use host.docker.internal to access services running on the host
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "--add-host",
-                "host.docker.internal:host-gateway",
-                "-e",
-                "POSTGRES_HOST=host.docker.internal",
-                "-e",
-                &format!("POSTGRES_PORT={}", postgres.port()),
-                "-e",
-                "POSTGRES_DATABASE=codesearch",
-                "-e",
-                "POSTGRES_USER=codesearch",
-                "-e",
-                "POSTGRES_PASSWORD=codesearch",
-                "-e",
-                "QDRANT_HOST=host.docker.internal",
-                "-e",
-                &format!("QDRANT_PORT={}", qdrant.port()),
-                "-e",
-                &format!("QDRANT_REST_PORT={}", qdrant.rest_port()),
-                "-e",
-                &format!("QDRANT_COLLECTION={collection_name}"),
-                "-e",
-                "RUST_LOG=debug",
-                "codesearch-outbox:test",
-            ])
+        // On Linux, use --network host to access localhost services
+        // On macOS/Windows, use host.docker.internal
+        let mut cmd = Command::new("docker");
+        cmd.args(["run", "-d", "--name", &container_name]);
+
+        let host = if cfg!(target_os = "linux") {
+            cmd.arg("--network").arg("host");
+            "localhost"
+        } else {
+            cmd.arg("--add-host")
+                .arg("host.docker.internal:host-gateway");
+            "host.docker.internal"
+        };
+
+        cmd.arg("-e")
+            .arg(format!("POSTGRES_HOST={host}"))
+            .arg("-e")
+            .arg(format!("POSTGRES_PORT={}", postgres.port()))
+            .arg("-e")
+            .arg(format!("POSTGRES_DATABASE={db_name}"))
+            .arg("-e")
+            .arg("POSTGRES_USER=codesearch")
+            .arg("-e")
+            .arg("POSTGRES_PASSWORD=codesearch")
+            .arg("-e")
+            .arg(format!("QDRANT_HOST={host}"))
+            .arg("-e")
+            .arg(format!("QDRANT_PORT={}", qdrant.port()))
+            .arg("-e")
+            .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()))
+            .arg("-e")
+            .arg(format!("QDRANT_COLLECTION={collection_name}"))
+            .arg("-e")
+            .arg("RUST_LOG=debug")
+            .arg("codesearch-outbox:test");
+
+        let output = cmd
             .output()
             .context("Failed to start outbox processor container")?;
 
@@ -863,11 +975,28 @@ impl TestOutboxProcessor {
 ///
 /// Polls the outbox table every 100ms until all unprocessed entries are gone
 /// or the timeout is reached.
-pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -> Result<()> {
+pub async fn wait_for_outbox_empty(
+    postgres: &TestPostgres,
+    db_name: &str,
+    timeout: Duration,
+) -> Result<()> {
+    wait_for_outbox_empty_with_processor(postgres, db_name, timeout, None).await
+}
+
+/// Wait for the outbox table to be empty, with optional processor for debugging
+///
+/// Uses adaptive polling: starts with fast polling (50ms) and gradually backs off
+/// to slower intervals (500ms max) to optimize for both fast response and low overhead.
+async fn wait_for_outbox_empty_with_processor(
+    postgres: &TestPostgres,
+    db_name: &str,
+    timeout: Duration,
+    processor: Option<&TestOutboxProcessor>,
+) -> Result<()> {
     use sqlx::PgPool;
 
     let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/codesearch",
+        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
         postgres.port()
     );
 
@@ -876,7 +1005,16 @@ pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -
         .context("Failed to connect to Postgres for outbox polling")?;
 
     let start = std::time::Instant::now();
-    let poll_interval = Duration::from_millis(100);
+
+    // Adaptive polling intervals: check frequently at first, then back off
+    let poll_intervals = [
+        Duration::from_millis(10),  // First few checks: very fast
+        Duration::from_millis(50),  // Next checks: fast
+        Duration::from_millis(100), // Later checks: normal
+        Duration::from_millis(200), // Final checks: slower
+    ];
+
+    let mut interval_idx = 0;
 
     loop {
         let count: i64 =
@@ -892,31 +1030,63 @@ pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -
 
         if start.elapsed() >= timeout {
             pool.close().await;
+
+            // Dump processor logs if available for debugging
+            if let Some(proc) = processor {
+                eprintln!("\n=== OUTBOX PROCESSOR LOGS ===");
+                eprintln!("{}", proc.get_logs());
+                eprintln!("=== END PROCESSOR LOGS ===\n");
+            }
+
             return Err(anyhow::anyhow!(
                 "Timeout waiting for outbox to be empty. {count} unprocessed entries remain after {timeout:?}"
             ));
         }
 
-        tokio::time::sleep(poll_interval).await;
+        let current_interval = poll_intervals[interval_idx];
+        tokio::time::sleep(current_interval).await;
+
+        if interval_idx < poll_intervals.len() - 1 {
+            interval_idx += 1;
+        }
     }
 }
 
 /// Start an outbox processor and wait for it to sync all pending entries
 ///
 /// This is a convenience function that starts the processor and waits for
-/// the outbox table to be empty with a 10-second timeout
+/// the outbox table to be empty with a 15-second timeout using adaptive polling.
+/// No fixed sleep is needed - adaptive polling handles varying startup times efficiently.
 pub async fn start_and_wait_for_outbox_sync(
     postgres: &TestPostgres,
     qdrant: &TestQdrant,
     collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
+    // Use default database name for backward compatibility
+    start_and_wait_for_outbox_sync_with_db(postgres, qdrant, "codesearch", collection_name).await
+}
 
-    // Give the processor a moment to start up
-    tokio::time::sleep(Duration::from_millis(100)).await;
+/// Start an outbox processor and wait for it to sync all pending entries (with custom database)
+///
+/// This variant allows specifying a custom database name for database isolation.
+/// Uses adaptive polling (50ms -> 500ms) to efficiently handle varying processor startup times.
+pub async fn start_and_wait_for_outbox_sync_with_db(
+    postgres: &TestPostgres,
+    qdrant: &TestQdrant,
+    db_name: &str,
+    collection_name: &str,
+) -> Result<TestOutboxProcessor> {
+    let processor = TestOutboxProcessor::start(postgres, qdrant, db_name, collection_name)?;
 
-    // Wait for outbox to be empty (10 second timeout)
-    wait_for_outbox_empty(postgres, Duration::from_secs(10)).await?;
+    // Wait for outbox to be empty (5 second timeout optimized for tests)
+    // with processor logs on failure
+    wait_for_outbox_empty_with_processor(
+        postgres,
+        db_name,
+        Duration::from_secs(5),
+        Some(&processor),
+    )
+    .await?;
 
     Ok(processor)
 }

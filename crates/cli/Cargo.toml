@@ -17,7 +17,8 @@ codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
-indexer = { path = "../indexer" }
+codesearch-server = { path = "../server" }
+codesearch-indexer = { path = "../indexer" }
 
 # CLI framework
 clap = { workspace = true }
@@ -38,9 +39,6 @@ toml = { workspace = true }
 
 # Progress indicators
 indicatif = { workspace = true }
-
-# MCP protocol support
-rmcp = { version = "0.6", features = ["server"] }
 
 # File system utilities
 glob = { workspace = true }

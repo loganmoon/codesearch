@@ -13,15 +13,30 @@ use std::path::PathBuf;
 
 // Private implementation modules
 mod common;
+mod entity_processor;
 mod git_provider;
 mod repository_indexer;
 mod types;
+
+// Public modules for file change processing
+pub mod catch_up_indexer;
+pub mod file_change_processor;
 
 // Re-export error types from core
 pub use codesearch_core::error::{Error, Result};
 
 // Re-export RepositoryIndexer for direct use
 pub use repository_indexer::RepositoryIndexer;
+
+// Re-export public functions and types
+pub use catch_up_indexer::{catch_up_from_git, CatchUpStats};
+pub use file_change_processor::{process_file_changes, ProcessingStats};
+
+use codesearch_watcher::FileChange;
+use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
+use tracing::error;
 
 /// Main trait for repository indexing
 #[async_trait]
@@ -221,4 +236,81 @@ pub fn create_indexer(
         postgres_client,
         git_repo,
     ))
+}
+
+/// Start watching for file changes and processing them in the background
+///
+/// Spawns a background task that consumes file change events from the watcher
+/// and processes them in batches.
+pub fn start_watching(
+    mut event_rx: Receiver<FileChange>,
+    repo_id: uuid::Uuid,
+    repo_root: PathBuf,
+    embedding_manager: Arc<codesearch_embeddings::EmbeddingManager>,
+    postgres_client: Arc<codesearch_storage::postgres::PostgresClient>,
+) -> JoinHandle<Result<()>> {
+    tokio::spawn(async move {
+        tracing::info!("File watcher indexer task started");
+
+        // Buffer for batching events
+        const BATCH_SIZE: usize = 10;
+        const BATCH_TIMEOUT_MS: u64 = 1000;
+
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+
+        loop {
+            let mut timeout = Box::pin(tokio::time::sleep(tokio::time::Duration::from_millis(
+                BATCH_TIMEOUT_MS,
+            )));
+
+            tokio::select! {
+                // Receive event
+                maybe_event = event_rx.recv() => {
+                    match maybe_event {
+                        Some(event) => {
+                            batch.push(event);
+
+                            // Process batch if full
+                            if batch.len() >= BATCH_SIZE {
+                                if let Err(e) = process_file_changes(
+                                    std::mem::take(&mut batch),
+                                    repo_id,
+                                    &repo_root,
+                                    &embedding_manager,
+                                    &postgres_client,
+                                )
+                                .await
+                                {
+                                    error!("Error processing file changes: {e}");
+                                }
+                            }
+                        }
+                        None => {
+                            tracing::info!("File watcher channel closed, stopping indexer task");
+                            break;
+                        }
+                    }
+                }
+
+                // Timeout - process partial batch
+                _ = &mut timeout => {
+                    if !batch.is_empty() {
+                        if let Err(e) = process_file_changes(
+                            std::mem::take(&mut batch),
+                            repo_id,
+                            &repo_root,
+                            &embedding_manager,
+                            &postgres_client,
+                        )
+                        .await
+                        {
+                            error!("Error processing file changes: {e}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    })
 }

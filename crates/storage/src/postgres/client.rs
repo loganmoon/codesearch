@@ -420,6 +420,33 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
+        // Pre-validate and convert entities to avoid unwrap in closure
+        let validated_entities: Result<Vec<_>> = entities
+            .iter()
+            .map(|(entity, embedding, op, point_id, target, git_commit)| {
+                let entity_json = serde_json::to_value(entity)
+                    .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
+
+                let file_path_str = entity
+                    .file_path
+                    .to_str()
+                    .ok_or_else(|| Error::storage("Invalid file path"))?;
+
+                Ok((
+                    entity,
+                    embedding,
+                    op,
+                    point_id,
+                    target,
+                    git_commit,
+                    entity_json,
+                    file_path_str,
+                ))
+            })
+            .collect();
+
+        let validated_entities = validated_entities?;
+
         // Build bulk insert for entity_metadata
         let mut entity_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_metadata (
@@ -430,18 +457,18 @@ impl PostgresClient {
         );
 
         entity_query.push_values(
-            entities,
-            |mut b, (entity, _embedding, _op, point_id, _target, git_commit)| {
-                let entity_json = serde_json::to_value(entity)
-                    .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))
-                    .unwrap();
-
-                let file_path_str = entity
-                    .file_path
-                    .to_str()
-                    .ok_or_else(|| Error::storage("Invalid file path"))
-                    .unwrap();
-
+            &validated_entities,
+            |mut b,
+             (
+                entity,
+                _embedding,
+                _op,
+                point_id,
+                _target,
+                git_commit,
+                entity_json,
+                file_path_str,
+            )| {
                 b.push_bind(&entity.entity_id)
                     .push_bind(repository_id)
                     .push_bind(&entity.qualified_name)
@@ -449,7 +476,7 @@ impl PostgresClient {
                     .push_bind(&entity.parent_scope)
                     .push_bind(format!("{:?}", entity.entity_type))
                     .push_bind(entity.language.to_string())
-                    .push_bind(file_path_str)
+                    .push_bind(*file_path_str)
                     .push_bind(format!("{:?}", entity.visibility))
                     .push_bind(entity_json)
                     .push_bind(git_commit)
@@ -622,6 +649,112 @@ impl PostgresClient {
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Get the last indexed commit for a repository
+    ///
+    /// Retrieves the commit hash of the most recently indexed commit for the specified repository.
+    /// This is used for incremental indexing to determine which commits need to be processed.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The UUID of the repository to query
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(String))` - The commit hash if a commit has been indexed
+    /// * `Ok(None)` - If no commits have been indexed yet
+    /// * `Err(_)` - If a database error occurred
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * The database connection fails
+    /// * The repository_id is invalid or not found
+    /// * A database query error occurs
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use uuid::Uuid;
+    /// # async fn example(client: &codesearch_storage::postgres::PostgresClient, repo_id: Uuid) -> codesearch_core::error::Result<()> {
+    /// let last_commit = client.get_last_indexed_commit(repo_id).await?;
+    /// if let Some(commit_hash) = last_commit {
+    ///     println!("Last indexed commit: {commit_hash}");
+    /// } else {
+    ///     println!("Repository has not been indexed yet");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let record: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT last_indexed_commit FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    Error::storage(format!(
+                        "Failed to get last indexed commit for repository {repository_id}: {e}"
+                    ))
+                })?;
+
+        Ok(record.and_then(|(commit,)| commit))
+    }
+
+    /// Set the last indexed commit for a repository
+    ///
+    /// Updates the last_indexed_commit field for the specified repository.
+    /// This should be called after successfully indexing a commit to track progress
+    /// and enable incremental indexing in subsequent runs.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The UUID of the repository to update
+    /// * `commit_hash` - The Git commit hash (SHA) that was just indexed
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If the update succeeded
+    /// * `Err(_)` - If a database error occurred
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// * The database connection fails
+    /// * The repository_id does not exist
+    /// * A database query error occurs
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use uuid::Uuid;
+    /// # async fn example(client: &codesearch_storage::postgres::PostgresClient, repo_id: Uuid) -> codesearch_core::error::Result<()> {
+    /// // After successfully indexing commit abc123...
+    /// client.set_last_indexed_commit(repo_id, "abc123def456...").await?;
+    /// println!("Updated last indexed commit");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_last_indexed_commit(
+        &self,
+        repository_id: Uuid,
+        commit_hash: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE repositories SET last_indexed_commit = $2, updated_at = NOW() WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .bind(commit_hash)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to set last indexed commit for repository {repository_id}: {e}"
+            ))
+        })?;
 
         Ok(())
     }

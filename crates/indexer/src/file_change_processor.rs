@@ -1,0 +1,227 @@
+//! File change processing for real-time indexing
+//!
+//! Processes file change events from the watcher in batches for optimal throughput.
+
+use crate::entity_processor;
+use crate::Result;
+use codesearch_core::error::Error;
+use codesearch_embeddings::EmbeddingManager;
+use codesearch_storage::postgres::PostgresClient;
+use codesearch_watcher::FileChange;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use tracing::{info, warn};
+use uuid::Uuid;
+
+/// Statistics for file change processing
+#[derive(Debug, Clone, Default)]
+pub struct ProcessingStats {
+    pub files_processed: usize,
+    pub files_failed: usize,
+    pub entities_added: usize,
+    pub entities_updated: usize,
+    pub entities_deleted: usize,
+}
+
+/// Process a batch of file changes (always batched, even if batch size is 1)
+pub async fn process_file_changes(
+    changes: Vec<FileChange>,
+    repo_id: Uuid,
+    repo_root: &Path,
+    embedding_manager: &Arc<EmbeddingManager>,
+    postgres_client: &Arc<PostgresClient>,
+) -> Result<ProcessingStats> {
+    if changes.is_empty() {
+        return Ok(ProcessingStats::default());
+    }
+
+    info!("Processing batch of {} file changes", changes.len());
+    let mut stats = ProcessingStats::default();
+
+    // Separate changes by type
+    let mut files_to_index = Vec::new();
+    let mut files_to_delete = Vec::new();
+    let mut renames = Vec::new();
+
+    for change in changes {
+        match change {
+            FileChange::Created(path, _) | FileChange::Modified(path, _) => {
+                files_to_index.push(path);
+            }
+            FileChange::Deleted(path) => {
+                files_to_delete.push(path);
+            }
+            FileChange::Renamed { from, to } => {
+                renames.push((from, to));
+            }
+            FileChange::PermissionsChanged(_) => {
+                // Ignore permission changes
+            }
+        }
+    }
+
+    // Handle renames (delete old, index new)
+    for (from, to) in renames {
+        let from_str = from
+            .to_str()
+            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+
+        if let Err(e) = entity_processor::mark_file_entities_deleted(
+            repo_id,
+            from_str,
+            postgres_client.as_ref(),
+        )
+        .await
+        {
+            warn!(
+                "Failed to handle rename deletion for {}: {}",
+                from.display(),
+                e
+            );
+            stats.files_failed += 1;
+        } else {
+            stats.entities_deleted += 1;
+        }
+        files_to_index.push(to);
+    }
+
+    // Process deletions
+    for path in files_to_delete {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+
+        match entity_processor::mark_file_entities_deleted(
+            repo_id,
+            path_str,
+            postgres_client.as_ref(),
+        )
+        .await
+        {
+            Ok(count) => {
+                stats.files_processed += 1;
+                stats.entities_deleted += count;
+            }
+            Err(e) => {
+                warn!("Failed to handle deletion for {}: {}", path.display(), e);
+                stats.files_failed += 1;
+            }
+        }
+    }
+
+    // Process files to index (in batch)
+    if !files_to_index.is_empty() {
+        match process_file_batch(
+            &files_to_index,
+            repo_id,
+            repo_root,
+            embedding_manager,
+            postgres_client,
+        )
+        .await
+        {
+            Ok(batch_stats) => {
+                stats.files_processed += batch_stats.files_processed;
+                stats.files_failed += batch_stats.files_failed;
+                stats.entities_added += batch_stats.entities_added;
+                stats.entities_updated += batch_stats.entities_updated;
+            }
+            Err(e) => {
+                warn!("Batch processing failed: {}", e);
+                stats.files_failed += files_to_index.len();
+            }
+        }
+    }
+
+    info!(
+        "Batch complete: {} processed, {} failed, {} entities added/updated, {} deleted",
+        stats.files_processed,
+        stats.files_failed,
+        stats.entities_added + stats.entities_updated,
+        stats.entities_deleted
+    );
+
+    Ok(stats)
+}
+
+/// Process a batch of files for indexing
+async fn process_file_batch(
+    file_paths: &[PathBuf],
+    repo_id: Uuid,
+    repo_root: &Path,
+    embedding_manager: &Arc<EmbeddingManager>,
+    postgres_client: &Arc<PostgresClient>,
+) -> Result<ProcessingStats> {
+    let mut stats = ProcessingStats::default();
+    let mut batch_entities = Vec::new();
+
+    // Extract entities from all files
+    for file_path in file_paths {
+        // Make path absolute relative to repo root
+        let absolute_path = if file_path.is_absolute() {
+            file_path.clone()
+        } else {
+            repo_root.join(file_path)
+        };
+
+        match entity_processor::extract_entities_from_file(&absolute_path, &repo_id.to_string())
+            .await
+        {
+            Ok(entities) => {
+                batch_entities.extend(entities);
+                stats.files_processed += 1;
+            }
+            Err(e) => {
+                warn!("Failed to extract from {}: {}", file_path.display(), e);
+                stats.files_failed += 1;
+            }
+        }
+    }
+
+    // Get git commit
+    let git_repo = codesearch_watcher::GitRepository::open(repo_root).ok();
+    let git_commit = git_repo
+        .as_ref()
+        .and_then(|repo| repo.current_commit_hash().ok());
+
+    // Process entities with embeddings using shared logic
+    let (batch_stats, entities_by_file) = entity_processor::process_entity_batch(
+        batch_entities,
+        repo_id,
+        git_commit.clone(),
+        embedding_manager,
+        postgres_client.as_ref(),
+    )
+    .await?;
+
+    stats.entities_added = batch_stats.entities_added;
+    stats.entities_updated = batch_stats.entities_updated;
+
+    // Update file snapshots and handle stale entities
+    for file_path in file_paths {
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+
+        let new_entity_ids = entities_by_file
+            .get(file_path_str)
+            .cloned()
+            .unwrap_or_default();
+
+        if let Err(e) = entity_processor::update_file_snapshot_and_mark_stale(
+            repo_id,
+            file_path_str,
+            new_entity_ids,
+            git_commit.clone(),
+            postgres_client.as_ref(),
+        )
+        .await
+        {
+            warn!("Failed to update snapshot for {}: {}", file_path_str, e);
+        }
+    }
+
+    Ok(stats)
+}

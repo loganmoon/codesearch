@@ -32,26 +32,23 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-pub mod config;
-pub mod debouncer;
-pub mod events;
-pub mod git;
-pub mod ignore;
-pub mod watcher;
+// Private implementation modules
+mod config;
+mod debouncer;
+mod events;
+mod git;
+mod ignore;
+mod watcher;
 
-// Re-export main types
-pub use config::{BranchStrategy, FilterConfig, RecoveryConfig, WatcherConfig};
-pub use debouncer::{BatchProcessor, EventDebouncer};
-pub use events::{
-    ChangeType, DebouncedEvent, DiffStats, EntityId, FileChange, FileMetadata, LineRange,
-};
-pub use git::{BranchChange, BranchWatcher, GitDetector, GitRepository};
-pub use ignore::{CompositeLanguageFilter, IgnoreFilter, LanguageFilter};
-pub use watcher::{FileWatcher, PollingWatcher};
+// Public exports - minimal API surface
+pub use config::WatcherConfig;
+pub use events::{DiffStats, FileChange, FileMetadata};
+pub use git::{FileDiffChangeType, FileDiffStatus, GitRepository};
+pub use watcher::FileWatcher;
 
 /// Prelude for convenient imports
 pub mod prelude {
-    pub use crate::config::{BranchStrategy, WatcherConfig};
-    pub use crate::events::{FileChange, FileMetadata};
+    pub use crate::config::WatcherConfig;
+    pub use crate::events::FileChange;
     pub use crate::watcher::FileWatcher;
 }

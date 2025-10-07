@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 // Private implementation modules
 mod common;
+mod entity_processor;
 mod git_provider;
 mod repository_indexer;
 mod types;

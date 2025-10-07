@@ -3,6 +3,8 @@
 //! This module defines immutable event types for file system changes
 //! with comprehensive metadata for change detection and processing.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;

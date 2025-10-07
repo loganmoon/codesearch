@@ -7,9 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-// All modules are private (will be created in later phases)
-mod catch_up;
-mod file_watcher;
+// All modules are private
 mod mcp_server;
 mod storage_init;
 

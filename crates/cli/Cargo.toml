@@ -18,7 +18,7 @@ codesearch-embeddings = { path = "../embeddings" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
 codesearch-server = { path = "../server" }
-indexer = { path = "../indexer" }
+codesearch-indexer = { path = "../indexer" }
 
 # CLI framework
 clap = { workspace = true }

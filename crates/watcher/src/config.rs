@@ -13,8 +13,6 @@ pub struct WatcherConfig {
     pub debounce_ms: u64,
     /// Patterns to ignore (glob patterns)
     pub ignore_patterns: Vec<String>,
-    /// Git branch handling strategy
-    pub branch_strategy: BranchStrategy,
     /// Maximum file size to watch in bytes (default: 10MB)
     pub max_file_size: u64,
     /// Whether to follow symbolic links (default: false)
@@ -93,7 +91,6 @@ impl Default for WatcherConfig {
         Self {
             debounce_ms: 500,
             ignore_patterns: Self::default_ignore_patterns(),
-            branch_strategy: BranchStrategy::IndexCurrent,
             max_file_size: 10 * 1024 * 1024, // 10MB
             follow_symlinks: false,
             recursive_depth: 50,
@@ -127,12 +124,6 @@ impl WatcherConfigBuilder {
     /// Add an ignore pattern
     pub fn add_ignore_pattern(mut self, pattern: String) -> Self {
         self.config.ignore_patterns.push(pattern);
-        self
-    }
-
-    /// Set branch strategy
-    pub fn branch_strategy(mut self, strategy: BranchStrategy) -> Self {
-        self.config.branch_strategy = strategy;
         self
     }
 
@@ -184,31 +175,6 @@ impl WatcherConfigBuilder {
     }
 }
 
-/// Strategy for handling Git branches
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BranchStrategy {
-    /// Index only files in the current branch
-    IndexCurrent,
-    /// Index all branches
-    IndexAll,
-    /// Index specific branches by pattern
-    IndexPattern,
-    /// Disable Git integration
-    Disabled,
-}
-
-impl BranchStrategy {
-    /// Check if Git integration is enabled
-    pub fn is_enabled(&self) -> bool {
-        !matches!(self, Self::Disabled)
-    }
-
-    /// Check if we should index the current branch
-    pub fn should_index_current(&self) -> bool {
-        matches!(self, Self::IndexCurrent | Self::IndexAll)
-    }
-}
-
 /// Configuration for file filtering
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterConfig {
@@ -228,6 +194,7 @@ pub struct FilterConfig {
 
 impl FilterConfig {
     /// Check if a file extension should be included
+    #[allow(dead_code)]
     pub fn should_include_extension(&self, ext: &str) -> bool {
         // If include list is empty, include all except excluded
         if self.include_extensions.is_empty() {
@@ -240,11 +207,13 @@ impl FilterConfig {
     }
 
     /// Check if a file size is within limits
+    #[allow(dead_code)]
     pub fn is_size_valid(&self, size: u64) -> bool {
         size >= self.min_file_size && size <= self.max_file_size
     }
 
     /// Check if a hidden file should be included
+    #[allow(dead_code)]
     pub fn should_include_hidden_file(&self, filename: &str) -> bool {
         !filename.starts_with('.') || self.include_hidden
     }
@@ -436,14 +405,12 @@ mod tests {
             .debounce_ms(1000)
             .max_file_size(5 * 1024 * 1024)
             .follow_symlinks(true)
-            .branch_strategy(BranchStrategy::IndexAll)
             .add_ignore_pattern("*.test".to_string())
             .build();
 
         assert_eq!(config.debounce_ms, 1000);
         assert_eq!(config.max_file_size, 5 * 1024 * 1024);
         assert!(config.follow_symlinks);
-        assert_eq!(config.branch_strategy, BranchStrategy::IndexAll);
         assert!(config.ignore_patterns.contains(&"*.test".to_string()));
     }
 
@@ -473,14 +440,6 @@ mod tests {
         assert!(config.is_size_valid(500));
         assert!(!config.is_size_valid(50));
         assert!(!config.is_size_valid(2000));
-    }
-
-    #[test]
-    fn test_branch_strategy() {
-        assert!(BranchStrategy::IndexCurrent.is_enabled());
-        assert!(BranchStrategy::IndexCurrent.should_index_current());
-        assert!(!BranchStrategy::Disabled.is_enabled());
-        assert!(!BranchStrategy::Disabled.should_index_current());
     }
 
     #[test]

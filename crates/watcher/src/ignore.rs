@@ -3,6 +3,8 @@
 //! This module provides pattern matching for file filtering,
 //! supporting glob patterns, gitignore rules, and language-specific filters.
 
+#![allow(dead_code)]
+
 use glob::{Pattern, PatternError};
 use std::collections::HashSet;
 use std::path::Path;

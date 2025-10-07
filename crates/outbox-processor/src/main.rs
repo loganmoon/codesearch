@@ -113,7 +113,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust", "python", "javascript", "typescript", "go"]

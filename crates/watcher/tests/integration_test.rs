@@ -3,12 +3,7 @@
 //! These tests use temporary directories and real filesystem operations
 //! to validate the watcher's behavior in realistic scenarios.
 
-use codesearch_watcher::{
-    config::{BranchStrategy, WatcherConfig},
-    events::FileChange,
-    git::GitRepository,
-    watcher::FileWatcher,
-};
+use codesearch_watcher::{FileChange, FileWatcher, GitRepository, WatcherConfig};
 use git2::Repository;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -53,10 +48,7 @@ async fn create_test_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 async fn test_file_creation_detection() {
     let temp_dir = TempDir::new().unwrap();
 
-    let config = WatcherConfig::builder()
-        .debounce_ms(50)
-        .branch_strategy(BranchStrategy::Disabled)
-        .build();
+    let config = WatcherConfig::builder().debounce_ms(50).build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
     let mut events = watcher.watch(temp_dir.path()).await.unwrap();
@@ -86,10 +78,7 @@ async fn test_file_modification_detection() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = create_test_file(&temp_dir, "test.rs", "fn main() {}").await;
 
-    let config = WatcherConfig::builder()
-        .debounce_ms(50)
-        .branch_strategy(BranchStrategy::Disabled)
-        .build();
+    let config = WatcherConfig::builder().debounce_ms(50).build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
     let mut events = watcher.watch(temp_dir.path()).await.unwrap();
@@ -121,10 +110,7 @@ async fn test_file_deletion_detection() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = create_test_file(&temp_dir, "test.rs", "fn main() {}").await;
 
-    let config = WatcherConfig::builder()
-        .debounce_ms(50)
-        .branch_strategy(BranchStrategy::Disabled)
-        .build();
+    let config = WatcherConfig::builder().debounce_ms(50).build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
     let mut events = watcher.watch(temp_dir.path()).await.unwrap();
@@ -156,7 +142,6 @@ async fn test_debouncing() {
 
     let config = WatcherConfig::builder()
         .debounce_ms(200) // Longer debounce window
-        .branch_strategy(BranchStrategy::Disabled)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
@@ -194,7 +179,6 @@ async fn test_ignore_patterns() {
         .debounce_ms(50)
         .add_ignore_pattern("*.log".to_string())
         .add_ignore_pattern("*.tmp".to_string())
-        .branch_strategy(BranchStrategy::Disabled)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
@@ -230,10 +214,7 @@ async fn test_ignore_patterns() {
 async fn test_git_branch_detection() {
     let (temp_dir, repo) = setup_git_repo().await;
 
-    let config = WatcherConfig::builder()
-        .debounce_ms(50)
-        .branch_strategy(BranchStrategy::IndexCurrent)
-        .build();
+    let config = WatcherConfig::builder().debounce_ms(50).build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
     watcher.init_git(temp_dir.path()).await.unwrap();
@@ -267,7 +248,6 @@ async fn test_recursive_watching() {
     let config = WatcherConfig::builder()
         .debounce_ms(50)
         .recursive_depth(10)
-        .branch_strategy(BranchStrategy::Disabled)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
@@ -303,7 +283,6 @@ async fn test_max_file_size_limit() {
     let config = WatcherConfig::builder()
         .debounce_ms(50)
         .max_file_size(100) // 100 bytes limit
-        .branch_strategy(BranchStrategy::Disabled)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
@@ -347,7 +326,6 @@ async fn test_concurrent_modifications() {
     let config = WatcherConfig::builder()
         .debounce_ms(100)
         .batch_size(5)
-        .branch_strategy(BranchStrategy::Disabled)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
@@ -401,10 +379,7 @@ async fn test_gitignore_integration() {
         .await
         .unwrap();
 
-    let config = WatcherConfig::builder()
-        .debounce_ms(50)
-        .branch_strategy(BranchStrategy::IndexCurrent)
-        .build();
+    let config = WatcherConfig::builder().debounce_ms(50).build();
 
     let mut watcher = FileWatcher::new(config).unwrap();
     let mut events = watcher.watch(temp_dir.path()).await.unwrap();

@@ -14,7 +14,6 @@ ignore_patterns = [
     "*.pyc",
     "__pycache__",
 ]
-branch_strategy = "index_current"
 
 [storage]
 qdrant_host = "localhost"

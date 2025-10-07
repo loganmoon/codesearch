@@ -56,7 +56,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]
@@ -362,7 +361,6 @@ model_name = "BAAI/bge-small-en-v1.5"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]
@@ -574,7 +572,6 @@ provider = "mock"
 [watcher]
 debounce_ms = 500
 ignore_patterns = ["*.log", "target", ".git"]
-branch_strategy = "index_current"
 
 [languages]
 enabled = ["rust"]

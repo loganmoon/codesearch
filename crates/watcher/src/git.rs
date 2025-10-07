@@ -3,6 +3,8 @@
 //! This module provides Git repository management, branch detection,
 //! and `.gitignore` pattern handling.
 
+#![allow(dead_code)]
+
 use codesearch_core::error::{Error, Result};
 use git2::{BranchType, Repository, Status, StatusOptions};
 use glob::Pattern;

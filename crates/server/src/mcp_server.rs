@@ -5,7 +5,7 @@ use codesearch_storage::{
     create_collection_manager, create_storage_client, postgres::PostgresClient, SearchFilters,
     StorageClient,
 };
-use codesearch_watcher::{FileWatcher, GitRepository, WatcherConfig};
+use codesearch_watcher::{FileWatcher, WatcherConfig};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
@@ -351,9 +351,10 @@ pub(crate) async fn run_server_impl(
 
     // Step 6: Run catch-up indexing
     info!("Checking for offline changes...");
-    let git_repo = GitRepository::open(&repo_root).context("Failed to open git repository")?;
+    let git_repo = codesearch_watcher::GitRepository::open(&repo_root)
+        .context("Failed to open git repository")?;
 
-    crate::catch_up::catch_up_index(
+    codesearch_indexer::catch_up_from_git(
         &repo_root,
         repository_id,
         &postgres_client,
@@ -373,38 +374,19 @@ pub(crate) async fn run_server_impl(
 
     let mut watcher = FileWatcher::new(watcher_config).context("Failed to create file watcher")?;
 
-    let mut event_rx = watcher
+    let event_rx = watcher
         .watch(&repo_root)
         .await
         .context("Failed to start watching repository")?;
 
-    // Clone dependencies for watcher task
-    let watcher_repo_root = repo_root.clone();
-    let watcher_repo_id = repository_id;
-    let watcher_embedding_mgr = embedding_manager.clone();
-    let watcher_postgres = postgres_client.clone();
-
-    // Spawn background task to handle file changes
-    let watcher_task = tokio::spawn(async move {
-        info!("File watcher task started");
-
-        while let Some(event) = event_rx.recv().await {
-            if let Err(e) = crate::file_watcher::handle_file_change_event(
-                event,
-                &watcher_repo_root,
-                watcher_repo_id,
-                &watcher_embedding_mgr,
-                &watcher_postgres,
-            )
-            .await
-            {
-                // Log error but don't crash watcher
-                tracing::error!("Error handling file change: {e}");
-            }
-        }
-
-        tracing::warn!("File watcher task stopped");
-    });
+    // Start indexer background task to process file changes
+    let watcher_task = codesearch_indexer::start_watching(
+        event_rx,
+        repository_id,
+        repo_root.clone(),
+        embedding_manager.clone(),
+        postgres_client.clone(),
+    );
 
     // Step 8: Setup signal handler for graceful shutdown
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);

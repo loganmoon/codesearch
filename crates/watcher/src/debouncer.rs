@@ -3,6 +3,8 @@
 //! This module provides intelligent debouncing of file system events
 //! with per-file timers and event aggregation.
 
+#![allow(dead_code)]
+
 use crate::events::{DebouncedEvent, FileChange};
 use dashmap::DashMap;
 use std::collections::BinaryHeap;
@@ -71,6 +73,7 @@ impl EventDebouncer {
     }
 
     /// Force flush all pending events
+    #[allow(dead_code)]
     pub async fn flush(&self) {
         debug!("Flushing {} pending events", self.pending_events.len());
 
@@ -88,6 +91,7 @@ impl EventDebouncer {
     }
 
     /// Get the number of pending events
+    #[allow(dead_code)]
     pub fn pending_count(&self) -> usize {
         self.pending_events.len()
     }

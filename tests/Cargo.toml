@@ -8,7 +8,7 @@ publish = false
 # Workspace crates
 codesearch-core = { path = "../crates/core" }
 codesearch-storage = { path = "../crates/storage" }
-indexer = { path = "../crates/indexer" }
+codesearch-indexer = { path = "../crates/indexer" }
 codesearch-embeddings = { path = "../crates/embeddings" }
 codesearch-watcher = { path = "../crates/watcher" }
 

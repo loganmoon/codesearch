@@ -59,6 +59,10 @@ impl QdrantStorageClient {
             json!(format!("{:?}", entity.entity_type)),
         );
         map.insert(
+            "language".to_string(),
+            json!(format!("{:?}", entity.language)),
+        );
+        map.insert(
             "file_path".to_string(),
             json!(entity.file_path.display().to_string()),
         );

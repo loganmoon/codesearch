@@ -5,7 +5,7 @@ use codesearch_core::error::Result;
 use codesearch_storage::{create_postgres_client, create_storage_client};
 use processor::OutboxProcessor;
 use std::time::Duration;
-use tracing::info;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,17 +24,33 @@ async fn main() -> Result<()> {
         "Connecting to Postgres at {}:{}",
         config.storage.postgres_host, config.storage.postgres_port
     );
-    let postgres_client = create_postgres_client(&config.storage).await?;
+    let postgres_client = match create_postgres_client(&config.storage).await {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to connect to Postgres: {e}");
+            return Err(e);
+        }
+    };
 
     info!("Running database migrations");
-    postgres_client.run_migrations().await?;
+    if let Err(e) = postgres_client.run_migrations().await {
+        error!("Failed to run database migrations: {e}");
+        return Err(e);
+    }
+    info!("Database migrations completed successfully");
 
     info!(
         "Connecting to Qdrant at {}:{} (collection: {})",
         config.storage.qdrant_host, config.storage.qdrant_port, config.storage.collection_name
     );
     let storage_client =
-        create_storage_client(&config.storage, &config.storage.collection_name).await?;
+        match create_storage_client(&config.storage, &config.storage.collection_name).await {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to connect to Qdrant: {e}");
+                return Err(e);
+            }
+        };
 
     let processor = OutboxProcessor::new(
         postgres_client,

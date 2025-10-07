@@ -60,9 +60,13 @@ impl OutboxProcessor {
             for entry in qdrant_entries {
                 if entry.retry_count >= self.max_retries {
                     warn!(
-                        "Outbox entry {} exceeded max retries ({}), skipping",
+                        "Outbox entry {} exceeded max retries ({}), marking as processed with failure",
                         entry.outbox_id, self.max_retries
                     );
+                    // Mark as processed so it doesn't block the outbox forever
+                    self.postgres_client
+                        .mark_outbox_processed(entry.outbox_id)
+                        .await?;
                     continue;
                 }
 
@@ -180,12 +184,7 @@ impl OutboxProcessor {
             )));
         }
 
-        if embedding.len() != 1536 {
-            return Err(Error::storage(format!(
-                "Invalid embedding dimensions: {} (expected 1536)",
-                embedding.len()
-            )));
-        }
+        // Removed hardcoded 1536 check - dimension validation handled by Qdrant
 
         Ok(EmbeddedEntity {
             entity,

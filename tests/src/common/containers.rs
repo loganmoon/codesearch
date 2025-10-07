@@ -182,6 +182,7 @@ impl TestPostgres {
             .ok_or_else(|| anyhow::anyhow!("No available port for Postgres"))?;
 
         // Start Postgres container
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -189,7 +190,7 @@ impl TestPostgres {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:5432"),
+                &format!("127.0.0.1:{port}:5432"),
                 "-e",
                 "POSTGRES_DB=codesearch",
                 "-e",
@@ -248,7 +249,7 @@ impl TestPostgres {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:5432"),
+                &format!("127.0.0.1:{port}:5432"),
                 "-e",
                 "POSTGRES_DB=codesearch",
                 "-e",
@@ -450,6 +451,7 @@ impl TestQdrant {
 
         // Start Qdrant container with temporary storage using unprivileged image
         // This runs as a non-root user, so cleanup won't require sudo
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -457,9 +459,9 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:6334"),
+                &format!("127.0.0.1:{port}:6334"),
                 "-p",
-                &format!("{rest_port}:6333"),
+                &format!("127.0.0.1:{rest_port}:6333"),
                 "-v",
                 &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant:latest-unprivileged",
@@ -520,6 +522,7 @@ impl TestQdrant {
             .with_context(|| format!("Failed to create temp directory: {temp_dir_name}"))?;
 
         // Start Qdrant container with pre-allocated ports
+        // Bind to 127.0.0.1 only for security and to avoid port conflicts
         let output = Command::new("docker")
             .args([
                 "run",
@@ -527,9 +530,9 @@ impl TestQdrant {
                 "--name",
                 &container_name,
                 "-p",
-                &format!("{port}:6334"),
+                &format!("127.0.0.1:{port}:6334"),
                 "-p",
-                &format!("{rest_port}:6333"),
+                &format!("127.0.0.1:{rest_port}:6333"),
                 "-v",
                 &format!("{temp_dir_name}:/qdrant/storage"),
                 "qdrant/qdrant:latest-unprivileged",
@@ -767,38 +770,42 @@ impl TestOutboxProcessor {
 
         let container_name = format!("outbox-processor-test-{}", Uuid::new_v4());
 
-        // Start container with connection to host services
-        // Use host.docker.internal to access services running on the host
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "--add-host",
-                "host.docker.internal:host-gateway",
-                "-e",
-                "POSTGRES_HOST=host.docker.internal",
-                "-e",
-                &format!("POSTGRES_PORT={}", postgres.port()),
-                "-e",
-                "POSTGRES_DATABASE=codesearch",
-                "-e",
-                "POSTGRES_USER=codesearch",
-                "-e",
-                "POSTGRES_PASSWORD=codesearch",
-                "-e",
-                "QDRANT_HOST=host.docker.internal",
-                "-e",
-                &format!("QDRANT_PORT={}", qdrant.port()),
-                "-e",
-                &format!("QDRANT_REST_PORT={}", qdrant.rest_port()),
-                "-e",
-                &format!("QDRANT_COLLECTION={collection_name}"),
-                "-e",
-                "RUST_LOG=debug",
-                "codesearch-outbox:test",
-            ])
+        // On Linux, use --network host to access localhost services
+        // On macOS/Windows, use host.docker.internal
+        let mut cmd = Command::new("docker");
+        cmd.args(["run", "-d", "--name", &container_name]);
+
+        let host = if cfg!(target_os = "linux") {
+            cmd.arg("--network").arg("host");
+            "localhost"
+        } else {
+            cmd.arg("--add-host").arg("host.docker.internal:host-gateway");
+            "host.docker.internal"
+        };
+
+        cmd.arg("-e")
+            .arg(format!("POSTGRES_HOST={host}"))
+            .arg("-e")
+            .arg(format!("POSTGRES_PORT={}", postgres.port()))
+            .arg("-e")
+            .arg("POSTGRES_DATABASE=codesearch")
+            .arg("-e")
+            .arg("POSTGRES_USER=codesearch")
+            .arg("-e")
+            .arg("POSTGRES_PASSWORD=codesearch")
+            .arg("-e")
+            .arg(format!("QDRANT_HOST={host}"))
+            .arg("-e")
+            .arg(format!("QDRANT_PORT={}", qdrant.port()))
+            .arg("-e")
+            .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()))
+            .arg("-e")
+            .arg(format!("QDRANT_COLLECTION={collection_name}"))
+            .arg("-e")
+            .arg("RUST_LOG=debug")
+            .arg("codesearch-outbox:test");
+
+        let output = cmd
             .output()
             .context("Failed to start outbox processor container")?;
 
@@ -864,6 +871,15 @@ impl TestOutboxProcessor {
 /// Polls the outbox table every 100ms until all unprocessed entries are gone
 /// or the timeout is reached.
 pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -> Result<()> {
+    wait_for_outbox_empty_with_processor(postgres, timeout, None).await
+}
+
+/// Wait for the outbox table to be empty, with optional processor for debugging
+async fn wait_for_outbox_empty_with_processor(
+    postgres: &TestPostgres,
+    timeout: Duration,
+    processor: Option<&TestOutboxProcessor>,
+) -> Result<()> {
     use sqlx::PgPool;
 
     let connection_url = format!(
@@ -892,6 +908,14 @@ pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -
 
         if start.elapsed() >= timeout {
             pool.close().await;
+
+            // Dump processor logs if available for debugging
+            if let Some(proc) = processor {
+                eprintln!("\n=== OUTBOX PROCESSOR LOGS ===");
+                eprintln!("{}", proc.get_logs());
+                eprintln!("=== END PROCESSOR LOGS ===\n");
+            }
+
             return Err(anyhow::anyhow!(
                 "Timeout waiting for outbox to be empty. {count} unprocessed entries remain after {timeout:?}"
             ));
@@ -912,11 +936,13 @@ pub async fn start_and_wait_for_outbox_sync(
 ) -> Result<TestOutboxProcessor> {
     let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
 
-    // Give the processor a moment to start up
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Give the processor time to fully start up (Docker container initialization)
+    eprintln!("Waiting for outbox processor to start...");
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
-    // Wait for outbox to be empty (10 second timeout)
-    wait_for_outbox_empty(postgres, Duration::from_secs(10)).await?;
+    // Wait for outbox to be empty (10 second timeout) with processor logs on failure
+    wait_for_outbox_empty_with_processor(postgres, Duration::from_secs(10), Some(&processor))
+        .await?;
 
     Ok(processor)
 }

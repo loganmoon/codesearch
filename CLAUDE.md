@@ -57,9 +57,13 @@ The main binary is `codesearch` which provides init, serve, index, and watch com
 cargo build --workspace --all-targets       # Build all debug targets
 cargo build --release --workspace --all-targets  # Build all release targets
 
-cargo test --workspace                    # Run all tests
+cargo test --workspace                    # Run unit & integration tests (excludes E2E)
 cargo test --package <crate-name>         # Run tests for specific crate
 cargo test --test <test-name>             # Run specific integration test
+
+# E2E tests (slow, require Docker)
+cargo test --package codesearch-e2e-tests -- --ignored           # Run all E2E tests
+cargo test --package codesearch-e2e-tests -- --ignored test_name # Run specific E2E test
 
 cargo clippy --workspace                  # Lint with strict rules
 cargo fmt                                 # Format code

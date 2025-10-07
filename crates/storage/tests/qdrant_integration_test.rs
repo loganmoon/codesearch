@@ -24,6 +24,7 @@ async fn setup_qdrant() -> Result<(TestQdrant, Arc<dyn StorageClient>, String)> 
         qdrant.rest_port(),
         5432, // Postgres not needed for Qdrant tests
         &collection_name,
+        "codesearch",
     );
 
     // Create collection
@@ -42,7 +43,6 @@ async fn test_bulk_load_entities() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Create test entities with embeddings
         let entities = vec![
             create_embedded_entity(
                 create_test_entity("add", EntityType::Function, &repository_id),
@@ -58,13 +58,10 @@ async fn test_bulk_load_entities() -> Result<()> {
             ),
         ];
 
-        // Bulk load entities
         let result = client.bulk_load_entities(entities.clone()).await?;
 
-        // Verify we got back entity_id and point_id pairs
         assert_eq!(result.len(), 3, "Should return 3 entity-point pairs");
 
-        // Verify entity IDs match
         let returned_entity_ids: Vec<String> = result.iter().map(|(id, _)| id.clone()).collect();
         for entity in &entities {
             assert!(
@@ -85,7 +82,6 @@ async fn test_search_similar_no_filters() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Load 5 entities
         let entities: Vec<_> = (0..5)
             .map(|i| {
                 create_embedded_entity(
@@ -97,15 +93,12 @@ async fn test_search_similar_no_filters() -> Result<()> {
 
         client.bulk_load_entities(entities).await?;
 
-        // Search with mock query embedding
         let query_embedding = mock_embedding(1536);
         let results = client.search_similar(query_embedding, 3, None).await?;
 
-        // Should return up to 3 results
         assert!(results.len() <= 3, "Should return at most 3 results");
         assert!(!results.is_empty(), "Should return some results");
 
-        // Verify result structure: (entity_id, repository_id, score)
         for (entity_id, repo_id, score) in &results {
             assert!(!entity_id.is_empty(), "Entity ID should not be empty");
             assert_eq!(repo_id, &repository_id, "Repository ID should match");
@@ -126,7 +119,6 @@ async fn test_search_similar_with_entity_type_filter() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Load mix of Functions and Structs
         let entities = vec![
             create_embedded_entity(
                 create_test_entity("add", EntityType::Function, &repository_id),
@@ -144,7 +136,6 @@ async fn test_search_similar_with_entity_type_filter() -> Result<()> {
 
         client.bulk_load_entities(entities).await?;
 
-        // Search with entity_type filter
         let query_embedding = mock_embedding(1536);
         let filters = SearchFilters {
             entity_type: Some(EntityType::Function),
@@ -155,7 +146,6 @@ async fn test_search_similar_with_entity_type_filter() -> Result<()> {
             .search_similar(query_embedding, 10, Some(filters))
             .await?;
 
-        // Should only return Functions
         assert!(results.len() >= 2, "Should find at least the 2 functions");
 
         Ok(())
@@ -169,8 +159,6 @@ async fn test_search_similar_with_language_filter() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // For this test, all entities are Rust (from create_test_entity default)
-        // so filtering by "rust" should return all, filtering by "python" should return none
         let entities = vec![
             create_embedded_entity(
                 create_test_entity("func1", EntityType::Function, &repository_id),
@@ -184,7 +172,6 @@ async fn test_search_similar_with_language_filter() -> Result<()> {
 
         client.bulk_load_entities(entities).await?;
 
-        // Search with language filter for rust
         let query_embedding = mock_embedding(1536);
         let filters = SearchFilters {
             language: Some("Rust".to_string()),
@@ -207,7 +194,6 @@ async fn test_search_similar_with_file_path_filter() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Create entities in different files
         let entities = vec![
             create_embedded_entity(
                 create_test_entity_with_file(
@@ -240,7 +226,6 @@ async fn test_search_similar_with_file_path_filter() -> Result<()> {
 
         client.bulk_load_entities(entities).await?;
 
-        // Search with file path filter
         let query_embedding = mock_embedding(1536);
         let filters = SearchFilters {
             file_path: Some(PathBuf::from("main.rs")),
@@ -251,7 +236,6 @@ async fn test_search_similar_with_file_path_filter() -> Result<()> {
             .search_similar(query_embedding, 10, Some(filters))
             .await?;
 
-        // Should return only main.rs entities
         assert_eq!(results.len(), 2, "Should return 2 entities from main.rs");
 
         Ok(())
@@ -265,7 +249,6 @@ async fn test_delete_entities() -> Result<()> {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Load 5 entities
         let entities: Vec<_> = (0..5)
             .map(|i| {
                 create_embedded_entity(
@@ -281,18 +264,14 @@ async fn test_delete_entities() -> Result<()> {
             .collect();
         client.bulk_load_entities(entities).await?;
 
-        // Delete 2 entities
         let to_delete = vec![entity_ids[0].clone(), entity_ids[1].clone()];
         client.delete_entities(&to_delete).await?;
 
-        // Search to verify remaining entities
         let query_embedding = mock_embedding(1536);
         let results = client.search_similar(query_embedding, 10, None).await?;
 
-        // Should have 3 remaining entities
         assert_eq!(results.len(), 3, "Should have 3 entities after deleting 2");
 
-        // Verify deleted entities are not present
         let result_entity_ids: Vec<String> = results.iter().map(|(id, _, _)| id.clone()).collect();
         assert!(
             !result_entity_ids.contains(&to_delete[0]),
@@ -313,7 +292,6 @@ async fn test_delete_entities_empty_list() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
 
-        // Delete with empty list should be no-op
         let result = client.delete_entities(&[]).await;
         assert!(result.is_ok(), "Deleting empty list should succeed");
 
@@ -327,7 +305,6 @@ async fn test_bulk_load_empty_list() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
 
-        // Bulk load with empty list
         let result = client.bulk_load_entities(vec![]).await?;
         assert_eq!(result.len(), 0, "Should return empty vec for empty input");
 
@@ -341,7 +318,6 @@ async fn test_search_no_results() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
 
-        // Search in empty collection
         let query_embedding = mock_embedding(1536);
         let results = client.search_similar(query_embedding, 10, None).await?;
 
@@ -365,13 +341,12 @@ async fn test_connection_error() -> Result<()> {
             9998,
             5432,
             "test_collection",
+            "codesearch",
         );
 
-        // Attempt to create client - this might succeed since connection is lazy
         // So we test the actual operation
         let result = create_storage_client(&config, "test_collection").await;
 
-        // Either client creation or first operation should fail
         if let Ok(client) = result {
             let query_embedding = mock_embedding(1536);
             let search_result = client.search_similar(query_embedding, 10, None).await;
@@ -394,22 +369,17 @@ async fn test_bulk_load_during_connection_loss() -> Result<()> {
         let (qdrant, client, _collection) = setup_qdrant().await?;
         let repository_id = Uuid::new_v4().to_string();
 
-        // Create test entities
         let entities = vec![create_embedded_entity(
             create_test_entity("test_func", EntityType::Function, &repository_id),
             1536,
         )];
 
-        // Bulk load should succeed first
         client.bulk_load_entities(entities.clone()).await?;
 
-        // Drop the Qdrant container to simulate connection loss
         drop(qdrant);
 
-        // Wait a moment for the container to stop
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        // Subsequent bulk load should fail
         let result = client.bulk_load_entities(entities).await;
         assert!(
             result.is_err(),
@@ -426,21 +396,19 @@ async fn test_search_invalid_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (qdrant, _original_client, _collection) = setup_qdrant().await?;
 
-        // Create a client pointing to a non-existent collection
         let config = create_storage_config(
             qdrant.port(),
             qdrant.rest_port(),
             5432,
             "nonexistent_collection",
+            "codesearch",
         );
 
         let client = create_storage_client(&config, "nonexistent_collection").await?;
 
-        // Attempt to search
         let query_embedding = mock_embedding(1536);
         let result = client.search_similar(query_embedding, 10, None).await;
 
-        // Should return error (collection not found)
         assert!(
             result.is_err(),
             "Search should fail on non-existent collection"
@@ -456,11 +424,9 @@ async fn test_delete_from_empty_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
 
-        // Delete from empty collection
         let entity_ids = vec!["entity1".to_string(), "entity2".to_string()];
         let result = client.delete_entities(&entity_ids).await;
 
-        // Should succeed (no-op, 0 deletes)
         assert!(
             result.is_ok(),
             "Delete from empty collection should succeed"
@@ -476,7 +442,6 @@ async fn test_concurrent_bulk_loads() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
 
-        // Spawn 5 concurrent bulk load tasks
         let mut tasks = vec![];
         for i in 0..5 {
             let client_clone = Arc::clone(&client);
@@ -505,17 +470,14 @@ async fn test_concurrent_bulk_loads() -> Result<()> {
             }));
         }
 
-        // All should succeed
         for task in tasks {
             let result = task.await?;
             assert!(result.is_ok(), "Concurrent bulk loads should succeed");
         }
 
-        // Verify entities are present
         let query_embedding = mock_embedding(1536);
         let results = client.search_similar(query_embedding, 20, None).await?;
 
-        // Should have 10 total entities (5 tasks * 2 entities each)
         assert_eq!(
             results.len(),
             10,

@@ -309,13 +309,12 @@ impl TestPostgres {
     /// Wait for Postgres to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
         let max_attempts = 20;
-        let initial_delay = Duration::from_millis(50);
+        let initial_delay = Duration::from_millis(10);
         let max_delay = Duration::from_millis(500);
 
         let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
-            // Check if container is still running
             let status = Command::new("docker")
                 .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
                 .output()
@@ -329,7 +328,6 @@ impl TestPostgres {
                 return Err(anyhow::anyhow!("Container stopped unexpectedly"));
             }
 
-            // Try to connect to Postgres
             let connection_string = format!(
                 "postgresql://codesearch:codesearch@localhost:{}/codesearch",
                 self.port
@@ -343,7 +341,6 @@ impl TestPostgres {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
-                // Exponential backoff: double the delay, but cap at max_delay
                 delay = std::cmp::min(delay * 2, max_delay);
             }
         }
@@ -701,13 +698,12 @@ impl TestQdrant {
     /// Wait for Qdrant to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
         let max_attempts = 20;
-        let initial_delay = Duration::from_millis(50);
+        let initial_delay = Duration::from_millis(10);
         let max_delay = Duration::from_millis(500);
 
         let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
-            // Check if container is still running
             let status = Command::new("docker")
                 .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
                 .output()
@@ -721,7 +717,6 @@ impl TestQdrant {
                 return Err(anyhow::anyhow!("Container stopped unexpectedly"));
             }
 
-            // Try to connect to health endpoint
             let health_url = format!("{}/healthz", self.rest_url());
             if let Ok(response) = reqwest::get(&health_url).await {
                 if response.status().is_success() {
@@ -731,7 +726,6 @@ impl TestQdrant {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
-                // Exponential backoff: double the delay, but cap at max_delay
                 delay = std::cmp::min(delay * 2, max_delay);
             }
         }
@@ -872,6 +866,7 @@ impl TestOutboxProcessor {
     pub fn start(
         postgres: &TestPostgres,
         qdrant: &TestQdrant,
+        db_name: &str,
         collection_name: &str,
     ) -> Result<Self> {
         // Ensure the Docker image is built (thread-safe, happens only once)
@@ -898,7 +893,7 @@ impl TestOutboxProcessor {
             .arg("-e")
             .arg(format!("POSTGRES_PORT={}", postgres.port()))
             .arg("-e")
-            .arg("POSTGRES_DATABASE=codesearch")
+            .arg(format!("POSTGRES_DATABASE={db_name}"))
             .arg("-e")
             .arg("POSTGRES_USER=codesearch")
             .arg("-e")
@@ -1013,10 +1008,10 @@ async fn wait_for_outbox_empty_with_processor(
 
     // Adaptive polling intervals: check frequently at first, then back off
     let poll_intervals = [
-        Duration::from_millis(50),  // First few checks: very fast
-        Duration::from_millis(100), // Next checks: normal
-        Duration::from_millis(200), // Later checks: slower
-        Duration::from_millis(500), // Final checks: slowest
+        Duration::from_millis(10),  // First few checks: very fast
+        Duration::from_millis(50),  // Next checks: fast
+        Duration::from_millis(100), // Later checks: normal
+        Duration::from_millis(200), // Final checks: slower
     ];
 
     let mut interval_idx = 0;
@@ -1048,11 +1043,9 @@ async fn wait_for_outbox_empty_with_processor(
             ));
         }
 
-        // Adaptive interval: gradually increase delay
         let current_interval = poll_intervals[interval_idx];
         tokio::time::sleep(current_interval).await;
 
-        // Gradually increase interval (backoff) up to the maximum
         if interval_idx < poll_intervals.len() - 1 {
             interval_idx += 1;
         }
@@ -1083,18 +1076,14 @@ pub async fn start_and_wait_for_outbox_sync_with_db(
     db_name: &str,
     collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
+    let processor = TestOutboxProcessor::start(postgres, qdrant, db_name, collection_name)?;
 
-    // No fixed sleep needed - adaptive polling starts checking immediately at 50ms intervals
-    // and gradually backs off. This is much faster than a fixed 2s sleep when the processor
-    // starts quickly, but still reliable when it takes longer.
-
-    // Wait for outbox to be empty (15 second timeout, increased from 10s for safety)
+    // Wait for outbox to be empty (5 second timeout optimized for tests)
     // with processor logs on failure
     wait_for_outbox_empty_with_processor(
         postgres,
         db_name,
-        Duration::from_secs(15),
+        Duration::from_secs(5),
         Some(&processor),
     )
     .await?;

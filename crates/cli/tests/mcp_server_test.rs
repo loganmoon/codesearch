@@ -9,17 +9,17 @@ async fn test_search_code_limit_validation() {
 
     // Test limit too small (should be clamped to 1)
     let limit = 0;
-    let clamped = limit.max(1).min(100);
+    let clamped = limit.clamp(1, 100);
     assert_eq!(clamped, 1);
 
     // Test limit too large (should be clamped to 100)
     let limit = 150;
-    let clamped = limit.max(1).min(100);
+    let clamped = limit.clamp(1, 100);
     assert_eq!(clamped, 100);
 
     // Test valid limit (should remain unchanged)
     let limit = 50;
-    let clamped = limit.max(1).min(100);
+    let clamped = limit.clamp(1, 100);
     assert_eq!(clamped, 50);
 }
 
@@ -59,7 +59,7 @@ fn test_entity_serialization() {
     assert_eq!(entity_id, "test-id");
     assert_eq!(name, "test_func");
     assert_eq!(similarity_percent, 95);
-    assert!(similarity_percent >= 0 && similarity_percent <= 100);
+    assert!((0..=100).contains(&similarity_percent));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_similarity_score_conversion() {
 
     for score in scores {
         let percent = (score * 100.0).round() as i32;
-        assert!(percent >= 0 && percent <= 100);
+        assert!((0..=100).contains(&percent));
 
         // Verify specific cases
         if (score - 0.95).abs() < 0.001 {

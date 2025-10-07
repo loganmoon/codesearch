@@ -1,10 +1,7 @@
 //! Integration tests for the init command
 
 use anyhow::{Context, Result};
-use codesearch_e2e_tests::common::{
-    codesearch_binary,
-    containers::{TestPostgres, TestQdrant},
-};
+use codesearch_e2e_tests::common::{codesearch_binary, containers::start_test_containers};
 use std::process::Command;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -35,8 +32,7 @@ fn create_test_repo() -> Result<TempDir> {
 #[tokio::test]
 async fn test_init_command_creates_collection() -> Result<()> {
     // Start test Qdrant and Postgres with temporary storage
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create test repository
     let test_repo = create_test_repo()?;
@@ -117,8 +113,7 @@ enabled = ["rust"]
 #[tokio::test]
 async fn test_init_command_handles_existing_collection() -> Result<()> {
     // Start test Qdrant and Postgres with temporary storage
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create test repository
     let test_repo = create_test_repo()?;

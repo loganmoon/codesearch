@@ -85,8 +85,7 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
 async fn test_init_creates_collection_in_qdrant() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = simple_rust_repo().await?;
 
     // Create config pointing to test instances
@@ -142,8 +141,7 @@ async fn test_init_creates_collection_in_qdrant() -> Result<()> {
 async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -185,8 +183,7 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
 async fn test_index_with_mock_embeddings() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -215,8 +212,7 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
 async fn test_search_finds_relevant_entities() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -288,8 +284,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
 async fn test_complete_pipeline_with_real_embeddings() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = complex_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -371,8 +366,7 @@ enabled = ["rust"]
 async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -409,8 +403,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
 async fn test_init_command_handles_existing_collection() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -447,8 +440,7 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
 async fn test_programmatic_indexing_pipeline() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
@@ -512,8 +504,7 @@ async fn test_programmatic_indexing_pipeline() -> Result<()> {
 async fn test_index_without_init_fails_gracefully() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
     let repo = simple_rust_repo().await?;
 
     // Create config but don't run init
@@ -590,8 +581,7 @@ enabled = ["rust"]
 async fn test_index_with_invalid_files_continues() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repo with valid and invalid Rust files
     let repo = TestRepositoryBuilder::new()
@@ -668,8 +658,7 @@ fn broken( {
 async fn test_empty_repository_indexes_successfully() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create empty repository with just git
     let repo = TestRepositoryBuilder::new().build().await?;
@@ -704,8 +693,7 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
 async fn test_large_entity_is_skipped() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create file with very large entity (exceeds context window)
     let large_content = format!(
@@ -753,8 +741,7 @@ fn large_function() {{
 async fn test_duplicate_entity_ids_handled() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repo with two files that have identically named functions
     let repo = TestRepositoryBuilder::new()

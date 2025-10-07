@@ -70,8 +70,7 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
 async fn test_reindex_detects_deleted_function() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repository with one function
     let repo = TestRepositoryBuilder::new()
@@ -138,8 +137,7 @@ pub fn function_one() -> i32 {
 async fn test_reindex_detects_renamed_function() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repository with function
     let repo = TestRepositoryBuilder::new()
@@ -200,8 +198,7 @@ pub fn new_name() -> i32 {
 async fn test_reindex_empty_file() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repository with functions
     let repo = TestRepositoryBuilder::new()
@@ -252,8 +249,7 @@ pub fn func3() {}
 async fn test_reindex_modified_function_body() -> Result<()> {
     init_test_logging();
 
-    let qdrant = TestQdrant::start().await?;
-    let postgres = TestPostgres::start().await?;
+    let (qdrant, postgres) = start_test_containers().await?;
 
     // Create repository
     let repo = TestRepositoryBuilder::new()

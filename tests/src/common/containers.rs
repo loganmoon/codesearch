@@ -299,10 +299,13 @@ impl TestPostgres {
         self.port
     }
 
-    /// Wait for Postgres to become healthy
+    /// Wait for Postgres to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 30;
-        let delay = Duration::from_millis(100);
+        let max_attempts = 20;
+        let initial_delay = Duration::from_millis(50);
+        let max_delay = Duration::from_millis(500);
+
+        let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
             // Check if container is still running
@@ -333,6 +336,8 @@ impl TestPostgres {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
+                // Exponential backoff: double the delay, but cap at max_delay
+                delay = std::cmp::min(delay * 2, max_delay);
             }
         }
 
@@ -378,6 +383,16 @@ impl Drop for TestPostgres {
     fn drop(&mut self) {
         self.cleanup();
     }
+}
+
+/// Start test containers in parallel for faster setup
+///
+/// This starts both Qdrant and Postgres containers concurrently,
+/// which is much faster than starting them sequentially.
+pub async fn start_test_containers() -> Result<(TestQdrant, TestPostgres)> {
+    let (qdrant_result, postgres_result) = tokio::join!(TestQdrant::start(), TestPostgres::start());
+
+    Ok((qdrant_result?, postgres_result?))
 }
 
 /// Pool of test Postgres containers for concurrent testing
@@ -594,10 +609,13 @@ impl TestQdrant {
         format!("http://localhost:{}", self.rest_port)
     }
 
-    /// Wait for Qdrant to become healthy
+    /// Wait for Qdrant to become healthy using exponential backoff
     async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 30;
-        let delay = Duration::from_millis(100);
+        let max_attempts = 20;
+        let initial_delay = Duration::from_millis(50);
+        let max_delay = Duration::from_millis(500);
+
+        let mut delay = initial_delay;
 
         for attempt in 1..=max_attempts {
             // Check if container is still running
@@ -624,6 +642,8 @@ impl TestQdrant {
 
             if attempt < max_attempts {
                 tokio::time::sleep(delay).await;
+                // Exponential backoff: double the delay, but cap at max_delay
+                delay = std::cmp::min(delay * 2, max_delay);
             }
         }
 
@@ -779,7 +799,8 @@ impl TestOutboxProcessor {
             cmd.arg("--network").arg("host");
             "localhost"
         } else {
-            cmd.arg("--add-host").arg("host.docker.internal:host-gateway");
+            cmd.arg("--add-host")
+                .arg("host.docker.internal:host-gateway");
             "host.docker.internal"
         };
 

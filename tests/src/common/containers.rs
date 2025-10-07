@@ -5,11 +5,18 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 /// Global registry of test resources for cleanup
 static RESOURCE_REGISTRY: Mutex<Option<ResourceRegistry>> = Mutex::new(None);
 static INIT_CLEANUP: Once = Once::new();
+
+/// Global shared Qdrant instance for all tests (Phase 2 optimization)
+static SHARED_QDRANT: OnceCell<TestQdrant> = OnceCell::const_new();
+
+/// Global shared Postgres instance for all tests (Phase 2 optimization)
+static SHARED_POSTGRES: OnceCell<TestPostgres> = OnceCell::const_new();
 
 struct ResourceRegistry {
     container_names: Vec<String>,
@@ -393,6 +400,88 @@ pub async fn start_test_containers() -> Result<(TestQdrant, TestPostgres)> {
     let (qdrant_result, postgres_result) = tokio::join!(TestQdrant::start(), TestPostgres::start());
 
     Ok((qdrant_result?, postgres_result?))
+}
+
+/// Get or create the shared Qdrant instance (Phase 2 optimization)
+///
+/// Returns a reference to a global shared Qdrant container that is created once
+/// and reused across all tests. Tests maintain isolation by using unique collection names.
+pub async fn get_shared_qdrant() -> Result<&'static TestQdrant> {
+    SHARED_QDRANT
+        .get_or_try_init(|| async {
+            eprintln!("🚀 Starting shared Qdrant instance for all tests...");
+            TestQdrant::start().await
+        })
+        .await
+}
+
+/// Get or create the shared Postgres instance (Phase 2 optimization)
+///
+/// Returns a reference to a global shared Postgres container that is created once
+/// and reused across all tests. Tests maintain isolation by creating unique databases.
+pub async fn get_shared_postgres() -> Result<&'static TestPostgres> {
+    SHARED_POSTGRES
+        .get_or_try_init(|| async {
+            eprintln!("🚀 Starting shared Postgres instance for all tests...");
+            TestPostgres::start().await
+        })
+        .await
+}
+
+/// Create an isolated test database in the shared Postgres instance
+///
+/// Each test gets its own database to maintain isolation while sharing the container.
+/// The database name includes a UUID to ensure uniqueness.
+pub async fn create_test_database(postgres: &TestPostgres) -> Result<String> {
+    let db_name = format!("test_db_{}", Uuid::new_v4().simple());
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        postgres.port()
+    );
+
+    let pool = sqlx::PgPool::connect(&connection_url).await?;
+    sqlx::query(&format!("CREATE DATABASE {db_name}"))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok(db_name)
+}
+
+/// Drop a test database from the shared Postgres instance
+///
+/// Terminates all connections to the database before dropping it to avoid errors.
+pub async fn drop_test_database(postgres: &TestPostgres, db_name: &str) -> Result<()> {
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        postgres.port()
+    );
+
+    let pool = sqlx::PgPool::connect(&connection_url).await?;
+
+    // Terminate all connections to the database first
+    sqlx::query(&format!(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}'"
+    ))
+    .execute(&pool)
+    .await?;
+
+    // Now drop the database
+    sqlx::query(&format!("DROP DATABASE IF EXISTS {db_name}"))
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+
+    Ok(())
+}
+
+/// Clean up a test collection from Qdrant
+///
+/// Deletes the collection to clean up after a test while keeping the container running.
+pub async fn drop_test_collection(qdrant: &TestQdrant, collection_name: &str) -> Result<()> {
+    let url = format!("{}/collections/{collection_name}", qdrant.rest_url());
+    let _ = reqwest::Client::new().delete(&url).send().await?;
+    Ok(())
 }
 
 /// Pool of test Postgres containers for concurrent testing
@@ -891,20 +980,28 @@ impl TestOutboxProcessor {
 ///
 /// Polls the outbox table every 100ms until all unprocessed entries are gone
 /// or the timeout is reached.
-pub async fn wait_for_outbox_empty(postgres: &TestPostgres, timeout: Duration) -> Result<()> {
-    wait_for_outbox_empty_with_processor(postgres, timeout, None).await
+pub async fn wait_for_outbox_empty(
+    postgres: &TestPostgres,
+    db_name: &str,
+    timeout: Duration,
+) -> Result<()> {
+    wait_for_outbox_empty_with_processor(postgres, db_name, timeout, None).await
 }
 
 /// Wait for the outbox table to be empty, with optional processor for debugging
+///
+/// Uses adaptive polling: starts with fast polling (50ms) and gradually backs off
+/// to slower intervals (500ms max) to optimize for both fast response and low overhead.
 async fn wait_for_outbox_empty_with_processor(
     postgres: &TestPostgres,
+    db_name: &str,
     timeout: Duration,
     processor: Option<&TestOutboxProcessor>,
 ) -> Result<()> {
     use sqlx::PgPool;
 
     let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/codesearch",
+        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
         postgres.port()
     );
 
@@ -913,7 +1010,16 @@ async fn wait_for_outbox_empty_with_processor(
         .context("Failed to connect to Postgres for outbox polling")?;
 
     let start = std::time::Instant::now();
-    let poll_interval = Duration::from_millis(100);
+
+    // Adaptive polling intervals: check frequently at first, then back off
+    let poll_intervals = [
+        Duration::from_millis(50),  // First few checks: very fast
+        Duration::from_millis(100), // Next checks: normal
+        Duration::from_millis(200), // Later checks: slower
+        Duration::from_millis(500), // Final checks: slowest
+    ];
+
+    let mut interval_idx = 0;
 
     loop {
         let count: i64 =
@@ -942,28 +1048,56 @@ async fn wait_for_outbox_empty_with_processor(
             ));
         }
 
-        tokio::time::sleep(poll_interval).await;
+        // Adaptive interval: gradually increase delay
+        let current_interval = poll_intervals[interval_idx];
+        tokio::time::sleep(current_interval).await;
+
+        // Gradually increase interval (backoff) up to the maximum
+        if interval_idx < poll_intervals.len() - 1 {
+            interval_idx += 1;
+        }
     }
 }
 
 /// Start an outbox processor and wait for it to sync all pending entries
 ///
 /// This is a convenience function that starts the processor and waits for
-/// the outbox table to be empty with a 10-second timeout
+/// the outbox table to be empty with a 15-second timeout using adaptive polling.
+/// No fixed sleep is needed - adaptive polling handles varying startup times efficiently.
 pub async fn start_and_wait_for_outbox_sync(
     postgres: &TestPostgres,
     qdrant: &TestQdrant,
     collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
+    // Use default database name for backward compatibility
+    start_and_wait_for_outbox_sync_with_db(postgres, qdrant, "codesearch", collection_name).await
+}
+
+/// Start an outbox processor and wait for it to sync all pending entries (with custom database)
+///
+/// This variant allows specifying a custom database name for database isolation.
+/// Uses adaptive polling (50ms -> 500ms) to efficiently handle varying processor startup times.
+pub async fn start_and_wait_for_outbox_sync_with_db(
+    postgres: &TestPostgres,
+    qdrant: &TestQdrant,
+    db_name: &str,
+    collection_name: &str,
+) -> Result<TestOutboxProcessor> {
     let processor = TestOutboxProcessor::start(postgres, qdrant, collection_name)?;
 
-    // Give the processor time to fully start up (Docker container initialization)
-    eprintln!("Waiting for outbox processor to start...");
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // No fixed sleep needed - adaptive polling starts checking immediately at 50ms intervals
+    // and gradually backs off. This is much faster than a fixed 2s sleep when the processor
+    // starts quickly, but still reliable when it takes longer.
 
-    // Wait for outbox to be empty (10 second timeout) with processor logs on failure
-    wait_for_outbox_empty_with_processor(postgres, Duration::from_secs(10), Some(&processor))
-        .await?;
+    // Wait for outbox to be empty (15 second timeout, increased from 10s for safety)
+    // with processor logs on failure
+    wait_for_outbox_empty_with_processor(
+        postgres,
+        db_name,
+        Duration::from_secs(15),
+        Some(&processor),
+    )
+    .await?;
 
     Ok(processor)
 }

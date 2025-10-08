@@ -408,12 +408,9 @@ pub async fn get_dependencies_status(
     };
     let outbox_running = is_outbox_processor_running().unwrap_or(false);
     let vllm_running = is_vllm_running().unwrap_or(false);
-    let vllm_healthy = if vllm_running && api_base_url.is_some() {
-        check_vllm_health(api_base_url.unwrap_or("http://localhost:8000/v1"))
-            .await
-            .unwrap_or(false)
-    } else {
-        false
+    let vllm_healthy = match (vllm_running, api_base_url) {
+        (true, Some(url)) => check_vllm_health(url).await.unwrap_or(false),
+        _ => false,
     };
 
     Ok(DependencyStatus {

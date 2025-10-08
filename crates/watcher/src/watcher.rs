@@ -318,8 +318,9 @@ impl FileWatcher {
                         match watcher.has_branch_changed().await {
                             Ok(Some(change)) => {
                                 info!("Branch changed from {} to {}", change.from, change.to);
-                                // ISSUE: Trigger reindexing on branch change
-                                debug!("Would trigger reindexing for branch change");
+                                // TODO(#38): Optimize branch change reindexing
+                                // Currently relies on fs watcher to detect file changes (correct but inefficient)
+                                debug!("Branch change detected - fs watcher will handle file changes");
                             }
                             Ok(None) => {
                                 // No change

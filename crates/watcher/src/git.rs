@@ -7,20 +7,16 @@
 
 use codesearch_core::error::{Error, Result};
 use git2::{BranchType, Repository, Status, StatusOptions};
-use glob::Pattern;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Wrapper around git2::Repository with additional functionality
 #[derive(Clone)]
 pub struct GitRepository {
     /// Path to the repository root
     repo_path: PathBuf,
-    /// Cached gitignore patterns
-    ignore_patterns: Arc<Vec<Pattern>>,
 }
 
 impl GitRepository {
@@ -35,12 +31,7 @@ impl GitRepository {
             .ok_or_else(|| Error::watcher("Repository has no working directory"))?
             .to_path_buf();
 
-        let ignore_patterns = Self::load_gitignore_patterns(&repo_path)?;
-
-        Ok(Self {
-            repo_path,
-            ignore_patterns: Arc::new(ignore_patterns),
-        })
+        Ok(Self { repo_path })
     }
 
     /// Get the current branch name
@@ -153,126 +144,40 @@ impl GitRepository {
     }
 
     /// Check if a path should be ignored according to gitignore rules
+    ///
+    /// Uses git2's is_path_ignored which respects all .gitignore files
+    /// (root, nested, .git/info/exclude, and global gitignore)
     pub fn should_ignore(&self, path: &Path) -> bool {
-        // Make path relative to repo root
-        let relative_path = match path.strip_prefix(&self.repo_path) {
-            Ok(p) => p,
+        let repo = match self.open_repo() {
+            Ok(r) => r,
             Err(_) => {
-                debug!("Path {:?} is outside repository", path);
+                debug!("Failed to open repository for ignore check");
                 return false;
             }
         };
 
-        let path_str = relative_path.to_string_lossy();
-
-        // Check against gitignore patterns
-        for pattern in self.ignore_patterns.iter() {
-            if pattern.matches(&path_str) {
-                debug!("Path {:?} matches gitignore pattern", path);
-                return true;
+        // Make path relative to repo root for git2
+        let relative_path = match path.strip_prefix(&self.repo_path) {
+            Ok(p) => p,
+            Err(_) => {
+                debug!("Path {path:?} is outside repository");
+                return false;
             }
-        }
-
-        false
-    }
-
-    /// Load all gitignore patterns from the repository
-    fn load_gitignore_patterns(repo_path: &Path) -> Result<Vec<Pattern>> {
-        let mut patterns = Vec::new();
-
-        // Load root .gitignore
-        let root_gitignore = repo_path.join(".gitignore");
-        if root_gitignore.exists() {
-            patterns.extend(Self::parse_gitignore_file(&root_gitignore)?);
-        }
-
-        // Load .git/info/exclude
-        let exclude_file = repo_path.join(".git").join("info").join("exclude");
-        if exclude_file.exists() {
-            patterns.extend(Self::parse_gitignore_file(&exclude_file)?);
-        }
-
-        // ISSUE: Support nested .gitignore files (would require walking the tree)
-
-        Ok(patterns)
-    }
-
-    /// Parse a gitignore file and return glob patterns
-    fn parse_gitignore_file(path: &Path) -> Result<Vec<Pattern>> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| Error::watcher(format!("Failed to read gitignore: {e}")))?;
-
-        let mut patterns = Vec::new();
-        for line in content.lines() {
-            let line = line.trim();
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            // For directory patterns (ending with /), we need two patterns:
-            // one for the directory itself and one for its contents
-            if line.ends_with('/') {
-                // Pattern for the directory itself
-                let dir_name = line.trim_end_matches('/');
-                let dir_glob = if let Some(stripped) = dir_name.strip_prefix('/') {
-                    stripped.to_string()
-                } else {
-                    format!("**/{dir_name}")
-                };
-
-                if let Ok(pattern) = Pattern::new(&dir_glob) {
-                    patterns.push(pattern);
-                }
-            }
-
-            // Convert gitignore pattern to glob pattern (handles both files and dir contents)
-            let glob_pattern = Self::gitignore_to_glob(line);
-            match Pattern::new(&glob_pattern) {
-                Ok(pattern) => patterns.push(pattern),
-                Err(e) => {
-                    warn!("Invalid gitignore pattern '{}': {}", line, e);
-                }
-            }
-        }
-
-        Ok(patterns)
-    }
-
-    /// Convert a gitignore pattern to a glob pattern
-    fn gitignore_to_glob(pattern: &str) -> String {
-        let mut glob = String::new();
-        let pattern = pattern.trim();
-
-        // Handle negation (we'll skip these for now)
-        if let Some(stripped) = pattern.strip_prefix('!') {
-            return stripped.to_string();
-        }
-
-        // Directory-only patterns
-        let is_dir = pattern.ends_with('/');
-        let pattern = if is_dir {
-            &pattern[..pattern.len() - 1]
-        } else {
-            pattern
         };
 
-        // Absolute patterns (start with /)
-        if let Some(stripped) = pattern.strip_prefix('/') {
-            glob.push_str(stripped);
-        } else {
-            // Relative patterns can match anywhere
-            // Always add **/ prefix for relative patterns
-            glob.push_str("**/");
-            glob.push_str(pattern);
+        // Use git2's built-in ignore checking which handles all .gitignore files
+        match repo.is_path_ignored(relative_path) {
+            Ok(ignored) => {
+                if ignored {
+                    debug!("Path {path:?} is ignored by git");
+                }
+                ignored
+            }
+            Err(e) => {
+                debug!("Error checking if path is ignored: {e}");
+                false
+            }
         }
-
-        // Add wildcard for directories
-        if is_dir {
-            glob.push_str("/**");
-        }
-
-        glob
     }
 
     /// Check if a repository has uncommitted changes
@@ -642,11 +547,41 @@ mod tests {
     }
 
     #[test]
-    fn test_gitignore_to_glob() {
-        assert_eq!(GitRepository::gitignore_to_glob("*.log"), "**/*.log");
-        assert_eq!(GitRepository::gitignore_to_glob("/build"), "build");
-        assert_eq!(GitRepository::gitignore_to_glob("temp/"), "**/temp/**");
-        assert_eq!(GitRepository::gitignore_to_glob("/docs/"), "docs/**");
+    fn test_gitignore_detection() {
+        use std::fs;
+
+        let temp_dir = TempDir::new().expect("test setup failed");
+        let repo = Repository::init(temp_dir.path()).expect("test setup failed");
+
+        // Configure test repo
+        let mut config = repo.config().expect("test setup failed");
+        config
+            .set_str("user.name", "Test User")
+            .expect("test setup failed");
+        config
+            .set_str("user.email", "test@example.com")
+            .expect("test setup failed");
+
+        // Create .gitignore in root
+        fs::write(temp_dir.path().join(".gitignore"), "*.log\ntarget/\n")
+            .expect("test setup failed");
+
+        // Create nested directory with its own .gitignore
+        fs::create_dir_all(temp_dir.path().join("subdir")).expect("test setup failed");
+        fs::write(temp_dir.path().join("subdir/.gitignore"), "*.tmp\n").expect("test setup failed");
+
+        let git_repo = GitRepository::open(temp_dir.path()).expect("test setup failed");
+
+        // Test root .gitignore patterns
+        assert!(git_repo.should_ignore(&temp_dir.path().join("test.log")));
+        assert!(git_repo.should_ignore(&temp_dir.path().join("target/debug/foo")));
+
+        // Test nested .gitignore patterns
+        assert!(git_repo.should_ignore(&temp_dir.path().join("subdir/test.tmp")));
+
+        // Test files that should not be ignored
+        assert!(!git_repo.should_ignore(&temp_dir.path().join("test.rs")));
+        assert!(!git_repo.should_ignore(&temp_dir.path().join("subdir/test.rs")));
     }
 
     #[test]

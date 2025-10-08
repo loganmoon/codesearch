@@ -2,12 +2,10 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-pub mod processor;
-
 use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::error::Result;
+use codesearch_outbox_processor::processor::OutboxProcessor;
 use codesearch_storage::{create_postgres_client, create_storage_client};
-use processor::OutboxProcessor;
 use std::time::Duration;
 use tracing::{error, info};
 

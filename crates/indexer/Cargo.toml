@@ -17,7 +17,6 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tree-sitter = { workspace = true }
-indicatif = { workspace = true }
 tokio = { workspace = true }
 glob = { workspace = true }
 tree-sitter-rust = { workspace = true }

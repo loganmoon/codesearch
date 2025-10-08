@@ -8,8 +8,6 @@ use crate::{IndexResult, IndexStats};
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_embeddings::EmbeddingManager;
-
-use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, error, info};
@@ -17,17 +15,14 @@ use tracing::{debug, error, info};
 /// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
 struct IndexProgress {
-    #[allow(dead_code)]
-    pub total_files: usize,
     pub processed_files: usize,
     pub failed_files: usize,
     pub current_file: Option<String>,
 }
 
 impl IndexProgress {
-    fn new(total_files: usize) -> Self {
+    fn new(_total_files: usize) -> Self {
         Self {
-            total_files,
             processed_files: 0,
             failed_files: 0,
             current_file: None,
@@ -77,11 +72,7 @@ impl RepositoryIndexer {
     }
 
     /// Process a batch of files for better performance
-    async fn process_batch(
-        &mut self,
-        file_paths: &[PathBuf],
-        _pb: &indicatif::ProgressBar,
-    ) -> Result<IndexStats> {
+    async fn process_batch(&mut self, file_paths: &[PathBuf]) -> Result<IndexStats> {
         debug!("Processing batch of {} files", file_paths.len());
 
         // Process statistics
@@ -174,7 +165,6 @@ impl crate::Indexer for RepositoryIndexer {
 
         // Create progress tracking
         let mut progress = IndexProgress::new(files.len());
-        let pb = create_progress_bar(files.len());
 
         // Process statistics
         let mut stats = IndexStats::new();
@@ -183,24 +173,18 @@ impl crate::Indexer for RepositoryIndexer {
         const BATCH_SIZE: usize = 100; // Configurable batch size
 
         for chunk in files.chunks(BATCH_SIZE) {
-            pb.set_message(format!("Processing batch of {} files", chunk.len()));
-
-            match self.process_batch(chunk, &pb).await {
+            match self.process_batch(chunk).await {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
                     for file_path in chunk {
                         progress.update(&file_path.to_string_lossy(), true);
-                        pb.inc(1);
                     }
                 }
                 Err(e) => {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback (batch size of 1)
                     for file_path in chunk {
-                        match self
-                            .process_batch(std::slice::from_ref(file_path), &pb)
-                            .await
-                        {
+                        match self.process_batch(std::slice::from_ref(file_path)).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -211,13 +195,12 @@ impl crate::Indexer for RepositoryIndexer {
                                 progress.update(&file_path.to_string_lossy(), false);
                             }
                         }
-                        pb.inc(1);
                     }
                 }
             }
         }
 
-        pb.finish_with_message("Indexing complete");
+        info!("Indexing complete");
 
         // Calculate final statistics
         stats.set_total_files(files.len());
@@ -233,19 +216,6 @@ impl crate::Indexer for RepositoryIndexer {
 
         Ok(IndexResult::new(stats, Vec::new()))
     }
-}
-
-/// Create a progress bar for indexing operations
-fn create_progress_bar(total: usize) -> ProgressBar {
-    let pb = ProgressBar::new(total as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .map_err(|e| error!("Failed to set progress bar style: {}", e))
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("##-"),
-    );
-    pb
 }
 
 #[cfg(test)]

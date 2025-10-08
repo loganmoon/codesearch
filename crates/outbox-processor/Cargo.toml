@@ -3,6 +3,9 @@ name = "codesearch-outbox-processor"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "outbox-processor"
 path = "src/main.rs"
@@ -18,3 +21,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0"
 uuid = { version = "1.11", features = ["v4", "serde"] }
+async-trait = "0.1"
+chrono = "0.4"

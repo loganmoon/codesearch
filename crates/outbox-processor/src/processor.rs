@@ -211,5 +211,448 @@ impl OutboxProcessor {
     }
 }
 
-// TODO: Add unit tests for OutboxProcessor
-// Tests removed temporarily due to structural changes needed in test setup
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codesearch_core::entities::{
+        CodeEntityBuilder, EntityType, Language, SourceLocation, Visibility,
+    };
+    use codesearch_core::CodeEntity;
+    use codesearch_storage::{OutboxOperation, Uuid};
+    use serde_json::json;
+    use std::sync::Mutex;
+
+    // Type alias matching the storage module's internal type
+    type EntityOutboxBatchEntry<'a> = (
+        &'a CodeEntity,
+        &'a [f32],
+        OutboxOperation,
+        Uuid,
+        TargetStore,
+        Option<String>,
+    );
+
+    // Mock PostgreSQL client
+    struct MockPostgresClient {
+        unprocessed_entries: Mutex<Vec<OutboxEntry>>,
+        processed_ids: Mutex<Vec<Uuid>>,
+        failed_ids: Mutex<Vec<(Uuid, String)>>,
+    }
+
+    impl MockPostgresClient {
+        fn new(entries: Vec<OutboxEntry>) -> Self {
+            Self {
+                unprocessed_entries: Mutex::new(entries),
+                processed_ids: Mutex::new(Vec::new()),
+                failed_ids: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PostgresClientTrait for MockPostgresClient {
+        async fn run_migrations(&self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn ensure_repository(
+            &self,
+            _: &std::path::Path,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<Uuid> {
+            Ok(Uuid::new_v4())
+        }
+
+        async fn get_repository_id(&self, _: &str) -> Result<Option<Uuid>> {
+            Ok(Some(Uuid::new_v4()))
+        }
+
+        async fn get_entity_metadata(
+            &self,
+            _: Uuid,
+            _: &str,
+        ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
+            Ok(None)
+        }
+
+        async fn get_file_snapshot(&self, _: Uuid, _: &str) -> Result<Option<Vec<String>>> {
+            Ok(None)
+        }
+
+        async fn update_file_snapshot(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: Vec<String>,
+            _: Option<String>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_entities_by_ids(&self, _: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
+            Ok(vec![])
+        }
+
+        async fn mark_entities_deleted(&self, _: Uuid, _: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn mark_entities_deleted_with_outbox(&self, _: Uuid, _: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn store_entities_with_outbox_batch(
+            &self,
+            _: Uuid,
+            _: &[EntityOutboxBatchEntry<'_>],
+        ) -> Result<Vec<Uuid>> {
+            Ok(vec![])
+        }
+
+        async fn get_unprocessed_outbox_entries(
+            &self,
+            _target: TargetStore,
+            _limit: i64,
+        ) -> Result<Vec<OutboxEntry>> {
+            Ok(self.unprocessed_entries.lock().unwrap().clone())
+        }
+
+        async fn mark_outbox_processed(&self, outbox_id: Uuid) -> Result<()> {
+            self.processed_ids.lock().unwrap().push(outbox_id);
+            Ok(())
+        }
+
+        async fn record_outbox_failure(&self, outbox_id: Uuid, error_message: &str) -> Result<()> {
+            self.failed_ids
+                .lock()
+                .unwrap()
+                .push((outbox_id, error_message.to_string()));
+            Ok(())
+        }
+
+        async fn get_last_indexed_commit(&self, _: Uuid) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        async fn set_last_indexed_commit(&self, _: Uuid, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    // Mock Qdrant client
+    struct MockQdrantClient {
+        bulk_loaded: Mutex<Vec<EmbeddedEntity>>,
+        deleted_ids: Mutex<Vec<String>>,
+        should_fail: bool,
+    }
+
+    impl MockQdrantClient {
+        fn new(should_fail: bool) -> Self {
+            Self {
+                bulk_loaded: Mutex::new(Vec::new()),
+                deleted_ids: Mutex::new(Vec::new()),
+                should_fail,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageClient for MockQdrantClient {
+        async fn bulk_load_entities(
+            &self,
+            entities: Vec<EmbeddedEntity>,
+        ) -> Result<Vec<(String, Uuid)>> {
+            if self.should_fail {
+                return Err(Error::storage("Mock failure"));
+            }
+            let result: Vec<(String, Uuid)> = entities
+                .iter()
+                .map(|e| (e.entity.entity_id.clone(), e.qdrant_point_id))
+                .collect();
+            self.bulk_loaded.lock().unwrap().extend(entities);
+            Ok(result)
+        }
+
+        async fn search_similar(
+            &self,
+            _: Vec<f32>,
+            _: usize,
+            _: Option<codesearch_storage::SearchFilters>,
+        ) -> Result<Vec<(String, String, f32)>> {
+            Ok(vec![])
+        }
+
+        async fn get_entity(&self, _: &str) -> Result<Option<CodeEntity>> {
+            Ok(None)
+        }
+
+        async fn delete_entities(&self, entity_ids: &[String]) -> Result<()> {
+            if self.should_fail {
+                return Err(Error::storage("Mock failure"));
+            }
+            self.deleted_ids
+                .lock()
+                .unwrap()
+                .extend(entity_ids.iter().cloned());
+            Ok(())
+        }
+    }
+
+    fn create_test_entity() -> codesearch_core::entities::CodeEntity {
+        CodeEntityBuilder::default()
+            .entity_id("test_entity_id".to_string())
+            .repository_id("test_repo".to_string())
+            .name("test_function".to_string())
+            .qualified_name("test_function".to_string())
+            .entity_type(EntityType::Function)
+            .location(SourceLocation {
+                start_line: 1,
+                end_line: 1,
+                start_column: 0,
+                end_column: 10,
+            })
+            .visibility(Visibility::Public)
+            .language(Language::Rust)
+            .file_path(std::path::PathBuf::from("/test/file.rs"))
+            .build()
+            .unwrap()
+    }
+
+    fn create_test_outbox_entry(operation: &str, retry_count: i32) -> OutboxEntry {
+        let entity = create_test_entity();
+        let embedding = vec![0.1; 1536];
+        let outbox_id = Uuid::new_v4();
+        let qdrant_point_id = Uuid::new_v4();
+
+        OutboxEntry {
+            outbox_id,
+            repository_id: Uuid::new_v4(),
+            entity_id: entity.entity_id.clone(),
+            operation: operation.to_string(),
+            target_store: "qdrant".to_string(),
+            payload: json!({
+                "entity": entity,
+                "embedding": embedding,
+                "qdrant_point_id": qdrant_point_id.to_string(),
+            }),
+            created_at: chrono::Utc::now(),
+            processed_at: None,
+            retry_count,
+            last_error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_successful_insert_processing() {
+        let entry = create_test_outbox_entry("INSERT", 0);
+        let outbox_id = entry.outbox_id;
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify entity was loaded to Qdrant
+        assert_eq!(qdrant.bulk_loaded.lock().unwrap().len(), 1);
+
+        // Verify outbox entry was marked as processed
+        assert_eq!(postgres.processed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.processed_ids.lock().unwrap()[0], outbox_id);
+    }
+
+    #[tokio::test]
+    async fn test_successful_delete_processing() {
+        let mut entry = create_test_outbox_entry("DELETE", 0);
+        let outbox_id = entry.outbox_id;
+        let entity_id = entry.entity_id.clone();
+
+        // Modify payload for DELETE operation
+        entry.payload = json!({
+            "entity_ids": vec![entity_id.clone()],
+        });
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify entity was deleted from Qdrant
+        assert_eq!(qdrant.deleted_ids.lock().unwrap().len(), 1);
+        assert_eq!(qdrant.deleted_ids.lock().unwrap()[0], entity_id);
+
+        // Verify outbox entry was marked as processed
+        assert_eq!(postgres.processed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.processed_ids.lock().unwrap()[0], outbox_id);
+    }
+
+    #[tokio::test]
+    async fn test_max_retries_exceeded() {
+        let entry = create_test_outbox_entry("INSERT", 5);
+        let outbox_id = entry.outbox_id;
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3, // max_retries = 3, entry has retry_count = 5
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify entity was NOT loaded to Qdrant
+        assert_eq!(qdrant.bulk_loaded.lock().unwrap().len(), 0);
+
+        // Verify entry was marked as processed despite exceeding retries
+        assert_eq!(postgres.processed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.processed_ids.lock().unwrap()[0], outbox_id);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_payload_handling() {
+        let mut entry = create_test_outbox_entry("INSERT", 0);
+        let outbox_id = entry.outbox_id;
+
+        // Create invalid payload (missing embedding)
+        entry.payload = json!({
+            "entity": create_test_entity(),
+            "qdrant_point_id": Uuid::new_v4().to_string(),
+        });
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify entity was NOT loaded to Qdrant
+        assert_eq!(qdrant.bulk_loaded.lock().unwrap().len(), 0);
+
+        // Verify failure was recorded
+        assert_eq!(postgres.failed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.failed_ids.lock().unwrap()[0].0, outbox_id);
+        assert!(postgres.failed_ids.lock().unwrap()[0]
+            .1
+            .contains("Missing embedding"));
+    }
+
+    #[tokio::test]
+    async fn test_unknown_operation() {
+        let entry = create_test_outbox_entry("UNKNOWN", 0);
+        let outbox_id = entry.outbox_id;
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify failure was recorded
+        assert_eq!(postgres.failed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.failed_ids.lock().unwrap()[0].0, outbox_id);
+        assert!(postgres.failed_ids.lock().unwrap()[0]
+            .1
+            .contains("Unknown operation"));
+    }
+
+    #[tokio::test]
+    async fn test_batch_processing() {
+        let entries = vec![
+            create_test_outbox_entry("INSERT", 0),
+            create_test_outbox_entry("UPDATE", 0),
+            create_test_outbox_entry("INSERT", 0),
+        ];
+
+        let postgres = Arc::new(MockPostgresClient::new(entries));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify all entities were loaded to Qdrant in batch
+        assert_eq!(qdrant.bulk_loaded.lock().unwrap().len(), 3);
+
+        // Verify all outbox entries were marked as processed
+        assert_eq!(postgres.processed_ids.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_embedding_dimension_validation() {
+        let mut entry = create_test_outbox_entry("INSERT", 0);
+        let outbox_id = entry.outbox_id;
+
+        // Create payload with oversized embedding
+        let entity = create_test_entity();
+        let huge_embedding = vec![0.1; 200_000]; // Exceeds MAX_EMBEDDING_DIM
+
+        entry.payload = json!({
+            "entity": entity,
+            "embedding": huge_embedding,
+            "qdrant_point_id": Uuid::new_v4().to_string(),
+        });
+
+        let postgres = Arc::new(MockPostgresClient::new(vec![entry]));
+        let qdrant = Arc::new(MockQdrantClient::new(false));
+
+        let processor = OutboxProcessor::new(
+            postgres.clone(),
+            qdrant.clone(),
+            Duration::from_secs(1),
+            10,
+            3,
+        );
+
+        processor.process_batch().await.unwrap();
+
+        // Verify entity was NOT loaded to Qdrant
+        assert_eq!(qdrant.bulk_loaded.lock().unwrap().len(), 0);
+
+        // Verify failure was recorded with dimension error
+        assert_eq!(postgres.failed_ids.lock().unwrap().len(), 1);
+        assert_eq!(postgres.failed_ids.lock().unwrap()[0].0, outbox_id);
+        assert!(postgres.failed_ids.lock().unwrap()[0]
+            .1
+            .contains("exceeds maximum allowed size"));
+    }
+}

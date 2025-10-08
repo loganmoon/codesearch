@@ -298,19 +298,34 @@ impl StorageConfig {
     ///
     /// The repo name is truncated to 50 characters if needed.
     /// The name is deterministic - the same path always generates the same name.
-    pub fn generate_collection_name(repo_path: &Path) -> String {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The path cannot be canonicalized (e.g., doesn't exist or permission denied)
+    /// - The path has no valid filename component
+    /// - The filename cannot be converted to UTF-8
+    pub fn generate_collection_name(repo_path: &Path) -> Result<String> {
         use twox_hash::XxHash3_128;
 
         // Get the absolute path
-        let absolute_path = repo_path
-            .canonicalize()
-            .unwrap_or_else(|_| repo_path.to_path_buf());
+        let absolute_path = repo_path.canonicalize().map_err(|e| {
+            Error::config(format!(
+                "Failed to canonicalize path {}: {e}",
+                repo_path.display()
+            ))
+        })?;
 
         // Extract repository name (last component of path)
         let repo_name = absolute_path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("repo");
+            .ok_or_else(|| {
+                Error::config(format!(
+                    "Path {} has no valid filename component",
+                    absolute_path.display()
+                ))
+            })?;
 
         // Truncate repo name to 50 chars and sanitize
         let sanitized_name: String = repo_name
@@ -330,7 +345,7 @@ impl StorageConfig {
         let hash = XxHash3_128::oneshot(path_str.as_bytes());
 
         // Format: <repo_name>_<hash>
-        format!("{sanitized_name}_{hash:032x}")
+        Ok(format!("{sanitized_name}_{hash:032x}"))
     }
 }
 
@@ -801,7 +816,8 @@ mod tests {
     #[test]
     fn test_generate_collection_name() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let collection_name = StorageConfig::generate_collection_name(temp_dir.path());
+        let collection_name = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
 
         // Verify format: name_hash
         assert!(collection_name.contains('_'));
@@ -823,7 +839,8 @@ mod tests {
         // Create the directory
         std::fs::create_dir(&special_path).expect("Failed to create dir");
 
-        let collection_name = StorageConfig::generate_collection_name(&special_path);
+        let collection_name = StorageConfig::generate_collection_name(&special_path)
+            .expect("Failed to generate collection name");
 
         // Special characters should be replaced with underscores
         assert!(!collection_name.contains('('));
@@ -836,8 +853,10 @@ mod tests {
     fn test_generate_collection_name_deterministic() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-        let name1 = StorageConfig::generate_collection_name(temp_dir.path());
-        let name2 = StorageConfig::generate_collection_name(temp_dir.path());
+        let name1 = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
+        let name2 = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
 
         // Same path should generate same name
         assert_eq!(name1, name2);

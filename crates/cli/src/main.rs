@@ -50,7 +50,7 @@ fn create_default_storage_config(collection_name: String) -> StorageConfig {
 /// Ensure config has a collection name, generating one if needed
 fn ensure_collection_name(config: Config, repo_root: &Path) -> Result<Config> {
     if config.storage.collection_name.is_empty() {
-        let collection_name = StorageConfig::generate_collection_name(repo_root);
+        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
         info!("Generated collection name: {collection_name}");
         Ok(Config::builder()
             .storage(StorageConfig {
@@ -267,7 +267,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
     let config_file = current_dir.join("codesearch.toml");
     if !config_file.exists() {
         // Generate collection name from repository path
-        let collection_name = StorageConfig::generate_collection_name(&repo_root);
+        let collection_name = StorageConfig::generate_collection_name(&repo_root)?;
         info!("Generated collection name: {}", collection_name);
 
         let storage_config = create_default_storage_config(collection_name);
@@ -400,7 +400,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
         ensure_collection_name(loaded, repo_root)?
     } else {
         warn!("No configuration file found, using defaults");
-        let collection_name = StorageConfig::generate_collection_name(repo_root);
+        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
         info!("Generated collection name: {}", collection_name);
 
         Config::builder()

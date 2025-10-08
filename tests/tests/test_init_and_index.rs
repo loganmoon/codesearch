@@ -90,12 +90,12 @@ async fn test_init_creates_collection_in_qdrant() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = simple_rust_repo().await?;
 
     // Create config pointing to test instances
-    let config_path = create_test_config(repo.path(), qdrant, postgres, &db_name, None)?;
+    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name, None)?;
 
     // Run init command
     let output = run_cli(
@@ -132,14 +132,14 @@ async fn test_init_creates_collection_in_qdrant() -> Result<()> {
         .map(|s| s.trim().trim_matches('"'))
         .context("Failed to extract collection name")?;
 
-    assert_collection_exists(qdrant, collection_name).await?;
+    assert_collection_exists(&qdrant, collection_name).await?;
 
     // Note: The init command uses the default model dimensions (1536 for BAAI/bge-code-v1)
     // even with mock provider, since the provider type is determined at runtime
     // We just verify the collection was created successfully
 
-    drop_test_collection(qdrant, collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -151,15 +151,15 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -182,17 +182,17 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     );
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
-    assert_min_point_count(qdrant, &collection_name, 10).await?;
+    assert_min_point_count(&qdrant, &collection_name, 10).await?;
 
     drop(processor); // Clean up processor
 
-    assert_collection_exists(qdrant, &collection_name).await?;
+    assert_collection_exists(&qdrant, &collection_name).await?;
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -204,15 +204,15 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -226,15 +226,15 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
     assert!(output.status.success(), "Index with mock embeddings failed");
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
-    assert_min_point_count(qdrant, &collection_name, 3).await?;
+    assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
     drop(processor); // Clean up processor
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -246,15 +246,15 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -267,7 +267,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     run_cli(repo.path(), &["index"])?;
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
     // Create storage client for programmatic search
@@ -317,26 +317,26 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
 
     drop(processor); // Clean up processor
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
 #[tokio::test]
-#[ignore] // Requires vLLM running
+#[ignore] // Requires docker compose up vllm-embeddings before running
 async fn test_complete_pipeline_with_real_embeddings() -> Result<()> {
     init_test_logging();
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = complex_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
 
-    // Create config with LocalApi provider instead of mock
+    // Create config with LocalApi provider using manual vLLM service
     let config_content = format!(
         r#"
 [indexer]
@@ -349,7 +349,7 @@ collection_name = "{}"
 auto_start_deps = false
 postgres_host = "localhost"
 postgres_port = {}
-postgres_database = "codesearch"
+postgres_database = "{}"
 postgres_user = "codesearch"
 postgres_password = "codesearch"
 
@@ -368,7 +368,8 @@ enabled = ["rust"]
         qdrant.port(),
         qdrant.rest_port(),
         collection_name,
-        postgres.port()
+        postgres.port(),
+        db_name
     );
 
     let config_path = repo.path().join("codesearch.toml");
@@ -394,17 +395,17 @@ enabled = ["rust"]
     );
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
-    assert_min_point_count(qdrant, &collection_name, 15).await?;
+    assert_min_point_count(&qdrant, &collection_name, 15).await?;
 
     drop(processor); // Clean up processor
 
-    assert_collection_exists(qdrant, &collection_name).await?;
+    assert_collection_exists(&qdrant, &collection_name).await?;
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -416,15 +417,15 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -437,11 +438,11 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     run_cli(repo.path(), &["index"])?;
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
     // Just check that we have a reasonable number of entities - at least 10
-    assert_min_point_count(qdrant, &collection_name, 10).await?;
+    assert_min_point_count(&qdrant, &collection_name, 10).await?;
 
     drop(processor); // Clean up processor
 
@@ -450,10 +451,10 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
         codesearch_core::entities::EntityType::Struct,
         "main.rs",
     );
-    assert_entity_in_qdrant(qdrant, &collection_name, &expected).await?;
+    assert_entity_in_qdrant(&qdrant, &collection_name, &expected).await?;
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -465,15 +466,15 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -499,8 +500,8 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
         "Second init failed: stdout={stdout}, stderr={stderr}"
     );
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -516,7 +517,7 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = simple_rust_repo().await?;
 
@@ -524,8 +525,8 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -544,7 +545,7 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
         "Should provide error message when index fails"
     );
 
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -601,7 +602,7 @@ async fn test_index_with_invalid_files_continues() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     // Create repo with valid and invalid Rust files
     let repo = TestRepositoryBuilder::new()
@@ -628,8 +629,8 @@ fn broken( {
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -646,7 +647,7 @@ fn broken( {
     );
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
     let storage_config = StorageConfig {
@@ -672,8 +673,8 @@ fn broken( {
 
     drop(processor); // Clean up processor
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -689,15 +690,15 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = TestRepositoryBuilder::new().build().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -717,11 +718,11 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
     );
 
     // Collection should exist but be empty
-    assert_collection_exists(qdrant, &collection_name).await?;
-    assert_point_count(qdrant, &collection_name, 0).await?;
+    assert_collection_exists(&qdrant, &collection_name).await?;
+    assert_point_count(&qdrant, &collection_name, 0).await?;
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -733,7 +734,7 @@ async fn test_large_entity_is_skipped() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     // Create file with very large entity (exceeds context window)
     let large_content = format!(
@@ -753,8 +754,8 @@ fn large_function() {{
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -771,17 +772,17 @@ fn large_function() {{
     );
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
     // Large entity should be skipped
     // (Collection may be empty or have other entities if any were extracted)
-    assert_collection_exists(qdrant, &collection_name).await?;
+    assert_collection_exists(&qdrant, &collection_name).await?;
 
     drop(processor); // Clean up processor
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
@@ -793,7 +794,7 @@ async fn test_duplicate_entity_ids_handled() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     // Create repo with two files that have identically named functions
     let repo = TestRepositoryBuilder::new()
@@ -819,8 +820,8 @@ pub fn duplicate_name() -> i32 {
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path = create_test_config(
         repo.path(),
-        qdrant,
-        postgres,
+        &qdrant,
+        &postgres,
         &db_name,
         Some(&collection_name),
     )?;
@@ -837,15 +838,15 @@ pub fn duplicate_name() -> i32 {
     );
 
     let processor =
-        start_and_wait_for_outbox_sync_with_db(postgres, qdrant, &db_name, &collection_name)
+        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
             .await?;
 
-    assert_min_point_count(qdrant, &collection_name, 2).await?;
+    assert_min_point_count(&qdrant, &collection_name, 2).await?;
 
     drop(processor); // Clean up processor
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 

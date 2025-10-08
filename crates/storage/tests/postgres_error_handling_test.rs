@@ -19,12 +19,12 @@ use uuid::Uuid;
 
 /// Setup helper: Use shared Postgres instance and create unique database
 async fn setup_postgres() -> Result<(
-    &'static codesearch_e2e_tests::common::TestPostgres,
+    Arc<codesearch_e2e_tests::common::TestPostgres>,
     String,
     Arc<codesearch_storage::postgres::PostgresClient>,
 )> {
     let postgres = get_shared_postgres().await?;
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let config = create_storage_config(
         6334, // Qdrant not needed for Postgres tests
@@ -76,7 +76,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
             assert!(result.is_ok(), "Concurrent operations should succeed");
         }
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -158,7 +158,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
             "Should have exactly one entity (upserted)"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -208,7 +208,7 @@ async fn test_concurrent_snapshot_updates() -> Result<()> {
             "Snapshot should exist after concurrent updates"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -242,7 +242,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
             "Deleting non-existent entities should not error"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -293,7 +293,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
             "Should return only existing entities (no error for missing)"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -355,7 +355,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
             .await?;
         assert_eq!(entries.len(), 10, "Should retrieve all 10 entries");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -410,7 +410,7 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
             "Entry should still be marked processed"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -434,7 +434,7 @@ async fn test_migration_already_applied() -> Result<()> {
 
         assert!(!repository_id.is_nil(), "Schema should still be functional");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await

@@ -75,7 +75,7 @@ async fn test_reindex_detects_deleted_function() -> Result<()> {
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
@@ -95,7 +95,7 @@ pub fn function_two() -> i32 {
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path =
-        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
+        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
 
     run_cli(
         repo.path(),
@@ -104,9 +104,9 @@ pub fn function_two() -> i32 {
     let output = run_cli(repo.path(), &["index"])?;
     assert!(output.status.success(), "Initial index failed");
 
-    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
-    assert_min_point_count(qdrant, &collection_name, 2).await?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
+    assert_min_point_count(&qdrant, &collection_name, 2).await?;
 
     std::fs::write(
         repo.path().join("src/lib.rs"),
@@ -120,11 +120,11 @@ pub fn function_one() -> i32 {
     let output = run_cli(repo.path(), &["index"])?;
     assert!(output.status.success(), "Re-index failed");
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
-    assert_point_count(qdrant, &collection_name, 1).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
+    assert_point_count(&qdrant, &collection_name, 1).await?;
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
 
     Ok(())
 }
@@ -137,7 +137,7 @@ async fn test_reindex_detects_renamed_function() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
@@ -153,7 +153,7 @@ pub fn old_name() -> i32 {
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path =
-        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
+        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
 
     run_cli(
         repo.path(),
@@ -161,11 +161,11 @@ pub fn old_name() -> i32 {
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    assert_min_point_count(qdrant, &collection_name, 1).await?;
+    assert_min_point_count(&qdrant, &collection_name, 1).await?;
 
     std::fs::write(
         repo.path().join("src/lib.rs"),
@@ -178,16 +178,16 @@ pub fn new_name() -> i32 {
 
     run_cli(repo.path(), &["index"])?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    let final_count = get_point_count(qdrant, &collection_name).await?;
+    let final_count = get_point_count(&qdrant, &collection_name).await?;
     assert!(
         final_count >= 1,
         "Expected at least 1 entity after rename, got {final_count}"
     );
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
 
     Ok(())
 }
@@ -200,7 +200,7 @@ async fn test_reindex_empty_file() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
@@ -216,7 +216,7 @@ pub fn func3() {}
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path =
-        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
+        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
 
     run_cli(
         repo.path(),
@@ -224,23 +224,23 @@ pub fn func3() {}
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    assert_min_point_count(qdrant, &collection_name, 3).await?;
+    assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
     std::fs::write(repo.path().join("src/lib.rs"), "// Empty file\n")?;
 
     run_cli(repo.path(), &["index"])?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    let final_count = get_point_count(qdrant, &collection_name).await?;
+    let final_count = get_point_count(&qdrant, &collection_name).await?;
     assert_eq!(final_count, 0, "Expected 0 entities in empty file");
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
 
     Ok(())
 }
@@ -253,7 +253,7 @@ async fn test_reindex_modified_function_body() -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
 
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let repo = TestRepositoryBuilder::new()
         .with_rust_file(
@@ -269,7 +269,7 @@ pub fn calculate() -> i32 {
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     let config_path =
-        create_test_config(repo.path(), qdrant, postgres, &db_name, &collection_name)?;
+        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
 
     run_cli(
         repo.path(),
@@ -277,11 +277,11 @@ pub fn calculate() -> i32 {
     )?;
     run_cli(repo.path(), &["index"])?;
 
-    let _processor = TestOutboxProcessor::start(postgres, qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    assert_min_point_count(qdrant, &collection_name, 1).await?;
+    assert_min_point_count(&qdrant, &collection_name, 1).await?;
 
     std::fs::write(
         repo.path().join("src/lib.rs"),
@@ -295,13 +295,13 @@ pub fn calculate() -> i32 {
 
     run_cli(repo.path(), &["index"])?;
 
-    wait_for_outbox_empty(postgres, &db_name, Duration::from_secs(5)).await?;
+    wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
-    let final_count = get_point_count(qdrant, &collection_name).await?;
+    let final_count = get_point_count(&qdrant, &collection_name).await?;
     assert_eq!(final_count, 1, "Expected 1 entity after body modification");
 
-    drop_test_collection(qdrant, &collection_name).await?;
-    drop_test_database(postgres, &db_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
 
     Ok(())
 }

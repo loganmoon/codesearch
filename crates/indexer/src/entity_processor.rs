@@ -8,7 +8,6 @@ use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
 use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -249,27 +248,13 @@ pub async fn update_file_snapshot_and_mark_stale(
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
         postgres_client
-            .mark_entities_deleted(repo_id, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, &stale_ids)
             .await
-            .map_err(|e| Error::Storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-        for entity_id in &stale_ids {
-            let payload = json!({
-                "entity_ids": [entity_id],
-                "reason": "file_change"
-            });
-
-            postgres_client
-                .write_outbox_entry(
-                    repo_id,
-                    entity_id,
-                    OutboxOperation::Delete,
-                    TargetStore::Qdrant,
-                    payload,
-                )
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
-        }
+            .map_err(|e| {
+                Error::Storage(format!(
+                    "Failed to mark entities as deleted with outbox: {e}"
+                ))
+            })?;
     }
 
     postgres_client
@@ -301,27 +286,13 @@ pub async fn mark_file_entities_deleted(
     let count = entity_ids.len();
 
     postgres_client
-        .mark_entities_deleted(repo_id, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, &entity_ids)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-    for entity_id in &entity_ids {
-        let payload = json!({
-            "entity_ids": [entity_id],
-            "reason": "file_deleted"
-        });
-
-        postgres_client
-            .write_outbox_entry(
-                repo_id,
-                entity_id,
-                OutboxOperation::Delete,
-                TargetStore::Qdrant,
-                payload,
-            )
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
-    }
+        .map_err(|e| {
+            Error::Storage(format!(
+                "Failed to mark entities as deleted with outbox: {e}"
+            ))
+        })?;
 
     info!("Marked {} entities as deleted", count);
     Ok(count)

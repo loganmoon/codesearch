@@ -28,18 +28,6 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Get repository by collection name
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>>;
 
-    /// Store or update entity metadata
-    async fn store_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity: &CodeEntity,
-        git_commit_hash: Option<String>,
-        qdrant_point_id: Uuid,
-    ) -> Result<()>;
-
-    /// Get all entity IDs for a file path
-    async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>>;
-
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     async fn get_entity_metadata(
         &self,
@@ -70,22 +58,19 @@ pub trait PostgresClientTrait: Send + Sync {
     async fn mark_entities_deleted(&self, repository_id: Uuid, entity_ids: &[String])
         -> Result<()>;
 
+    /// Mark entities as deleted and create outbox entries in a single transaction
+    async fn mark_entities_deleted_with_outbox(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()>;
+
     /// Store entities with outbox entries in a single transaction (batch operation)
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>>;
-
-    /// Write outbox entry for entity operation
-    async fn write_outbox_entry(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-        operation: OutboxOperation,
-        target_store: TargetStore,
-        payload: serde_json::Value,
-    ) -> Result<Uuid>;
 
     /// Get unprocessed outbox entries for a target store
     async fn get_unprocessed_outbox_entries(

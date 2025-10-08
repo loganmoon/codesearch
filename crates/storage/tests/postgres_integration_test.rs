@@ -107,13 +107,17 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
         );
         let qdrant_point_id = Uuid::new_v4();
 
+        let embedding = vec![0.1; 384];
+        let batch = vec![(
+            &entity,
+            embedding.as_slice(),
+            OutboxOperation::Insert,
+            qdrant_point_id,
+            TargetStore::Qdrant,
+            Some("abc123".to_string()),
+        )];
         client
-            .store_entity_metadata(
-                repository_id,
-                &entity,
-                Some("abc123".to_string()),
-                qdrant_point_id,
-            )
+            .store_entities_with_outbox_batch(repository_id, &batch)
             .await?;
 
         let entities = client
@@ -147,23 +151,30 @@ async fn test_store_entity_metadata_update() -> Result<()> {
         );
         let qdrant_point_id = Uuid::new_v4();
 
+        let embedding = vec![0.1; 384];
+        let batch = vec![(
+            &entity,
+            embedding.as_slice(),
+            OutboxOperation::Insert,
+            qdrant_point_id,
+            TargetStore::Qdrant,
+            Some("abc123".to_string()),
+        )];
         client
-            .store_entity_metadata(
-                repository_id,
-                &entity,
-                Some("abc123".to_string()),
-                qdrant_point_id,
-            )
+            .store_entities_with_outbox_batch(repository_id, &batch)
             .await?;
 
         entity.content = Some("fn test_func() { /* updated */ }".to_string());
+        let batch = vec![(
+            &entity,
+            embedding.as_slice(),
+            OutboxOperation::Insert,
+            qdrant_point_id,
+            TargetStore::Qdrant,
+            Some("def456".to_string()),
+        )];
         client
-            .store_entity_metadata(
-                repository_id,
-                &entity,
-                Some("def456".to_string()),
-                qdrant_point_id,
-            )
+            .store_entities_with_outbox_batch(repository_id, &batch)
             .await?;
 
         let entities = client
@@ -183,7 +194,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_get_entities_for_file() -> Result<()> {
+async fn test_get_file_snapshot() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
 
@@ -212,13 +223,63 @@ async fn test_get_entities_for_file() -> Result<()> {
             "lib.rs",
         );
 
-        for entity in &[&entity1, &entity2, &entity3] {
-            client
-                .store_entity_metadata(repository_id, entity, None, Uuid::new_v4())
-                .await?;
-        }
+        // Store entities using batch API
+        let embedding = vec![0.1; 384];
+        let batch = vec![
+            (
+                &entity1,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+            ),
+            (
+                &entity2,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+            ),
+            (
+                &entity3,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+            ),
+        ];
 
-        let main_entities = client.get_entities_for_file("main.rs").await?;
+        client
+            .store_entities_with_outbox_batch(repository_id, &batch)
+            .await?;
+
+        // Update file snapshots
+        client
+            .update_file_snapshot(
+                repository_id,
+                "main.rs",
+                vec![entity1.entity_id.clone(), entity2.entity_id.clone()],
+                None,
+            )
+            .await?;
+
+        client
+            .update_file_snapshot(
+                repository_id,
+                "lib.rs",
+                vec![entity3.entity_id.clone()],
+                None,
+            )
+            .await?;
+
+        // Get file snapshot for main.rs
+        let main_entities = client
+            .get_file_snapshot(repository_id, "main.rs")
+            .await?
+            .expect("main.rs snapshot should exist");
 
         assert_eq!(
             main_entities.len(),
@@ -234,55 +295,16 @@ async fn test_get_entities_for_file() -> Result<()> {
             "Should include main_struct"
         );
 
-        drop_test_database(&postgres, &db_name).await?;
-        Ok(())
-    })
-    .await
-}
+        // Get file snapshot for lib.rs
+        let lib_entities = client
+            .get_file_snapshot(repository_id, "lib.rs")
+            .await?
+            .expect("lib.rs snapshot should exist");
 
-#[tokio::test]
-async fn test_get_entities_for_file_excludes_deleted() -> Result<()> {
-    with_timeout(Duration::from_secs(30), async {
-        let (postgres, db_name, client) = setup_postgres().await?;
-
-        let repo_path = Path::new("/tmp/test-repo");
-        let collection_name = format!("test_{}", Uuid::new_v4());
-        let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
-            .await?;
-
-        // Create 3 entities in same file
-        let entities: Vec<_> = (0..3)
-            .map(|i| {
-                create_test_entity_with_file(
-                    &format!("func{i}"),
-                    EntityType::Function,
-                    &repository_id.to_string(),
-                    "test.rs",
-                )
-            })
-            .collect();
-
-        for entity in &entities {
-            client
-                .store_entity_metadata(repository_id, entity, None, Uuid::new_v4())
-                .await?;
-        }
-
-        client
-            .mark_entities_deleted(repository_id, &[entities[1].entity_id.clone()])
-            .await?;
-
-        let file_entities = client.get_entities_for_file("test.rs").await?;
-
-        assert_eq!(
-            file_entities.len(),
-            2,
-            "Should return only 2 entities (deleted excluded)"
-        );
+        assert_eq!(lib_entities.len(), 1, "Should return 1 entity from lib.rs");
         assert!(
-            !file_entities.contains(&entities[1].entity_id),
-            "Deleted entity should not be included"
+            lib_entities.contains(&entity3.entity_id),
+            "Should include lib_func"
         );
 
         drop_test_database(&postgres, &db_name).await?;
@@ -398,9 +420,18 @@ async fn test_mark_entities_deleted() -> Result<()> {
             })
             .collect();
 
+        let embedding = vec![0.1; 384];
         for entity in &entities {
+            let batch = vec![(
+                entity,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+            )];
             client
-                .store_entity_metadata(repository_id, entity, None, Uuid::new_v4())
+                .store_entities_with_outbox_batch(repository_id, &batch)
                 .await?;
         }
 
@@ -484,9 +515,18 @@ async fn test_get_entities_by_ids() -> Result<()> {
             })
             .collect();
 
+        let embedding = vec![0.1; 384];
         for entity in &entities {
+            let batch = vec![(
+                entity,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+            )];
             client
-                .store_entity_metadata(repository_id, entity, None, Uuid::new_v4())
+                .store_entities_with_outbox_batch(repository_id, &batch)
                 .await?;
         }
 
@@ -742,8 +782,17 @@ async fn test_transaction_rollback() -> Result<()> {
             &repository_id.to_string(),
         );
 
+        let embedding = vec![0.1; 384];
+        let batch = vec![(
+            &entity,
+            embedding.as_slice(),
+            OutboxOperation::Insert,
+            Uuid::new_v4(),
+            TargetStore::Qdrant,
+            None,
+        )];
         client
-            .store_entity_metadata(repository_id, &entity, None, Uuid::new_v4())
+            .store_entities_with_outbox_batch(repository_id, &batch)
             .await?;
 
         let entities = client
@@ -751,7 +800,7 @@ async fn test_transaction_rollback() -> Result<()> {
             .await?;
         assert_eq!(entities.len(), 1, "Entity should be stored");
 
-        // without exposing transaction APIs. The store_entity_metadata method already
+        // without exposing transaction APIs. The store_entities_with_outbox_batch method already
         // handles transactions internally, and successful operations prove transaction safety.
 
         drop_test_database(&postgres, &db_name).await?;

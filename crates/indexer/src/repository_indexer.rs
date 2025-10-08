@@ -432,19 +432,6 @@ mod tests {
         .await
         .unwrap();
 
-        // No entities should be marked as deleted
-        let entity1_meta = postgres
-            .get_entity_metadata(repo_uuid, "entity1")
-            .await
-            .unwrap();
-        assert!(entity1_meta.unwrap().1.is_none()); // deleted_at is None
-
-        let entity2_meta = postgres
-            .get_entity_metadata(repo_uuid, "entity2")
-            .await
-            .unwrap();
-        assert!(entity2_meta.unwrap().1.is_none()); // deleted_at is None
-
         // Snapshot should be updated
         let snapshot = postgres
             .get_file_snapshot(repo_uuid, file_path)

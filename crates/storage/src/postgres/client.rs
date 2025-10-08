@@ -133,89 +133,6 @@ impl PostgresClient {
         Ok(record.map(|(id,)| id))
     }
 
-    /// Store or update entity metadata (simplified - no version history)
-    pub async fn store_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity: &CodeEntity,
-        git_commit_hash: Option<String>,
-        qdrant_point_id: Uuid,
-    ) -> Result<()> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
-
-        // Serialize entity to JSONB
-        let entity_json = serde_json::to_value(entity)
-            .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
-
-        // Upsert entity_metadata
-        sqlx::query(
-            "INSERT INTO entity_metadata (
-                entity_id, repository_id, qualified_name, name, parent_scope,
-                entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id,
-                indexed_at, updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-            ON CONFLICT (repository_id, entity_id)
-            DO UPDATE SET
-                qualified_name = EXCLUDED.qualified_name,
-                name = EXCLUDED.name,
-                parent_scope = EXCLUDED.parent_scope,
-                entity_type = EXCLUDED.entity_type,
-                language = EXCLUDED.language,
-                file_path = EXCLUDED.file_path,
-                visibility = EXCLUDED.visibility,
-                entity_data = EXCLUDED.entity_data,
-                git_commit_hash = EXCLUDED.git_commit_hash,
-                qdrant_point_id = EXCLUDED.qdrant_point_id,
-                updated_at = NOW(),
-                deleted_at = NULL",
-        )
-        .bind(&entity.entity_id)
-        .bind(repository_id)
-        .bind(&entity.qualified_name)
-        .bind(&entity.name)
-        .bind(&entity.parent_scope)
-        .bind(format!("{:?}", entity.entity_type))
-        .bind(entity.language.to_string())
-        .bind(
-            entity
-                .file_path
-                .to_str()
-                .ok_or_else(|| Error::storage("Invalid file path"))?,
-        )
-        .bind(format!("{:?}", entity.visibility))
-        .bind(entity_json)
-        .bind(git_commit_hash)
-        .bind(qdrant_point_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to upsert entity metadata: {e}")))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Get all entity IDs for a file path
-    pub async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>> {
-        let entity_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT entity_id FROM entity_metadata WHERE file_path = $1 AND deleted_at IS NULL",
-        )
-        .bind(file_path)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to get entities for file: {e}")))?;
-
-        Ok(entity_ids)
-    }
-
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     pub async fn get_entity_metadata(
         &self,
@@ -394,6 +311,88 @@ impl PostgresClient {
         Ok(())
     }
 
+    /// Mark entities as deleted and create outbox entries in a single transaction
+    pub async fn mark_entities_deleted_with_outbox(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_ids.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_ids.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // 1. Mark entities as deleted
+        let mut update_query: QueryBuilder<Postgres> = QueryBuilder::new(
+            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW() WHERE repository_id = "
+        );
+
+        update_query.push_bind(repository_id);
+        update_query.push(" AND entity_id IN (");
+
+        let mut separated = update_query.separated(", ");
+        for entity_id in entity_ids {
+            separated.push_bind(entity_id);
+        }
+        separated.push_unseparated(")");
+
+        let update_result = update_query
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
+
+        // 2. Create outbox entries for all deletes
+        let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, created_at) "
+        );
+
+        outbox_query.push_values(entity_ids, |mut b, entity_id| {
+            let payload = serde_json::json!({
+                "entity_ids": [entity_id],
+                "reason": "file_change"
+            });
+            b.push_bind(repository_id)
+                .push_bind(entity_id)
+                .push_bind(OutboxOperation::Delete.to_string())
+                .push_bind(TargetStore::Qdrant.to_string())
+                .push_bind(payload)
+                .push("NOW()");
+        });
+
+        outbox_query
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        tracing::info!(
+            "Marked {} entities as deleted with outbox entries",
+            update_result.rows_affected()
+        );
+
+        Ok(())
+    }
+
     /// Store entities with outbox entries in a single transaction (batch operation)
     pub async fn store_entities_with_outbox_batch(
         &self,
@@ -546,43 +545,6 @@ impl PostgresClient {
         Ok(outbox_ids)
     }
 
-    /// Write outbox entry for entity operation (transactional)
-    pub async fn write_outbox_entry(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-        operation: OutboxOperation,
-        target_store: TargetStore,
-        payload: serde_json::Value,
-    ) -> Result<Uuid> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
-
-        let outbox_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO entity_outbox (
-                repository_id, entity_id, operation, target_store, payload, created_at
-            ) VALUES ($1, $2, $3, $4, $5, NOW())
-            RETURNING outbox_id",
-        )
-        .bind(repository_id)
-        .bind(entity_id)
-        .bind(operation.to_string())
-        .bind(target_store.to_string())
-        .bind(payload)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to write outbox entry: {e}")))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-
-        Ok(outbox_id)
-    }
-
     /// Get unprocessed outbox entries for a target store
     pub async fn get_unprocessed_outbox_entries(
         &self,
@@ -679,7 +641,8 @@ impl PostgresClient {
     ///
     /// ```no_run
     /// # use uuid::Uuid;
-    /// # async fn example(client: &codesearch_storage::postgres::PostgresClient, repo_id: Uuid) -> codesearch_core::error::Result<()> {
+    /// # use codesearch_storage::PostgresClientTrait;
+    /// # async fn example(client: &dyn PostgresClientTrait, repo_id: Uuid) -> codesearch_core::error::Result<()> {
     /// let last_commit = client.get_last_indexed_commit(repo_id).await?;
     /// if let Some(commit_hash) = last_commit {
     ///     println!("Last indexed commit: {commit_hash}");
@@ -731,7 +694,8 @@ impl PostgresClient {
     ///
     /// ```no_run
     /// # use uuid::Uuid;
-    /// # async fn example(client: &codesearch_storage::postgres::PostgresClient, repo_id: Uuid) -> codesearch_core::error::Result<()> {
+    /// # use codesearch_storage::PostgresClientTrait;
+    /// # async fn example(client: &dyn PostgresClientTrait, repo_id: Uuid) -> codesearch_core::error::Result<()> {
     /// // After successfully indexing commit abc123...
     /// client.set_last_indexed_commit(repo_id, "abc123def456...").await?;
     /// println!("Updated last indexed commit");
@@ -780,21 +744,6 @@ impl super::PostgresClientTrait for PostgresClient {
         self.get_repository_id(collection_name).await
     }
 
-    async fn store_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity: &CodeEntity,
-        git_commit_hash: Option<String>,
-        qdrant_point_id: Uuid,
-    ) -> Result<()> {
-        self.store_entity_metadata(repository_id, entity, git_commit_hash, qdrant_point_id)
-            .await
-    }
-
-    async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>> {
-        self.get_entities_for_file(file_path).await
-    }
-
     async fn get_entity_metadata(
         &self,
         repository_id: Uuid,
@@ -834,24 +783,21 @@ impl super::PostgresClientTrait for PostgresClient {
         self.mark_entities_deleted(repository_id, entity_ids).await
     }
 
+    async fn mark_entities_deleted_with_outbox(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        self.mark_entities_deleted_with_outbox(repository_id, entity_ids)
+            .await
+    }
+
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
         self.store_entities_with_outbox_batch(repository_id, entities)
-            .await
-    }
-
-    async fn write_outbox_entry(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-        operation: OutboxOperation,
-        target_store: TargetStore,
-        payload: serde_json::Value,
-    ) -> Result<Uuid> {
-        self.write_outbox_entry(repository_id, entity_id, operation, target_store, payload)
             .await
     }
 

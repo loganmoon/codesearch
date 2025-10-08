@@ -7,7 +7,6 @@ use std::path::Path;
 
 // All internal modules are private
 mod extraction_framework;
-mod generic_entities;
 mod rust;
 
 // Public module for qualified name building

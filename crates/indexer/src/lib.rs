@@ -3,7 +3,7 @@
 //! This crate provides a three-stage indexing pipeline (Extract → Transform → Commit)
 //! for processing source code repositories.
 
-#![warn(warnings)]
+#![deny(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 

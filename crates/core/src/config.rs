@@ -877,14 +877,16 @@ impl CodesearchConfigBuilder {
     }
 
     /// Build the Config
-    pub fn build(self) -> Config {
-        Config {
+    pub fn build(self) -> Result<Config> {
+        Ok(Config {
             indexer: self.indexer,
             embeddings: self.embeddings,
             watcher: self.watcher,
-            storage: self.storage.expect("Storage config is required"),
+            storage: self
+                .storage
+                .ok_or_else(|| Error::config("Storage config is required"))?,
             languages: self.languages,
-        }
+        })
     }
 }
 

@@ -1,5 +1,8 @@
 //! Mock PostgreSQL client for testing
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+
 use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;

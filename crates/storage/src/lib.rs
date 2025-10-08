@@ -3,6 +3,10 @@
 //! This module provides the persistence layer for storing and retrieving
 //! indexed code entities and their relationships.
 
+#![deny(warnings)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 mod collection_manager;
 pub mod postgres;
 mod qdrant;

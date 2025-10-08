@@ -1,3 +1,7 @@
+#![deny(warnings)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 mod processor;
 
 use codesearch_core::config::Config;

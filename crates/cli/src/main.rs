@@ -235,7 +235,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
             postgres_password: "codesearch".to_string(),
         };
 
-        let config = Config::builder().storage(storage_config).build();
+        let config = Config::builder().storage(storage_config).build()?;
 
         config
             .save(&config_file)
@@ -259,7 +259,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
             .embeddings(config.embeddings)
             .watcher(config.watcher)
             .languages(config.languages)
-            .build();
+            .build()?;
         updated_config.save(config_path)?;
         updated_config
     } else {
@@ -389,7 +389,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
                 .embeddings(loaded.embeddings)
                 .watcher(loaded.watcher)
                 .languages(loaded.languages)
-                .build()
+                .build()?
         } else {
             loaded
         }
@@ -412,7 +412,7 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
             postgres_password: "codesearch".to_string(),
         };
 
-        Config::builder().storage(storage_config).build()
+        Config::builder().storage(storage_config).build()?
     };
 
     Ok(config)
@@ -757,7 +757,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                             postgres_user: "codesearch".to_string(),
                             postgres_password: "codesearch".to_string(),
                         };
-                        Config::builder().storage(storage_config).build()
+                        Config::builder().storage(storage_config).build()?
                     }
                 }
             } else {
@@ -775,7 +775,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                     postgres_user: "codesearch".to_string(),
                     postgres_password: "codesearch".to_string(),
                 };
-                Config::builder().storage(storage_config).build()
+                Config::builder().storage(storage_config).build()?
             };
 
             let api_base_url = if parse_provider_type(&config.embeddings.provider)

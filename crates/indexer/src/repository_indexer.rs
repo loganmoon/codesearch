@@ -49,7 +49,7 @@ pub struct RepositoryIndexer {
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
-    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 }
 
@@ -59,7 +59,7 @@ impl RepositoryIndexer {
         repository_path: PathBuf,
         repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
-        postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+        postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
@@ -257,8 +257,8 @@ mod tests {
         EntityMetadata, EntityType, Language, SourceLocation, Visibility,
     };
     use codesearch_core::CodeEntity;
-    use codesearch_storage::postgres::mock::MockPostgresClient;
-    use codesearch_storage::postgres::PostgresClientTrait;
+    use codesearch_storage::MockPostgresClient;
+    use codesearch_storage::PostgresClientTrait;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -334,8 +334,17 @@ mod tests {
         .unwrap();
 
         // Verify entity2 was marked as deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
+        let entity2_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity2")
+            .await
+            .unwrap();
+        assert!(entity2_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity1_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity1")
+            .await
+            .unwrap();
+        assert!(entity1_meta.unwrap().1.is_none()); // deleted_at is None
 
         // Verify snapshot was updated
         let snapshot = postgres
@@ -345,7 +354,12 @@ mod tests {
         assert_eq!(snapshot, Some(new_entities));
 
         // Verify DELETE outbox entry was created
-        assert_eq!(postgres.unprocessed_outbox_count(), 1);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
     }
 
     #[tokio::test]
@@ -384,7 +398,11 @@ mod tests {
         .unwrap();
 
         // Old entity should be marked deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity_old_name"));
+        let old_entity_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity_old_name")
+            .await
+            .unwrap();
+        assert!(old_entity_meta.unwrap().1.is_some()); // deleted_at is Some
     }
 
     #[tokio::test]
@@ -415,8 +433,17 @@ mod tests {
         .unwrap();
 
         // No entities should be marked as deleted
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity2"));
+        let entity1_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity1")
+            .await
+            .unwrap();
+        assert!(entity1_meta.unwrap().1.is_none()); // deleted_at is None
+
+        let entity2_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity2")
+            .await
+            .unwrap();
+        assert!(entity2_meta.unwrap().1.is_none()); // deleted_at is None
 
         // Snapshot should be updated
         let snapshot = postgres
@@ -426,7 +453,12 @@ mod tests {
         assert_eq!(snapshot, Some(new_entities));
 
         // No DELETE outbox entries
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
     }
 
     #[tokio::test]
@@ -476,12 +508,31 @@ mod tests {
         .unwrap();
 
         // All entities should be marked as deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity1"));
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity3"));
+        let entity1_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity1")
+            .await
+            .unwrap();
+        assert!(entity1_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity2_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity2")
+            .await
+            .unwrap();
+        assert!(entity2_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity3_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity3")
+            .await
+            .unwrap();
+        assert!(entity3_meta.unwrap().1.is_some()); // deleted_at is Some
 
         // Should have 3 DELETE outbox entries
-        assert_eq!(postgres.unprocessed_outbox_count(), 3);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 3);
     }
 
     #[tokio::test]
@@ -505,7 +556,12 @@ mod tests {
         .unwrap();
 
         // No entities should be deleted (first time indexing)
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
 
         // Snapshot should be created
         let snapshot = postgres
@@ -541,7 +597,12 @@ mod tests {
         .unwrap();
 
         // No entities deleted
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
 
         // Snapshot still updated (for git commit tracking)
         let snapshot = postgres
@@ -578,7 +639,7 @@ mod tests {
 
         // Verify outbox entry
         let entries = postgres
-            .get_unprocessed_outbox_entries(codesearch_storage::postgres::TargetStore::Qdrant, 10)
+            .get_unprocessed_outbox_entries(codesearch_storage::TargetStore::Qdrant, 10)
             .await
             .unwrap();
 
@@ -614,7 +675,9 @@ mod tests {
 
         // Snapshot should be stored with git commit
         let snapshot = postgres
-            .get_snapshot_sync(repo_uuid, file_path)
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap()
             .expect("Snapshot should exist");
         assert_eq!(snapshot, new_entities);
     }

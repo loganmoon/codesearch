@@ -225,7 +225,7 @@ pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
-    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(
@@ -246,7 +246,7 @@ pub fn start_watching(
     repo_id: uuid::Uuid,
     repo_root: PathBuf,
     embedding_manager: Arc<codesearch_embeddings::EmbeddingManager>,
-    postgres_client: Arc<codesearch_storage::postgres::PostgresClient>,
+    postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait>,
 ) -> JoinHandle<Result<()>> {
     tokio::spawn(async move {
         tracing::info!("File watcher indexer task started");

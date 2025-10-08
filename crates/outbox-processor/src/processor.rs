@@ -1,13 +1,13 @@
 use codesearch_core::error::{Error, Result};
-use codesearch_storage::postgres::{OutboxEntry, PostgresClient, TargetStore};
 use codesearch_storage::{EmbeddedEntity, StorageClient};
+use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 pub struct OutboxProcessor {
-    postgres_client: Arc<PostgresClient>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_client: Arc<dyn StorageClient>,
     poll_interval: Duration,
     batch_size: i64,
@@ -16,7 +16,7 @@ pub struct OutboxProcessor {
 
 impl OutboxProcessor {
     pub fn new(
-        postgres_client: Arc<PostgresClient>,
+        postgres_client: Arc<dyn PostgresClientTrait>,
         qdrant_client: Arc<dyn StorageClient>,
         poll_interval: Duration,
         batch_size: i64,

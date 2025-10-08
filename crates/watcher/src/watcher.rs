@@ -40,6 +40,8 @@ pub struct FileWatcher {
     watcher: Option<Arc<RwLock<RecommendedWatcher>>>,
     /// Paths being watched
     watched_paths: Arc<RwLock<Vec<PathBuf>>>,
+    /// Cancellation token for stopping background tasks
+    cancellation_token: Arc<tokio_util::sync::CancellationToken>,
 }
 
 impl FileWatcher {
@@ -62,6 +64,7 @@ impl FileWatcher {
             branch_watcher: None,
             watcher: None,
             watched_paths: Arc::new(RwLock::new(Vec::new())),
+            cancellation_token: Arc::new(tokio_util::sync::CancellationToken::new()),
         })
     }
 
@@ -255,12 +258,15 @@ impl FileWatcher {
                 EventKind::Create(_) => {
                     if let Ok(metadata) = tokio::fs::metadata(path).await {
                         if !ignore_filter.exceeds_size_limit(metadata.len()) {
-                            let file_meta = crate::events::FileMetadata::new(
-                                metadata.len(),
-                                metadata
-                                    .modified()
-                                    .unwrap_or_else(|_| std::time::SystemTime::now()),
-                                {
+                            let modified_time = match metadata.modified() {
+                                Ok(time) => time,
+                                Err(e) => {
+                                    warn!("Failed to get modified time for {path:?}: {e}");
+                                    continue;
+                                }
+                            };
+                            let file_meta =
+                                crate::events::FileMetadata::new(metadata.len(), modified_time, {
                                     #[cfg(unix)]
                                     {
                                         use std::os::unix::fs::PermissionsExt;
@@ -270,8 +276,7 @@ impl FileWatcher {
                                     {
                                         0o644
                                     }
-                                },
-                            );
+                                });
                             return Some(FileChange::Created(path.clone(), file_meta));
                         }
                     }
@@ -298,24 +303,31 @@ impl FileWatcher {
 
     /// Start monitoring for branch changes
     fn start_branch_monitor(&self, branch_watcher: Arc<RwLock<BranchWatcher>>) {
+        let cancel_token = self.cancellation_token.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
 
             loop {
-                interval.tick().await;
-
-                let mut watcher = branch_watcher.write().await;
-                match watcher.has_branch_changed().await {
-                    Ok(Some(change)) => {
-                        info!("Branch changed from {} to {}", change.from, change.to);
-                        // TODO: Trigger reindexing
-                        debug!("Would trigger reindexing for branch change");
+                tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        info!("Branch monitor shutting down");
+                        break;
                     }
-                    Ok(None) => {
-                        // No change
-                    }
-                    Err(e) => {
-                        error!("Error checking branch: {}", e);
+                    _ = interval.tick() => {
+                        let mut watcher = branch_watcher.write().await;
+                        match watcher.has_branch_changed().await {
+                            Ok(Some(change)) => {
+                                info!("Branch changed from {} to {}", change.from, change.to);
+                                // TODO: Trigger reindexing
+                                debug!("Would trigger reindexing for branch change");
+                            }
+                            Ok(None) => {
+                                // No change
+                            }
+                            Err(e) => {
+                                error!("Error checking branch: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -324,6 +336,7 @@ impl FileWatcher {
 
     /// Stop watching all paths
     pub async fn stop(&mut self) -> Result<()> {
+        self.cancellation_token.cancel();
         if let Some(_watcher) = self.watcher.take() {
             // Clear watched paths
             self.watched_paths.write().await.clear();

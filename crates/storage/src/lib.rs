@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod collection_manager;
-pub mod postgres;
+mod postgres;
 mod qdrant;
 
 use async_trait::async_trait;
@@ -18,6 +18,14 @@ use std::sync::Arc;
 
 // Re-export only the trait
 pub use collection_manager::CollectionManager;
+pub use postgres::{OutboxOperation, PostgresClientTrait};
+
+// Re-export types needed by outbox-processor
+pub use postgres::{OutboxEntry, TargetStore};
+
+// Re-export mock for testing
+pub use postgres::mock::MockPostgresClient;
+
 pub use uuid::Uuid;
 
 /// Search filters for querying entities
@@ -146,7 +154,7 @@ pub async fn create_collection_manager(
 /// Factory function to create a Postgres metadata client
 pub async fn create_postgres_client(
     config: &StorageConfig,
-) -> Result<Arc<postgres::PostgresClient>> {
+) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
     let connection_string = format!(
         "postgresql://{}:{}@{}:{}/{}",
         config.postgres_user,
@@ -162,5 +170,5 @@ pub async fn create_postgres_client(
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
         })?;
 
-    Ok(Arc::new(postgres::PostgresClient::new(pool)))
+    Ok(Arc::new(postgres::PostgresClient::new(pool)) as Arc<dyn postgres::PostgresClientTrait>)
 }

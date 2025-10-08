@@ -2,7 +2,7 @@ use codesearch_core::error::{Error, ResultExt};
 use codesearch_core::{config::Config, entities::EntityType};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{
-    create_collection_manager, create_storage_client, postgres::PostgresClient, SearchFilters,
+    create_collection_manager, create_storage_client, PostgresClientTrait, SearchFilters,
     StorageClient,
 };
 use codesearch_watcher::{FileWatcher, WatcherConfig};
@@ -31,7 +31,7 @@ struct CodeSearchMcpServer {
     collection_name: String,
     embedding_manager: Arc<EmbeddingManager>,
     storage_client: Arc<dyn StorageClient>,
-    postgres_client: Arc<PostgresClient>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -73,10 +73,13 @@ impl CodeSearchMcpServer {
         // Validate limit
         let limit = request.limit.unwrap_or(10).clamp(1, 100);
 
+        // Extract query to avoid clone
+        let query_text = request.query;
+
         // Generate query embedding
         let embeddings = self
             .embedding_manager
-            .embed(vec![request.query.clone()])
+            .embed(vec![query_text.clone()])
             .await
             .map_err(|e| {
                 McpError::new(
@@ -173,7 +176,7 @@ impl CodeSearchMcpServer {
         let response = serde_json::json!({
             "results": formatted_results,
             "total": formatted_results.len(),
-            "query": request.query,
+            "query": query_text,
         });
 
         let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
@@ -193,7 +196,7 @@ impl CodeSearchMcpServer {
         collection_name: String,
         embedding_manager: Arc<EmbeddingManager>,
         storage_client: Arc<dyn StorageClient>,
-        postgres_client: Arc<PostgresClient>,
+        postgres_client: Arc<dyn PostgresClientTrait>,
     ) -> Self {
         Self {
             repository_id,

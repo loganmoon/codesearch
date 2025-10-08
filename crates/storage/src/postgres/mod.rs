@@ -6,9 +6,10 @@ use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use uuid::Uuid;
 
-pub use client::{
-    EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
-};
+pub(crate) use client::{EntityOutboxBatchEntry, PostgresClient};
+
+// Re-export types needed externally
+pub use client::{OutboxEntry, OutboxOperation, TargetStore};
 
 /// Trait for PostgreSQL metadata operations
 #[async_trait]
@@ -98,4 +99,10 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Increment retry count and record error
     async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()>;
+
+    /// Get the last indexed commit for a repository
+    async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>>;
+
+    /// Set the last indexed commit for a repository
+    async fn set_last_indexed_commit(&self, repository_id: Uuid, commit_hash: &str) -> Result<()>;
 }

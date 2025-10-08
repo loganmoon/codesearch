@@ -8,8 +8,7 @@ use codesearch_e2e_tests::common::{
     create_test_database, drop_test_database, get_shared_postgres, with_timeout,
 };
 use codesearch_storage::{
-    create_postgres_client,
-    postgres::{OutboxOperation, TargetStore},
+    create_postgres_client, OutboxOperation, PostgresClientTrait, TargetStore,
 };
 use common::*;
 use std::path::Path;
@@ -21,7 +20,7 @@ use uuid::Uuid;
 async fn setup_postgres() -> Result<(
     Arc<codesearch_e2e_tests::common::TestPostgres>,
     String,
-    Arc<codesearch_storage::postgres::PostgresClient>,
+    Arc<dyn PostgresClientTrait>,
 )> {
     let postgres = get_shared_postgres().await?;
     let db_name = create_test_database(&postgres).await?;

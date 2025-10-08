@@ -187,14 +187,14 @@ impl EmbeddingProvider for OpenAiApiProvider {
                     })?;
 
                 // Generate embeddings
-                let embeddings = {
+                let mut embeddings = {
                     let _permit = permit; // Keep permit alive
                     self.embed_batch(texts_to_embed).await?
                 };
 
-                // Place embeddings at their original indices
-                for (embed_idx, orig_idx) in indices_to_embed.iter().enumerate() {
-                    chunk_results[*orig_idx] = Some(embeddings[embed_idx].clone());
+                // Place embeddings at their original indices (consuming vector)
+                for orig_idx in indices_to_embed.into_iter() {
+                    chunk_results[orig_idx] = Some(embeddings.swap_remove(0));
                 }
             }
 

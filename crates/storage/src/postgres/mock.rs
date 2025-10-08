@@ -79,11 +79,13 @@ impl MockPostgresClient {
     }
 
     /// Get number of entities stored
+    #[cfg(test)]
     pub fn entity_count(&self) -> usize {
         self.data.lock().unwrap().entities.len()
     }
 
     /// Get number of non-deleted entities
+    #[cfg(test)]
     pub fn active_entity_count(&self) -> usize {
         self.data
             .lock()
@@ -95,16 +97,19 @@ impl MockPostgresClient {
     }
 
     /// Get number of snapshots stored
+    #[cfg(test)]
     pub fn snapshot_count(&self) -> usize {
         self.data.lock().unwrap().snapshots.len()
     }
 
     /// Get number of outbox entries
+    #[cfg(test)]
     pub fn outbox_count(&self) -> usize {
         self.data.lock().unwrap().outbox.len()
     }
 
     /// Get number of unprocessed outbox entries
+    #[cfg(test)]
     pub fn unprocessed_outbox_count(&self) -> usize {
         self.data
             .lock()
@@ -116,6 +121,7 @@ impl MockPostgresClient {
     }
 
     /// Check if entity is marked as deleted
+    #[cfg(test)]
     pub fn is_entity_deleted(&self, repository_id: Uuid, entity_id: &str) -> bool {
         self.data
             .lock()
@@ -127,6 +133,7 @@ impl MockPostgresClient {
     }
 
     /// Get snapshot for testing
+    #[cfg(test)]
     pub fn get_snapshot_sync(&self, repository_id: Uuid, file_path: &str) -> Option<Vec<String>> {
         self.data
             .lock()
@@ -137,6 +144,7 @@ impl MockPostgresClient {
     }
 
     /// Clear all data (for test cleanup)
+    #[cfg(test)]
     pub fn clear(&self) {
         let mut data = self.data.lock().unwrap();
         data.repositories.clear();
@@ -452,6 +460,20 @@ impl PostgresClientTrait for MockPostgresClient {
             entry.last_error = Some(error.to_string());
         }
 
+        Ok(())
+    }
+
+    async fn get_last_indexed_commit(&self, _repository_id: Uuid) -> Result<Option<String>> {
+        // Mock implementation: return None (not tracking commits in mock)
+        Ok(None)
+    }
+
+    async fn set_last_indexed_commit(
+        &self,
+        _repository_id: Uuid,
+        _commit_hash: &str,
+    ) -> Result<()> {
+        // Mock implementation: do nothing
         Ok(())
     }
 }

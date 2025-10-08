@@ -7,7 +7,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::postgres::{OutboxOperation, PostgresClientTrait, TargetStore};
+use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;

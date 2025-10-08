@@ -871,4 +871,13 @@ impl super::PostgresClientTrait for PostgresClient {
     async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()> {
         self.record_outbox_failure(outbox_id, error).await
     }
+
+    async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>> {
+        self.get_last_indexed_commit(repository_id).await
+    }
+
+    async fn set_last_indexed_commit(&self, repository_id: Uuid, commit_hash: &str) -> Result<()> {
+        self.set_last_indexed_commit(repository_id, commit_hash)
+            .await
+    }
 }

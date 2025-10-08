@@ -31,7 +31,7 @@ struct MinimalEntityPayload {
 /// Qdrant storage client implementing CRUD operations only
 pub(crate) struct QdrantStorageClient {
     qdrant_client: Arc<Qdrant>,
-    collection_name: String,
+    collection_name: Arc<str>,
 }
 
 impl QdrantStorageClient {
@@ -39,7 +39,7 @@ impl QdrantStorageClient {
     pub async fn new(connection: Arc<Qdrant>, collection_name: String) -> Result<Self> {
         Ok(Self {
             qdrant_client: connection,
-            collection_name,
+            collection_name: Arc::from(collection_name.as_str()),
         })
     }
 
@@ -190,7 +190,7 @@ impl StorageClient for QdrantStorageClient {
         self.qdrant_client
             .upsert_points(qdrant_client::qdrant::UpsertPoints::from(
                 qdrant_client::qdrant::UpsertPointsBuilder::new(
-                    self.collection_name.clone(),
+                    self.collection_name.as_ref(),
                     qdrant_points,
                 ),
             ))
@@ -212,7 +212,7 @@ impl StorageClient for QdrantStorageClient {
             .qdrant_client
             .search_points(SearchPoints::from(
                 qdrant_client::qdrant::SearchPointsBuilder::new(
-                    self.collection_name.clone(),
+                    self.collection_name.as_ref(),
                     query_embedding,
                     limit as u64,
                 )
@@ -275,7 +275,7 @@ impl StorageClient for QdrantStorageClient {
         let search_result = self
             .qdrant_client
             .scroll(ScrollPoints {
-                collection_name: self.collection_name.clone(),
+                collection_name: self.collection_name.as_ref().to_string(),
                 filter: Some(filter),
                 limit: Some(entity_ids.len() as u32),
                 with_payload: Some(false.into()),
@@ -294,7 +294,7 @@ impl StorageClient for QdrantStorageClient {
         if !point_ids_to_delete.is_empty() {
             self.qdrant_client
                 .delete_points(
-                    DeletePointsBuilder::new(self.collection_name.clone())
+                    DeletePointsBuilder::new(self.collection_name.as_ref())
                         .points(PointsSelectorOneOf::Points(PointsIdsList {
                             ids: point_ids_to_delete,
                         }))

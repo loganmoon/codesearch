@@ -30,6 +30,55 @@ fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProvid
     }
 }
 
+/// Create default storage configuration for a repository
+fn create_default_storage_config(collection_name: String) -> StorageConfig {
+    StorageConfig {
+        qdrant_host: "localhost".to_string(),
+        qdrant_port: 6334,
+        qdrant_rest_port: 6333,
+        collection_name,
+        auto_start_deps: true,
+        docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "codesearch".to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
+    }
+}
+
+/// Ensure config has a collection name, generating one if needed
+fn ensure_collection_name(config: Config, repo_root: &Path) -> Result<Config> {
+    if config.storage.collection_name.is_empty() {
+        let collection_name = StorageConfig::generate_collection_name(repo_root);
+        info!("Generated collection name: {collection_name}");
+        Ok(Config::builder()
+            .storage(StorageConfig {
+                collection_name,
+                ..config.storage
+            })
+            .embeddings(config.embeddings)
+            .watcher(config.watcher)
+            .languages(config.languages)
+            .build()?)
+    } else {
+        Ok(config)
+    }
+}
+
+/// Get API base URL if provider is LocalApi, None otherwise
+fn get_api_base_url_if_local_api(config: &Config) -> Option<&str> {
+    let provider_type = parse_provider_type(&config.embeddings.provider);
+    if matches!(
+        provider_type,
+        codesearch_embeddings::EmbeddingProviderType::LocalApi
+    ) {
+        config.embeddings.api_base_url.as_deref()
+    } else {
+        None
+    }
+}
+
 /// Helper function to create an embedding manager from configuration
 async fn create_embedding_manager(config: &Config) -> Result<Arc<EmbeddingManager>> {
     let mut embeddings_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
@@ -221,19 +270,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         let collection_name = StorageConfig::generate_collection_name(&repo_root);
         info!("Generated collection name: {}", collection_name);
 
-        let storage_config = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name,
-            auto_start_deps: true,
-            docker_compose_file: None,
-            postgres_host: "localhost".to_string(),
-            postgres_port: 5432,
-            postgres_database: "codesearch".to_string(),
-            postgres_user: "codesearch".to_string(),
-            postgres_password: "codesearch".to_string(),
-        };
+        let storage_config = create_default_storage_config(collection_name);
 
         let config = Config::builder().storage(storage_config).build()?;
 
@@ -248,35 +285,17 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
     let config = Config::from_file(config_path)?;
 
     // Ensure collection name is set
-    let config = if config.storage.collection_name.is_empty() {
-        let collection_name = StorageConfig::generate_collection_name(&repo_root);
-        info!("Updated collection name: {}", collection_name);
-        let updated_config = Config::builder()
-            .storage(StorageConfig {
-                collection_name,
-                ..config.storage
-            })
-            .embeddings(config.embeddings)
-            .watcher(config.watcher)
-            .languages(config.languages)
-            .build()?;
-        updated_config.save(config_path)?;
-        updated_config
-    } else {
-        config
-    };
+    let needs_save = config.storage.collection_name.is_empty();
+    let config = ensure_collection_name(config, &repo_root)?;
+    if needs_save {
+        config.save(config_path)?;
+    }
 
     config.validate()?;
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
-        let api_base_url = if parse_provider_type(&config.embeddings.provider)
-            == codesearch_embeddings::EmbeddingProviderType::LocalApi
-        {
-            config.embeddings.api_base_url.as_deref()
-        } else {
-            None
-        };
+        let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
 
@@ -378,41 +397,15 @@ async fn load_config(repo_root: &Path, config_path: Option<&Path>) -> Result<Con
             .with_context(|| format!("Failed to load configuration from {config_file:?}"))?;
 
         // Ensure collection name is set
-        if loaded.storage.collection_name.is_empty() {
-            let collection_name = StorageConfig::generate_collection_name(repo_root);
-            info!("Generated collection name: {}", collection_name);
-            Config::builder()
-                .storage(StorageConfig {
-                    collection_name,
-                    ..loaded.storage
-                })
-                .embeddings(loaded.embeddings)
-                .watcher(loaded.watcher)
-                .languages(loaded.languages)
-                .build()?
-        } else {
-            loaded
-        }
+        ensure_collection_name(loaded, repo_root)?
     } else {
         warn!("No configuration file found, using defaults");
         let collection_name = StorageConfig::generate_collection_name(repo_root);
         info!("Generated collection name: {}", collection_name);
 
-        let storage_config = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            collection_name,
-            auto_start_deps: true,
-            docker_compose_file: None,
-            postgres_host: "localhost".to_string(),
-            postgres_port: 5432,
-            postgres_database: "codesearch".to_string(),
-            postgres_user: "codesearch".to_string(),
-            postgres_password: "codesearch".to_string(),
-        };
-
-        Config::builder().storage(storage_config).build()?
+        Config::builder()
+            .storage(create_default_storage_config(collection_name))
+            .build()?
     };
 
     Ok(config)
@@ -423,13 +416,7 @@ async fn serve(config: Config) -> Result<()> {
     info!("Checking dependencies...");
 
     // Determine if vLLM is needed based on provider type
-    let api_base_url = if parse_provider_type(&config.embeddings.provider)
-        == codesearch_embeddings::EmbeddingProviderType::LocalApi
-    {
-        config.embeddings.api_base_url.as_deref()
-    } else {
-        None
-    };
+    let api_base_url = get_api_base_url_if_local_api(&config);
 
     // Ensure Docker dependencies are running
     docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
@@ -448,13 +435,7 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        let api_base_url = if parse_provider_type(&config.embeddings.provider)
-            == codesearch_embeddings::EmbeddingProviderType::LocalApi
-        {
-            config.embeddings.api_base_url.as_deref()
-        } else {
-            None
-        };
+        let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
@@ -568,13 +549,7 @@ async fn search_code(
 
     // Step 1: Ensure dependencies are running
     if config.storage.auto_start_deps {
-        let api_base_url = if parse_provider_type(&config.embeddings.provider)
-            == codesearch_embeddings::EmbeddingProviderType::LocalApi
-        {
-            config.embeddings.api_base_url.as_deref()
-        } else {
-            None
-        };
+        let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
@@ -744,47 +719,19 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
                     Ok(config) => config,
                     Err(_) => {
                         // Use default storage settings for status check
-                        let storage_config = StorageConfig {
-                            qdrant_host: "localhost".to_string(),
-                            qdrant_port: 6334,
-                            qdrant_rest_port: 6333,
-                            collection_name: "codesearch".to_string(),
-                            auto_start_deps: true,
-                            docker_compose_file: None,
-                            postgres_host: "localhost".to_string(),
-                            postgres_port: 5432,
-                            postgres_database: "codesearch".to_string(),
-                            postgres_user: "codesearch".to_string(),
-                            postgres_password: "codesearch".to_string(),
-                        };
-                        Config::builder().storage(storage_config).build()?
+                        Config::builder()
+                            .storage(create_default_storage_config("codesearch".to_string()))
+                            .build()?
                     }
                 }
             } else {
                 // Use default storage settings for status check
-                let storage_config = StorageConfig {
-                    qdrant_host: "localhost".to_string(),
-                    qdrant_port: 6334,
-                    qdrant_rest_port: 6333,
-                    collection_name: "codesearch".to_string(),
-                    auto_start_deps: true,
-                    docker_compose_file: None,
-                    postgres_host: "localhost".to_string(),
-                    postgres_port: 5432,
-                    postgres_database: "codesearch".to_string(),
-                    postgres_user: "codesearch".to_string(),
-                    postgres_password: "codesearch".to_string(),
-                };
-                Config::builder().storage(storage_config).build()?
+                Config::builder()
+                    .storage(create_default_storage_config("codesearch".to_string()))
+                    .build()?
             };
 
-            let api_base_url = if parse_provider_type(&config.embeddings.provider)
-                == codesearch_embeddings::EmbeddingProviderType::LocalApi
-            {
-                config.embeddings.api_base_url.as_deref()
-            } else {
-                None
-            };
+            let api_base_url = get_api_base_url_if_local_api(&config);
 
             let status = docker::get_dependencies_status(&config.storage, api_base_url).await?;
             println!("{status}");

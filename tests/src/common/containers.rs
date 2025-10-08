@@ -3,135 +3,20 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Mutex, Once};
+use std::sync::{Arc, Once, OnceLock, Weak};
 use std::time::Duration;
-use tokio::sync::OnceCell;
+use testcontainers::core::{ContainerPort, WaitFor};
+use testcontainers::runners::AsyncRunner;
+use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+use testcontainers_modules::postgres::Postgres;
+use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
-/// Global registry of test resources for cleanup
-static RESOURCE_REGISTRY: Mutex<Option<ResourceRegistry>> = Mutex::new(None);
-static INIT_CLEANUP: Once = Once::new();
+/// Global shared Qdrant instance (drops when last Arc is dropped)
+static SHARED_QDRANT: OnceLock<TokioMutex<Weak<TestQdrant>>> = OnceLock::new();
 
-/// Global shared Qdrant instance for all tests (Phase 2 optimization)
-static SHARED_QDRANT: OnceCell<TestQdrant> = OnceCell::const_new();
-
-/// Global shared Postgres instance for all tests (Phase 2 optimization)
-static SHARED_POSTGRES: OnceCell<TestPostgres> = OnceCell::const_new();
-
-struct ResourceRegistry {
-    container_names: Vec<String>,
-    process_ids: Vec<u32>,
-}
-
-impl ResourceRegistry {
-    fn new() -> Self {
-        Self {
-            container_names: Vec::new(),
-            process_ids: Vec::new(),
-        }
-    }
-
-    fn register_container(&mut self, name: String) {
-        self.container_names.push(name);
-    }
-
-    fn register_process(&mut self, pid: u32) {
-        self.process_ids.push(pid);
-    }
-
-    fn unregister_container(&mut self, name: &str) {
-        self.container_names.retain(|n| n != name);
-    }
-
-    fn unregister_process(&mut self, pid: u32) {
-        self.process_ids.retain(|p| *p != pid);
-    }
-
-    fn cleanup_all(&mut self) {
-        // Kill all processes
-        for pid in &self.process_ids {
-            #[cfg(unix)]
-            {
-                use nix::sys::signal::{self, Signal};
-                use nix::unistd::Pid;
-                let _ = signal::kill(Pid::from_raw(*pid as i32), Signal::SIGKILL);
-            }
-        }
-
-        // Stop all containers
-        if !self.container_names.is_empty() {
-            let _ = Command::new("docker")
-                .arg("stop")
-                .args(&self.container_names)
-                .output();
-            let _ = Command::new("docker")
-                .arg("rm")
-                .arg("-f")
-                .args(&self.container_names)
-                .output();
-        }
-
-        self.container_names.clear();
-        self.process_ids.clear();
-    }
-}
-
-fn init_cleanup_handler() {
-    INIT_CLEANUP.call_once(|| {
-        {
-            let mut registry = RESOURCE_REGISTRY.lock().unwrap();
-            *registry = Some(ResourceRegistry::new());
-        }
-
-        // Register cleanup on process exit
-        let _ = std::panic::catch_unwind(|| {
-            ctrlc::set_handler(move || {
-                eprintln!("\n🧹 Caught Ctrl+C, cleaning up test resources...");
-                if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
-                    if let Some(reg) = registry.as_mut() {
-                        reg.cleanup_all();
-                    }
-                }
-                std::process::exit(130); // Standard exit code for SIGINT
-            })
-            .expect("Error setting Ctrl-C handler");
-        });
-    });
-}
-
-fn register_container(name: String) {
-    init_cleanup_handler();
-    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
-        if let Some(reg) = registry.as_mut() {
-            reg.register_container(name);
-        }
-    }
-}
-
-fn unregister_container(name: &str) {
-    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
-        if let Some(reg) = registry.as_mut() {
-            reg.unregister_container(name);
-        }
-    }
-}
-
-fn register_process(pid: u32) {
-    init_cleanup_handler();
-    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
-        if let Some(reg) = registry.as_mut() {
-            reg.register_process(pid);
-        }
-    }
-}
-
-fn unregister_process(pid: u32) {
-    if let Ok(mut registry) = RESOURCE_REGISTRY.lock() {
-        if let Some(reg) = registry.as_mut() {
-            reg.unregister_process(pid);
-        }
-    }
-}
+/// Global shared Postgres instance (drops when last Arc is dropped)
+static SHARED_POSTGRES: OnceLock<TokioMutex<Weak<TestPostgres>>> = OnceLock::new();
 
 /// Ensures the outbox_processor Docker image is built before tests run
 /// This prevents race conditions when multiple tests try to build it concurrently
@@ -172,133 +57,29 @@ fn ensure_outbox_image_built() -> Result<()> {
     Ok(())
 }
 
-/// Test Postgres container with temporary storage
+/// Test Postgres container using testcontainers-rs
 pub struct TestPostgres {
-    container_id: String,
-    container_name: String,
+    container: ContainerAsync<Postgres>,
     port: u16,
 }
 
 impl TestPostgres {
     /// Start a new Postgres instance
     pub async fn start() -> Result<Self> {
-        let container_name = format!("postgres-test-{}", Uuid::new_v4());
-
-        // Find available port dynamically
-        let port = portpicker::pick_unused_port()
-            .ok_or_else(|| anyhow::anyhow!("No available port for Postgres"))?;
-
-        // Start Postgres container
-        // Bind to 127.0.0.1 only for security and to avoid port conflicts
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "-p",
-                &format!("127.0.0.1:{port}:5432"),
-                "-e",
-                "POSTGRES_DB=codesearch",
-                "-e",
-                "POSTGRES_USER=codesearch",
-                "-e",
-                "POSTGRES_PASSWORD=codesearch",
-                "postgres:17",
-            ])
-            .output()
+        let container = Postgres::default()
+            .with_user("codesearch")
+            .with_password("codesearch")
+            .with_db_name("codesearch")
+            .start()
+            .await
             .context("Failed to start Postgres container")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up container if it was created (even if it failed to start)
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container_name])
-                .output();
-            return Err(anyhow::anyhow!(
-                "Failed to start Postgres container: {stderr}"
-            ));
-        }
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("Failed to get Postgres port")?;
 
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        let instance = Self {
-            container_id: container_id.clone(),
-            container_name,
-            port,
-        };
-
-        if let Err(e) = instance.wait_for_health().await {
-            let logs = instance.get_container_logs();
-            instance.cleanup();
-            return Err(anyhow::anyhow!(
-                "Postgres container failed to become healthy: {e}\nLogs: {logs}"
-            ));
-        }
-
-        // Register for global cleanup
-        register_container(instance.container_name.clone());
-
-        Ok(instance)
-    }
-
-    /// Start a new Postgres instance with pre-allocated port
-    ///
-    /// This is used by TestPostgresPool to avoid port allocation race conditions.
-    pub async fn start_with_port(port: u16) -> Result<Self> {
-        let container_name = format!("postgres-test-{}", Uuid::new_v4());
-
-        // Start Postgres container with pre-allocated port
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "-p",
-                &format!("127.0.0.1:{port}:5432"),
-                "-e",
-                "POSTGRES_DB=codesearch",
-                "-e",
-                "POSTGRES_USER=codesearch",
-                "-e",
-                "POSTGRES_PASSWORD=codesearch",
-                "postgres:17",
-            ])
-            .output()
-            .context("Failed to start Postgres container")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up container if it was created (even if it failed to start)
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container_name])
-                .output();
-            return Err(anyhow::anyhow!(
-                "Failed to start Postgres container: {stderr}"
-            ));
-        }
-
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        let instance = Self {
-            container_id: container_id.clone(),
-            container_name,
-            port,
-        };
-
-        if let Err(e) = instance.wait_for_health().await {
-            let logs = instance.get_container_logs();
-            instance.cleanup();
-            return Err(anyhow::anyhow!(
-                "Postgres container failed to become healthy: {e}\nLogs: {logs}"
-            ));
-        }
-
-        // Register for global cleanup
-        register_container(instance.container_name.clone());
-
-        Ok(instance)
+        Ok(Self { container, port })
     }
 
     /// Get the Postgres port
@@ -306,86 +87,14 @@ impl TestPostgres {
         self.port
     }
 
-    /// Wait for Postgres to become healthy using exponential backoff
-    async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 20;
-        let initial_delay = Duration::from_millis(10);
-        let max_delay = Duration::from_millis(500);
-
-        let mut delay = initial_delay;
-
-        for attempt in 1..=max_attempts {
-            let status = Command::new("docker")
-                .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
-                .output()
-                .context("Failed to check container status")?;
-
-            let is_running = String::from_utf8_lossy(&status.stdout)
-                .trim()
-                .eq_ignore_ascii_case("true");
-
-            if !is_running {
-                return Err(anyhow::anyhow!("Container stopped unexpectedly"));
-            }
-
-            let connection_string = format!(
-                "postgresql://codesearch:codesearch@localhost:{}/codesearch",
-                self.port
-            );
-
-            if let Ok(pool) = sqlx::PgPool::connect(&connection_string).await {
-                if sqlx::query("SELECT 1").execute(&pool).await.is_ok() {
-                    return Ok(());
-                }
-            }
-
-            if attempt < max_attempts {
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(delay * 2, max_delay);
-            }
-        }
-
-        Err(anyhow::anyhow!(
-            "Postgres did not become healthy after {max_attempts} attempts"
-        ))
-    }
-
-    /// Get container logs for debugging
-    fn get_container_logs(&self) -> String {
-        let output = Command::new("docker")
-            .args(["logs", "--tail", "50", &self.container_id])
-            .output();
-
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}")
-            }
-            Err(e) => format!("Failed to get logs: {e}"),
-        }
-    }
-
-    /// Stop and clean up the Postgres instance
-    fn cleanup(&self) {
-        // Unregister from global cleanup
-        unregister_container(&self.container_name);
-
-        // Stop container
-        let _ = Command::new("docker")
-            .args(["stop", &self.container_name])
-            .output();
-
-        // Remove container
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &self.container_name])
-            .output();
-    }
-}
-
-impl Drop for TestPostgres {
-    fn drop(&mut self) {
-        self.cleanup();
+    /// Get connection string for a specific database
+    ///
+    /// Uses configured credentials: codesearch/codesearch
+    pub fn connection_string(&self, db_name: &str) -> String {
+        format!(
+            "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
+            self.port
+        )
     }
 }
 
@@ -399,40 +108,54 @@ pub async fn start_test_containers() -> Result<(TestQdrant, TestPostgres)> {
     Ok((qdrant_result?, postgres_result?))
 }
 
-/// Get or create the shared Qdrant instance (Phase 2 optimization)
+/// Get or create the shared Qdrant instance
 ///
-/// Returns a reference to a global shared Qdrant container that is created once
+/// Returns an Arc to a global shared Qdrant container that is created once
 /// and reused across all tests. Tests maintain isolation by using unique collection names.
-pub async fn get_shared_qdrant() -> Result<&'static TestQdrant> {
-    SHARED_QDRANT
-        .get_or_try_init(|| async {
-            eprintln!("🚀 Starting shared Qdrant instance for all tests...");
-            TestQdrant::start().await
-        })
-        .await
+pub async fn get_shared_qdrant() -> Result<Arc<TestQdrant>> {
+    let lock = SHARED_QDRANT.get_or_init(|| TokioMutex::new(Weak::new()));
+    let mut guard = lock.lock().await;
+
+    if let Some(qdrant) = guard.upgrade() {
+        // Reuse existing container
+        Ok(qdrant)
+    } else {
+        // Create new container
+        eprintln!("🚀 Starting shared Qdrant instance for all tests...");
+        let qdrant = Arc::new(TestQdrant::start().await?);
+        *guard = Arc::downgrade(&qdrant);
+        Ok(qdrant)
+    }
 }
 
-/// Get or create the shared Postgres instance (Phase 2 optimization)
+/// Get or create the shared Postgres instance
 ///
-/// Returns a reference to a global shared Postgres container that is created once
+/// Returns an Arc to a global shared Postgres container that is created once
 /// and reused across all tests. Tests maintain isolation by creating unique databases.
-pub async fn get_shared_postgres() -> Result<&'static TestPostgres> {
-    SHARED_POSTGRES
-        .get_or_try_init(|| async {
-            eprintln!("🚀 Starting shared Postgres instance for all tests...");
-            TestPostgres::start().await
-        })
-        .await
+pub async fn get_shared_postgres() -> Result<Arc<TestPostgres>> {
+    let lock = SHARED_POSTGRES.get_or_init(|| TokioMutex::new(Weak::new()));
+    let mut guard = lock.lock().await;
+
+    if let Some(postgres) = guard.upgrade() {
+        // Reuse existing container
+        Ok(postgres)
+    } else {
+        // Create new container
+        eprintln!("🚀 Starting shared Postgres instance for all tests...");
+        let postgres = Arc::new(TestPostgres::start().await?);
+        *guard = Arc::downgrade(&postgres);
+        Ok(postgres)
+    }
 }
 
 /// Create an isolated test database in the shared Postgres instance
 ///
 /// Each test gets its own database to maintain isolation while sharing the container.
 /// The database name includes a UUID to ensure uniqueness.
-pub async fn create_test_database(postgres: &TestPostgres) -> Result<String> {
+pub async fn create_test_database(postgres: &Arc<TestPostgres>) -> Result<String> {
     let db_name = format!("test_db_{}", Uuid::new_v4().simple());
     let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        "postgresql://codesearch:codesearch@localhost:{}/codesearch",
         postgres.port()
     );
 
@@ -448,9 +171,9 @@ pub async fn create_test_database(postgres: &TestPostgres) -> Result<String> {
 /// Drop a test database from the shared Postgres instance
 ///
 /// Terminates all connections to the database before dropping it to avoid errors.
-pub async fn drop_test_database(postgres: &TestPostgres, db_name: &str) -> Result<()> {
+pub async fn drop_test_database(postgres: &Arc<TestPostgres>, db_name: &str) -> Result<()> {
     let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/postgres",
+        "postgresql://codesearch:codesearch@localhost:{}/codesearch",
         postgres.port()
     );
 
@@ -475,214 +198,51 @@ pub async fn drop_test_database(postgres: &TestPostgres, db_name: &str) -> Resul
 /// Clean up a test collection from Qdrant
 ///
 /// Deletes the collection to clean up after a test while keeping the container running.
-pub async fn drop_test_collection(qdrant: &TestQdrant, collection_name: &str) -> Result<()> {
+pub async fn drop_test_collection(qdrant: &Arc<TestQdrant>, collection_name: &str) -> Result<()> {
     let url = format!("{}/collections/{collection_name}", qdrant.rest_url());
     let _ = reqwest::Client::new().delete(&url).send().await?;
     Ok(())
 }
 
-/// Pool of test Postgres containers for concurrent testing
-pub struct TestPostgresPool {
-    containers: Vec<TestPostgres>,
-}
-
-impl TestPostgresPool {
-    /// Create a new pool with the specified number of containers
-    ///
-    /// Pre-allocates all ports before starting any containers to avoid race conditions.
-    pub async fn new(size: usize) -> Result<Self> {
-        // Pre-allocate all ports at once to avoid race conditions
-        let mut ports = Vec::with_capacity(size);
-        for i in 0..size {
-            let port = portpicker::pick_unused_port()
-                .ok_or_else(|| anyhow::anyhow!("No available port for Postgres container {i}"))?;
-            ports.push(port);
-        }
-
-        // Now start containers with pre-allocated ports
-        let mut containers = Vec::with_capacity(size);
-        for (i, port) in ports.into_iter().enumerate() {
-            match TestPostgres::start_with_port(port).await {
-                Ok(container) => containers.push(container),
-                Err(e) => {
-                    drop(containers);
-                    return Err(anyhow::anyhow!(
-                        "Failed to start container {i} in pool: {e}"
-                    ));
-                }
-            }
-        }
-
-        Ok(Self { containers })
-    }
-
-    /// Get a reference to a container by index
-    pub fn get(&self, index: usize) -> Option<&TestPostgres> {
-        self.containers.get(index)
-    }
-}
-
-/// Test Qdrant container with temporary storage and enhanced cleanup
+/// Test Qdrant container using testcontainers-rs
 pub struct TestQdrant {
-    container_id: String,
-    container_name: String,
-    temp_dir: PathBuf,
-    port: u16,
+    container: ContainerAsync<GenericImage>,
     rest_port: u16,
+    grpc_port: u16,
 }
 
 impl TestQdrant {
-    /// Start a new Qdrant instance with temporary storage
-    ///
-    /// Uses health check polling to ensure the container is ready before returning.
+    /// Start a new Qdrant instance
     pub async fn start() -> Result<Self> {
-        let container_name = format!("qdrant-test-{}", Uuid::new_v4());
-        let temp_dir_name = format!("/tmp/qdrant-test-{}", Uuid::new_v4());
-        let temp_dir = PathBuf::from(&temp_dir_name);
-
-        // Create temp directory
-        std::fs::create_dir_all(&temp_dir)
-            .with_context(|| format!("Failed to create temp directory: {temp_dir_name}"))?;
-
-        // Find available ports dynamically to avoid conflicts
-        let port = portpicker::pick_unused_port()
-            .ok_or_else(|| anyhow::anyhow!("No available port for Qdrant"))?;
-        let rest_port = portpicker::pick_unused_port()
-            .ok_or_else(|| anyhow::anyhow!("No available port for Qdrant REST"))?;
-
-        // Start Qdrant container with temporary storage using unprivileged image
-        // This runs as a non-root user, so cleanup won't require sudo
-        // Bind to 127.0.0.1 only for security and to avoid port conflicts
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "-p",
-                &format!("127.0.0.1:{port}:6334"),
-                "-p",
-                &format!("127.0.0.1:{rest_port}:6333"),
-                "-v",
-                &format!("{temp_dir_name}:/qdrant/storage"),
-                "qdrant/qdrant:latest-unprivileged",
-            ])
-            .output()
+        let container = GenericImage::new("qdrant/qdrant", "latest-unprivileged")
+            .with_exposed_port(ContainerPort::Tcp(6333))
+            .with_exposed_port(ContainerPort::Tcp(6334))
+            .with_wait_for(WaitFor::message_on_stdout("Qdrant gRPC listening"))
+            .with_startup_timeout(Duration::from_secs(60))
+            .start()
+            .await
             .context("Failed to start Qdrant container")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up temp directory if container failed to start
-            let _ = std::fs::remove_dir_all(&temp_dir);
-            // Clean up container if it was created (even if it failed to start)
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container_name])
-                .output();
-            return Err(anyhow::anyhow!(
-                "Failed to start Qdrant container: {stderr}"
-            ));
-        }
+        let rest_port = container
+            .get_host_port_ipv4(6333)
+            .await
+            .context("Failed to get Qdrant REST port")?;
 
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let grpc_port = container
+            .get_host_port_ipv4(6334)
+            .await
+            .context("Failed to get Qdrant gRPC port")?;
 
-        // Poll for health instead of fixed sleep
-        let instance = Self {
-            container_id: container_id.clone(),
-            container_name,
-            temp_dir,
-            port,
+        Ok(Self {
+            container,
             rest_port,
-        };
-
-        if let Err(e) = instance.wait_for_health().await {
-            // Container failed to become healthy, capture logs
-            let logs = instance.get_container_logs();
-            instance.cleanup();
-            return Err(anyhow::anyhow!(
-                "Qdrant container failed to become healthy: {e}\nLogs: {logs}"
-            ));
-        }
-
-        // Register for global cleanup
-        register_container(instance.container_name.clone());
-
-        Ok(instance)
-    }
-
-    /// Start a new Qdrant instance with pre-allocated ports
-    ///
-    /// This is used by TestQdrantPool to avoid port allocation race conditions.
-    /// Uses health check polling to ensure the container is ready before returning.
-    pub async fn start_with_ports(port: u16, rest_port: u16) -> Result<Self> {
-        let container_name = format!("qdrant-test-{}", Uuid::new_v4());
-        let temp_dir_name = format!("/tmp/qdrant-test-{}", Uuid::new_v4());
-        let temp_dir = PathBuf::from(&temp_dir_name);
-
-        // Create temp directory
-        std::fs::create_dir_all(&temp_dir)
-            .with_context(|| format!("Failed to create temp directory: {temp_dir_name}"))?;
-
-        // Start Qdrant container with pre-allocated ports
-        // Bind to 127.0.0.1 only for security and to avoid port conflicts
-        let output = Command::new("docker")
-            .args([
-                "run",
-                "-d",
-                "--name",
-                &container_name,
-                "-p",
-                &format!("127.0.0.1:{port}:6334"),
-                "-p",
-                &format!("127.0.0.1:{rest_port}:6333"),
-                "-v",
-                &format!("{temp_dir_name}:/qdrant/storage"),
-                "qdrant/qdrant:latest-unprivileged",
-            ])
-            .output()
-            .context("Failed to start Qdrant container")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up temp directory if container failed to start
-            let _ = std::fs::remove_dir_all(&temp_dir);
-            // Clean up container if it was created (even if it failed to start)
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container_name])
-                .output();
-            return Err(anyhow::anyhow!(
-                "Failed to start Qdrant container: {stderr}"
-            ));
-        }
-
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        // Poll for health instead of fixed sleep
-        let instance = Self {
-            container_id: container_id.clone(),
-            container_name,
-            temp_dir,
-            port,
-            rest_port,
-        };
-
-        if let Err(e) = instance.wait_for_health().await {
-            // Container failed to become healthy, capture logs
-            let logs = instance.get_container_logs();
-            instance.cleanup();
-            return Err(anyhow::anyhow!(
-                "Qdrant container failed to become healthy: {e}\nLogs: {logs}"
-            ));
-        }
-
-        // Register for global cleanup
-        register_container(instance.container_name.clone());
-
-        Ok(instance)
+            grpc_port,
+        })
     }
 
     /// Get the gRPC port
     pub fn port(&self) -> u16 {
-        self.port
+        self.grpc_port
     }
 
     /// Get the REST API port
@@ -693,161 +253,6 @@ impl TestQdrant {
     /// Get the REST API URL
     pub fn rest_url(&self) -> String {
         format!("http://localhost:{}", self.rest_port)
-    }
-
-    /// Wait for Qdrant to become healthy using exponential backoff
-    async fn wait_for_health(&self) -> Result<()> {
-        let max_attempts = 20;
-        let initial_delay = Duration::from_millis(10);
-        let max_delay = Duration::from_millis(500);
-
-        let mut delay = initial_delay;
-
-        for attempt in 1..=max_attempts {
-            let status = Command::new("docker")
-                .args(["inspect", "-f", "{{.State.Running}}", &self.container_id])
-                .output()
-                .context("Failed to check container status")?;
-
-            let is_running = String::from_utf8_lossy(&status.stdout)
-                .trim()
-                .eq_ignore_ascii_case("true");
-
-            if !is_running {
-                return Err(anyhow::anyhow!("Container stopped unexpectedly"));
-            }
-
-            let health_url = format!("{}/healthz", self.rest_url());
-            if let Ok(response) = reqwest::get(&health_url).await {
-                if response.status().is_success() {
-                    return Ok(());
-                }
-            }
-
-            if attempt < max_attempts {
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(delay * 2, max_delay);
-            }
-        }
-
-        Err(anyhow::anyhow!(
-            "Qdrant did not become healthy after {max_attempts} attempts"
-        ))
-    }
-
-    /// Get container logs for debugging
-    fn get_container_logs(&self) -> String {
-        let output = Command::new("docker")
-            .args(["logs", "--tail", "50", &self.container_id])
-            .output();
-
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}")
-            }
-            Err(e) => format!("Failed to get logs: {e}"),
-        }
-    }
-
-    /// Stop and clean up the Qdrant instance
-    fn cleanup(&self) {
-        // Unregister from global cleanup
-        unregister_container(&self.container_name);
-
-        // Stop container (ignore errors, container might already be stopped)
-        let _ = Command::new("docker")
-            .args(["stop", &self.container_name])
-            .output();
-
-        // Remove container
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &self.container_name])
-            .output();
-
-        // Remove temp directory (may need sudo for Docker-created files)
-        if self.temp_dir.exists() {
-            // Try normal removal first
-            if std::fs::remove_dir_all(&self.temp_dir).is_err() {
-                // If that fails, try with sudo (for Docker-created files)
-                let _ = Command::new("sudo")
-                    .args(["rm", "-rf", self.temp_dir.to_string_lossy().as_ref()])
-                    .output();
-            }
-        }
-    }
-}
-
-impl Drop for TestQdrant {
-    fn drop(&mut self) {
-        self.cleanup();
-    }
-}
-
-/// Pool of test Qdrant containers for concurrent testing
-pub struct TestQdrantPool {
-    containers: Vec<TestQdrant>,
-}
-
-impl TestQdrantPool {
-    /// Create a new pool with the specified number of containers
-    ///
-    /// Pre-allocates all ports before starting any containers to avoid race conditions.
-    pub async fn new(size: usize) -> Result<Self> {
-        // Pre-allocate all ports at once to avoid race conditions
-        let mut ports = Vec::with_capacity(size);
-        for i in 0..size {
-            let port = portpicker::pick_unused_port()
-                .ok_or_else(|| anyhow::anyhow!("No available port for Qdrant container {i}"))?;
-            let rest_port = portpicker::pick_unused_port().ok_or_else(|| {
-                anyhow::anyhow!("No available REST port for Qdrant container {i}")
-            })?;
-            ports.push((port, rest_port));
-        }
-
-        // Now start containers with pre-allocated ports
-        let mut containers = Vec::with_capacity(size);
-        for (i, (port, rest_port)) in ports.into_iter().enumerate() {
-            match TestQdrant::start_with_ports(port, rest_port).await {
-                Ok(container) => containers.push(container),
-                Err(e) => {
-                    // Clean up any containers we've already created
-                    drop(containers);
-                    return Err(anyhow::anyhow!(
-                        "Failed to start container {i} in pool: {e}"
-                    ));
-                }
-            }
-        }
-
-        Ok(Self { containers })
-    }
-
-    /// Get a reference to a container by index
-    pub fn get(&self, index: usize) -> Option<&TestQdrant> {
-        self.containers.get(index)
-    }
-
-    /// Get the number of containers in the pool
-    pub fn len(&self) -> usize {
-        self.containers.len()
-    }
-
-    /// Check if the pool is empty
-    pub fn is_empty(&self) -> bool {
-        self.containers.is_empty()
-    }
-
-    /// Iterate over all containers
-    pub fn iter(&self) -> impl Iterator<Item = &TestQdrant> {
-        self.containers.iter()
-    }
-}
-
-impl Drop for TestQdrantPool {
-    fn drop(&mut self) {
-        // Cleanup happens automatically via Drop on each TestQdrant
     }
 }
 
@@ -864,8 +269,8 @@ impl TestOutboxProcessor {
     ///
     /// This uses a Docker container built from Dockerfile.outbox-processor
     pub fn start(
-        postgres: &TestPostgres,
-        qdrant: &TestQdrant,
+        postgres: &Arc<TestPostgres>,
+        qdrant: &Arc<TestQdrant>,
         db_name: &str,
         collection_name: &str,
     ) -> Result<Self> {
@@ -927,15 +332,10 @@ impl TestOutboxProcessor {
 
         let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-        let instance = Self {
+        Ok(Self {
             container_id,
-            container_name: container_name.clone(),
-        };
-
-        // Register for global cleanup
-        register_container(container_name);
-
-        Ok(instance)
+            container_name,
+        })
     }
 
     /// Get container logs for debugging
@@ -956,9 +356,6 @@ impl TestOutboxProcessor {
 
     /// Stop the outbox processor
     fn cleanup(&self) {
-        // Unregister from global cleanup
-        unregister_container(&self.container_name);
-
         // Stop container
         let _ = Command::new("docker")
             .args(["stop", &self.container_name])
@@ -976,7 +373,7 @@ impl TestOutboxProcessor {
 /// Polls the outbox table every 100ms until all unprocessed entries are gone
 /// or the timeout is reached.
 pub async fn wait_for_outbox_empty(
-    postgres: &TestPostgres,
+    postgres: &Arc<TestPostgres>,
     db_name: &str,
     timeout: Duration,
 ) -> Result<()> {
@@ -988,7 +385,7 @@ pub async fn wait_for_outbox_empty(
 /// Uses adaptive polling: starts with fast polling (50ms) and gradually backs off
 /// to slower intervals (500ms max) to optimize for both fast response and low overhead.
 async fn wait_for_outbox_empty_with_processor(
-    postgres: &TestPostgres,
+    postgres: &Arc<TestPostgres>,
     db_name: &str,
     timeout: Duration,
     processor: Option<&TestOutboxProcessor>,
@@ -1058,8 +455,8 @@ async fn wait_for_outbox_empty_with_processor(
 /// the outbox table to be empty with a 15-second timeout using adaptive polling.
 /// No fixed sleep is needed - adaptive polling handles varying startup times efficiently.
 pub async fn start_and_wait_for_outbox_sync(
-    postgres: &TestPostgres,
-    qdrant: &TestQdrant,
+    postgres: &Arc<TestPostgres>,
+    qdrant: &Arc<TestQdrant>,
     collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
     // Use default database name for backward compatibility
@@ -1071,8 +468,8 @@ pub async fn start_and_wait_for_outbox_sync(
 /// This variant allows specifying a custom database name for database isolation.
 /// Uses adaptive polling (50ms -> 500ms) to efficiently handle varying processor startup times.
 pub async fn start_and_wait_for_outbox_sync_with_db(
-    postgres: &TestPostgres,
-    qdrant: &TestQdrant,
+    postgres: &Arc<TestPostgres>,
+    qdrant: &Arc<TestQdrant>,
     db_name: &str,
     collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
@@ -1114,96 +511,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_qdrant_cleanup_removes_temp_dir() -> Result<()> {
-        let temp_dir = {
-            let qdrant = TestQdrant::start().await?;
-            qdrant.temp_dir.clone()
-        };
-
-        // Poll for cleanup with timeout (Docker cleanup can be slow)
-        let mut cleaned_up = false;
-        for _ in 0..20 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            if !temp_dir.exists() {
-                cleaned_up = true;
-                break;
-            }
-        }
-
-        // After dropping, temp directory should be cleaned up
-        assert!(
-            cleaned_up,
-            "Temp directory still exists after cleanup: {}",
-            temp_dir.display()
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_qdrant_pool_creates_multiple_containers() -> Result<()> {
-        let pool = TestQdrantPool::new(3).await?;
-
-        assert_eq!(pool.len(), 3);
-
-        // Verify all containers are healthy
-        for container in pool.iter() {
-            let health_url = format!("{}/healthz", container.rest_url());
-            let response = reqwest::get(&health_url).await?;
-            assert!(response.status().is_success());
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_postgres_starts_and_is_healthy() -> Result<()> {
         let postgres = TestPostgres::start().await?;
 
-        // Verify we can connect to Postgres
+        // Verify we can connect to Postgres with configured credentials
         let connection_string = format!(
             "postgresql://codesearch:codesearch@localhost:{}/codesearch",
             postgres.port()
         );
         let pool = sqlx::PgPool::connect(&connection_string).await?;
         sqlx::query("SELECT 1").execute(&pool).await?;
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_postgres_cleanup_stops_container() -> Result<()> {
-        let container_name = {
-            let postgres = TestPostgres::start().await?;
-            postgres.container_name.clone()
-        };
-
-        // Poll for cleanup with timeout
-        let mut cleaned_up = false;
-        for _ in 0..20 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            let output = Command::new("docker")
-                .args([
-                    "ps",
-                    "-a",
-                    "--filter",
-                    &format!("name={container_name}"),
-                    "--format",
-                    "{{.Names}}",
-                ])
-                .output()?;
-
-            if String::from_utf8_lossy(&output.stdout).trim().is_empty() {
-                cleaned_up = true;
-                break;
-            }
-        }
-
-        assert!(
-            cleaned_up,
-            "Postgres container still exists after cleanup: {container_name}"
-        );
 
         Ok(())
     }

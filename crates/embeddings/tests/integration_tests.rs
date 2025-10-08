@@ -1,19 +1,19 @@
 //! Integration tests for embedding providers
 //!
-//! These tests require a running vLLM instance at http://localhost:8000
-//! Start with: docker compose up -d vllm-embeddings
-//! Run with: cargo test --package codesearch-embeddings --test integration_tests -- --ignored
+//! These tests require manual setup of vLLM service via docker compose.
+//! Run: docker compose up vllm-embeddings
+//! Then: cargo test --package codesearch-embeddings --test integration_tests -- --ignored
 
 use codesearch_embeddings::{create_api_provider, EmbeddingConfigBuilder, EmbeddingProviderType};
 
 #[tokio::test]
-#[ignore] // Requires vLLM running locally
+#[ignore] // Requires docker compose up vllm-embeddings before running
 async fn test_vllm_api_provider_basic() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-code-v1")
+        .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(1536)
+        .embedding_dimension(384)
         .batch_size(32)
         .max_workers(4)
         .build();
@@ -31,7 +31,7 @@ async fn test_vllm_api_provider_basic() {
     let results = provider.embed(code_samples).await.unwrap();
 
     assert_eq!(results.len(), 2);
-    assert_eq!(provider.embedding_dimension(), 1536);
+    assert_eq!(provider.embedding_dimension(), 384);
 
     // Check embeddings are valid
     let embed1 = results[0].as_ref().expect("First embedding should succeed");
@@ -39,8 +39,8 @@ async fn test_vllm_api_provider_basic() {
         .as_ref()
         .expect("Second embedding should succeed");
 
-    assert_eq!(embed1.len(), 1536);
-    assert_eq!(embed2.len(), 1536);
+    assert_eq!(embed1.len(), 384);
+    assert_eq!(embed2.len(), 384);
 
     // Check embeddings are different
     let similarity = cosine_similarity(embed1, embed2);
@@ -52,13 +52,13 @@ async fn test_vllm_api_provider_basic() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore] // Requires docker compose up vllm-embeddings before running
 async fn test_api_provider_batch_processing() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-code-v1")
+        .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(1536)
+        .embedding_dimension(384)
         .batch_size(2) // Small batch for testing
         .max_workers(2)
         .build();
@@ -81,20 +81,20 @@ async fn test_api_provider_batch_processing() {
         assert!(result.is_some(), "Embedding {i} should succeed");
         assert_eq!(
             result.as_ref().unwrap().len(),
-            1536,
+            384,
             "Embedding {i} should have correct dimension"
         );
     }
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore] // Requires docker compose up vllm-embeddings before running
 async fn test_api_provider_long_text() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-code-v1")
+        .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(1536)
+        .embedding_dimension(384)
         .batch_size(32)
         .build();
 
@@ -111,13 +111,13 @@ async fn test_api_provider_long_text() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore] // Requires docker compose up vllm-embeddings before running
 async fn test_api_provider_consistency() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-code-v1")
+        .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(1536)
+        .embedding_dimension(384)
         .batch_size(32)
         .build();
 

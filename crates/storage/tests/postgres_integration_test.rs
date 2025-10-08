@@ -19,12 +19,12 @@ use uuid::Uuid;
 
 /// Setup helper: Use shared Postgres instance and create unique database
 async fn setup_postgres() -> Result<(
-    &'static codesearch_e2e_tests::common::TestPostgres,
+    Arc<codesearch_e2e_tests::common::TestPostgres>,
     String,
     Arc<codesearch_storage::postgres::PostgresClient>,
 )> {
     let postgres = get_shared_postgres().await?;
-    let db_name = create_test_database(postgres).await?;
+    let db_name = create_test_database(&postgres).await?;
 
     let config = create_storage_config(
         6334, // Qdrant not needed for Postgres tests
@@ -61,7 +61,7 @@ async fn test_ensure_repository_creates_new() -> Result<()> {
             "Should be able to fetch repository by collection name"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -84,7 +84,7 @@ async fn test_ensure_repository_idempotent() -> Result<()> {
 
         assert_eq!(id1, id2, "Should return same UUID both times");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -124,7 +124,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
         assert_eq!(entities.len(), 1, "Should retrieve the stored entity");
         assert_eq!(entities[0].name, "test_func", "Entity name should match");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -177,7 +177,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             "Content should be updated"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -235,7 +235,7 @@ async fn test_get_entities_for_file() -> Result<()> {
             "Should include main_struct"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -286,7 +286,7 @@ async fn test_get_entities_for_file_excludes_deleted() -> Result<()> {
             "Deleted entity should not be included"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -323,7 +323,7 @@ async fn test_file_snapshot_create_and_retrieve() -> Result<()> {
         assert!(snapshot.is_some(), "Snapshot should exist");
         assert_eq!(snapshot.unwrap(), entity_ids, "Entity IDs should match");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -372,7 +372,7 @@ async fn test_file_snapshot_update() -> Result<()> {
             "Snapshot should be updated to new entity IDs"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -429,7 +429,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
             );
         }
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -458,7 +458,7 @@ async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
             "Error message should mention batch size limit"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -506,7 +506,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
         assert!(fetched_names.contains(&"func2"));
         assert!(fetched_names.contains(&"func4"));
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -532,7 +532,7 @@ async fn test_get_entities_by_ids_batch_limit() -> Result<()> {
             "Error message should mention batch size limit"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -603,7 +603,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
         assert!(entry_ids.contains(&update_id));
         assert!(entry_ids.contains(&delete_id));
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -649,7 +649,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
             "Processed entry should not be returned"
         );
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -706,7 +706,7 @@ async fn test_outbox_record_failure() -> Result<()> {
         );
         assert!(entry.processed_at.is_none(), "Should still be unprocessed");
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await
@@ -755,7 +755,7 @@ async fn test_transaction_rollback() -> Result<()> {
         // without exposing transaction APIs. The store_entity_metadata method already
         // handles transactions internally, and successful operations prove transaction safety.
 
-        drop_test_database(postgres, &db_name).await?;
+        drop_test_database(&postgres, &db_name).await?;
         Ok(())
     })
     .await

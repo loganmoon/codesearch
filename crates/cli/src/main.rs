@@ -335,7 +335,7 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Failed to run database migrations")?;
 
-    info!("✓ Database migrations completed");
+    info!("Database migrations completed");
 
     // Register repository in Postgres
     let repository_id = postgres_client
@@ -343,9 +343,9 @@ async fn init_repository(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Failed to register repository")?;
 
-    info!("✓ Repository registered with ID: {}", repository_id);
+    info!("Repository registered with ID: {}", repository_id);
 
-    info!("✓ Repository initialized successfully");
+    info!("Repository initialized successfully");
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);
     info!("  Config: {:?}", config_path);
@@ -511,7 +511,7 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
         .context("Failed to index repository")?;
 
     // Step 8: Report statistics
-    info!("✅ Indexing completed successfully!");
+    info!("Indexing completed successfully");
     info!("  Files processed: {}", result.stats().total_files());
     info!(
         "  Entities extracted: {}",
@@ -657,7 +657,7 @@ async fn fetch_and_display_results(
         .collect();
 
     // Display results with scores
-    println!("\n📊 Found {} results:\n", results.len());
+    println!("\nFound {} results:\n", results.len());
     println!("{}", "─".repeat(80));
 
     for (idx, (entity_id, _repo_id, score)) in results.iter().enumerate() {
@@ -693,7 +693,7 @@ async fn fetch_and_display_results(
         }
     }
     println!("{}", "─".repeat(80));
-    println!("\n✅ Search completed successfully");
+    println!("\nSearch completed successfully");
 
     Ok(())
 }
@@ -707,7 +707,7 @@ async fn search_code(
     language: Option<String>,
     file_path: Option<PathBuf>,
 ) -> Result<()> {
-    info!("🔍 Searching for: {}", query);
+    info!("Searching for: {}", query);
 
     ensure_search_dependencies(&config).await?;
 
@@ -776,7 +776,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
             });
 
             docker::start_dependencies(compose_file.as_deref())?;
-            println!("✅ Dependencies started successfully");
+            println!("Dependencies started successfully");
             Ok(())
         }
         DepsCommands::Stop { compose_file } => {
@@ -787,7 +787,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
             });
 
             docker::stop_dependencies(compose_file.as_deref())?;
-            println!("✅ Dependencies stopped successfully");
+            println!("Dependencies stopped successfully");
             Ok(())
         }
         DepsCommands::Status => handle_status_command(config_path).await,

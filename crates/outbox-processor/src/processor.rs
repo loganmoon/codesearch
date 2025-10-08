@@ -142,7 +142,7 @@ impl OutboxProcessor {
     }
 
     /// Prepare an embedded entity from an outbox entry (validation only, no I/O)
-    fn prepare_embedded_entity(&self, entry: &OutboxEntry) -> Result<EmbeddedEntity> {
+    pub(crate) fn prepare_embedded_entity(&self, entry: &OutboxEntry) -> Result<EmbeddedEntity> {
         // Extract both entity and embedding from payload
         let entity: codesearch_core::entities::CodeEntity = serde_json::from_value(
             entry

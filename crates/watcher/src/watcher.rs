@@ -318,7 +318,7 @@ impl FileWatcher {
                         match watcher.has_branch_changed().await {
                             Ok(Some(change)) => {
                                 info!("Branch changed from {} to {}", change.from, change.to);
-                                // TODO: Trigger reindexing
+                                // ISSUE: Trigger reindexing on branch change
                                 debug!("Would trigger reindexing for branch change");
                             }
                             Ok(None) => {

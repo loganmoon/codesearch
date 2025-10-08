@@ -192,7 +192,7 @@ impl GitRepository {
             patterns.extend(Self::parse_gitignore_file(&exclude_file)?);
         }
 
-        // TODO: Load nested .gitignore files (would require walking the tree)
+        // ISSUE: Support nested .gitignore files (would require walking the tree)
 
         Ok(patterns)
     }

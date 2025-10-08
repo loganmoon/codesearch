@@ -22,6 +22,9 @@ use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
+const DEFAULT_DEBOUNCE_MS: u64 = 500;
+const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024; // 10MB
+
 /// MCP server for codesearch semantic code search
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -406,8 +409,8 @@ async fn setup_file_watcher(
 > {
     info!("Starting filesystem watcher...");
     let watcher_config = WatcherConfig::builder()
-        .debounce_ms(500)
-        .max_file_size(10 * 1024 * 1024) // 10MB
+        .debounce_ms(DEFAULT_DEBOUNCE_MS)
+        .max_file_size(MAX_FILE_SIZE_BYTES)
         .batch_size(100)
         .build();
 

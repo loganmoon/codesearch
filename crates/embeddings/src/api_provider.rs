@@ -73,11 +73,11 @@ impl OpenAiApiProvider {
 
         match client.models().list().await {
             Ok(models_response) => {
-                info!("✓ API health check passed");
+                info!("API health check passed");
                 debug!("  Available models: {}", models_response.data.len());
             }
             Err(e) => {
-                warn!("⚠ API health check failed: {e}");
+                warn!("API health check failed: {e}");
                 warn!("  The vLLM service may not be running or still starting up.");
                 warn!("  It can take 30-60 seconds for the service to become available.");
                 warn!(

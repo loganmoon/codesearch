@@ -2,7 +2,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-mod processor;
+pub mod processor;
 
 use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::error::Result;

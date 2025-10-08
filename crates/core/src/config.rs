@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use config::{Config as ConfigBuilder, Environment, File};
+use config::{Config as ConfigLib, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -341,7 +341,7 @@ impl Config {
     /// for nested values. For example:
     /// - `CODESEARCH_EMBEDDINGS__PROVIDER=openai`
     pub fn from_file(path: &Path) -> Result<Self> {
-        let mut builder = ConfigBuilder::builder();
+        let mut builder = ConfigLib::builder();
 
         // Add the config file if it exists
         if path.exists() {
@@ -465,9 +465,9 @@ impl Config {
         Ok(())
     }
 
-    /// Create a new CodesearchConfigBuilder
-    pub fn builder() -> CodesearchConfigBuilder {
-        CodesearchConfigBuilder::new()
+    /// Create a new ConfigBuilder
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder::new()
     }
 }
 
@@ -846,7 +846,7 @@ mod tests {
 
 /// Builder for Config with fluent API
 #[derive(Debug, Clone)]
-pub struct CodesearchConfigBuilder {
+pub struct ConfigBuilder {
     indexer: IndexerConfig,
     embeddings: EmbeddingsConfig,
     watcher: WatcherConfig,
@@ -854,8 +854,8 @@ pub struct CodesearchConfigBuilder {
     languages: LanguagesConfig,
 }
 
-impl CodesearchConfigBuilder {
-    /// Create a new CodesearchConfigBuilder with defaults
+impl ConfigBuilder {
+    /// Create a new ConfigBuilder with defaults
     pub fn new() -> Self {
         Self {
             indexer: IndexerConfig::default(),
@@ -904,7 +904,7 @@ impl CodesearchConfigBuilder {
     }
 }
 
-impl Default for CodesearchConfigBuilder {
+impl Default for ConfigBuilder {
     fn default() -> Self {
         Self::new()
     }

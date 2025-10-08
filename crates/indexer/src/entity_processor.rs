@@ -66,7 +66,7 @@ pub async fn extract_entities_from_file(
     debug!("Extracting from file: {}", file_path.display());
 
     // Create extractor for this file
-    let extractor = match create_extractor(file_path, repo_id) {
+    let extractor = match create_extractor(file_path, repo_id)? {
         Some(ext) => ext,
         None => {
             debug!("No extractor available for file: {}", file_path.display());

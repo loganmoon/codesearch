@@ -446,81 +446,81 @@ impl std::fmt::Display for DependencyStatus {
             f,
             "  Docker:            {}",
             if self.docker_available {
-                "✓ Available"
+                "Available"
             } else {
-                "✗ Not found"
+                "Not found"
             }
         )?;
         writeln!(
             f,
             "  Docker Compose:    {}",
             if self.compose_available {
-                "✓ Available"
+                "Available"
             } else {
-                "✗ Not found"
+                "Not found"
             }
         )?;
         writeln!(
             f,
             "  Qdrant Container:  {}",
             if self.qdrant_running {
-                "✓ Running"
+                "Running"
             } else {
-                "✗ Not running"
+                "Not running"
             }
         )?;
         writeln!(
             f,
             "  Qdrant Health:     {}",
             if self.qdrant_healthy {
-                "✓ Healthy"
+                "Healthy"
             } else {
-                "✗ Unhealthy"
+                "Unhealthy"
             }
         )?;
         writeln!(
             f,
             "  Postgres Container: {}",
             if self.postgres_running {
-                "✓ Running"
+                "Running"
             } else {
-                "✗ Not running"
+                "Not running"
             }
         )?;
         writeln!(
             f,
             "  Postgres Health:    {}",
             if self.postgres_healthy {
-                "✓ Healthy"
+                "Healthy"
             } else {
-                "✗ Unhealthy"
+                "Unhealthy"
             }
         )?;
         writeln!(
             f,
             "  Outbox Processor:   {}",
             if self.outbox_running {
-                "✓ Running"
+                "Running"
             } else {
-                "✗ Not running"
+                "Not running"
             }
         )?;
         writeln!(
             f,
             "  vLLM Container:     {}",
             if self.vllm_running {
-                "✓ Running"
+                "Running"
             } else {
-                "✗ Not running"
+                "Not running"
             }
         )?;
         writeln!(
             f,
             "  vLLM Health:        {}",
             if self.vllm_healthy {
-                "✓ Healthy"
+                "Healthy"
             } else {
-                "✗ Unhealthy"
+                "Unhealthy"
             }
         )?;
         Ok(())

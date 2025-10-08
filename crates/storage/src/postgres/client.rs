@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::{Error, Result};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use std::str::FromStr;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
@@ -21,6 +22,19 @@ impl std::fmt::Display for OutboxOperation {
     }
 }
 
+impl FromStr for OutboxOperation {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "INSERT" => Ok(Self::Insert),
+            "UPDATE" => Ok(Self::Update),
+            "DELETE" => Ok(Self::Delete),
+            _ => Err(Error::storage(format!("Invalid operation: {s}"))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum TargetStore {
     Qdrant,
@@ -32,6 +46,18 @@ impl std::fmt::Display for TargetStore {
         match self {
             Self::Qdrant => write!(f, "qdrant"),
             Self::Neo4j => write!(f, "neo4j"),
+        }
+    }
+}
+
+impl FromStr for TargetStore {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "qdrant" => Ok(Self::Qdrant),
+            "neo4j" => Ok(Self::Neo4j),
+            _ => Err(Error::storage(format!("Invalid target store: {s}"))),
         }
     }
 }
@@ -668,40 +694,6 @@ impl PostgresClient {
     }
 
     /// Set the last indexed commit for a repository
-    ///
-    /// Updates the last_indexed_commit field for the specified repository.
-    /// This should be called after successfully indexing a commit to track progress
-    /// and enable incremental indexing in subsequent runs.
-    ///
-    /// # Parameters
-    ///
-    /// * `repository_id` - The UUID of the repository to update
-    /// * `commit_hash` - The Git commit hash (SHA) that was just indexed
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - If the update succeeded
-    /// * `Err(_)` - If a database error occurred
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// * The database connection fails
-    /// * The repository_id does not exist
-    /// * A database query error occurs
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use uuid::Uuid;
-    /// # use codesearch_storage::PostgresClientTrait;
-    /// # async fn example(client: &dyn PostgresClientTrait, repo_id: Uuid) -> codesearch_core::error::Result<()> {
-    /// // After successfully indexing commit abc123...
-    /// client.set_last_indexed_commit(repo_id, "abc123def456...").await?;
-    /// println!("Updated last indexed commit");
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn set_last_indexed_commit(
         &self,
         repository_id: Uuid,
@@ -724,6 +716,7 @@ impl PostgresClient {
     }
 }
 
+// Trait implementation delegates to inherent methods for testability and flexibility
 #[async_trait]
 impl super::PostgresClientTrait for PostgresClient {
     async fn run_migrations(&self) -> Result<()> {

@@ -14,9 +14,9 @@ use std::time::SystemTime;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileChange {
     /// File was created
-    Created(PathBuf, Arc<FileMetadata>),
+    Created(PathBuf, FileMetadata),
     /// File was modified
-    Modified(PathBuf, Arc<DiffStats>),
+    Modified(PathBuf, DiffStats),
     /// File was deleted
     Deleted(PathBuf),
     /// File was renamed
@@ -74,25 +74,25 @@ pub struct FileMetadata {
 
 impl FileMetadata {
     /// Create new file metadata
-    pub fn new(size: u64, modified: SystemTime, permissions: u32) -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new(size: u64, modified: SystemTime, permissions: u32) -> Self {
+        Self {
             size,
             modified,
             permissions,
             readonly: permissions & 0o200 == 0,
             is_symlink: false,
-        })
+        }
     }
 
     /// Create metadata for a symlink
-    pub fn symlink(size: u64, modified: SystemTime) -> Arc<Self> {
-        Arc::new(Self {
+    pub fn symlink(size: u64, modified: SystemTime) -> Self {
+        Self {
             size,
             modified,
             permissions: 0o777,
             readonly: false,
             is_symlink: true,
-        })
+        }
     }
 }
 
@@ -115,14 +115,14 @@ impl DiffStats {
         added_lines: Vec<LineRange>,
         removed_lines: Vec<LineRange>,
         modified_entities: Vec<EntityId>,
-    ) -> Arc<Self> {
+    ) -> Self {
         let change_type = Self::classify_change(&added_lines, &removed_lines);
-        Arc::new(Self {
+        Self {
             added_lines: Arc::new(added_lines),
             removed_lines: Arc::new(removed_lines),
             modified_entities: Arc::new(modified_entities),
             change_type,
-        })
+        }
     }
 
     /// Classify the type of change based on diff statistics

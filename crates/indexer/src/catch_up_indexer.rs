@@ -132,7 +132,7 @@ pub async fn catch_up_from_git(
         .map_err(|e| Error::Storage(format!("Failed to update last indexed commit: {e}")))?;
 
     info!(
-        "✅ Catch-up indexing completed at commit {} ({} processed, {} failed)",
+        "Catch-up indexing completed at commit {} ({} processed, {} failed)",
         &current_commit[..8],
         stats.files_processed,
         stats.files_failed

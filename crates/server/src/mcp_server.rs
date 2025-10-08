@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use codesearch_core::error::{Error, ResultExt};
 use codesearch_core::{config::Config, entities::EntityType};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{
@@ -314,11 +314,10 @@ pub(crate) async fn run_server_impl(
         .await
         .context("Failed to check if collection exists")?
     {
-        return Err(anyhow!(
+        return Err(Error::config(format!(
             "Collection '{}' does not exist. Please run 'codesearch init' first.",
             config.storage.collection_name
-        )
-        .into());
+        )));
     }
 
     // Step 2: Create storage client
@@ -341,10 +340,10 @@ pub(crate) async fn run_server_impl(
         .await
         .context("Failed to query repository")?
         .ok_or_else(|| {
-            anyhow!(
+            Error::config(format!(
                 "Repository not found for collection '{}'. Run 'codesearch init' first.",
                 config.storage.collection_name
-            )
+            ))
         })?;
 
     info!("Repository ID: {repository_id}");
@@ -419,7 +418,7 @@ pub(crate) async fn run_server_impl(
     let server = mcp_server
         .serve(transport)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start MCP server: {e}"))?;
+        .map_err(|e| Error::config(format!("Failed to start MCP server: {e}")))?;
 
     info!("MCP server connected and running");
 

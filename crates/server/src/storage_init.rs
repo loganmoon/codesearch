@@ -3,8 +3,8 @@
 //! This module provides helper functions for initializing embedding managers
 //! and finding the repository root.
 
-use anyhow::{Context, Result};
 use codesearch_core::config::Config;
+use codesearch_core::error::{Error, Result, ResultExt};
 use codesearch_embeddings::EmbeddingManager;
 use std::{path::PathBuf, sync::Arc};
 
@@ -64,8 +64,8 @@ pub(crate) fn find_repository_root() -> Result<PathBuf> {
         match path.parent() {
             Some(parent) => path = parent,
             None => {
-                return Err(anyhow::anyhow!(
-                    "Not a git repository (or any parent up to mount point)"
+                return Err(Error::config(
+                    "Not a git repository (or any parent up to mount point)",
                 ))
             }
         }

@@ -145,9 +145,10 @@ impl IgnoreFilterBuilder {
         self
     }
 
-    /// Set excluded file extensions
+    /// Set excluded file extensions (will be converted to lowercase)
     pub fn exclude_extensions(mut self, extensions: HashSet<String>) -> Self {
-        self.exclude_extensions = Some(extensions);
+        let lowercase_exts: HashSet<_> = extensions.into_iter().map(|s| s.to_lowercase()).collect();
+        self.exclude_extensions = Some(lowercase_exts);
         self
     }
 

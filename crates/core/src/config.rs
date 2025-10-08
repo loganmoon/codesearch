@@ -157,6 +157,17 @@ pub struct JavaScriptConfig {
     pub typescript_enabled: bool,
 }
 
+// Default constants
+const DEFAULT_DEVICE: &str = "cpu";
+const DEFAULT_PROVIDER: &str = "localapi";
+const DEFAULT_MODEL: &str = "BAAI/bge-code-v1";
+const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
+const DEFAULT_QDRANT_HOST: &str = "localhost";
+const DEFAULT_POSTGRES_HOST: &str = "localhost";
+const DEFAULT_POSTGRES_DATABASE: &str = "codesearch";
+const DEFAULT_POSTGRES_USER: &str = "codesearch";
+const DEFAULT_POSTGRES_PASSWORD: &str = "codesearch";
+
 fn default_enabled_languages() -> Vec<String> {
     vec![
         "rust".to_string(),
@@ -170,20 +181,21 @@ fn default_enabled_languages() -> Vec<String> {
 fn default_batch_size() -> usize {
     32
 }
+
 fn default_device() -> String {
-    "cpu".to_string()
+    DEFAULT_DEVICE.to_string()
 }
 
 fn default_provider() -> String {
-    "localapi".to_string()
+    DEFAULT_PROVIDER.to_string()
 }
 
 fn default_model() -> String {
-    "BAAI/bge-code-v1".to_string()
+    DEFAULT_MODEL.to_string()
 }
 
 fn default_api_base_url() -> Option<String> {
-    Some("http://localhost:8000/v1".to_string())
+    Some(DEFAULT_API_BASE_URL.to_string())
 }
 
 fn default_embedding_dimension() -> usize {
@@ -193,9 +205,11 @@ fn default_embedding_dimension() -> usize {
 fn default_true() -> bool {
     true
 }
+
 fn default_debounce_ms() -> u64 {
     500
 }
+
 fn default_ignore_patterns() -> Vec<String> {
     vec![
         "*.log".to_string(),
@@ -208,7 +222,7 @@ fn default_ignore_patterns() -> Vec<String> {
 }
 
 fn default_qdrant_host() -> String {
-    "localhost".to_string()
+    DEFAULT_QDRANT_HOST.to_string()
 }
 
 fn default_qdrant_port() -> u16 {
@@ -224,7 +238,7 @@ fn default_auto_start_deps() -> bool {
 }
 
 fn default_postgres_host() -> String {
-    "localhost".to_string()
+    DEFAULT_POSTGRES_HOST.to_string()
 }
 
 fn default_postgres_port() -> u16 {
@@ -232,15 +246,15 @@ fn default_postgres_port() -> u16 {
 }
 
 fn default_postgres_database() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_DATABASE.to_string()
 }
 
 fn default_postgres_user() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_USER.to_string()
 }
 
 fn default_postgres_password() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_PASSWORD.to_string()
 }
 
 impl Default for EmbeddingsConfig {

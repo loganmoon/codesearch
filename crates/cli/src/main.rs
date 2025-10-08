@@ -536,26 +536,27 @@ async fn index_repository(config: Config, _force: bool, _progress: bool) -> Resu
     Ok(())
 }
 
-/// Search the indexed code
-async fn search_code(
-    config: Config,
-    query: String,
-    limit: usize,
-    entity_type: Option<String>,
-    language: Option<String>,
-    file_path: Option<PathBuf>,
-) -> Result<()> {
-    info!("🔍 Searching for: {}", query);
-
-    // Step 1: Ensure dependencies are running
+/// Ensure search dependencies are running
+async fn ensure_search_dependencies(config: &Config) -> Result<()> {
     if config.storage.auto_start_deps {
-        let api_base_url = get_api_base_url_if_local_api(&config);
+        let api_base_url = get_api_base_url_if_local_api(config);
         docker::ensure_dependencies_running(&config.storage, api_base_url)
             .await
             .context("Failed to ensure dependencies are running")?;
     }
+    Ok(())
+}
 
-    // Step 2: Create collection manager and verify collection exists
+/// Client handles for search operations
+struct SearchClients {
+    storage: Arc<dyn codesearch_storage::StorageClient>,
+    postgres: Arc<dyn codesearch_storage::PostgresClientTrait>,
+    embedding_manager: EmbeddingManager,
+}
+
+/// Create all necessary clients for search operations
+async fn create_search_clients(config: &Config) -> Result<SearchClients> {
+    // Verify collection exists
     let collection_manager = create_collection_manager(&config.storage)
         .await
         .context("Failed to create collection manager")?;
@@ -571,19 +572,35 @@ async fn search_code(
         ));
     }
 
-    // Step 3: Get storage client from manager
-    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+    // Create storage client
+    let storage = create_storage_client(&config.storage, &config.storage.collection_name)
         .await
         .context("Failed to create storage client")?;
 
-    // Step 4: Create embedding manager
-    let embedding_manager = create_embedding_manager(&config).await?;
-    let embedding_manager =
-        Arc::into_inner(embedding_manager).ok_or_else(|| anyhow!("Failed to unwrap Arc"))?;
+    // Create postgres client
+    let postgres = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to connect to Postgres")?;
 
-    // Step 5: Generate query embedding
+    // Create embedding manager
+    let embedding_manager_arc = create_embedding_manager(config).await?;
+    let embedding_manager =
+        Arc::into_inner(embedding_manager_arc).ok_or_else(|| anyhow!("Failed to unwrap Arc"))?;
+
+    Ok(SearchClients {
+        storage,
+        postgres,
+        embedding_manager,
+    })
+}
+
+/// Generate embedding for the search query
+async fn generate_query_embedding(
+    embedding_manager: &EmbeddingManager,
+    query: String,
+) -> Result<Vec<f32>> {
     let query_embeddings = embedding_manager
-        .embed(vec![query.clone()])
+        .embed(vec![query])
         .await
         .context("Failed to generate query embedding")?;
 
@@ -592,43 +609,37 @@ async fn search_code(
         .next()
         .ok_or_else(|| anyhow!("Failed to get query embedding"))?;
 
-    let query_embedding =
-        query_embedding_option.ok_or_else(|| anyhow!("Query text exceeds model context window"))?;
+    query_embedding_option.ok_or_else(|| anyhow!("Query text exceeds model context window"))
+}
 
-    // Step 6: Construct search filters if provided
-    let filters = if entity_type.is_some() || language.is_some() || file_path.is_some() {
-        let parsed_entity_type = entity_type
-            .as_ref()
-            .map(|t| parse_entity_type(t))
-            .transpose()?;
-
-        Some(SearchFilters {
-            entity_type: parsed_entity_type,
-            language,
-            file_path,
-        })
-    } else {
-        None
-    };
-
-    // Step 7: Create Postgres client for fetching full entities
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to connect to Postgres")?;
-
-    // Step 8: Search for similar entities (returns IDs only)
-    let search_results = storage_client
+/// Execute vector search and return results
+async fn execute_vector_search(
+    storage: &Arc<dyn codesearch_storage::StorageClient>,
+    query_embedding: Vec<f32>,
+    limit: usize,
+    filters: Option<SearchFilters>,
+) -> Result<Vec<(String, String, f32)>> {
+    let search_results = storage
         .search_similar(query_embedding, limit, filters)
         .await
         .context("Failed to search for similar entities")?;
 
-    if search_results.is_empty() {
+    Ok(search_results)
+}
+
+/// Fetch full entities and display results
+async fn fetch_and_display_results(
+    postgres: &Arc<dyn codesearch_storage::PostgresClientTrait>,
+    results: Vec<(String, String, f32)>,
+    query: &str,
+) -> Result<()> {
+    if results.is_empty() {
         println!("No results found for query: {query}");
         return Ok(());
     }
 
-    // Step 9: Batch fetch full entities from Postgres
-    let entity_refs: Vec<(codesearch_storage::Uuid, String)> = search_results
+    // Batch fetch full entities from Postgres
+    let entity_refs: Vec<(codesearch_storage::Uuid, String)> = results
         .iter()
         .filter_map(|(entity_id, repo_id, _score)| {
             codesearch_storage::Uuid::parse_str(repo_id)
@@ -637,7 +648,7 @@ async fn search_code(
         })
         .collect();
 
-    let full_entities = postgres_client.get_entities_by_ids(&entity_refs).await?;
+    let full_entities = postgres.get_entities_by_ids(&entity_refs).await?;
 
     // Create map for lookup
     let entity_map: std::collections::HashMap<String, codesearch_core::CodeEntity> = full_entities
@@ -645,11 +656,11 @@ async fn search_code(
         .map(|e| (e.entity_id.clone(), e))
         .collect();
 
-    // Step 9: Display results with scores
-    println!("\n📊 Found {} results:\n", search_results.len());
+    // Display results with scores
+    println!("\n📊 Found {} results:\n", results.len());
     println!("{}", "─".repeat(80));
 
-    for (idx, (entity_id, _repo_id, score)) in search_results.iter().enumerate() {
+    for (idx, (entity_id, _repo_id, score)) in results.iter().enumerate() {
         if let Some(entity) = entity_map.get(entity_id) {
             let similarity_percent = (score * 100.0) as u32;
 
@@ -676,7 +687,7 @@ async fn search_code(
                 println!("   Preview: {}", preview.replace('\n', "\n            "));
             }
 
-            if idx < search_results.len() - 1 {
+            if idx < results.len() - 1 {
                 println!("{}", "─".repeat(80));
             }
         }
@@ -684,6 +695,73 @@ async fn search_code(
     println!("{}", "─".repeat(80));
     println!("\n✅ Search completed successfully");
 
+    Ok(())
+}
+
+/// Search the indexed code
+async fn search_code(
+    config: Config,
+    query: String,
+    limit: usize,
+    entity_type: Option<String>,
+    language: Option<String>,
+    file_path: Option<PathBuf>,
+) -> Result<()> {
+    info!("🔍 Searching for: {}", query);
+
+    ensure_search_dependencies(&config).await?;
+
+    let clients = create_search_clients(&config).await?;
+    let query_embedding =
+        generate_query_embedding(&clients.embedding_manager, query.clone()).await?;
+
+    let filters = if entity_type.is_some() || language.is_some() || file_path.is_some() {
+        let parsed_entity_type = entity_type
+            .as_ref()
+            .map(|t| parse_entity_type(t))
+            .transpose()?;
+
+        Some(SearchFilters {
+            entity_type: parsed_entity_type,
+            language,
+            file_path,
+        })
+    } else {
+        None
+    };
+
+    let results = execute_vector_search(&clients.storage, query_embedding, limit, filters).await?;
+    fetch_and_display_results(&clients.postgres, results, &query).await?;
+
+    Ok(())
+}
+
+/// Load config from file or use defaults
+async fn load_config_or_default(config_path: Option<&Path>) -> Result<Config> {
+    if let Ok(repo_root) = find_repository_root() {
+        match load_config(&repo_root, config_path).await {
+            Ok(config) => Ok(config),
+            Err(_) => {
+                // Use default storage settings for status check
+                Ok(Config::builder()
+                    .storage(create_default_storage_config("codesearch".to_string()))
+                    .build()?)
+            }
+        }
+    } else {
+        // Use default storage settings for status check
+        Ok(Config::builder()
+            .storage(create_default_storage_config("codesearch".to_string()))
+            .build()?)
+    }
+}
+
+/// Handle the status command for dependencies
+async fn handle_status_command(config_path: Option<&Path>) -> Result<()> {
+    let config = load_config_or_default(config_path).await?;
+    let api_base_url = get_api_base_url_if_local_api(&config);
+    let status = docker::get_dependencies_status(&config.storage, api_base_url).await?;
+    println!("{status}");
     Ok(())
 }
 
@@ -712,31 +790,7 @@ async fn handle_deps_command(cmd: DepsCommands, config_path: Option<&Path>) -> R
             println!("✅ Dependencies stopped successfully");
             Ok(())
         }
-        DepsCommands::Status => {
-            // Try to load config to get Qdrant settings, use defaults if not found
-            let config = if let Ok(repo_root) = find_repository_root() {
-                match load_config(&repo_root, config_path).await {
-                    Ok(config) => config,
-                    Err(_) => {
-                        // Use default storage settings for status check
-                        Config::builder()
-                            .storage(create_default_storage_config("codesearch".to_string()))
-                            .build()?
-                    }
-                }
-            } else {
-                // Use default storage settings for status check
-                Config::builder()
-                    .storage(create_default_storage_config("codesearch".to_string()))
-                    .build()?
-            };
-
-            let api_base_url = get_api_base_url_if_local_api(&config);
-
-            let status = docker::get_dependencies_status(&config.storage, api_base_url).await?;
-            println!("{status}");
-            Ok(())
-        }
+        DepsCommands::Status => handle_status_command(config_path).await,
     }
 }
 

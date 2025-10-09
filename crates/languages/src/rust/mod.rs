@@ -64,6 +64,11 @@ impl RustExtractor {
                 queries::TYPE_ALIAS_QUERY,
                 Box::new(handlers::handle_type_alias),
             )
+            .add_extractor(
+                "macro",
+                queries::MACRO_QUERY,
+                Box::new(handlers::handle_macro),
+            )
             .build()?;
 
         Ok(Self {

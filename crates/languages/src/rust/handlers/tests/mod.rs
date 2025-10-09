@@ -6,6 +6,7 @@ mod enum_tests;
 mod fixtures;
 mod function_tests;
 mod impl_tests;
+mod macro_tests;
 mod module_tests;
 mod struct_tests;
 mod trait_tests;

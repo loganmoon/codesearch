@@ -124,10 +124,6 @@ pub const TYPE_ALIAS_QUERY: &str = r#"
 pub const MACRO_QUERY: &str = r#"
 (macro_definition
   name: (identifier) @name
-  (macro_rule
-    left: (token_tree_pattern)? @pattern
-    right: (token_tree)? @expansion
-  )? @rule
 ) @macro
 "#;
 

@@ -33,18 +33,6 @@ pub fn find_capture_node<'a>(
     })
 }
 
-/// Extract text from a capture by name
-#[allow(dead_code)]
-pub fn extract_capture_text(
-    query_match: &QueryMatch,
-    query: &Query,
-    capture_name: &str,
-    source: &str,
-) -> Option<String> {
-    find_capture_node(query_match, query, capture_name)
-        .and_then(|node| node_to_text(node, source).ok())
-}
-
 /// Convert a node to text with error handling
 pub fn node_to_text(node: Node, source: &str) -> Result<String> {
     node.utf8_text(source.as_bytes())
@@ -218,46 +206,4 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
     }
 
     generics
-}
-
-// ============================================================================
-// Node Traversal Helpers
-// ============================================================================
-
-/// Filter children nodes by kind, skipping punctuation
-#[allow(dead_code)]
-pub fn filter_children_by_kind<'a>(node: Node<'a>, kinds: &[&str]) -> Vec<Node<'a>> {
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .filter(|child| kinds.contains(&child.kind()))
-        .collect()
-}
-
-/// Check if a node has a child of a specific kind
-#[allow(dead_code)]
-pub fn has_child_of_kind(node: Node, kind: &str) -> bool {
-    let mut cursor = node.walk();
-    let result = node.children(&mut cursor).any(|child| child.kind() == kind);
-    result
-}
-
-/// Walk siblings backwards until a condition is met
-#[allow(dead_code)]
-pub fn walk_prev_siblings_until<F>(node: Node, mut predicate: F) -> Vec<Node>
-where
-    F: FnMut(Node) -> bool,
-{
-    let mut siblings = Vec::new();
-    let mut current = node.prev_sibling();
-
-    while let Some(sibling) = current {
-        if !predicate(sibling) {
-            break;
-        }
-        siblings.push(sibling);
-        current = sibling.prev_sibling();
-    }
-
-    siblings.reverse();
-    siblings
 }

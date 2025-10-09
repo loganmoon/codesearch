@@ -119,12 +119,21 @@ fn incomplete() {
     println!("Missing closing brace");
 "#;
 
-    // Should not panic, but might not extract properly
+    // tree-sitter is error-tolerant but incomplete functions may not match queries
     let result = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function);
 
-    // The extraction might fail or succeed with partial data
-    // Document the actual behavior
-    assert!(result.is_ok() || result.is_err());
+    // Should not panic - gracefully handles malformed code
+    assert!(result.is_ok(), "Should not panic on incomplete syntax");
+
+    // Document actual behavior: incomplete functions may or may not be extracted
+    // depending on how tree-sitter error recovery works
+    let entities = result.unwrap();
+    // Don't assert on entity count - behavior depends on tree-sitter's error recovery
+    // The important thing is we didn't panic
+    if !entities.is_empty() {
+        // If extracted, should have the correct name
+        assert_eq!(entities[0].name, "incomplete");
+    }
 }
 
 #[test]

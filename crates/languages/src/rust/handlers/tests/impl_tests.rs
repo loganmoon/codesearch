@@ -35,7 +35,7 @@ impl Counter {
     // Find the impl block entity (might be first or have specific name)
     let impl_entity = entities
         .iter()
-        .find(|e| e.entity_type == EntityType::Method && e.name == "Counter")
+        .find(|e| e.entity_type == EntityType::Impl && e.name == "Counter")
         .or_else(|| entities.first());
 
     assert!(impl_entity.is_some(), "Should extract impl block entity");
@@ -70,7 +70,7 @@ impl Display for Point {
 
     // Check that impl block has trait information in metadata
     let impl_entity = &entities[0];
-    assert_eq!(impl_entity.entity_type, EntityType::Method);
+    assert_eq!(impl_entity.entity_type, EntityType::Impl);
 
     // Should have trait name in attributes
     if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
@@ -164,7 +164,7 @@ impl AsyncService {
     // Check that async methods are marked as async
     let async_methods: Vec<_> = entities
         .iter()
-        .filter(|e| e.entity_type == EntityType::Function && e.metadata.is_async)
+        .filter(|e| e.entity_type == EntityType::Method && e.metadata.is_async)
         .collect();
     assert!(
         !async_methods.is_empty(),
@@ -199,7 +199,7 @@ impl RawPointer {
     let unsafe_methods: Vec<_> = entities
         .iter()
         .filter(|e| {
-            e.entity_type == EntityType::Function
+            e.entity_type == EntityType::Method
                 && e.metadata.attributes.get("unsafe") == Some(&"true".to_string())
         })
         .collect();
@@ -235,7 +235,7 @@ impl ConstCompute {
     // Check for const methods
     let const_methods: Vec<_> = entities
         .iter()
-        .filter(|e| e.entity_type == EntityType::Function && e.metadata.is_const)
+        .filter(|e| e.entity_type == EntityType::Method && e.metadata.is_const)
         .collect();
     assert!(
         !const_methods.is_empty(),
@@ -265,7 +265,7 @@ impl SelfTest {
     let methods_with_self: Vec<_> = entities
         .iter()
         .filter(|e| {
-            e.entity_type == EntityType::Function
+            e.entity_type == EntityType::Method
                 && e.signature
                     .as_ref()
                     .map(|sig| sig.parameters.iter().any(|(name, _)| name.contains("self")))
@@ -365,7 +365,42 @@ impl Config {
         .expect("Failed to extract impl with associated constants");
 
     assert!(!entities.is_empty(), "Should extract impl block");
-    // Associated constants might be extracted as separate entities or included in impl
+
+    // Should extract the impl block, 2 constants, and 1 method = 4 entities
+    assert!(
+        entities.len() >= 4,
+        "Should extract impl, constants, and method"
+    );
+
+    // Check that associated constants are extracted
+    let constants: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Constant)
+        .collect();
+
+    assert_eq!(
+        constants.len(),
+        2,
+        "Should extract both associated constants"
+    );
+
+    let constant_names: Vec<&str> = constants.iter().map(|e| e.name.as_str()).collect();
+    assert!(
+        constant_names.contains(&"MAX_SIZE"),
+        "Should extract MAX_SIZE constant"
+    );
+    assert!(
+        constant_names.contains(&"VERSION"),
+        "Should extract VERSION constant"
+    );
+
+    // Verify constants have metadata
+    for constant in &constants {
+        assert!(
+            constant.metadata.is_const,
+            "Constants should have is_const flag"
+        );
+    }
 }
 
 #[test]

@@ -111,12 +111,12 @@ fn collect_doc_lines(node: Node, source: &str) -> Vec<String> {
         match sibling.kind() {
             node_kinds::LINE_COMMENT => {
                 if let Some(doc_text) = extract_line_doc_text(sibling, source) {
-                    doc_lines.insert(0, doc_text);
+                    doc_lines.push(doc_text);
                 }
             }
             node_kinds::BLOCK_COMMENT => {
                 if let Some(doc_text) = extract_block_doc_text(sibling, source) {
-                    doc_lines.insert(0, doc_text);
+                    doc_lines.push(doc_text);
                 }
             }
             node_kinds::ATTRIBUTE_ITEM => {
@@ -127,6 +127,8 @@ fn collect_doc_lines(node: Node, source: &str) -> Vec<String> {
         current = sibling.prev_sibling();
     }
 
+    // Reverse once at the end instead of inserting at position 0 each time
+    doc_lines.reverse();
     doc_lines
 }
 
@@ -206,4 +208,90 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
     }
 
     generics
+}
+
+// ============================================================================
+// Function Parameter and Modifier Extraction
+// ============================================================================
+
+/// Extract parameters from a function parameters node
+pub fn extract_function_parameters(
+    params_node: Node,
+    source: &str,
+) -> Result<Vec<(String, String)>> {
+    use crate::rust::handlers::constants::{keywords, special_idents};
+
+    let mut parameters = Vec::new();
+    let mut cursor = params_node.walk();
+
+    for child in params_node.children(&mut cursor) {
+        // Skip punctuation like parentheses and commas
+        if matches!(
+            child.kind(),
+            punctuation::OPEN_PAREN | punctuation::CLOSE_PAREN | punctuation::COMMA
+        ) {
+            continue;
+        }
+
+        // Handle different parameter types
+        match child.kind() {
+            node_kinds::PARAMETER => {
+                if let Some((pattern, param_type)) = extract_parameter_parts(child, source)? {
+                    parameters.push((pattern, param_type));
+                }
+            }
+            node_kinds::SELF_PARAMETER => {
+                let text = node_to_text(child, source)?;
+                parameters.push((keywords::SELF.to_string(), text));
+            }
+            node_kinds::VARIADIC_PARAMETER => {
+                let text = node_to_text(child, source)?;
+                parameters.push((special_idents::VARIADIC.to_string(), text));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(parameters)
+}
+
+/// Extract pattern and type parts from a parameter node
+pub fn extract_parameter_parts(node: Node, source: &str) -> Result<Option<(String, String)>> {
+    let full_text = node_to_text(node, source)?;
+
+    // Use split_once for safe UTF-8 boundary handling
+    if let Some((pattern, param_type)) = full_text.split_once(':') {
+        return Ok(Some((
+            pattern.trim().to_string(),
+            param_type.trim().to_string(),
+        )));
+    }
+
+    // No colon means no type annotation (rare in Rust)
+    if !full_text.trim().is_empty() {
+        Ok(Some((full_text, String::new())))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract function modifiers (async, unsafe, const) from a modifiers node
+pub fn extract_function_modifiers(modifiers_node: Node) -> (bool, bool, bool) {
+    use crate::rust::handlers::constants::function_modifiers;
+
+    let mut has_async = false;
+    let mut has_unsafe = false;
+    let mut has_const = false;
+    let mut cursor = modifiers_node.walk();
+
+    for child in modifiers_node.children(&mut cursor) {
+        match child.kind() {
+            function_modifiers::ASYNC => has_async = true,
+            function_modifiers::UNSAFE => has_unsafe = true,
+            function_modifiers::CONST => has_const = true,
+            _ => {}
+        }
+    }
+
+    (has_async, has_unsafe, has_const)
 }

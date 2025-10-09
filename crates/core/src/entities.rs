@@ -17,6 +17,7 @@ pub enum EntityType {
     Struct,
     Interface,
     Trait,
+    Impl,
     Enum,
     Module,
     Package,

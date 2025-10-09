@@ -10,12 +10,10 @@
 
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handlers::common::{
-    extract_generics_from_node, extract_preceding_doc_comments, find_capture_node, node_to_text,
-    require_capture_node,
+    extract_function_modifiers, extract_function_parameters, extract_generics_from_node,
+    extract_preceding_doc_comments, find_capture_node, node_to_text, require_capture_node,
 };
-use crate::rust::handlers::constants::{
-    capture_names, function_modifiers, keywords, node_kinds, punctuation, special_idents,
-};
+use crate::rust::handlers::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
     Visibility,
@@ -101,7 +99,7 @@ pub fn handle_impl(
         } else {
             Some(parent_scope)
         })
-        .entity_type(EntityType::Method) // Per entities.rs:95
+        .entity_type(EntityType::Impl)
         .location(location)
         .visibility(Visibility::Private) // Impl blocks don't have visibility
         .documentation_summary(documentation)
@@ -201,7 +199,7 @@ pub fn handle_impl_trait(
         } else {
             Some(parent_scope)
         })
-        .entity_type(EntityType::Method) // Per entities.rs:95
+        .entity_type(EntityType::Impl)
         .location(location)
         .visibility(Visibility::Private) // Impl blocks don't have visibility
         .documentation_summary(documentation)
@@ -218,7 +216,7 @@ pub fn handle_impl_trait(
     Ok(entities)
 }
 
-/// Extract all methods from an impl block body
+/// Extract all methods and associated constants from an impl block body
 fn extract_impl_methods(
     body_node: Node,
     source: &str,
@@ -228,26 +226,168 @@ fn extract_impl_methods(
     for_type: &str,
     trait_name: Option<&str>,
 ) -> Result<Vec<CodeEntity>> {
-    let mut methods = Vec::new();
+    let mut entities = Vec::new();
     let mut cursor = body_node.walk();
 
     for child in body_node.children(&mut cursor) {
-        if child.kind() == node_kinds::FUNCTION_ITEM {
-            if let Ok(method) = extract_method(
-                child,
-                source,
-                file_path,
-                repository_id,
-                impl_qualified_name,
-                for_type,
-                trait_name,
-            ) {
-                methods.push(method);
+        match child.kind() {
+            node_kinds::FUNCTION_ITEM => {
+                if let Ok(method) = extract_method(
+                    child,
+                    source,
+                    file_path,
+                    repository_id,
+                    impl_qualified_name,
+                    for_type,
+                    trait_name,
+                ) {
+                    entities.push(method);
+                }
             }
+            "const_item" => {
+                if let Ok(constant) = extract_associated_constant(
+                    child,
+                    source,
+                    file_path,
+                    repository_id,
+                    impl_qualified_name,
+                    for_type,
+                    trait_name,
+                ) {
+                    entities.push(constant);
+                }
+            }
+            _ => {}
         }
     }
 
-    Ok(methods)
+    Ok(entities)
+}
+
+/// Determine if a function should be typed as a Method
+/// A function is a method if it has a self parameter OR returns Self
+fn is_method(parameters: &[(String, String)], return_type: &Option<String>) -> bool {
+    // Check for self parameter (any variant: self, &self, &mut self, mut self)
+    let has_self_param = parameters.iter().any(|(name, _)| {
+        name == "self" || name.starts_with("&self") || name.starts_with("mut self")
+    });
+
+    // Check for Self return type
+    let returns_self = return_type
+        .as_ref()
+        .map(|rt| rt.contains("Self"))
+        .unwrap_or(false);
+
+    has_self_param || returns_self
+}
+
+/// Extract an associated constant from an impl block
+fn extract_associated_constant(
+    const_node: Node,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    impl_qualified_name: &str,
+    for_type: &str,
+    trait_name: Option<&str>,
+) -> Result<CodeEntity> {
+    // Extract constant name
+    let name = const_node
+        .child_by_field_name("name")
+        .and_then(|n| node_to_text(n, source).ok())
+        .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
+
+    // Build qualified name based on impl type
+    let qualified_name = if let Some(trait_name) = trait_name {
+        format!("<{for_type} as {trait_name}>::{name}")
+    } else {
+        format!("{for_type}::{name}")
+    };
+
+    // Extract visibility
+    let visibility = extract_method_visibility(const_node);
+
+    // Extract type
+    let const_type = const_node
+        .child_by_field_name("type")
+        .and_then(|n| node_to_text(n, source).ok());
+
+    // Extract value
+    let value = const_node
+        .child_by_field_name("value")
+        .and_then(|n| node_to_text(n, source).ok());
+
+    // Extract documentation
+    let documentation = extract_preceding_doc_comments(const_node, source);
+
+    // Get location and content
+    let location = SourceLocation::from_tree_sitter_node(const_node);
+    let content = node_to_text(const_node, source).ok();
+
+    // Generate entity_id
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    // Build metadata
+    let mut metadata = EntityMetadata {
+        is_const: true,
+        ..Default::default()
+    };
+
+    if let Some(const_type_str) = &const_type {
+        metadata
+            .attributes
+            .insert("type".to_string(), const_type_str.clone());
+    }
+
+    if let Some(value_str) = &value {
+        metadata
+            .attributes
+            .insert("value".to_string(), value_str.clone());
+    }
+
+    CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(Some(impl_qualified_name.to_string()))
+        .entity_type(EntityType::Constant)
+        .location(location)
+        .visibility(visibility)
+        .documentation_summary(documentation)
+        .content(content)
+        .metadata(metadata)
+        .language(Language::Rust)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| Error::entity_extraction(format!("Failed to build constant entity: {e}")))
+}
+
+/// Find the function_modifiers node in a function_item node
+fn find_modifiers_node(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+    #[allow(clippy::manual_find)]
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_modifiers" {
+            return Some(child);
+        }
+    }
+    None
+}
+
+/// Find the parameters node in a function_item node
+fn find_parameters_node(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+    #[allow(clippy::manual_find)]
+    for child in node.children(&mut cursor) {
+        if child.kind() == "parameters" {
+            return Some(child);
+        }
+    }
+    None
 }
 
 /// Extract a single method from an impl block
@@ -274,14 +414,19 @@ fn extract_method(
     // Extract visibility
     let visibility = extract_method_visibility(method_node);
 
-    // Extract modifiers
-    let (is_async, is_unsafe, is_const) = extract_method_modifiers(method_node);
+    // Extract modifiers by finding the function_modifiers node
+    let (is_async, is_unsafe, is_const) = find_modifiers_node(method_node)
+        .map(extract_function_modifiers)
+        .unwrap_or((false, false, false));
 
     // Extract generics
     let generics = extract_method_generics(method_node, source);
 
-    // Extract parameters
-    let parameters = extract_method_parameters(method_node, source)?;
+    // Extract parameters by finding the parameters node
+    let parameters = find_parameters_node(method_node)
+        .map(|params_node| extract_function_parameters(params_node, source))
+        .transpose()?
+        .unwrap_or_default();
 
     // Extract return type
     let return_type = extract_method_return_type(method_node, source);
@@ -325,13 +470,20 @@ fn extract_method(
         generics: generics.clone(),
     };
 
+    // Determine entity type: Method (has self or returns Self) or Function (associated function)
+    let entity_type = if is_method(&parameters, &return_type) {
+        EntityType::Method
+    } else {
+        EntityType::Function
+    };
+
     CodeEntityBuilder::default()
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
         .qualified_name(qualified_name)
         .parent_scope(Some(impl_qualified_name.to_string()))
-        .entity_type(EntityType::Function)
+        .entity_type(entity_type)
         .location(location)
         .visibility(visibility)
         .documentation_summary(documentation)
@@ -366,38 +518,6 @@ fn extract_method_visibility(node: Node) -> Visibility {
     Visibility::Private
 }
 
-/// Extract function modifiers (async, unsafe, const) from a method node
-fn extract_method_modifiers(node: Node) -> (bool, bool, bool) {
-    let mut has_async = false;
-    let mut has_unsafe = false;
-    let mut has_const = false;
-    let mut cursor = node.walk();
-
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "function_modifiers" => {
-                // Found a function_modifiers node, walk its children
-                let mut mod_cursor = child.walk();
-                for mod_child in child.children(&mut mod_cursor) {
-                    match mod_child.kind() {
-                        function_modifiers::ASYNC => has_async = true,
-                        function_modifiers::UNSAFE => has_unsafe = true,
-                        function_modifiers::CONST => has_const = true,
-                        _ => {}
-                    }
-                }
-            }
-            // Also check for direct keyword children
-            function_modifiers::ASYNC => has_async = true,
-            function_modifiers::UNSAFE => has_unsafe = true,
-            function_modifiers::CONST => has_const = true,
-            _ => {}
-        }
-    }
-
-    (has_async, has_unsafe, has_const)
-}
-
 /// Extract generic parameters from a method node
 fn extract_method_generics(node: Node, source: &str) -> Vec<String> {
     let mut cursor = node.walk();
@@ -407,66 +527,6 @@ fn extract_method_generics(node: Node, source: &str) -> Vec<String> {
         }
     }
     Vec::new()
-}
-
-/// Extract parameters from a method node
-fn extract_method_parameters(node: Node, source: &str) -> Result<Vec<(String, String)>> {
-    let mut cursor = node.walk();
-    let params_node = node
-        .children(&mut cursor)
-        .find(|c| c.kind() == "parameters");
-
-    let Some(params) = params_node else {
-        return Ok(Vec::new());
-    };
-
-    let mut parameters = Vec::new();
-    let mut param_cursor = params.walk();
-
-    for child in params.children(&mut param_cursor) {
-        if matches!(
-            child.kind(),
-            punctuation::OPEN_PAREN | punctuation::CLOSE_PAREN | punctuation::COMMA
-        ) {
-            continue;
-        }
-
-        match child.kind() {
-            node_kinds::PARAMETER => {
-                if let Some((pattern, param_type)) = extract_parameter_parts(child, source)? {
-                    parameters.push((pattern, param_type));
-                }
-            }
-            node_kinds::SELF_PARAMETER => {
-                let text = node_to_text(child, source)?;
-                parameters.push((keywords::SELF.to_string(), text));
-            }
-            node_kinds::VARIADIC_PARAMETER => {
-                let text = node_to_text(child, source)?;
-                parameters.push((special_idents::VARIADIC.to_string(), text));
-            }
-            _ => {}
-        }
-    }
-
-    Ok(parameters)
-}
-
-/// Extract pattern and type parts from a parameter node
-fn extract_parameter_parts(node: Node, source: &str) -> Result<Option<(String, String)>> {
-    let full_text = node_to_text(node, source)?;
-
-    if let Some(colon_pos) = full_text.find(':') {
-        let pattern = full_text[..colon_pos].trim().to_string();
-        let param_type = full_text[colon_pos + 1..].trim().to_string();
-        return Ok(Some((pattern, param_type)));
-    }
-
-    if !full_text.trim().is_empty() {
-        Ok(Some((full_text, String::new())))
-    } else {
-        Ok(None)
-    }
 }
 
 /// Extract return type from a method node

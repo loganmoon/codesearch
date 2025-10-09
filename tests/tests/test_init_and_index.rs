@@ -323,7 +323,7 @@ postgres_user = "codesearch"
 postgres_password = "codesearch"
 
 [embeddings]
-provider = "local_api"
+provider = "localapi"
 api_url = "http://localhost:8000/v1"
 model_name = "BAAI/bge-small-en-v1.5"
 

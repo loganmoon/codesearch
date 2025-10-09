@@ -43,6 +43,12 @@ impl RustExtractor {
                 queries::TRAIT_QUERY,
                 Box::new(handlers::handle_trait),
             )
+            .add_extractor("impl", queries::IMPL_QUERY, Box::new(handlers::handle_impl))
+            .add_extractor(
+                "impl_trait",
+                queries::IMPL_TRAIT_QUERY,
+                Box::new(handlers::handle_impl_trait),
+            )
             .build()?;
 
         Ok(Self {

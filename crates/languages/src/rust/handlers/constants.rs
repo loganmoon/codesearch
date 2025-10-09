@@ -88,6 +88,10 @@ pub(crate) mod capture_names {
     pub const PARAMS: &str = "params";
     pub const RETURN: &str = "return";
     pub const MODIFIERS: &str = "modifiers";
+    pub const IMPL: &str = "impl";
+    pub const IMPL_TRAIT: &str = "impl_trait";
+    pub const IMPL_BODY: &str = "impl_body";
+    pub const TYPE: &str = "type";
 }
 
 // ============================================================================

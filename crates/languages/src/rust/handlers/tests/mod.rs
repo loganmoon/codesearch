@@ -4,6 +4,7 @@ mod edge_cases;
 mod enum_tests;
 mod fixtures;
 mod function_tests;
+mod impl_tests;
 mod struct_tests;
 mod trait_tests;
 

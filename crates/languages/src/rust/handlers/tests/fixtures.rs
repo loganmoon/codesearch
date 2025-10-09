@@ -4,6 +4,7 @@ use super::*;
 use codesearch_core::entities::{EntityType, Visibility};
 
 use crate::rust::handlers::function_handlers::handle_function;
+use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
 use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
 
 /// Large comprehensive Rust code sample (100+ lines)
@@ -38,6 +39,21 @@ impl Default for Config {
             debug: false,
             timeout: 30,
         }
+    }
+}
+
+impl Config {
+    pub fn new(hostname: String, port: u16) -> Self {
+        Self {
+            hostname,
+            port,
+            debug: false,
+            timeout: 30,
+        }
+    }
+
+    pub fn is_debug(&self) -> bool {
+        self.debug
     }
 }
 
@@ -452,4 +468,38 @@ fn test_extremely_large_extraction_performance() {
     // Extraction should be fast, even for large files
     // Adjust threshold as needed based on performance requirements
     assert!(duration.as_millis() < 100);
+}
+
+#[test]
+fn test_large_file_impl_extraction() {
+    // Test inherent impl extraction
+    let impl_entities = extract_with_handler(LARGE_RUST_SAMPLE, queries::IMPL_QUERY, handle_impl)
+        .expect("Failed to extract impl blocks");
+
+    assert!(impl_entities.len() >= 2); // Config::new, Config::is_debug, Reference::new, Reference::get
+
+    // Verify some methods were extracted
+    let entity_names: Vec<&str> = impl_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(entity_names.contains(&"new") || entity_names.contains(&"Config"));
+
+    // Test trait impl extraction
+    let trait_impl_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::IMPL_TRAIT_QUERY,
+        handle_impl_trait,
+    )
+    .expect("Failed to extract trait impls");
+
+    assert!(!trait_impl_entities.is_empty()); // Display for ProcessError
+
+    // Verify trait impl has correct metadata
+    let display_impl = trait_impl_entities.iter().find(|e| {
+        e.metadata
+            .attributes
+            .get("implements_trait")
+            .map(|t| t.contains("Display"))
+            .unwrap_or(false)
+    });
+
+    assert!(display_impl.is_some(), "Should find Display trait impl");
 }

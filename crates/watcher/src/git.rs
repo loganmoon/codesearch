@@ -8,7 +8,7 @@ use git2::{BranchType, Repository, Status, StatusOptions};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Wrapper around git2::Repository with additional functionality
 #[derive(Clone)]
@@ -149,7 +149,7 @@ impl GitRepository {
         let repo = match self.open_repo() {
             Ok(r) => r,
             Err(_) => {
-                debug!("Failed to open repository for ignore check");
+                warn!("Failed to open repository for ignore check");
                 return false;
             }
         };

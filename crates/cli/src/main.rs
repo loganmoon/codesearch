@@ -124,7 +124,7 @@ async fn ensure_storage_initialized(
         info!("Generated collection name: {}", collection_name);
 
         let storage_config = create_default_storage_config(collection_name);
-        let config = Config::builder().storage(storage_config).build()?;
+        let config = Config::builder(storage_config).build();
 
         config
             .save(&config_file)

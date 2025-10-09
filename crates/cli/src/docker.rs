@@ -101,19 +101,16 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
 
 /// Generic helper to check if a container is running
 fn is_container_running(container_name: &str) -> Result<bool> {
+    let filter_arg = format!("name={container_name}");
+
     let output = Command::new("docker")
-        .args([
-            "ps",
-            "--filter",
-            &format!("name={container_name}"),
-            "--format",
-            "{{.Names}}",
-        ])
+        .args(["ps", "--filter", &filter_arg, "--format", "{{.Names}}"])
         .output()
         .context("Failed to check container status")?;
 
     if !output.status.success() {
-        return Ok(false);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("Docker ps command failed: {stderr}"));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -146,9 +143,19 @@ pub async fn check_qdrant_health(config: &StorageConfig) -> bool {
     let url = format!("http://{}:{}/", config.qdrant_host, config.qdrant_rest_port);
 
     match reqwest::get(&url).await {
-        Ok(response) => response.status().is_success(),
+        Ok(response) => {
+            let is_success = response.status().is_success();
+            if !is_success {
+                warn!(
+                    "Qdrant health check failed: HTTP {} at {}",
+                    response.status(),
+                    url
+                );
+            }
+            is_success
+        }
         Err(e) => {
-            warn!("Qdrant health check failed: {e}");
+            warn!("Qdrant health check failed: unable to connect to {url}: {e}");
             false
         }
     }
@@ -160,9 +167,19 @@ pub async fn check_vllm_health(api_base_url: &str) -> bool {
     let url = format!("{}/health", api_base_url.trim_end_matches("/v1"));
 
     match reqwest::get(&url).await {
-        Ok(response) => response.status().is_success(),
+        Ok(response) => {
+            let is_success = response.status().is_success();
+            if !is_success {
+                warn!(
+                    "vLLM health check failed: HTTP {} at {}",
+                    response.status(),
+                    url
+                );
+            }
+            is_success
+        }
         Err(e) => {
-            warn!("vLLM health check failed: {e}");
+            warn!("vLLM health check failed: unable to connect to {url}: {e}");
             false
         }
     }
@@ -213,6 +230,18 @@ pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> 
 }
 
 /// Check Postgres health status
+///
+/// # Security Considerations
+///
+/// This function creates a new database connection for each health check, passing
+/// the password from the configuration. While this does expose credentials in memory,
+/// it is acceptable for local health checks because:
+/// - The password is already present in the `StorageConfig` structure in memory
+/// - This is a local development tool, not a production service
+/// - Health checks are infrequent and short-lived
+///
+/// For production deployments, consider using connection pooling or secret management
+/// systems instead of storing passwords in configuration.
 pub async fn check_postgres_health(config: &StorageConfig) -> bool {
     let connect_options = PgConnectOptions::new()
         .host(&config.postgres_host)
@@ -225,12 +254,18 @@ pub async fn check_postgres_health(config: &StorageConfig) -> bool {
         Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => true,
             Err(e) => {
-                warn!("Postgres health check query failed: {e}");
+                warn!(
+                    "Postgres health check query failed at {}:{}/{}: {e}",
+                    config.postgres_host, config.postgres_port, config.postgres_database
+                );
                 false
             }
         },
         Err(e) => {
-            warn!("Postgres health check connection failed: {e}");
+            warn!(
+                "Postgres health check connection failed at {}:{}/{}: {e}",
+                config.postgres_host, config.postgres_port, config.postgres_database
+            );
             false
         }
     }

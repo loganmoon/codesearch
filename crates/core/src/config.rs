@@ -325,11 +325,12 @@ impl Default for LanguagesConfig {
 impl StorageConfig {
     /// Generate a collection name from a repository path
     ///
-    /// Creates a unique, Qdrant-compatible collection name using the format:
-    /// `<repo_name>_<xxhash3_128_of_full_path>`
+    /// Creates a unique, deterministic Qdrant-compatible collection name using xxHash3_128.
+    /// Format: `<sanitized_repo_name>_<xxhash3_128_hex>`
     ///
-    /// The repo name is truncated to 50 characters if needed.
-    /// The name is deterministic - the same path always generates the same name.
+    /// The repo name is sanitized (alphanumeric, dash, underscore only) and truncated to
+    /// 50 characters if needed. The full absolute path is hashed using xxHash3_128 to ensure
+    /// uniqueness. The same path always generates the same collection name.
     ///
     /// # Errors
     ///
@@ -513,9 +514,9 @@ impl Config {
         Ok(())
     }
 
-    /// Create a new ConfigBuilder
-    pub fn builder() -> ConfigBuilder {
-        ConfigBuilder::new()
+    /// Create a new ConfigBuilder with required storage config
+    pub fn builder(storage: StorageConfig) -> ConfigBuilder {
+        ConfigBuilder::new(storage)
     }
 }
 
@@ -941,26 +942,20 @@ pub struct ConfigBuilder {
     indexer: IndexerConfig,
     embeddings: EmbeddingsConfig,
     watcher: WatcherConfig,
-    storage: Option<StorageConfig>,
+    storage: StorageConfig,
     languages: LanguagesConfig,
 }
 
 impl ConfigBuilder {
-    /// Create a new ConfigBuilder with defaults
-    pub fn new() -> Self {
+    /// Create a new ConfigBuilder with required storage config and defaults for other fields
+    pub fn new(storage: StorageConfig) -> Self {
         Self {
             indexer: IndexerConfig::default(),
             embeddings: EmbeddingsConfig::default(),
             watcher: WatcherConfig::default(),
-            storage: None,
+            storage,
             languages: LanguagesConfig::default(),
         }
-    }
-
-    /// Set the storage configuration
-    pub fn storage(mut self, storage: StorageConfig) -> Self {
-        self.storage = Some(storage);
-        self
     }
 
     /// Set the embeddings configuration
@@ -982,21 +977,13 @@ impl ConfigBuilder {
     }
 
     /// Build the Config
-    pub fn build(self) -> Result<Config> {
-        Ok(Config {
+    pub fn build(self) -> Config {
+        Config {
             indexer: self.indexer,
             embeddings: self.embeddings,
             watcher: self.watcher,
-            storage: self
-                .storage
-                .ok_or_else(|| Error::config("Storage config is required"))?,
+            storage: self.storage,
             languages: self.languages,
-        })
-    }
-}
-
-impl Default for ConfigBuilder {
-    fn default() -> Self {
-        Self::new()
+        }
     }
 }

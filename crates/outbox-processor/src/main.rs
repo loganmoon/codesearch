@@ -96,5 +96,5 @@ fn load_config_from_env() -> Result<Config> {
         docker_compose_file: None,
     };
 
-    Config::builder().storage(storage_config).build()
+    Ok(Config::builder(storage_config).build())
 }

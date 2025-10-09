@@ -592,10 +592,10 @@ impl PostgresClient {
                     .push_bind(&entity.qualified_name)
                     .push_bind(&entity.name)
                     .push_bind(&entity.parent_scope)
-                    .push_bind(format!("{:?}", entity.entity_type))
+                    .push_bind(entity.entity_type.to_string())
                     .push_bind(entity.language.to_string())
                     .push_bind(*file_path_str)
-                    .push_bind(format!("{:?}", entity.visibility))
+                    .push_bind(entity.visibility.to_string())
                     .push_bind(entity_json)
                     .push_bind(git_commit)
                     .push_bind(point_id);

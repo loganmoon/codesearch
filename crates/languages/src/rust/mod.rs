@@ -59,6 +59,11 @@ impl RustExtractor {
                 queries::CONSTANT_QUERY,
                 Box::new(handlers::handle_constant),
             )
+            .add_extractor(
+                "type_alias",
+                queries::TYPE_ALIAS_QUERY,
+                Box::new(handlers::handle_type_alias),
+            )
             .build()?;
 
         Ok(Self {

@@ -7,6 +7,7 @@ use crate::rust::handlers::constant_handlers::handle_constant;
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
 use crate::rust::handlers::module_handlers::handle_module;
+use crate::rust::handlers::type_alias_handlers::handle_type_alias;
 use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
 
 /// Large comprehensive Rust code sample (100+ lines)
@@ -28,6 +29,12 @@ const DEFAULT_TIMEOUT: u64 = 30;
 
 /// Global configuration instance
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
+
+/// Standard result type for this module
+pub type Result<T> = std::result::Result<T, ProcessError>;
+
+/// Type alias for message handler callbacks
+type MessageHandler = Box<dyn Fn(&Message) -> Result<()> + Send>;
 
 /// Configuration options for the application
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -576,4 +583,50 @@ fn test_large_file_constant_extraction() {
     let config = const_entities.iter().find(|e| e.name == "CONFIG").unwrap();
     assert!(!config.metadata.is_const);
     assert!(config.metadata.is_static);
+}
+
+#[test]
+fn test_large_file_type_alias_extraction() {
+    let alias_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::TYPE_ALIAS_QUERY,
+        handle_type_alias,
+    )
+    .expect("Failed to extract type aliases");
+
+    assert!(alias_entities.len() >= 2); // Result, MessageHandler
+
+    let alias_names: Vec<&str> = alias_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(alias_names.contains(&"Result"));
+    assert!(alias_names.contains(&"MessageHandler"));
+
+    // Verify all are type aliases
+    for alias in &alias_entities {
+        assert_eq!(alias.entity_type, EntityType::TypeAlias);
+    }
+
+    // Verify generic alias
+    let result_alias = alias_entities.iter().find(|e| e.name == "Result").unwrap();
+    assert!(result_alias.metadata.is_generic);
+    assert_eq!(result_alias.metadata.generic_params.len(), 1);
+    assert!(result_alias
+        .metadata
+        .generic_params
+        .contains(&"T".to_string()));
+
+    // Check aliased type is captured
+    let aliased_type = result_alias
+        .metadata
+        .attributes
+        .get("aliased_type")
+        .expect("Should have aliased_type");
+    assert!(aliased_type.contains("std::result::Result"));
+
+    // Verify non-generic alias
+    let handler_alias = alias_entities
+        .iter()
+        .find(|e| e.name == "MessageHandler")
+        .unwrap();
+    assert!(!handler_alias.metadata.is_generic);
+    assert_eq!(handler_alias.metadata.generic_params.len(), 0);
 }

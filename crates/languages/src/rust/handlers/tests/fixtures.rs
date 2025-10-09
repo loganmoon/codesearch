@@ -5,6 +5,7 @@ use codesearch_core::entities::{EntityType, Visibility};
 
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
+use crate::rust::handlers::module_handlers::handle_module;
 use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
 
 /// Large comprehensive Rust code sample (100+ lines)
@@ -215,6 +216,12 @@ mod tests {
     fn test_message_variants() {
         let msg = Message::Text("Hello".to_string());
         assert!(matches!(msg, Message::Text(_)));
+    }
+}
+
+pub mod utils {
+    pub fn helper_function() -> i32 {
+        42
     }
 }
 "####;
@@ -502,4 +509,35 @@ fn test_large_file_impl_extraction() {
     });
 
     assert!(display_impl.is_some(), "Should find Display trait impl");
+}
+
+#[test]
+fn test_large_file_module_extraction() {
+    let module_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::MODULE_QUERY, handle_module)
+            .expect("Failed to extract modules");
+
+    assert!(module_entities.len() >= 2); // tests, utils
+
+    let module_names: Vec<&str> = module_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(module_names.contains(&"tests"));
+    assert!(module_names.contains(&"utils"));
+
+    // Check that modules have correct entity type
+    for module in &module_entities {
+        assert_eq!(module.entity_type, EntityType::Module);
+    }
+
+    // Check visibility
+    let utils_module = module_entities
+        .iter()
+        .find(|e| e.name == "utils")
+        .expect("Should find utils module");
+    assert_eq!(utils_module.visibility, Visibility::Public);
+
+    let tests_module = module_entities
+        .iter()
+        .find(|e| e.name == "tests")
+        .expect("Should find tests module");
+    assert_eq!(tests_module.visibility, Visibility::Private);
 }

@@ -3,8 +3,6 @@
 //! This module provides pattern matching for file filtering,
 //! supporting glob patterns, gitignore rules, and language-specific filters.
 
-#![allow(dead_code)]
-
 use glob::{Pattern, PatternError};
 use std::collections::HashSet;
 use std::path::Path;
@@ -24,6 +22,7 @@ pub struct IgnoreFilter {
     /// File extensions to explicitly exclude
     exclude_extensions: Arc<HashSet<String>>,
     /// Whether to follow symbolic links
+    #[allow(dead_code)]
     follow_symlinks: bool,
     /// Maximum file size to consider (bytes)
     max_file_size: u64,
@@ -48,6 +47,7 @@ impl IgnoreFilter {
     }
 
     /// Create a filter from patterns
+    #[allow(dead_code)]
     pub fn from_patterns(patterns: Vec<String>) -> Result<Self, PatternError> {
         let compiled_patterns = patterns
             .iter()
@@ -106,6 +106,7 @@ impl IgnoreFilter {
     }
 
     /// Check if we should follow a symlink
+    #[allow(dead_code)]
     pub fn should_follow_symlink(&self, path: &Path) -> bool {
         self.follow_symlinks && !self.should_ignore(path)
     }
@@ -134,6 +135,7 @@ impl Default for IgnoreFilterBuilder {
 
 impl IgnoreFilterBuilder {
     /// Add a glob pattern to ignore
+    #[allow(dead_code)]
     pub fn add_pattern(mut self, pattern: String) -> Self {
         self.patterns.push(pattern);
         self
@@ -145,13 +147,16 @@ impl IgnoreFilterBuilder {
         self
     }
 
-    /// Set excluded file extensions
+    /// Set excluded file extensions (will be converted to lowercase)
+    #[allow(dead_code)]
     pub fn exclude_extensions(mut self, extensions: HashSet<String>) -> Self {
-        self.exclude_extensions = Some(extensions);
+        let lowercase_exts: HashSet<_> = extensions.into_iter().map(|s| s.to_lowercase()).collect();
+        self.exclude_extensions = Some(lowercase_exts);
         self
     }
 
     /// Set ignored directory names
+    #[allow(dead_code)]
     pub fn ignored_dirs(mut self, dirs: HashSet<String>) -> Self {
         self.ignored_dirs = Some(dirs);
         self
@@ -188,6 +193,7 @@ impl IgnoreFilterBuilder {
 }
 
 /// Language-specific file filter
+#[allow(dead_code)]
 pub struct LanguageFilter {
     /// Language name
     language: String,
@@ -197,6 +203,7 @@ pub struct LanguageFilter {
     patterns: Vec<Pattern>,
 }
 
+#[allow(dead_code)]
 impl LanguageFilter {
     /// Create a filter for Python files
     pub fn python() -> Self {
@@ -291,10 +298,12 @@ impl LanguageFilter {
 }
 
 /// Composite filter combining multiple language filters
+#[allow(dead_code)]
 pub struct CompositeLanguageFilter {
     filters: Vec<LanguageFilter>,
 }
 
+#[allow(dead_code)]
 impl CompositeLanguageFilter {
     /// Create a new composite filter
     pub fn new(filters: Vec<LanguageFilter>) -> Self {
@@ -330,6 +339,7 @@ impl CompositeLanguageFilter {
 }
 
 /// Helper to check if a path is hidden (starts with .)
+#[allow(dead_code)]
 pub fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -338,6 +348,7 @@ pub fn is_hidden(path: &Path) -> bool {
 }
 
 /// Helper to check if a path is likely a binary file
+#[allow(dead_code)]
 pub fn is_likely_binary(path: &Path) -> bool {
     if let Some(ext) = path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();

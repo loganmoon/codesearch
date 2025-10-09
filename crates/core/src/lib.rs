@@ -10,6 +10,10 @@
 //! - **Error handling**: Unified error types
 //!
 
+#![deny(warnings)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 pub mod config;
 pub mod entities;
 pub mod entity_id;

@@ -1,7 +1,8 @@
 //! End-to-end tests for the complete codesearch pipeline
 //!
-//! These tests validate the full workflow: init → index → search
+//! These tests validate the full workflow: index → search
 //! using isolated Qdrant containers with temporary storage.
+//! The index command automatically initializes storage if needed.
 //!
 //! ## Running Tests
 //!
@@ -84,7 +85,7 @@ fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
 
 #[tokio::test]
 #[ignore]
-async fn test_init_creates_collection_in_qdrant() -> Result<()> {
+async fn test_index_creates_collection_in_qdrant() -> Result<()> {
     init_test_logging();
 
     let qdrant = get_shared_qdrant().await?;
@@ -94,51 +95,32 @@ async fn test_init_creates_collection_in_qdrant() -> Result<()> {
 
     let repo = simple_rust_repo().await?;
 
-    // Create config pointing to test instances
-    let config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name, None)?;
+    let collection_name = format!("test_collection_{}", Uuid::new_v4());
 
-    // Run init command
-    let output = run_cli(
+    // Create config pointing to test instances
+    let _config_path = create_test_config(
         repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
+        &qdrant,
+        &postgres,
+        &db_name,
+        Some(&collection_name),
     )?;
+
+    // Run index command - it will automatically initialize storage
+    let output = run_cli(repo.path(), &["index"])?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
         output.status.success(),
-        "Init command failed: stdout={stdout}, stderr={stderr}"
+        "Index command failed: stdout={stdout}, stderr={stderr}"
     );
 
-    assert!(
-        stderr.contains("Repository initialized successfully")
-            || stdout.contains("Repository initialized successfully"),
-        "Expected success message not found"
-    );
+    // Verify collection was created
+    assert_collection_exists(&qdrant, &collection_name).await?;
 
-    // Read updated config to get collection name
-    let config_content = std::fs::read_to_string(&config_path)?;
-    assert!(
-        config_content.contains("collection_name = "),
-        "Collection name not saved to config"
-    );
-
-    // Extract collection name from config
-    let collection_name = config_content
-        .lines()
-        .find(|line| line.contains("collection_name = "))
-        .and_then(|line| line.split('=').nth(1))
-        .map(|s| s.trim().trim_matches('"'))
-        .context("Failed to extract collection name")?;
-
-    assert_collection_exists(&qdrant, collection_name).await?;
-
-    // Note: The init command uses the default model dimensions (1536 for BAAI/bge-code-v1)
-    // even with mock provider, since the provider type is determined at runtime
-    // We just verify the collection was created successfully
-
-    drop_test_collection(&qdrant, collection_name).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
     drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
@@ -156,7 +138,7 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -164,13 +146,7 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    // Run init first
-    let init_output = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
-    assert!(init_output.status.success(), "Init failed");
-
+    // Run index - it will automatically initialize storage if needed
     let index_output = run_cli(repo.path(), &["index"])?;
 
     let stdout = String::from_utf8_lossy(&index_output.stdout);
@@ -209,7 +185,7 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -217,10 +193,7 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
 
     assert!(output.status.success(), "Index with mock embeddings failed");
@@ -251,7 +224,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -259,11 +232,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    // Init and index the repository
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Index the repository - it will automatically initialize storage if needed
     run_cli(repo.path(), &["index"])?;
 
     let processor =
@@ -287,7 +256,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
 
     let storage_client = create_storage_client(&storage_config, &collection_name).await?;
 
-    // Create mock embedding for search query with matching dimensions (1536 from init)
+    // Create mock embedding for search query with matching dimensions (1536 for BAAI/bge-code-v1)
     let mock_provider = Arc::new(MockEmbeddingProvider::new(1536));
     let query_embedding = mock_provider
         .embed(vec!["Calculator add method".to_string()])
@@ -354,7 +323,7 @@ postgres_user = "codesearch"
 postgres_password = "codesearch"
 
 [embeddings]
-provider = "local_api"
+provider = "localapi"
 api_url = "http://localhost:8000/v1"
 model_name = "BAAI/bge-small-en-v1.5"
 
@@ -375,16 +344,7 @@ enabled = ["rust"]
     let config_path = repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    // Run init
-    let init_output = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
-    assert!(
-        init_output.status.success(),
-        "Init failed with real embeddings"
-    );
-
+    // Run index - it will automatically initialize storage if needed
     let index_output = run_cli(repo.path(), &["index"])?;
     let stdout = String::from_utf8_lossy(&index_output.stdout);
     let stderr = String::from_utf8_lossy(&index_output.stderr);
@@ -422,7 +382,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     let repo = multi_file_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -430,11 +390,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    // Init and index
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index - it will automatically initialize storage if needed
     run_cli(repo.path(), &["index"])?;
 
     let processor =
@@ -460,7 +416,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_init_command_handles_existing_collection() -> Result<()> {
+async fn test_index_command_handles_existing_collection() -> Result<()> {
     init_test_logging();
 
     let qdrant = get_shared_qdrant().await?;
@@ -471,7 +427,7 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
     let repo = simple_rust_repo().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -479,25 +435,19 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    // Run init first time
-    let output1 = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
-    assert!(output1.status.success(), "First init failed");
+    // Run index first time - will automatically initialize storage
+    let output1 = run_cli(repo.path(), &["index"])?;
+    assert!(output1.status.success(), "First index failed");
 
-    // Run init again - should handle gracefully
-    let output2 = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index again - should handle gracefully (storage already initialized)
+    let output2 = run_cli(repo.path(), &["index"])?;
 
     let stdout = String::from_utf8_lossy(&output2.stdout);
     let stderr = String::from_utf8_lossy(&output2.stderr);
 
     assert!(
         output2.status.success(),
-        "Second init failed: stdout={stdout}, stderr={stderr}"
+        "Second index failed: stdout={stdout}, stderr={stderr}"
     );
 
     drop_test_collection(&qdrant, &collection_name).await?;
@@ -511,7 +461,7 @@ async fn test_init_command_handles_existing_collection() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_index_without_init_fails_gracefully() -> Result<()> {
+async fn test_index_auto_initializes_when_collection_missing() -> Result<()> {
     init_test_logging();
 
     let qdrant = get_shared_qdrant().await?;
@@ -521,7 +471,7 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
 
     let repo = simple_rust_repo().await?;
 
-    // Create config but don't run init
+    // Create config - collection doesn't exist yet
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
     create_test_config(
         repo.path(),
@@ -531,27 +481,28 @@ async fn test_index_without_init_fails_gracefully() -> Result<()> {
         Some(&collection_name),
     )?;
 
+    // Run index - should auto-initialize storage
     let output = run_cli(repo.path(), &["index"])?;
 
-    assert!(
-        !output.status.success(),
-        "Index should fail when collection doesn't exist"
-    );
-
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // Error message should be helpful
+
     assert!(
-        !stderr.is_empty(),
-        "Should provide error message when index fails"
+        output.status.success(),
+        "Index should succeed and auto-initialize storage: stdout={stdout}, stderr={stderr}"
     );
 
+    // Verify collection was created
+    assert_collection_exists(&qdrant, &collection_name).await?;
+
+    drop_test_collection(&qdrant, &collection_name).await?;
     drop_test_database(&postgres, &db_name).await?;
     Ok(())
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_init_with_unreachable_qdrant_fails() -> Result<()> {
+async fn test_index_with_unreachable_qdrant_fails() -> Result<()> {
     init_test_logging();
 
     let repo = simple_rust_repo().await?;
@@ -564,7 +515,7 @@ async fn test_init_with_unreachable_qdrant_fails() -> Result<()> {
 qdrant_host = "localhost"
 qdrant_port = 19999
 qdrant_rest_port = 19998
-collection_name = ""
+collection_name = "test_collection"
 auto_start_deps = false
 
 [embeddings]
@@ -581,14 +532,11 @@ enabled = ["rust"]
     let config_path = repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    let output = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    let output = run_cli(repo.path(), &["index"])?;
 
     assert!(
         !output.status.success(),
-        "Init should fail with unreachable Qdrant"
+        "Index should fail with unreachable Qdrant"
     );
 
     Ok(())
@@ -627,7 +575,7 @@ fn broken( {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -635,10 +583,7 @@ fn broken( {
         Some(&collection_name),
     )?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
 
     assert!(
@@ -695,7 +640,7 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
     let repo = TestRepositoryBuilder::new().build().await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -703,13 +648,7 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
         Some(&collection_name),
     )?;
 
-    // Run init
-    let init_output = run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
-    assert!(init_output.status.success(), "Init should succeed");
-
+    // Run index - it will automatically initialize storage if needed
     let index_output = run_cli(repo.path(), &["index"])?;
 
     assert!(
@@ -752,7 +691,7 @@ fn large_function() {{
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -760,10 +699,7 @@ fn large_function() {{
         Some(&collection_name),
     )?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
 
     assert!(
@@ -818,7 +754,7 @@ pub fn duplicate_name() -> i32 {
         .await?;
 
     let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path = create_test_config(
+    let _config_path = create_test_config(
         repo.path(),
         &qdrant,
         &postgres,
@@ -826,10 +762,7 @@ pub fn duplicate_name() -> i32 {
         Some(&collection_name),
     )?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
+    // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
 
     assert!(

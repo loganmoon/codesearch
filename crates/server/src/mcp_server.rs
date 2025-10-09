@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context};
+use codesearch_core::error::{Error, ResultExt};
 use codesearch_core::{config::Config, entities::EntityType};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{
-    create_collection_manager, create_storage_client, postgres::PostgresClient, SearchFilters,
+    create_collection_manager, create_storage_client, PostgresClientTrait, SearchFilters,
     StorageClient,
 };
 use codesearch_watcher::{FileWatcher, WatcherConfig};
@@ -22,6 +22,9 @@ use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
+const DEFAULT_DEBOUNCE_MS: u64 = 500;
+const MAX_FILE_SIZE_BYTES: u64 = 10 * 1024 * 1024; // 10MB
+
 /// MCP server for codesearch semantic code search
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -31,7 +34,7 @@ struct CodeSearchMcpServer {
     collection_name: String,
     embedding_manager: Arc<EmbeddingManager>,
     storage_client: Arc<dyn StorageClient>,
-    postgres_client: Arc<PostgresClient>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -73,10 +76,13 @@ impl CodeSearchMcpServer {
         // Validate limit
         let limit = request.limit.unwrap_or(10).clamp(1, 100);
 
+        // Extract query to avoid clone
+        let query_text = request.query;
+
         // Generate query embedding
         let embeddings = self
             .embedding_manager
-            .embed(vec![request.query.clone()])
+            .embed(vec![query_text.clone()])
             .await
             .map_err(|e| {
                 McpError::new(
@@ -173,7 +179,7 @@ impl CodeSearchMcpServer {
         let response = serde_json::json!({
             "results": formatted_results,
             "total": formatted_results.len(),
-            "query": request.query,
+            "query": query_text,
         });
 
         let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
@@ -193,7 +199,7 @@ impl CodeSearchMcpServer {
         collection_name: String,
         embedding_manager: Arc<EmbeddingManager>,
         storage_client: Arc<dyn StorageClient>,
-        postgres_client: Arc<PostgresClient>,
+        postgres_client: Arc<dyn PostgresClientTrait>,
     ) -> Self {
         Self {
             repository_id,
@@ -300,95 +306,138 @@ impl ServerHandler for CodeSearchMcpServer {
     }
 }
 
-/// Run the MCP server implementation
-pub(crate) async fn run_server_impl(
-    config: Config,
+/// Verify that the collection exists
+async fn verify_collection_exists(
+    collection_name: &str,
+    storage_config: &codesearch_core::config::StorageConfig,
 ) -> std::result::Result<(), codesearch_core::Error> {
-    // Step 1: Verify collection exists
-    let collection_manager = create_collection_manager(&config.storage)
+    let collection_manager = create_collection_manager(storage_config)
         .await
         .context("Failed to create collection manager")?;
 
     if !collection_manager
-        .collection_exists(&config.storage.collection_name)
+        .collection_exists(collection_name)
         .await
         .context("Failed to check if collection exists")?
     {
-        return Err(anyhow!(
-            "Collection '{}' does not exist. Please run 'codesearch init' first.",
-            config.storage.collection_name
-        )
-        .into());
+        return Err(Error::config(format!(
+            "Collection '{collection_name}' does not exist. Please run 'codesearch serve' or 'codesearch index' to initialize."
+        )));
     }
 
-    // Step 2: Create storage client
-    let storage_client = create_storage_client(&config.storage, &config.storage.collection_name)
+    Ok(())
+}
+
+/// Client handles for server operations
+struct ServerClients {
+    storage: Arc<dyn StorageClient>,
+    postgres: Arc<dyn PostgresClientTrait>,
+    embedding_manager: Arc<EmbeddingManager>,
+}
+
+/// Initialize all server clients
+async fn initialize_server_clients(
+    config: &Config,
+) -> std::result::Result<(ServerClients, uuid::Uuid), codesearch_core::Error> {
+    let storage = create_storage_client(&config.storage, &config.storage.collection_name)
         .await
         .context("Failed to create storage client")?;
 
-    // Step 3: Create embedding manager
-    let embedding_manager = crate::storage_init::create_embedding_manager(&config).await?;
+    let embedding_manager = crate::storage_init::create_embedding_manager(config).await?;
 
-    // Step 4: Create postgres client
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+    let postgres = codesearch_storage::create_postgres_client(&config.storage)
         .await
         .context("Failed to connect to Postgres")?;
 
-    // Step 5: Get repository metadata
-    let repo_root = crate::storage_init::find_repository_root()?;
-    let repository_id = postgres_client
+    let repository_id = postgres
         .get_repository_id(&config.storage.collection_name)
         .await
         .context("Failed to query repository")?
         .ok_or_else(|| {
-            anyhow!(
-                "Repository not found for collection '{}'. Run 'codesearch init' first.",
+            Error::config(format!(
+                "Repository not found for collection '{}'. Run 'codesearch serve' or 'codesearch index' to initialize.",
                 config.storage.collection_name
-            )
+            ))
         })?;
 
     info!("Repository ID: {repository_id}");
 
-    // Step 6: Run catch-up indexing
+    Ok((
+        ServerClients {
+            storage,
+            postgres,
+            embedding_manager,
+        },
+        repository_id,
+    ))
+}
+
+/// Run catch-up indexing for offline changes
+async fn run_catchup_indexing(
+    repo_root: &PathBuf,
+    repository_id: uuid::Uuid,
+    clients: &ServerClients,
+) -> std::result::Result<(), codesearch_core::Error> {
     info!("Checking for offline changes...");
-    let git_repo = codesearch_watcher::GitRepository::open(&repo_root)
+    let git_repo = codesearch_watcher::GitRepository::open(repo_root)
         .context("Failed to open git repository")?;
 
     codesearch_indexer::catch_up_from_git(
-        &repo_root,
+        repo_root,
         repository_id,
-        &postgres_client,
-        &embedding_manager,
+        &clients.postgres,
+        &clients.embedding_manager,
         &git_repo,
     )
     .await
     .context("Catch-up indexing failed")?;
 
-    // Step 7: Initialize and start file watcher
+    Ok(())
+}
+
+/// Setup and start the file watcher
+async fn setup_file_watcher(
+    repo_root: &PathBuf,
+    repository_id: uuid::Uuid,
+    clients: &ServerClients,
+) -> std::result::Result<
+    (
+        FileWatcher,
+        tokio::task::JoinHandle<codesearch_core::Result<()>>,
+    ),
+    codesearch_core::Error,
+> {
     info!("Starting filesystem watcher...");
     let watcher_config = WatcherConfig::builder()
-        .debounce_ms(500)
-        .max_file_size(10 * 1024 * 1024) // 10MB
+        .debounce_ms(DEFAULT_DEBOUNCE_MS)
+        .max_file_size(MAX_FILE_SIZE_BYTES)
         .batch_size(100)
         .build();
 
     let mut watcher = FileWatcher::new(watcher_config).context("Failed to create file watcher")?;
 
     let event_rx = watcher
-        .watch(&repo_root)
+        .watch(repo_root)
         .await
         .context("Failed to start watching repository")?;
 
-    // Start indexer background task to process file changes
     let watcher_task = codesearch_indexer::start_watching(
         event_rx,
         repository_id,
         repo_root.clone(),
-        embedding_manager.clone(),
-        postgres_client.clone(),
+        clients.embedding_manager.clone(),
+        clients.postgres.clone(),
     );
 
-    // Step 8: Setup signal handler for graceful shutdown
+    Ok((watcher, watcher_task))
+}
+
+/// Run MCP server with shutdown handling
+async fn run_mcp_server_with_shutdown(
+    server: CodeSearchMcpServer,
+    mut watcher: FileWatcher,
+    watcher_task: tokio::task::JoinHandle<codesearch_core::Result<()>>,
+) -> std::result::Result<(), codesearch_core::Error> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     tokio::spawn(async move {
@@ -403,29 +452,17 @@ pub(crate) async fn run_server_impl(
         }
     });
 
-    // Step 9: Create MCP server
-    let mcp_server = CodeSearchMcpServer::new(
-        repository_id,
-        repo_root.clone(),
-        config.storage.collection_name.clone(),
-        embedding_manager.clone(),
-        storage_client,
-        postgres_client,
-    );
-
-    // Step 10: Start MCP server on stdio
     println!("🚀 Starting MCP server on stdio...");
     let transport = (tokio::io::stdin(), tokio::io::stdout());
-    let server = mcp_server
+    let server_handle = server
         .serve(transport)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to start MCP server: {e}"))?;
+        .map_err(|e| Error::config(format!("Failed to start MCP server: {e}")))?;
 
     info!("MCP server connected and running");
 
-    // Step 11: Run server with shutdown handling
     tokio::select! {
-        quit_reason = server.waiting() => {
+        quit_reason = server_handle.waiting() => {
             match quit_reason {
                 Ok(reason) => info!("MCP server stopped normally. Reason: {reason:?}"),
                 Err(e) => tracing::error!("MCP server error: {e}"),
@@ -436,14 +473,43 @@ pub(crate) async fn run_server_impl(
         }
     }
 
-    // Step 12: Cleanup
     info!("Stopping file watcher...");
     watcher.stop().await?;
-    if let Err(e) = watcher_task.await {
-        tracing::error!("Watcher task error: {e}");
+    match watcher_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::error!("Watcher task error: {e}"),
+        Err(e) => tracing::error!("Watcher task join error: {e}"),
     }
 
     info!("Codesearch MCP server shut down successfully");
+
+    Ok(())
+}
+
+/// Run the MCP server implementation
+pub(crate) async fn run_server_impl(
+    config: Config,
+) -> std::result::Result<(), codesearch_core::Error> {
+    verify_collection_exists(&config.storage.collection_name, &config.storage).await?;
+
+    let (clients, repository_id) = initialize_server_clients(&config).await?;
+
+    let repo_root = crate::storage_init::find_repository_root()?;
+
+    run_catchup_indexing(&repo_root, repository_id, &clients).await?;
+
+    let (watcher, watcher_task) = setup_file_watcher(&repo_root, repository_id, &clients).await?;
+
+    let mcp_server = CodeSearchMcpServer::new(
+        repository_id,
+        repo_root,
+        config.storage.collection_name.clone(),
+        clients.embedding_manager,
+        clients.storage,
+        clients.postgres,
+    );
+
+    run_mcp_server_with_shutdown(mcp_server, watcher, watcher_task).await?;
 
     Ok(())
 }

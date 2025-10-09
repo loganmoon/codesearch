@@ -7,8 +7,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::postgres::{OutboxOperation, PostgresClientTrait, TargetStore};
-use serde_json::json;
+use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -67,7 +66,7 @@ pub async fn extract_entities_from_file(
     debug!("Extracting from file: {}", file_path.display());
 
     // Create extractor for this file
-    let extractor = match create_extractor(file_path, repo_id) {
+    let extractor = match create_extractor(file_path, repo_id)? {
         Some(ext) => ext,
         None => {
             debug!("No extractor available for file: {}", file_path.display());
@@ -151,14 +150,22 @@ pub async fn process_entity_batch(
         entity_embedding_pairs.len()
     );
 
-    // Prepare batch data
-    let mut batch_data = Vec::new();
+    // Batch fetch all entity metadata in a single query
+    let entity_ids: Vec<String> = entity_embedding_pairs
+        .iter()
+        .map(|(entity, _)| entity.entity_id.clone())
+        .collect();
+
+    let metadata_map = postgres_client
+        .get_entities_metadata_batch(repo_id, &entity_ids)
+        .await
+        .map_err(|e| Error::Storage(format!("Failed to fetch entity metadata: {e}")))?;
+
+    // Prepare batch data directly as references (no intermediate cloning)
+    let mut batch_refs = Vec::new();
 
     for (entity, embedding) in &entity_embedding_pairs {
-        let existing_metadata = postgres_client
-            .get_entity_metadata(repo_id, &entity.entity_id)
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to check entity metadata: {e}")))?;
+        let existing_metadata = metadata_map.get(&entity.entity_id);
 
         let (point_id, operation) = if let Some((existing_point_id, deleted_at)) = existing_metadata
         {
@@ -167,7 +174,7 @@ pub async fn process_entity_batch(
                 (Uuid::new_v4(), OutboxOperation::Insert)
             } else {
                 stats.entities_updated += 1;
-                (existing_point_id, OutboxOperation::Update)
+                (*existing_point_id, OutboxOperation::Update)
             }
         } else {
             stats.entities_added += 1;
@@ -181,34 +188,19 @@ pub async fn process_entity_batch(
             .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
             .to_string();
         entities_by_file
-            .entry(file_path_str.clone())
+            .entry(file_path_str)
             .or_default()
             .push(entity.entity_id.clone());
 
-        batch_data.push((
-            entity.clone(),
-            embedding.clone(),
+        batch_refs.push((
+            entity,
+            embedding.as_slice(),
             operation,
             point_id,
             TargetStore::Qdrant,
             git_commit.clone(),
         ));
     }
-
-    // Store entities with outbox
-    let batch_refs: Vec<_> = batch_data
-        .iter()
-        .map(|(entity, embedding, op, point_id, target, git_commit)| {
-            (
-                entity,
-                embedding.as_slice(),
-                *op,
-                *point_id,
-                *target,
-                git_commit.clone(),
-            )
-        })
-        .collect();
 
     postgres_client
         .store_entities_with_outbox_batch(repo_id, &batch_refs)
@@ -249,27 +241,13 @@ pub async fn update_file_snapshot_and_mark_stale(
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
         postgres_client
-            .mark_entities_deleted(repo_id, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, &stale_ids)
             .await
-            .map_err(|e| Error::Storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-        for entity_id in &stale_ids {
-            let payload = json!({
-                "entity_ids": [entity_id],
-                "reason": "file_change"
-            });
-
-            postgres_client
-                .write_outbox_entry(
-                    repo_id,
-                    entity_id,
-                    OutboxOperation::Delete,
-                    TargetStore::Qdrant,
-                    payload,
-                )
-                .await
-                .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
-        }
+            .map_err(|e| {
+                Error::Storage(format!(
+                    "Failed to mark entities as deleted with outbox: {e}"
+                ))
+            })?;
     }
 
     postgres_client
@@ -301,27 +279,13 @@ pub async fn mark_file_entities_deleted(
     let count = entity_ids.len();
 
     postgres_client
-        .mark_entities_deleted(repo_id, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, &entity_ids)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-    for entity_id in &entity_ids {
-        let payload = json!({
-            "entity_ids": [entity_id],
-            "reason": "file_deleted"
-        });
-
-        postgres_client
-            .write_outbox_entry(
-                repo_id,
-                entity_id,
-                OutboxOperation::Delete,
-                TargetStore::Qdrant,
-                payload,
-            )
-            .await
-            .map_err(|e| Error::Storage(format!("Failed to write outbox entry: {e}")))?;
-    }
+        .map_err(|e| {
+            Error::Storage(format!(
+                "Failed to mark entities as deleted with outbox: {e}"
+            ))
+        })?;
 
     info!("Marked {} entities as deleted", count);
     Ok(count)

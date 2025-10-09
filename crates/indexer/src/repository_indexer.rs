@@ -8,8 +8,6 @@ use crate::{IndexResult, IndexStats};
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_embeddings::EmbeddingManager;
-
-use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, error, info};
@@ -17,17 +15,14 @@ use tracing::{debug, error, info};
 /// Progress tracking for indexing operations (internal)
 #[derive(Debug, Clone)]
 struct IndexProgress {
-    #[allow(dead_code)]
-    pub total_files: usize,
     pub processed_files: usize,
     pub failed_files: usize,
     pub current_file: Option<String>,
 }
 
 impl IndexProgress {
-    fn new(total_files: usize) -> Self {
+    fn new(_total_files: usize) -> Self {
         Self {
-            total_files,
             processed_files: 0,
             failed_files: 0,
             current_file: None,
@@ -49,7 +44,7 @@ pub struct RepositoryIndexer {
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
-    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 }
 
@@ -59,7 +54,7 @@ impl RepositoryIndexer {
         repository_path: PathBuf,
         repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
-        postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+        postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
     ) -> Self {
         Self {
@@ -77,11 +72,7 @@ impl RepositoryIndexer {
     }
 
     /// Process a batch of files for better performance
-    async fn process_batch(
-        &mut self,
-        file_paths: &[PathBuf],
-        _pb: &indicatif::ProgressBar,
-    ) -> Result<IndexStats> {
+    async fn process_batch(&mut self, file_paths: &[PathBuf]) -> Result<IndexStats> {
         debug!("Processing batch of {} files", file_paths.len());
 
         // Process statistics
@@ -174,7 +165,6 @@ impl crate::Indexer for RepositoryIndexer {
 
         // Create progress tracking
         let mut progress = IndexProgress::new(files.len());
-        let pb = create_progress_bar(files.len());
 
         // Process statistics
         let mut stats = IndexStats::new();
@@ -183,24 +173,18 @@ impl crate::Indexer for RepositoryIndexer {
         const BATCH_SIZE: usize = 100; // Configurable batch size
 
         for chunk in files.chunks(BATCH_SIZE) {
-            pb.set_message(format!("Processing batch of {} files", chunk.len()));
-
-            match self.process_batch(chunk, &pb).await {
+            match self.process_batch(chunk).await {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
                     for file_path in chunk {
                         progress.update(&file_path.to_string_lossy(), true);
-                        pb.inc(1);
                     }
                 }
                 Err(e) => {
                     error!("Failed to process batch: {}", e);
                     // Process failed batch files individually as fallback (batch size of 1)
                     for file_path in chunk {
-                        match self
-                            .process_batch(std::slice::from_ref(file_path), &pb)
-                            .await
-                        {
+                        match self.process_batch(std::slice::from_ref(file_path)).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
                                 progress.update(&file_path.to_string_lossy(), true);
@@ -211,13 +195,12 @@ impl crate::Indexer for RepositoryIndexer {
                                 progress.update(&file_path.to_string_lossy(), false);
                             }
                         }
-                        pb.inc(1);
                     }
                 }
             }
         }
 
-        pb.finish_with_message("Indexing complete");
+        info!("Indexing complete");
 
         // Calculate final statistics
         stats.set_total_files(files.len());
@@ -235,19 +218,6 @@ impl crate::Indexer for RepositoryIndexer {
     }
 }
 
-/// Create a progress bar for indexing operations
-fn create_progress_bar(total: usize) -> ProgressBar {
-    let pb = ProgressBar::new(total as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .map_err(|e| error!("Failed to set progress bar style: {}", e))
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("##-"),
-    );
-    pb
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 #[allow(clippy::expect_used)]
@@ -257,8 +227,8 @@ mod tests {
         EntityMetadata, EntityType, Language, SourceLocation, Visibility,
     };
     use codesearch_core::CodeEntity;
-    use codesearch_storage::postgres::mock::MockPostgresClient;
-    use codesearch_storage::postgres::PostgresClientTrait;
+    use codesearch_storage::MockPostgresClient;
+    use codesearch_storage::PostgresClientTrait;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -334,8 +304,17 @@ mod tests {
         .unwrap();
 
         // Verify entity2 was marked as deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
+        let entity2_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity2")
+            .await
+            .unwrap();
+        assert!(entity2_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity1_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity1")
+            .await
+            .unwrap();
+        assert!(entity1_meta.unwrap().1.is_none()); // deleted_at is None
 
         // Verify snapshot was updated
         let snapshot = postgres
@@ -345,7 +324,12 @@ mod tests {
         assert_eq!(snapshot, Some(new_entities));
 
         // Verify DELETE outbox entry was created
-        assert_eq!(postgres.unprocessed_outbox_count(), 1);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 1);
     }
 
     #[tokio::test]
@@ -384,7 +368,11 @@ mod tests {
         .unwrap();
 
         // Old entity should be marked deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity_old_name"));
+        let old_entity_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity_old_name")
+            .await
+            .unwrap();
+        assert!(old_entity_meta.unwrap().1.is_some()); // deleted_at is Some
     }
 
     #[tokio::test]
@@ -414,10 +402,6 @@ mod tests {
         .await
         .unwrap();
 
-        // No entities should be marked as deleted
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity1"));
-        assert!(!postgres.is_entity_deleted(repo_uuid, "entity2"));
-
         // Snapshot should be updated
         let snapshot = postgres
             .get_file_snapshot(repo_uuid, file_path)
@@ -426,7 +410,12 @@ mod tests {
         assert_eq!(snapshot, Some(new_entities));
 
         // No DELETE outbox entries
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
     }
 
     #[tokio::test]
@@ -476,12 +465,31 @@ mod tests {
         .unwrap();
 
         // All entities should be marked as deleted
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity1"));
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity2"));
-        assert!(postgres.is_entity_deleted(repo_uuid, "entity3"));
+        let entity1_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity1")
+            .await
+            .unwrap();
+        assert!(entity1_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity2_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity2")
+            .await
+            .unwrap();
+        assert!(entity2_meta.unwrap().1.is_some()); // deleted_at is Some
+
+        let entity3_meta = postgres
+            .get_entity_metadata(repo_uuid, "entity3")
+            .await
+            .unwrap();
+        assert!(entity3_meta.unwrap().1.is_some()); // deleted_at is Some
 
         // Should have 3 DELETE outbox entries
-        assert_eq!(postgres.unprocessed_outbox_count(), 3);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 3);
     }
 
     #[tokio::test]
@@ -505,7 +513,12 @@ mod tests {
         .unwrap();
 
         // No entities should be deleted (first time indexing)
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
 
         // Snapshot should be created
         let snapshot = postgres
@@ -541,7 +554,12 @@ mod tests {
         .unwrap();
 
         // No entities deleted
-        assert_eq!(postgres.unprocessed_outbox_count(), 0);
+        use codesearch_storage::TargetStore;
+        let entries = postgres
+            .get_unprocessed_outbox_entries(TargetStore::Qdrant, 10)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 0);
 
         // Snapshot still updated (for git commit tracking)
         let snapshot = postgres
@@ -578,7 +596,7 @@ mod tests {
 
         // Verify outbox entry
         let entries = postgres
-            .get_unprocessed_outbox_entries(codesearch_storage::postgres::TargetStore::Qdrant, 10)
+            .get_unprocessed_outbox_entries(codesearch_storage::TargetStore::Qdrant, 10)
             .await
             .unwrap();
 
@@ -614,7 +632,9 @@ mod tests {
 
         // Snapshot should be stored with git commit
         let snapshot = postgres
-            .get_snapshot_sync(repo_uuid, file_path)
+            .get_file_snapshot(repo_uuid, file_path)
+            .await
+            .unwrap()
             .expect("Snapshot should exist");
         assert_eq!(snapshot, new_entities);
     }

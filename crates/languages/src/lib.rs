@@ -1,4 +1,4 @@
-#![warn(warnings)]
+#![deny(warnings)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
@@ -7,7 +7,6 @@ use std::path::Path;
 
 // All internal modules are private
 mod extraction_framework;
-mod generic_entities;
 mod rust;
 
 // Public module for qualified name building
@@ -21,24 +20,25 @@ pub trait Extractor: Send + Sync {
 
 /// Create an appropriate extractor for a file based on its extension
 ///
-/// Returns None if the file type is not supported
-pub fn create_extractor(file_path: &Path, repository_id: &str) -> Option<Box<dyn Extractor>> {
-    let extension = file_path.extension()?.to_str()?;
+/// Returns Ok(None) if the file type is not supported, Err if extractor creation fails
+pub fn create_extractor(
+    file_path: &Path,
+    repository_id: &str,
+) -> Result<Option<Box<dyn Extractor>>> {
+    let Some(extension) = file_path.extension().and_then(|e| e.to_str()) else {
+        return Ok(None);
+    };
 
     match extension.to_lowercase().as_str() {
-        "rs" => match rust::RustExtractor::new(repository_id.to_string()) {
-            Ok(extractor) => Some(Box::new(extractor)),
-            Err(e) => {
-                tracing::error!("Failed to create Rust extractor: {}", e);
-                None
-            }
-        },
+        "rs" => Ok(Some(Box::new(rust::RustExtractor::new(
+            repository_id.to_string(),
+        )?))),
         // Future language support can be added here:
         // "py" => create_python_extractor(repository_id),
         // "js" | "jsx" => create_javascript_extractor(repository_id),
         // "ts" | "tsx" => create_typescript_extractor(repository_id),
         // "go" => create_go_extractor(repository_id),
-        _ => None,
+        _ => Ok(None),
     }
 }
 

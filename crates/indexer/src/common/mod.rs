@@ -148,46 +148,6 @@ fn path_matches_pattern(path: &str, pattern: &str) -> bool {
     }
 }
 
-/// Get the language identifier from a file extension
-#[allow(dead_code)]
-pub fn get_language_from_extension(extension: &str) -> Option<&'static str> {
-    match extension.to_lowercase().as_str() {
-        "rs" => Some("rust"),
-        "py" => Some("python"),
-        "js" | "jsx" => Some("javascript"),
-        "ts" | "tsx" => Some("typescript"),
-        "go" => Some("go"),
-        "java" => Some("java"),
-        "c" | "h" => Some("c"),
-        "cpp" | "cc" | "cxx" | "hpp" => Some("cpp"),
-        "cs" => Some("csharp"),
-        "rb" => Some("ruby"),
-        "php" => Some("php"),
-        "swift" => Some("swift"),
-        "kt" => Some("kotlin"),
-        "scala" => Some("scala"),
-        "r" => Some("r"),
-        "lua" => Some("lua"),
-        "dart" => Some("dart"),
-        "zig" => Some("zig"),
-        _ => None,
-    }
-}
-
-/// Extract the relative path from a base directory
-#[allow(dead_code)]
-pub fn get_relative_path(base: &Path, full_path: &Path) -> Result<PathBuf> {
-    full_path
-        .strip_prefix(base)
-        .map(|p| p.to_path_buf())
-        .map_err(|_| {
-            Error::parse(
-                full_path.display().to_string(),
-                format!("Failed to get relative path from {base:?}"),
-            )
-        })
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -209,25 +169,5 @@ mod tests {
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() {}").expect("Failed to write test file");
         assert!(should_include_file(&test_file));
-    }
-
-    #[test]
-    fn test_get_language_from_extension() {
-        assert_eq!(get_language_from_extension("rs"), Some("rust"));
-        assert_eq!(get_language_from_extension("py"), Some("python"));
-        assert_eq!(get_language_from_extension("js"), Some("javascript"));
-        assert_eq!(get_language_from_extension("unknown"), None);
-    }
-
-    #[test]
-    fn test_get_relative_path() {
-        let base = Path::new("/home/user/project");
-        let full = Path::new("/home/user/project/src/main.rs");
-        let relative = get_relative_path(base, full).expect("Failed to get relative path");
-        assert_eq!(relative, Path::new("src/main.rs"));
-
-        // Test error case
-        let other = Path::new("/other/path");
-        assert!(get_relative_path(base, other).is_err());
     }
 }

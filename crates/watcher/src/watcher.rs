@@ -40,6 +40,8 @@ pub struct FileWatcher {
     watcher: Option<Arc<RwLock<RecommendedWatcher>>>,
     /// Paths being watched
     watched_paths: Arc<RwLock<Vec<PathBuf>>>,
+    /// Cancellation token for stopping background tasks
+    cancellation_token: Arc<tokio_util::sync::CancellationToken>,
 }
 
 impl FileWatcher {
@@ -62,6 +64,7 @@ impl FileWatcher {
             branch_watcher: None,
             watcher: None,
             watched_paths: Arc::new(RwLock::new(Vec::new())),
+            cancellation_token: Arc::new(tokio_util::sync::CancellationToken::new()),
         })
     }
 
@@ -255,12 +258,15 @@ impl FileWatcher {
                 EventKind::Create(_) => {
                     if let Ok(metadata) = tokio::fs::metadata(path).await {
                         if !ignore_filter.exceeds_size_limit(metadata.len()) {
-                            let file_meta = crate::events::FileMetadata::new(
-                                metadata.len(),
-                                metadata
-                                    .modified()
-                                    .unwrap_or_else(|_| std::time::SystemTime::now()),
-                                {
+                            let modified_time = match metadata.modified() {
+                                Ok(time) => time,
+                                Err(e) => {
+                                    warn!("Failed to get modified time for {path:?}: {e}");
+                                    continue;
+                                }
+                            };
+                            let file_meta =
+                                crate::events::FileMetadata::new(metadata.len(), modified_time, {
                                     #[cfg(unix)]
                                     {
                                         use std::os::unix::fs::PermissionsExt;
@@ -270,8 +276,7 @@ impl FileWatcher {
                                     {
                                         0o644
                                     }
-                                },
-                            );
+                                });
                             return Some(FileChange::Created(path.clone(), file_meta));
                         }
                     }
@@ -298,24 +303,32 @@ impl FileWatcher {
 
     /// Start monitoring for branch changes
     fn start_branch_monitor(&self, branch_watcher: Arc<RwLock<BranchWatcher>>) {
+        let cancel_token = self.cancellation_token.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
 
             loop {
-                interval.tick().await;
-
-                let mut watcher = branch_watcher.write().await;
-                match watcher.has_branch_changed().await {
-                    Ok(Some(change)) => {
-                        info!("Branch changed from {} to {}", change.from, change.to);
-                        // TODO: Trigger reindexing
-                        debug!("Would trigger reindexing for branch change");
+                tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        info!("Branch monitor shutting down");
+                        break;
                     }
-                    Ok(None) => {
-                        // No change
-                    }
-                    Err(e) => {
-                        error!("Error checking branch: {}", e);
+                    _ = interval.tick() => {
+                        let mut watcher = branch_watcher.write().await;
+                        match watcher.has_branch_changed().await {
+                            Ok(Some(change)) => {
+                                info!("Branch changed from {} to {}", change.from, change.to);
+                                // TODO(#38): Optimize branch change reindexing
+                                // Currently relies on fs watcher to detect file changes (correct but inefficient)
+                                debug!("Branch change detected - fs watcher will handle file changes");
+                            }
+                            Ok(None) => {
+                                // No change
+                            }
+                            Err(e) => {
+                                error!("Error checking branch: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -324,6 +337,7 @@ impl FileWatcher {
 
     /// Stop watching all paths
     pub async fn stop(&mut self) -> Result<()> {
+        self.cancellation_token.cancel();
         if let Some(_watcher) = self.watcher.take() {
             // Clear watched paths
             self.watched_paths.write().await.clear();
@@ -347,125 +361,9 @@ impl FileWatcher {
     }
 }
 
-/// Polling-based fallback watcher for problematic filesystems
-pub struct PollingWatcher {
-    /// Paths to watch
-    paths: Vec<PathBuf>,
-    /// Polling interval
-    interval: Duration,
-    /// Ignore filter
-    ignore_filter: Arc<IgnoreFilter>,
-    /// Last known state
-    last_state: Arc<RwLock<std::collections::HashMap<PathBuf, std::time::SystemTime>>>,
-}
-
-impl PollingWatcher {
-    /// Create a new polling watcher
-    pub fn new(paths: Vec<PathBuf>, interval: Duration, ignore_filter: Arc<IgnoreFilter>) -> Self {
-        Self {
-            paths,
-            interval,
-            ignore_filter,
-            last_state: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        }
-    }
-
-    /// Start polling for changes
-    pub async fn start(&self) -> mpsc::Receiver<FileChange> {
-        let (tx, rx) = mpsc::channel(1000);
-        let paths = self.paths.clone();
-        let interval = self.interval;
-        let ignore_filter = Arc::clone(&self.ignore_filter);
-        let last_state = Arc::clone(&self.last_state);
-
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-            loop {
-                ticker.tick().await;
-
-                for path in &paths {
-                    if let Err(e) = Self::check_path(path, &ignore_filter, &last_state, &tx).await {
-                        debug!("Error checking path {:?}: {}", path, e);
-                    }
-                }
-            }
-        });
-
-        rx
-    }
-
-    /// Check a path for changes
-    async fn check_path(
-        path: &Path,
-        ignore_filter: &IgnoreFilter,
-        last_state: &Arc<RwLock<std::collections::HashMap<PathBuf, std::time::SystemTime>>>,
-        tx: &mpsc::Sender<FileChange>,
-    ) -> Result<()> {
-        if ignore_filter.should_ignore(path) {
-            return Ok(());
-        }
-
-        // Try to get metadata to determine if it's a file or directory
-        match tokio::fs::metadata(path).await {
-            Ok(metadata) => {
-                if metadata.is_dir() {
-                    // Recursively check directory contents
-                    match tokio::fs::read_dir(path).await {
-                        Ok(mut entries) => {
-                            while let Some(entry) = entries.next_entry().await? {
-                                let entry_path = entry.path();
-                                let _ = Box::pin(Self::check_path(
-                                    &entry_path,
-                                    ignore_filter,
-                                    last_state,
-                                    tx,
-                                ))
-                                .await;
-                            }
-                        }
-                        Err(e) => {
-                            trace!("Failed to read directory {:?}: {}", path, e);
-                        }
-                    }
-                } else if metadata.is_file() {
-                    // Check file modification time
-                    let modified = metadata.modified()?;
-
-                    let mut state = last_state.write().await;
-                    let prev_modified = state.get(path).copied();
-
-                    if let Some(prev) = prev_modified {
-                        if modified > prev {
-                            // File was modified
-                            state.insert(path.to_path_buf(), modified);
-                            let diff_stats = crate::events::DiffStats::new(vec![], vec![], vec![]);
-                            let _ = tx
-                                .send(FileChange::Modified(path.to_path_buf(), diff_stats))
-                                .await;
-                        }
-                    } else {
-                        // New file discovered - just track it, don't emit event
-                        state.insert(path.to_path_buf(), modified);
-                        trace!("Tracking new file: {:?}", path);
-                    }
-                }
-            }
-            Err(e) => {
-                // Path doesn't exist or we can't access it
-                trace!("Cannot access path {:?}: {}", path, e);
-            }
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use tempfile::TempDir;
 
     async fn setup_test_watcher() -> (TempDir, FileWatcher) {
@@ -505,59 +403,5 @@ mod tests {
         assert!(watcher.is_watching(temp_dir.path()).await);
         assert!(watcher.is_watching(&temp_dir.path().join("subdir")).await);
         assert!(!watcher.is_watching(Path::new("/other/path")).await);
-    }
-
-    #[tokio::test]
-    async fn test_polling_watcher() {
-        let temp_dir = TempDir::new().expect("test setup failed");
-        let ignore_filter = Arc::new(
-            IgnoreFilter::builder()
-                .patterns(vec![]) // No ignore patterns for testing
-                .ignored_dirs(HashSet::new()) // No ignored directories
-                .build()
-                .expect("test setup failed"),
-        );
-
-        let watcher = PollingWatcher::new(
-            vec![temp_dir.path().to_path_buf()],
-            Duration::from_millis(100),
-            ignore_filter,
-        );
-
-        let mut rx = watcher.start().await;
-
-        // Create a file
-        let test_file = temp_dir.path().join("test.txt");
-        tokio::fs::write(&test_file, "initial")
-            .await
-            .expect("test setup failed");
-
-        // Wait for first poll to discover the file
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
-        // Modify the file
-        tokio::fs::write(&test_file, "modified")
-            .await
-            .expect("test setup failed");
-
-        // Wait for next poll to detect the modification
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
-        // Should receive a modification event
-        let result = tokio::time::timeout(Duration::from_secs(2), async {
-            while let Some(event) = rx.recv().await {
-                if matches!(event, FileChange::Modified(p, _) if p == test_file) {
-                    return Ok(());
-                }
-            }
-            Err("Did not receive expected modification event")
-        })
-        .await;
-
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => panic!("{}", e),
-            Err(_) => panic!("Timeout waiting for modification event"),
-        }
     }
 }

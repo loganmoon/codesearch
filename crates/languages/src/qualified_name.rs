@@ -70,8 +70,7 @@ fn extract_js_scope_name(node: Node, source: &str) -> Option<String> {
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string()),
         "object" => {
-            // Objects assigned to variables - more complex logic needed
-            // TODO: Implement by checking parent assignment
+            // Objects assigned to variables require parent assignment checking
             None
         }
         _ => None,

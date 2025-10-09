@@ -1,5 +1,8 @@
 //! Mock PostgreSQL client for testing
 
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+
 use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
@@ -76,11 +79,13 @@ impl MockPostgresClient {
     }
 
     /// Get number of entities stored
+    #[cfg(test)]
     pub fn entity_count(&self) -> usize {
         self.data.lock().unwrap().entities.len()
     }
 
     /// Get number of non-deleted entities
+    #[cfg(test)]
     pub fn active_entity_count(&self) -> usize {
         self.data
             .lock()
@@ -92,16 +97,19 @@ impl MockPostgresClient {
     }
 
     /// Get number of snapshots stored
+    #[cfg(test)]
     pub fn snapshot_count(&self) -> usize {
         self.data.lock().unwrap().snapshots.len()
     }
 
     /// Get number of outbox entries
+    #[cfg(test)]
     pub fn outbox_count(&self) -> usize {
         self.data.lock().unwrap().outbox.len()
     }
 
     /// Get number of unprocessed outbox entries
+    #[cfg(test)]
     pub fn unprocessed_outbox_count(&self) -> usize {
         self.data
             .lock()
@@ -113,6 +121,7 @@ impl MockPostgresClient {
     }
 
     /// Check if entity is marked as deleted
+    #[cfg(test)]
     pub fn is_entity_deleted(&self, repository_id: Uuid, entity_id: &str) -> bool {
         self.data
             .lock()
@@ -124,6 +133,7 @@ impl MockPostgresClient {
     }
 
     /// Get snapshot for testing
+    #[cfg(test)]
     pub fn get_snapshot_sync(&self, repository_id: Uuid, file_path: &str) -> Option<Vec<String>> {
         self.data
             .lock()
@@ -134,6 +144,7 @@ impl MockPostgresClient {
     }
 
     /// Clear all data (for test cleanup)
+    #[cfg(test)]
     pub fn clear(&self) {
         let mut data = self.data.lock().unwrap();
         data.repositories.clear();
@@ -194,44 +205,6 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(data.collection_to_repo.get(collection_name).copied())
     }
 
-    async fn store_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity: &CodeEntity,
-        git_commit_hash: Option<String>,
-        qdrant_point_id: Uuid,
-    ) -> Result<()> {
-        let mut data = self.data.lock().unwrap();
-
-        data.entities.insert(
-            (repository_id, entity.entity_id.clone()),
-            EntityMetadata {
-                entity: entity.clone(),
-                git_commit_hash,
-                qdrant_point_id,
-                deleted_at: None, // Reset deleted_at on upsert
-            },
-        );
-
-        Ok(())
-    }
-
-    async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>> {
-        let data = self.data.lock().unwrap();
-
-        let entity_ids: Vec<String> = data
-            .entities
-            .iter()
-            .filter(|(_, metadata)| {
-                metadata.deleted_at.is_none()
-                    && metadata.entity.file_path.to_str() == Some(file_path)
-            })
-            .map(|((_, entity_id), _)| entity_id.clone())
-            .collect();
-
-        Ok(entity_ids)
-    }
-
     async fn get_entity_metadata(
         &self,
         repository_id: Uuid,
@@ -243,6 +216,27 @@ impl PostgresClientTrait for MockPostgresClient {
             .entities
             .get(&(repository_id, entity_id.to_string()))
             .map(|metadata| (metadata.qdrant_point_id, metadata.deleted_at)))
+    }
+
+    async fn get_entities_metadata_batch(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>
+    {
+        let data = self.data.lock().unwrap();
+
+        let mut result = std::collections::HashMap::new();
+        for entity_id in entity_ids {
+            if let Some(metadata) = data.entities.get(&(repository_id, entity_id.clone())) {
+                result.insert(
+                    entity_id.clone(),
+                    (metadata.qdrant_point_id, metadata.deleted_at),
+                );
+            }
+        }
+
+        Ok(result)
     }
 
     async fn get_file_snapshot(
@@ -321,6 +315,56 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(())
     }
 
+    async fn mark_entities_deleted_with_outbox(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<()> {
+        if entity_ids.is_empty() {
+            return Ok(());
+        }
+
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_ids.len() > MAX_BATCH_SIZE {
+            return Err(codesearch_core::error::Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_ids.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        let mut data = self.data.lock().unwrap();
+        let now = chrono::Utc::now();
+
+        // Mark entities as deleted
+        for entity_id in entity_ids {
+            if let Some(metadata) = data.entities.get_mut(&(repository_id, entity_id.clone())) {
+                metadata.deleted_at = Some(now);
+            }
+
+            // Create outbox entry for delete
+            let payload = serde_json::json!({
+                "entity_ids": [entity_id],
+                "reason": "file_change"
+            });
+
+            data.outbox.push(MockOutboxEntry {
+                outbox_id: Uuid::new_v4(),
+                repository_id,
+                entity_id: entity_id.clone(),
+                operation: OutboxOperation::Delete,
+                target_store: TargetStore::Qdrant,
+                payload,
+                created_at: now,
+                processed_at: None,
+                retry_count: 0,
+                last_error: None,
+            });
+        }
+
+        Ok(())
+    }
+
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
@@ -382,33 +426,6 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(outbox_ids)
     }
 
-    async fn write_outbox_entry(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-        operation: OutboxOperation,
-        target_store: TargetStore,
-        payload: serde_json::Value,
-    ) -> Result<Uuid> {
-        let mut data = self.data.lock().unwrap();
-
-        let outbox_id = Uuid::new_v4();
-        data.outbox.push(MockOutboxEntry {
-            outbox_id,
-            repository_id,
-            entity_id: entity_id.to_string(),
-            operation,
-            target_store,
-            payload,
-            created_at: chrono::Utc::now(),
-            processed_at: None,
-            retry_count: 0,
-            last_error: None,
-        });
-
-        Ok(outbox_id)
-    }
-
     async fn get_unprocessed_outbox_entries(
         &self,
         target_store: TargetStore,
@@ -450,6 +467,91 @@ impl PostgresClientTrait for MockPostgresClient {
         }
 
         Ok(())
+    }
+
+    async fn get_last_indexed_commit(&self, _repository_id: Uuid) -> Result<Option<String>> {
+        // Mock implementation: return None (not tracking commits in mock)
+        Ok(None)
+    }
+
+    async fn set_last_indexed_commit(
+        &self,
+        _repository_id: Uuid,
+        _commit_hash: &str,
+    ) -> Result<()> {
+        // Mock implementation: do nothing
+        Ok(())
+    }
+}
+
+// Test helper methods (not part of the trait)
+impl MockPostgresClient {
+    /// Store entity metadata (for tests only)
+    pub async fn store_entity_metadata(
+        &self,
+        repository_id: Uuid,
+        entity: &CodeEntity,
+        git_commit_hash: Option<String>,
+        qdrant_point_id: Uuid,
+    ) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+
+        data.entities.insert(
+            (repository_id, entity.entity_id.clone()),
+            EntityMetadata {
+                entity: entity.clone(),
+                git_commit_hash,
+                qdrant_point_id,
+                deleted_at: None,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Get all entity IDs for a file path (for tests only)
+    pub async fn get_entities_for_file(&self, file_path: &str) -> Result<Vec<String>> {
+        let data = self.data.lock().unwrap();
+
+        let entity_ids: Vec<String> = data
+            .entities
+            .iter()
+            .filter(|(_, metadata)| {
+                metadata.deleted_at.is_none()
+                    && metadata.entity.file_path.to_str() == Some(file_path)
+            })
+            .map(|((_, entity_id), _)| entity_id.clone())
+            .collect();
+
+        Ok(entity_ids)
+    }
+
+    /// Write outbox entry (for tests only)
+    pub async fn write_outbox_entry(
+        &self,
+        repository_id: Uuid,
+        entity_id: &str,
+        operation: OutboxOperation,
+        target_store: TargetStore,
+        payload: serde_json::Value,
+    ) -> Result<Uuid> {
+        let mut data = self.data.lock().unwrap();
+
+        let outbox_id = Uuid::new_v4();
+        data.outbox.push(MockOutboxEntry {
+            outbox_id,
+            repository_id,
+            entity_id: entity_id.to_string(),
+            operation,
+            target_store,
+            payload,
+            created_at: chrono::Utc::now(),
+            processed_at: None,
+            retry_count: 0,
+            last_error: None,
+        });
+
+        Ok(outbox_id)
     }
 }
 

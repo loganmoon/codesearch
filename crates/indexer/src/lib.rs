@@ -3,7 +3,7 @@
 //! This crate provides a three-stage indexing pipeline (Extract → Transform → Commit)
 //! for processing source code repositories.
 
-#![warn(warnings)]
+#![deny(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
@@ -14,7 +14,6 @@ use std::path::PathBuf;
 // Private implementation modules
 mod common;
 mod entity_processor;
-mod git_provider;
 mod repository_indexer;
 mod types;
 
@@ -178,42 +177,12 @@ impl IndexStats {
         self.total_files = value;
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn set_failed_files(&mut self, value: usize) {
-        self.failed_files = value;
-    }
-
-    pub(crate) fn set_entities_extracted(&mut self, value: usize) {
-        self.entities_extracted = value;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_relationships_extracted(&mut self, value: usize) {
-        self.relationships_extracted = value;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_functions_indexed(&mut self, value: usize) {
-        self.functions_indexed = value;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_types_indexed(&mut self, value: usize) {
-        self.types_indexed = value;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn set_variables_indexed(&mut self, value: usize) {
-        self.variables_indexed = value;
-    }
-
     pub(crate) fn set_processing_time_ms(&mut self, value: u64) {
         self.processing_time_ms = value;
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn set_memory_usage_bytes(&mut self, value: Option<u64>) {
-        self.memory_usage_bytes = value;
+    pub(crate) fn set_entities_extracted(&mut self, value: usize) {
+        self.entities_extracted = value;
     }
 
     pub(crate) fn increment_failed_files(&mut self) {
@@ -226,7 +195,7 @@ pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
-    postgres_client: std::sync::Arc<dyn codesearch_storage::postgres::PostgresClientTrait>,
+    postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
 ) -> Box<dyn Indexer> {
     Box::new(repository_indexer::RepositoryIndexer::new(
@@ -247,7 +216,7 @@ pub fn start_watching(
     repo_id: uuid::Uuid,
     repo_root: PathBuf,
     embedding_manager: Arc<codesearch_embeddings::EmbeddingManager>,
-    postgres_client: Arc<codesearch_storage::postgres::PostgresClient>,
+    postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait>,
 ) -> JoinHandle<Result<()>> {
     tokio::spawn(async move {
         tracing::info!("File watcher indexer task started");

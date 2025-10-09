@@ -1,9 +1,11 @@
-mod processor;
+#![deny(warnings)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
 
-use codesearch_core::config::Config;
+use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::error::Result;
+use codesearch_outbox_processor::processor::OutboxProcessor;
 use codesearch_storage::{create_postgres_client, create_storage_client};
-use processor::OutboxProcessor;
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -68,56 +70,31 @@ async fn main() -> Result<()> {
 }
 
 fn load_config_from_env() -> Result<Config> {
-    let postgres_host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let postgres_port = std::env::var("POSTGRES_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(5432);
-    let postgres_database =
-        std::env::var("POSTGRES_DATABASE").unwrap_or_else(|_| "codesearch".to_string());
-    let postgres_user = std::env::var("POSTGRES_USER").unwrap_or_else(|_| "codesearch".to_string());
-    let postgres_password =
-        std::env::var("POSTGRES_PASSWORD").unwrap_or_else(|_| "codesearch".to_string());
+    let storage_config = StorageConfig {
+        postgres_host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
+        postgres_port: std::env::var("POSTGRES_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(5432),
+        postgres_database: std::env::var("POSTGRES_DATABASE")
+            .unwrap_or_else(|_| "codesearch".to_string()),
+        postgres_user: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "codesearch".to_string()),
+        postgres_password: std::env::var("POSTGRES_PASSWORD")
+            .unwrap_or_else(|_| "codesearch".to_string()),
+        qdrant_host: std::env::var("QDRANT_HOST").unwrap_or_else(|_| "localhost".to_string()),
+        qdrant_port: std::env::var("QDRANT_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(6334),
+        qdrant_rest_port: std::env::var("QDRANT_REST_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(6333),
+        collection_name: std::env::var("QDRANT_COLLECTION")
+            .unwrap_or_else(|_| "codesearch".to_string()),
+        auto_start_deps: false,
+        docker_compose_file: None,
+    };
 
-    let qdrant_host = std::env::var("QDRANT_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let qdrant_port = std::env::var("QDRANT_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(6334);
-    let qdrant_rest_port = std::env::var("QDRANT_REST_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(6333);
-    let collection_name =
-        std::env::var("QDRANT_COLLECTION").unwrap_or_else(|_| "codesearch".to_string());
-
-    let config_toml = format!(
-        r#"
-[indexer]
-
-[storage]
-qdrant_host = "{qdrant_host}"
-qdrant_port = {qdrant_port}
-qdrant_rest_port = {qdrant_rest_port}
-collection_name = "{collection_name}"
-auto_start_deps = false
-postgres_host = "{postgres_host}"
-postgres_port = {postgres_port}
-postgres_database = "{postgres_database}"
-postgres_user = "{postgres_user}"
-postgres_password = "{postgres_password}"
-
-[embeddings]
-provider = "mock"
-
-[watcher]
-debounce_ms = 500
-ignore_patterns = ["*.log", "target", ".git"]
-
-[languages]
-enabled = ["rust", "python", "javascript", "typescript", "go"]
-"#
-    );
-
-    Config::from_toml_str(&config_toml)
+    Ok(Config::builder(storage_config).build())
 }

@@ -6,7 +6,7 @@ use crate::entity_processor;
 use crate::Result;
 use codesearch_core::error::Error;
 use codesearch_embeddings::EmbeddingManager;
-use codesearch_storage::postgres::PostgresClient;
+use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::FileChange;
 use std::{
     path::{Path, PathBuf},
@@ -31,7 +31,7 @@ pub async fn process_file_changes(
     repo_id: Uuid,
     repo_root: &Path,
     embedding_manager: &Arc<EmbeddingManager>,
-    postgres_client: &Arc<PostgresClient>,
+    postgres_client: &Arc<dyn PostgresClientTrait>,
 ) -> Result<ProcessingStats> {
     if changes.is_empty() {
         return Ok(ProcessingStats::default());
@@ -152,7 +152,7 @@ async fn process_file_batch(
     repo_id: Uuid,
     repo_root: &Path,
     embedding_manager: &Arc<EmbeddingManager>,
-    postgres_client: &Arc<PostgresClient>,
+    postgres_client: &Arc<dyn PostgresClientTrait>,
 ) -> Result<ProcessingStats> {
     let mut stats = ProcessingStats::default();
     let mut batch_entities = Vec::new();

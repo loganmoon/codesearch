@@ -1,3 +1,7 @@
+#![deny(warnings)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 //! File system watching for real-time indexing
 //!
 //! This crate provides comprehensive file system monitoring with:
@@ -27,10 +31,6 @@
 //! # Ok(())
 //! # }
 //! ```
-
-#![deny(warnings)]
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
-#![cfg_attr(not(test), deny(clippy::expect_used))]
 
 // Private implementation modules
 mod config;

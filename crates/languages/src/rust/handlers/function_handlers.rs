@@ -3,7 +3,7 @@
 //! This module processes tree-sitter query matches for Rust functions
 //! and builds EntityData instances.
 
-#![warn(warnings)]
+#![deny(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 

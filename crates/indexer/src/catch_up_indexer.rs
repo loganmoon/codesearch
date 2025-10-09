@@ -5,7 +5,7 @@
 use crate::{file_change_processor::process_file_changes, Result};
 use codesearch_core::error::Error;
 use codesearch_embeddings::EmbeddingManager;
-use codesearch_storage::postgres::PostgresClient;
+use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::{DiffStats, FileChange, FileDiffChangeType, FileMetadata, GitRepository};
 use std::{path::Path, sync::Arc, time::SystemTime};
 use tracing::{info, warn};
@@ -29,7 +29,7 @@ pub struct CatchUpStats {
 pub async fn catch_up_from_git(
     repo_root: &Path,
     repo_id: Uuid,
-    postgres_client: &Arc<PostgresClient>,
+    postgres_client: &Arc<dyn PostgresClientTrait>,
     embedding_manager: &Arc<EmbeddingManager>,
     git_repo: &GitRepository,
 ) -> Result<CatchUpStats> {
@@ -132,7 +132,7 @@ pub async fn catch_up_from_git(
         .map_err(|e| Error::Storage(format!("Failed to update last indexed commit: {e}")))?;
 
     info!(
-        "✅ Catch-up indexing completed at commit {} ({} processed, {} failed)",
+        "Catch-up indexing completed at commit {} ({} processed, {} failed)",
         &current_commit[..8],
         stats.files_processed,
         stats.files_failed

@@ -8,8 +8,7 @@ use codesearch_e2e_tests::common::{
     create_test_database, drop_test_database, get_shared_postgres, with_timeout,
 };
 use codesearch_storage::{
-    create_postgres_client,
-    postgres::{OutboxOperation, TargetStore},
+    create_postgres_client, OutboxOperation, PostgresClientTrait, TargetStore,
 };
 use common::*;
 use std::path::Path;
@@ -21,7 +20,7 @@ use uuid::Uuid;
 async fn setup_postgres() -> Result<(
     Arc<codesearch_e2e_tests::common::TestPostgres>,
     String,
-    Arc<codesearch_storage::postgres::PostgresClient>,
+    Arc<dyn PostgresClientTrait>,
 )> {
     let postgres = get_shared_postgres().await?;
     let db_name = create_test_database(&postgres).await?;
@@ -64,8 +63,18 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
                     EntityType::Function,
                     &repo_id.to_string(),
                 );
+                let embedding = vec![0.1; 384];
+                let point_id = Uuid::new_v4();
+                let batch = vec![(
+                    &entity,
+                    embedding.as_slice(),
+                    OutboxOperation::Insert,
+                    point_id,
+                    TargetStore::Qdrant,
+                    None,
+                )];
                 client_clone
-                    .store_entity_metadata(repo_id, &entity, None, Uuid::new_v4())
+                    .store_entities_with_outbox_batch(repo_id, &batch)
                     .await
             }));
         }
@@ -131,14 +140,34 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         let client2 = Arc::clone(&client);
 
         let task1 = tokio::spawn(async move {
+            let embedding = vec![0.1; 384];
+            let point_id = Uuid::new_v4();
+            let batch = vec![(
+                &entity1,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                point_id,
+                TargetStore::Qdrant,
+                None,
+            )];
             client1
-                .store_entity_metadata(repository_id, &entity1, None, Uuid::new_v4())
+                .store_entities_with_outbox_batch(repository_id, &batch)
                 .await
         });
 
         let task2 = tokio::spawn(async move {
+            let embedding = vec![0.1; 384];
+            let point_id = Uuid::new_v4();
+            let batch = vec![(
+                &entity2,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                point_id,
+                TargetStore::Qdrant,
+                None,
+            )];
             client2
-                .store_entity_metadata(repository_id, &entity2, None, Uuid::new_v4())
+                .store_entities_with_outbox_batch(repository_id, &batch)
                 .await
         });
 
@@ -270,8 +299,18 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
             .collect();
 
         for entity in &entities {
+            let embedding = vec![0.1; 384];
+            let point_id = Uuid::new_v4();
+            let batch = vec![(
+                entity,
+                embedding.as_slice(),
+                OutboxOperation::Insert,
+                point_id,
+                TargetStore::Qdrant,
+                None,
+            )];
             client
-                .store_entity_metadata(repository_id, entity, None, Uuid::new_v4())
+                .store_entities_with_outbox_batch(repository_id, &batch)
                 .await?;
         }
 

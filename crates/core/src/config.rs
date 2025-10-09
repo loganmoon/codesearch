@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use config::{Config as ConfigBuilder, Environment, File};
+use config::{Config as ConfigLib, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -28,7 +28,7 @@ pub struct Config {
 }
 
 /// Configuration for embeddings generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingsConfig {
     /// Provider type: "localapi", "api", "mock"
     #[serde(default = "default_provider")]
@@ -58,6 +58,20 @@ pub struct EmbeddingsConfig {
     pub embedding_dimension: usize,
 }
 
+impl std::fmt::Debug for EmbeddingsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmbeddingsConfig")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("batch_size", &self.batch_size)
+            .field("device", &self.device)
+            .field("api_base_url", &self.api_base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
+            .field("embedding_dimension", &self.embedding_dimension)
+            .finish()
+    }
+}
+
 /// Configuration for file watching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatcherConfig {
@@ -71,7 +85,7 @@ pub struct WatcherConfig {
 }
 
 /// Configuration for storage backend
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     /// Qdrant host address
     #[serde(default = "default_qdrant_host")]
@@ -117,6 +131,24 @@ pub struct StorageConfig {
     pub postgres_password: String,
 }
 
+impl std::fmt::Debug for StorageConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageConfig")
+            .field("qdrant_host", &self.qdrant_host)
+            .field("qdrant_port", &self.qdrant_port)
+            .field("qdrant_rest_port", &self.qdrant_rest_port)
+            .field("collection_name", &self.collection_name)
+            .field("auto_start_deps", &self.auto_start_deps)
+            .field("docker_compose_file", &self.docker_compose_file)
+            .field("postgres_host", &self.postgres_host)
+            .field("postgres_port", &self.postgres_port)
+            .field("postgres_database", &self.postgres_database)
+            .field("postgres_user", &self.postgres_user)
+            .field("postgres_password", &"***REDACTED***")
+            .finish()
+    }
+}
+
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguagesConfig {
@@ -157,6 +189,17 @@ pub struct JavaScriptConfig {
     pub typescript_enabled: bool,
 }
 
+// Default constants
+const DEFAULT_DEVICE: &str = "cpu";
+const DEFAULT_PROVIDER: &str = "localapi";
+const DEFAULT_MODEL: &str = "BAAI/bge-code-v1";
+const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
+const DEFAULT_QDRANT_HOST: &str = "localhost";
+const DEFAULT_POSTGRES_HOST: &str = "localhost";
+const DEFAULT_POSTGRES_DATABASE: &str = "codesearch";
+const DEFAULT_POSTGRES_USER: &str = "codesearch";
+const DEFAULT_POSTGRES_PASSWORD: &str = "codesearch";
+
 fn default_enabled_languages() -> Vec<String> {
     vec![
         "rust".to_string(),
@@ -170,20 +213,21 @@ fn default_enabled_languages() -> Vec<String> {
 fn default_batch_size() -> usize {
     32
 }
+
 fn default_device() -> String {
-    "cpu".to_string()
+    DEFAULT_DEVICE.to_string()
 }
 
 fn default_provider() -> String {
-    "localapi".to_string()
+    DEFAULT_PROVIDER.to_string()
 }
 
 fn default_model() -> String {
-    "BAAI/bge-code-v1".to_string()
+    DEFAULT_MODEL.to_string()
 }
 
 fn default_api_base_url() -> Option<String> {
-    Some("http://localhost:8000/v1".to_string())
+    Some(DEFAULT_API_BASE_URL.to_string())
 }
 
 fn default_embedding_dimension() -> usize {
@@ -193,9 +237,11 @@ fn default_embedding_dimension() -> usize {
 fn default_true() -> bool {
     true
 }
+
 fn default_debounce_ms() -> u64 {
     500
 }
+
 fn default_ignore_patterns() -> Vec<String> {
     vec![
         "*.log".to_string(),
@@ -208,7 +254,7 @@ fn default_ignore_patterns() -> Vec<String> {
 }
 
 fn default_qdrant_host() -> String {
-    "localhost".to_string()
+    DEFAULT_QDRANT_HOST.to_string()
 }
 
 fn default_qdrant_port() -> u16 {
@@ -224,7 +270,7 @@ fn default_auto_start_deps() -> bool {
 }
 
 fn default_postgres_host() -> String {
-    "localhost".to_string()
+    DEFAULT_POSTGRES_HOST.to_string()
 }
 
 fn default_postgres_port() -> u16 {
@@ -232,15 +278,15 @@ fn default_postgres_port() -> u16 {
 }
 
 fn default_postgres_database() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_DATABASE.to_string()
 }
 
 fn default_postgres_user() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_USER.to_string()
 }
 
 fn default_postgres_password() -> String {
-    "codesearch".to_string()
+    DEFAULT_POSTGRES_PASSWORD.to_string()
 }
 
 impl Default for EmbeddingsConfig {
@@ -279,24 +325,41 @@ impl Default for LanguagesConfig {
 impl StorageConfig {
     /// Generate a collection name from a repository path
     ///
-    /// Creates a unique, Qdrant-compatible collection name using the format:
-    /// `<repo_name>_<xxhash3_128_of_full_path>`
+    /// Creates a unique, deterministic Qdrant-compatible collection name using xxHash3_128.
+    /// Format: `<sanitized_repo_name>_<xxhash3_128_hex>`
     ///
-    /// The repo name is truncated to 50 characters if needed.
-    /// The name is deterministic - the same path always generates the same name.
-    pub fn generate_collection_name(repo_path: &Path) -> String {
+    /// The repo name is sanitized (alphanumeric, dash, underscore only) and truncated to
+    /// 50 characters if needed. The full absolute path is hashed using xxHash3_128 to ensure
+    /// uniqueness. The same path always generates the same collection name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The current directory cannot be determined (for relative paths)
+    /// - The path has no valid filename component
+    /// - The filename cannot be converted to UTF-8
+    pub fn generate_collection_name(repo_path: &Path) -> Result<String> {
         use twox_hash::XxHash3_128;
 
-        // Get the absolute path
-        let absolute_path = repo_path
-            .canonicalize()
-            .unwrap_or_else(|_| repo_path.to_path_buf());
+        // Get the absolute path without requiring it to exist
+        let absolute_path = if repo_path.is_absolute() {
+            repo_path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
+                .join(repo_path)
+        };
 
         // Extract repository name (last component of path)
         let repo_name = absolute_path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("repo");
+            .ok_or_else(|| {
+                Error::config(format!(
+                    "Path {} has no valid filename component",
+                    absolute_path.display()
+                ))
+            })?;
 
         // Truncate repo name to 50 chars and sanitize
         let sanitized_name: String = repo_name
@@ -316,7 +379,7 @@ impl StorageConfig {
         let hash = XxHash3_128::oneshot(path_str.as_bytes());
 
         // Format: <repo_name>_<hash>
-        format!("{sanitized_name}_{hash:032x}")
+        Ok(format!("{sanitized_name}_{hash:032x}"))
     }
 }
 
@@ -327,7 +390,7 @@ impl Config {
     /// for nested values. For example:
     /// - `CODESEARCH_EMBEDDINGS__PROVIDER=openai`
     pub fn from_file(path: &Path) -> Result<Self> {
-        let mut builder = ConfigBuilder::builder();
+        let mut builder = ConfigLib::builder();
 
         // Add the config file if it exists
         if path.exists() {
@@ -451,9 +514,9 @@ impl Config {
         Ok(())
     }
 
-    /// Create a new CodesearchConfigBuilder
-    pub fn builder() -> CodesearchConfigBuilder {
-        CodesearchConfigBuilder::new()
+    /// Create a new ConfigBuilder with required storage config
+    pub fn builder(storage: StorageConfig) -> ConfigBuilder {
+        ConfigBuilder::new(storage)
     }
 }
 
@@ -787,7 +850,8 @@ mod tests {
     #[test]
     fn test_generate_collection_name() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let collection_name = StorageConfig::generate_collection_name(temp_dir.path());
+        let collection_name = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
 
         // Verify format: name_hash
         assert!(collection_name.contains('_'));
@@ -809,7 +873,8 @@ mod tests {
         // Create the directory
         std::fs::create_dir(&special_path).expect("Failed to create dir");
 
-        let collection_name = StorageConfig::generate_collection_name(&special_path);
+        let collection_name = StorageConfig::generate_collection_name(&special_path)
+            .expect("Failed to generate collection name");
 
         // Special characters should be replaced with underscores
         assert!(!collection_name.contains('('));
@@ -822,40 +887,75 @@ mod tests {
     fn test_generate_collection_name_deterministic() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-        let name1 = StorageConfig::generate_collection_name(temp_dir.path());
-        let name2 = StorageConfig::generate_collection_name(temp_dir.path());
+        let name1 = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
+        let name2 = StorageConfig::generate_collection_name(temp_dir.path())
+            .expect("Failed to generate collection name");
 
         // Same path should generate same name
         assert_eq!(name1, name2);
+    }
+
+    #[test]
+    fn test_generate_collection_name_nonexistent_path() {
+        // Non-existent paths should now work (no canonicalization required)
+        let nonexistent = std::path::PathBuf::from("/tmp/this_path_does_not_exist_test_12345");
+
+        let result = StorageConfig::generate_collection_name(&nonexistent);
+        assert!(result.is_ok());
+
+        let collection_name = result.expect("test setup failed");
+        assert!(collection_name.contains("this_path_does_not_exist_test_12345"));
+        assert!(collection_name.contains('_')); // Should have hash separator
+    }
+
+    #[test]
+    fn test_generate_collection_name_relative_path() {
+        // Relative paths should work and be converted to absolute
+        let relative = std::path::PathBuf::from("relative/test/path");
+
+        let result = StorageConfig::generate_collection_name(&relative);
+        assert!(result.is_ok());
+
+        let collection_name = result.expect("test setup failed");
+        // Should use the last component as the name
+        assert!(collection_name.starts_with("path_"));
+    }
+
+    #[test]
+    fn test_generate_collection_name_root_path() {
+        // Root path should fail - no filename component
+        let root = std::path::PathBuf::from("/");
+
+        let result = StorageConfig::generate_collection_name(&root);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no valid filename component"));
     }
 }
 
 /// Builder for Config with fluent API
 #[derive(Debug, Clone)]
-pub struct CodesearchConfigBuilder {
+pub struct ConfigBuilder {
     indexer: IndexerConfig,
     embeddings: EmbeddingsConfig,
     watcher: WatcherConfig,
-    storage: Option<StorageConfig>,
+    storage: StorageConfig,
     languages: LanguagesConfig,
 }
 
-impl CodesearchConfigBuilder {
-    /// Create a new CodesearchConfigBuilder with defaults
-    pub fn new() -> Self {
+impl ConfigBuilder {
+    /// Create a new ConfigBuilder with required storage config and defaults for other fields
+    pub fn new(storage: StorageConfig) -> Self {
         Self {
             indexer: IndexerConfig::default(),
             embeddings: EmbeddingsConfig::default(),
             watcher: WatcherConfig::default(),
-            storage: None,
+            storage,
             languages: LanguagesConfig::default(),
         }
-    }
-
-    /// Set the storage configuration
-    pub fn storage(mut self, storage: StorageConfig) -> Self {
-        self.storage = Some(storage);
-        self
     }
 
     /// Set the embeddings configuration
@@ -882,14 +982,8 @@ impl CodesearchConfigBuilder {
             indexer: self.indexer,
             embeddings: self.embeddings,
             watcher: self.watcher,
-            storage: self.storage.expect("Storage config is required"),
+            storage: self.storage,
             languages: self.languages,
         }
-    }
-}
-
-impl Default for CodesearchConfigBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

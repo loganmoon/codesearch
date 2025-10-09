@@ -73,11 +73,11 @@ impl OpenAiApiProvider {
 
         match client.models().list().await {
             Ok(models_response) => {
-                info!("✓ API health check passed");
+                info!("API health check passed");
                 debug!("  Available models: {}", models_response.data.len());
             }
             Err(e) => {
-                warn!("⚠ API health check failed: {e}");
+                warn!("API health check failed: {e}");
                 warn!("  The vLLM service may not be running or still starting up.");
                 warn!("  It can take 30-60 seconds for the service to become available.");
                 warn!(
@@ -187,14 +187,14 @@ impl EmbeddingProvider for OpenAiApiProvider {
                     })?;
 
                 // Generate embeddings
-                let embeddings = {
+                let mut embeddings = {
                     let _permit = permit; // Keep permit alive
                     self.embed_batch(texts_to_embed).await?
                 };
 
-                // Place embeddings at their original indices
-                for (embed_idx, orig_idx) in indices_to_embed.iter().enumerate() {
-                    chunk_results[*orig_idx] = Some(embeddings[embed_idx].clone());
+                // Place embeddings at their original indices (consuming vector)
+                for orig_idx in indices_to_embed.into_iter() {
+                    chunk_results[orig_idx] = Some(embeddings.swap_remove(0));
                 }
             }
 

@@ -54,6 +54,11 @@ impl RustExtractor {
                 queries::MODULE_QUERY,
                 Box::new(handlers::handle_module),
             )
+            .add_extractor(
+                "constant",
+                queries::CONSTANT_QUERY,
+                Box::new(handlers::handle_constant),
+            )
             .build()?;
 
         Ok(Self {

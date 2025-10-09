@@ -3,6 +3,7 @@
 use super::*;
 use codesearch_core::entities::{EntityType, Visibility};
 
+use crate::rust::handlers::constant_handlers::handle_constant;
 use crate::rust::handlers::function_handlers::handle_function;
 use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
 use crate::rust::handlers::module_handlers::handle_module;
@@ -18,6 +19,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::fmt::{self, Display, Debug};
 use std::io::{self, Read, Write};
+
+/// Maximum number of connections
+pub const MAX_CONNECTIONS: usize = 1000;
+
+/// Default timeout in seconds
+const DEFAULT_TIMEOUT: u64 = 30;
+
+/// Global configuration instance
+static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
 
 /// Configuration options for the application
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -540,4 +550,30 @@ fn test_large_file_module_extraction() {
         .find(|e| e.name == "tests")
         .expect("Should find tests module");
     assert_eq!(tests_module.visibility, Visibility::Private);
+}
+
+#[test]
+fn test_large_file_constant_extraction() {
+    let const_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::CONSTANT_QUERY, handle_constant)
+            .expect("Failed to extract constants");
+
+    assert!(const_entities.len() >= 3); // MAX_CONNECTIONS, DEFAULT_TIMEOUT, CONFIG
+
+    let const_names: Vec<&str> = const_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(const_names.contains(&"MAX_CONNECTIONS"));
+    assert!(const_names.contains(&"DEFAULT_TIMEOUT"));
+    assert!(const_names.contains(&"CONFIG"));
+
+    // Verify const vs static distinction
+    let max_conn = const_entities
+        .iter()
+        .find(|e| e.name == "MAX_CONNECTIONS")
+        .unwrap();
+    assert!(max_conn.metadata.is_const);
+    assert!(!max_conn.metadata.is_static);
+
+    let config = const_entities.iter().find(|e| e.name == "CONFIG").unwrap();
+    assert!(!config.metadata.is_const);
+    assert!(config.metadata.is_static);
 }

@@ -1,5 +1,6 @@
 //! Comprehensive test suite for Rust extraction handlers
 
+mod constant_tests;
 mod edge_cases;
 mod enum_tests;
 mod fixtures;

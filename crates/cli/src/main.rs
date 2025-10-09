@@ -46,22 +46,15 @@ fn create_default_storage_config(collection_name: String) -> StorageConfig {
 }
 
 /// Ensure config has a collection name, generating one if needed
-fn ensure_collection_name(config: Config, repo_root: &Path) -> Result<Config> {
+fn ensure_collection_name(mut config: Config, repo_root: &Path) -> Result<Config> {
     if config.storage.collection_name.is_empty() {
-        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
-        info!("Generated collection name: {collection_name}");
-        Ok(Config::builder()
-            .storage(StorageConfig {
-                collection_name,
-                ..config.storage
-            })
-            .embeddings(config.embeddings)
-            .watcher(config.watcher)
-            .languages(config.languages)
-            .build()?)
-    } else {
-        Ok(config)
+        config.storage.collection_name = StorageConfig::generate_collection_name(repo_root)?;
+        info!(
+            "Generated collection name: {}",
+            config.storage.collection_name
+        );
     }
+    Ok(config)
 }
 
 /// Get API base URL if provider is LocalApi, None otherwise

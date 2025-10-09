@@ -37,9 +37,6 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 
-# Progress indicators
-indicatif = { workspace = true }
-
 # File system utilities
 glob = { workspace = true }
 

@@ -2,10 +2,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use codesearch_core::config::StorageConfig;
+use sqlx::postgres::PgConnectOptions;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Check if Docker is installed and available
 pub fn is_docker_available() -> bool {
@@ -189,7 +190,10 @@ pub async fn check_qdrant_health(config: &StorageConfig) -> Result<bool> {
 
     match reqwest::get(&url).await {
         Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false),
+        Err(e) => {
+            warn!("Qdrant health check failed: {e}");
+            Ok(false)
+        }
     }
 }
 
@@ -200,7 +204,10 @@ pub async fn check_vllm_health(api_base_url: &str) -> Result<bool> {
 
     match reqwest::get(&url).await {
         Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false),
+        Err(e) => {
+            warn!("vLLM health check failed: {e}");
+            Ok(false)
+        }
     }
 }
 
@@ -250,21 +257,25 @@ pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> 
 
 /// Check Postgres health status
 pub async fn check_postgres_health(config: &StorageConfig) -> Result<bool> {
-    let connection_string = format!(
-        "postgresql://{}:{}@{}:{}/{}",
-        config.postgres_user,
-        config.postgres_password,
-        config.postgres_host,
-        config.postgres_port,
-        config.postgres_database
-    );
+    let connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database(&config.postgres_database);
 
-    match sqlx::PgPool::connect(&connection_string).await {
+    match sqlx::PgPool::connect_with(connect_options).await {
         Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Err(e) => {
+                warn!("Postgres health check query failed: {e}");
+                Ok(false)
+            }
         },
-        Err(_) => Ok(false),
+        Err(e) => {
+            warn!("Postgres health check connection failed: {e}");
+            Ok(false)
+        }
     }
 }
 

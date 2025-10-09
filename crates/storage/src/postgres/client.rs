@@ -5,10 +5,18 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Operation type for outbox pattern
+///
+/// Represents the type of operation to be performed on the target data store.
+/// Used in the transactional outbox pattern to ensure eventual consistency
+/// between PostgreSQL metadata and external stores like Qdrant.
 #[derive(Debug, Clone, Copy)]
 pub enum OutboxOperation {
+    /// Insert a new entity into the target store
     Insert,
+    /// Update an existing entity in the target store
     Update,
+    /// Delete an entity from the target store
     Delete,
 }
 
@@ -35,9 +43,16 @@ impl FromStr for OutboxOperation {
     }
 }
 
+/// Target data store for outbox pattern
+///
+/// Identifies which external data store should process the outbox entry.
+/// Each target store has its own processing queue to enable parallel processing
+/// and independent scaling of different storage backends.
 #[derive(Debug, Clone, Copy)]
 pub enum TargetStore {
+    /// Qdrant vector database for semantic search
     Qdrant,
+    /// Neo4j graph database for relationship queries
     Neo4j,
 }
 
@@ -62,6 +77,25 @@ impl FromStr for TargetStore {
     }
 }
 
+/// Outbox entry for reliable event publishing
+///
+/// Represents a pending operation that needs to be applied to an external data store.
+/// The outbox pattern ensures that database changes and external store updates happen
+/// atomically by writing both to PostgreSQL in a transaction, then processing outbox
+/// entries asynchronously to update external stores.
+///
+/// # Fields
+///
+/// * `outbox_id` - Unique identifier for this outbox entry
+/// * `repository_id` - Repository this operation applies to
+/// * `entity_id` - Identifier of the entity to be modified
+/// * `operation` - Operation type (INSERT, UPDATE, DELETE)
+/// * `target_store` - Which external store should process this (qdrant, neo4j)
+/// * `payload` - JSON payload containing the data needed to perform the operation
+/// * `created_at` - When this entry was created
+/// * `processed_at` - When this entry was successfully processed (None if pending)
+/// * `retry_count` - Number of times processing has been attempted
+/// * `last_error` - Error message from the most recent failed processing attempt
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct OutboxEntry {
     pub outbox_id: Uuid,
@@ -176,6 +210,65 @@ impl PostgresClient {
         .map_err(|e| Error::storage(format!("Failed to get entity metadata: {e}")))?;
 
         Ok(record)
+    }
+
+    /// Batch fetch entity metadata for multiple entities
+    pub async fn get_entities_metadata_batch(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>
+    {
+        if entity_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Validate batch size to prevent resource exhaustion
+        const MAX_BATCH_SIZE: usize = 1000;
+        if entity_ids.len() > MAX_BATCH_SIZE {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                entity_ids.len(),
+                MAX_BATCH_SIZE
+            )));
+        }
+
+        // Build query using QueryBuilder for type safety
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT entity_id, qdrant_point_id, deleted_at FROM entity_metadata WHERE repository_id = "
+        );
+
+        query_builder.push_bind(repository_id);
+        query_builder.push(" AND entity_id IN (");
+
+        let mut separated = query_builder.separated(", ");
+        for entity_id in entity_ids {
+            separated.push_bind(entity_id);
+        }
+        separated.push_unseparated(")");
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch entity metadata batch: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let entity_id: String = row
+                .try_get("entity_id")
+                .map_err(|e| Error::storage(format!("Failed to extract entity_id: {e}")))?;
+            let point_id: Uuid = row
+                .try_get("qdrant_point_id")
+                .map_err(|e| Error::storage(format!("Failed to extract qdrant_point_id: {e}")))?;
+            let deleted_at: Option<chrono::DateTime<chrono::Utc>> = row
+                .try_get("deleted_at")
+                .map_err(|e| Error::storage(format!("Failed to extract deleted_at: {e}")))?;
+
+            result.insert(entity_id, (point_id, deleted_at));
+        }
+
+        Ok(result)
     }
 
     /// Get file snapshot (list of entity IDs in file)
@@ -540,10 +633,20 @@ impl PostgresClient {
         );
 
         outbox_query.push_values(
-            entities,
-            |mut b, (entity, embedding, op, point_id, target, _git_commit)| {
+            &validated_entities,
+            |mut b,
+             (
+                entity,
+                embedding,
+                op,
+                point_id,
+                target,
+                _git_commit,
+                entity_json,
+                _file_path_str,
+            )| {
                 let payload = serde_json::json!({
-                    "entity": entity,
+                    "entity": entity_json,
                     "embedding": embedding,
                     "qdrant_point_id": point_id.to_string()
                 });
@@ -743,6 +846,16 @@ impl super::PostgresClientTrait for PostgresClient {
         entity_id: &str,
     ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
         self.get_entity_metadata(repository_id, entity_id).await
+    }
+
+    async fn get_entities_metadata_batch(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>
+    {
+        self.get_entities_metadata_batch(repository_id, entity_ids)
+            .await
     }
 
     async fn get_file_snapshot(

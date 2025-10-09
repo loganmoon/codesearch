@@ -3,8 +3,6 @@
 //! This module provides Git repository management, branch detection,
 //! and `.gitignore` pattern handling.
 
-#![allow(dead_code)]
-
 use codesearch_core::error::{Error, Result};
 use git2::{BranchType, Repository, Status, StatusOptions};
 use std::collections::HashSet;
@@ -435,8 +433,10 @@ impl BranchChange {
 }
 
 /// Helper to detect Git repository boundaries
+#[allow(dead_code)]
 pub struct GitDetector;
 
+#[allow(dead_code)]
 impl GitDetector {
     /// Find the Git repository root for a given path
     pub fn find_repository_root(path: &Path) -> Option<PathBuf> {

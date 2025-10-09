@@ -276,6 +276,15 @@ mod tests {
             Ok(None)
         }
 
+        async fn get_entities_metadata_batch(
+            &self,
+            _: Uuid,
+            _: &[String],
+        ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>
+        {
+            Ok(std::collections::HashMap::new())
+        }
+
         async fn get_file_snapshot(&self, _: Uuid, _: &str) -> Result<Option<Vec<String>>> {
             Ok(None)
         }

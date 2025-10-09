@@ -13,6 +13,7 @@ mod qdrant;
 
 use async_trait::async_trait;
 use codesearch_core::{config::StorageConfig, entities::EntityType, error::Result, CodeEntity};
+use sqlx::postgres::PgConnectOptions;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -155,16 +156,14 @@ pub async fn create_collection_manager(
 pub async fn create_postgres_client(
     config: &StorageConfig,
 ) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
-    let connection_string = format!(
-        "postgresql://{}:{}@{}:{}/{}",
-        config.postgres_user,
-        config.postgres_password,
-        config.postgres_host,
-        config.postgres_port,
-        config.postgres_database
-    );
+    let connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database(&config.postgres_database);
 
-    let pool = sqlx::PgPool::connect(&connection_string)
+    let pool = sqlx::PgPool::connect_with(connect_options)
         .await
         .map_err(|e| {
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))

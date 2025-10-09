@@ -218,6 +218,27 @@ impl PostgresClientTrait for MockPostgresClient {
             .map(|metadata| (metadata.qdrant_point_id, metadata.deleted_at)))
     }
 
+    async fn get_entities_metadata_batch(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>
+    {
+        let data = self.data.lock().unwrap();
+
+        let mut result = std::collections::HashMap::new();
+        for entity_id in entity_ids {
+            if let Some(metadata) = data.entities.get(&(repository_id, entity_id.clone())) {
+                result.insert(
+                    entity_id.clone(),
+                    (metadata.qdrant_point_id, metadata.deleted_at),
+                );
+            }
+        }
+
+        Ok(result)
+    }
+
     async fn get_file_snapshot(
         &self,
         repository_id: Uuid,

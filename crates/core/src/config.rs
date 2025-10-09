@@ -302,19 +302,20 @@ impl StorageConfig {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The path cannot be canonicalized (e.g., doesn't exist or permission denied)
+    /// - The current directory cannot be determined (for relative paths)
     /// - The path has no valid filename component
     /// - The filename cannot be converted to UTF-8
     pub fn generate_collection_name(repo_path: &Path) -> Result<String> {
         use twox_hash::XxHash3_128;
 
-        // Get the absolute path
-        let absolute_path = repo_path.canonicalize().map_err(|e| {
-            Error::config(format!(
-                "Failed to canonicalize path {}: {e}",
-                repo_path.display()
-            ))
-        })?;
+        // Get the absolute path without requiring it to exist
+        let absolute_path = if repo_path.is_absolute() {
+            repo_path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
+                .join(repo_path)
+        };
 
         // Extract repository name (last component of path)
         let repo_name = absolute_path
@@ -860,6 +861,45 @@ mod tests {
 
         // Same path should generate same name
         assert_eq!(name1, name2);
+    }
+
+    #[test]
+    fn test_generate_collection_name_nonexistent_path() {
+        // Non-existent paths should now work (no canonicalization required)
+        let nonexistent = std::path::PathBuf::from("/tmp/this_path_does_not_exist_test_12345");
+
+        let result = StorageConfig::generate_collection_name(&nonexistent);
+        assert!(result.is_ok());
+
+        let collection_name = result.expect("test setup failed");
+        assert!(collection_name.contains("this_path_does_not_exist_test_12345"));
+        assert!(collection_name.contains('_')); // Should have hash separator
+    }
+
+    #[test]
+    fn test_generate_collection_name_relative_path() {
+        // Relative paths should work and be converted to absolute
+        let relative = std::path::PathBuf::from("relative/test/path");
+
+        let result = StorageConfig::generate_collection_name(&relative);
+        assert!(result.is_ok());
+
+        let collection_name = result.expect("test setup failed");
+        // Should use the last component as the name
+        assert!(collection_name.starts_with("path_"));
+    }
+
+    #[test]
+    fn test_generate_collection_name_root_path() {
+        // Root path should fail - no filename component
+        let root = std::path::PathBuf::from("/");
+
+        let result = StorageConfig::generate_collection_name(&root);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no valid filename component"));
     }
 }
 

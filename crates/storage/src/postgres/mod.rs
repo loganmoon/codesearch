@@ -35,6 +35,29 @@ pub trait PostgresClientTrait: Send + Sync {
         entity_id: &str,
     ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>>;
 
+    /// Batch fetch entity metadata (qdrant_point_id and deleted_at) for multiple entities
+    ///
+    /// Returns a HashMap mapping entity_id to (qdrant_point_id, deleted_at).
+    /// Entities not found in the database will not be present in the map.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `entity_ids` - Slice of entity IDs to fetch (max 1000)
+    ///
+    /// # Performance
+    ///
+    /// This method fetches all metadata in a single database query, avoiding the N+1 query problem.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `entity_ids.len()` exceeds the maximum batch size of 1000 entities.
+    async fn get_entities_metadata_batch(
+        &self,
+        repository_id: Uuid,
+        entity_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, (Uuid, Option<chrono::DateTime<chrono::Utc>>)>>;
+
     /// Get file snapshot (list of entity IDs in file)
     async fn get_file_snapshot(
         &self,
@@ -52,13 +75,19 @@ pub trait PostgresClientTrait: Send + Sync {
     ) -> Result<()>;
 
     /// Batch fetch entities by (repository_id, entity_id) pairs
+    ///
+    /// Maximum batch size is 1000 entity references.
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>>;
 
     /// Mark entities as deleted (soft delete)
+    ///
+    /// Maximum batch size is 1000 entity IDs.
     async fn mark_entities_deleted(&self, repository_id: Uuid, entity_ids: &[String])
         -> Result<()>;
 
     /// Mark entities as deleted and create outbox entries in a single transaction
+    ///
+    /// Maximum batch size is 1000 entity IDs.
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
@@ -66,6 +95,8 @@ pub trait PostgresClientTrait: Send + Sync {
     ) -> Result<()>;
 
     /// Store entities with outbox entries in a single transaction (batch operation)
+    ///
+    /// Maximum batch size is 1000 entities.
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,

@@ -5,7 +5,7 @@ use codesearch_core::config::StorageConfig;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Check if Docker is installed and available
 pub fn is_docker_available() -> bool {
@@ -95,32 +95,6 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
     }
 
     info!("Dependencies started successfully");
-    Ok(())
-}
-
-/// Stop containerized dependencies
-pub fn stop_dependencies(compose_file: Option<&str>) -> Result<()> {
-    let (cmd, mut args) = get_compose_command();
-
-    if let Some(file) = compose_file {
-        args.push("-f");
-        args.push(file);
-    }
-
-    args.extend(["down"]);
-
-    info!("Stopping containerized dependencies...");
-
-    let output = Command::new(cmd)
-        .args(&args)
-        .output()
-        .context("Failed to execute docker compose")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!("Failed to stop dependencies cleanly: {}", stderr);
-    }
-
     Ok(())
 }
 
@@ -385,144 +359,4 @@ pub async fn ensure_dependencies_running(
     }
 
     Ok(())
-}
-
-/// Get status of dependencies
-pub async fn get_dependencies_status(
-    config: &StorageConfig,
-    api_base_url: Option<&str>,
-) -> Result<DependencyStatus> {
-    let docker_available = is_docker_available();
-    let compose_available = is_docker_compose_available();
-    let qdrant_running = is_qdrant_running().unwrap_or(false);
-    let qdrant_healthy = if qdrant_running {
-        check_qdrant_health(config).await.unwrap_or(false)
-    } else {
-        false
-    };
-    let postgres_running = is_postgres_running().unwrap_or(false);
-    let postgres_healthy = if postgres_running {
-        check_postgres_health(config).await.unwrap_or(false)
-    } else {
-        false
-    };
-    let outbox_running = is_outbox_processor_running().unwrap_or(false);
-    let vllm_running = is_vllm_running().unwrap_or(false);
-    let vllm_healthy = match (vllm_running, api_base_url) {
-        (true, Some(url)) => check_vllm_health(url).await.unwrap_or(false),
-        _ => false,
-    };
-
-    Ok(DependencyStatus {
-        docker_available,
-        compose_available,
-        qdrant_running,
-        qdrant_healthy,
-        postgres_running,
-        postgres_healthy,
-        outbox_running,
-        vllm_running,
-        vllm_healthy,
-    })
-}
-
-#[derive(Debug)]
-pub struct DependencyStatus {
-    pub docker_available: bool,
-    pub compose_available: bool,
-    pub qdrant_running: bool,
-    pub qdrant_healthy: bool,
-    pub postgres_running: bool,
-    pub postgres_healthy: bool,
-    pub outbox_running: bool,
-    pub vllm_running: bool,
-    pub vllm_healthy: bool,
-}
-
-impl std::fmt::Display for DependencyStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Dependency Status:")?;
-        writeln!(
-            f,
-            "  Docker:            {}",
-            if self.docker_available {
-                "Available"
-            } else {
-                "Not found"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Docker Compose:    {}",
-            if self.compose_available {
-                "Available"
-            } else {
-                "Not found"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Qdrant Container:  {}",
-            if self.qdrant_running {
-                "Running"
-            } else {
-                "Not running"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Qdrant Health:     {}",
-            if self.qdrant_healthy {
-                "Healthy"
-            } else {
-                "Unhealthy"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Postgres Container: {}",
-            if self.postgres_running {
-                "Running"
-            } else {
-                "Not running"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Postgres Health:    {}",
-            if self.postgres_healthy {
-                "Healthy"
-            } else {
-                "Unhealthy"
-            }
-        )?;
-        writeln!(
-            f,
-            "  Outbox Processor:   {}",
-            if self.outbox_running {
-                "Running"
-            } else {
-                "Not running"
-            }
-        )?;
-        writeln!(
-            f,
-            "  vLLM Container:     {}",
-            if self.vllm_running {
-                "Running"
-            } else {
-                "Not running"
-            }
-        )?;
-        writeln!(
-            f,
-            "  vLLM Health:        {}",
-            if self.vllm_healthy {
-                "Healthy"
-            } else {
-                "Unhealthy"
-            }
-        )?;
-        Ok(())
-    }
 }

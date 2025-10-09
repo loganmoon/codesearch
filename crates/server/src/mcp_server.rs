@@ -321,7 +321,7 @@ async fn verify_collection_exists(
         .context("Failed to check if collection exists")?
     {
         return Err(Error::config(format!(
-            "Collection '{collection_name}' does not exist. Please run 'codesearch init' first."
+            "Collection '{collection_name}' does not exist. Please run 'codesearch serve' or 'codesearch index' to initialize."
         )));
     }
 
@@ -355,7 +355,7 @@ async fn initialize_server_clients(
         .context("Failed to query repository")?
         .ok_or_else(|| {
             Error::config(format!(
-                "Repository not found for collection '{}'. Run 'codesearch init' first.",
+                "Repository not found for collection '{}'. Run 'codesearch serve' or 'codesearch index' to initialize.",
                 config.storage.collection_name
             ))
         })?;

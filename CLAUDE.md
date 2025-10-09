@@ -48,7 +48,7 @@ This is a workspace with these crates:
 - **storage**: Persistent storage layer for indexed data
 - **cli**: Command-line interface and MCP server (`codesearch` binary)
 
-The main binary is `codesearch` which provides init, serve, index, and watch commands.
+The main binary is `codesearch` which provides serve and index commands.
 
 ## DEVELOPMENT COMMANDS
 
@@ -71,7 +71,6 @@ cargo fmt                                 # Format code
 
 **Running:**
 ```bash
-cargo run -- init                        # Initialize codesearch in current repo
 cargo run -- index                       # Index the repository
 cargo run -- serve                       # Start MCP server
 ```

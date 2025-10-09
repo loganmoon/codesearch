@@ -99,13 +99,13 @@ pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Check if Qdrant container is running
-pub fn is_qdrant_running() -> Result<bool> {
+/// Generic helper to check if a container is running
+fn is_container_running(container_name: &str) -> Result<bool> {
     let output = Command::new("docker")
         .args([
             "ps",
             "--filter",
-            "name=codesearch-qdrant",
+            &format!("name={container_name}"),
             "--format",
             "{{.Names}}",
         ])
@@ -117,96 +117,53 @@ pub fn is_qdrant_running() -> Result<bool> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains("codesearch-qdrant"))
+    Ok(stdout.contains(container_name))
+}
+
+/// Check if Qdrant container is running
+pub fn is_qdrant_running() -> Result<bool> {
+    is_container_running("codesearch-qdrant")
 }
 
 /// Check if vLLM container is running
 pub fn is_vllm_running() -> Result<bool> {
-    let output = Command::new("docker")
-        .args([
-            "ps",
-            "--filter",
-            "name=codesearch-vllm",
-            "--format",
-            "{{.Names}}",
-        ])
-        .output()
-        .context("Failed to check container status")?;
-
-    if !output.status.success() {
-        return Ok(false);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains("codesearch-vllm"))
+    is_container_running("codesearch-vllm")
 }
 
 /// Check if Postgres container is running
 pub fn is_postgres_running() -> Result<bool> {
-    let output = Command::new("docker")
-        .args([
-            "ps",
-            "--filter",
-            "name=codesearch-postgres",
-            "--format",
-            "{{.Names}}",
-        ])
-        .output()
-        .context("Failed to check container status")?;
-
-    if !output.status.success() {
-        return Ok(false);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains("codesearch-postgres"))
+    is_container_running("codesearch-postgres")
 }
 
 /// Check if Outbox Processor container is running
 pub fn is_outbox_processor_running() -> Result<bool> {
-    let output = Command::new("docker")
-        .args([
-            "ps",
-            "--filter",
-            "name=codesearch-outbox-processor",
-            "--format",
-            "{{.Names}}",
-        ])
-        .output()
-        .context("Failed to check container status")?;
-
-    if !output.status.success() {
-        return Ok(false);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.contains("codesearch-outbox-processor"))
+    is_container_running("codesearch-outbox-processor")
 }
 
 /// Check Qdrant health status
-pub async fn check_qdrant_health(config: &StorageConfig) -> Result<bool> {
+pub async fn check_qdrant_health(config: &StorageConfig) -> bool {
     // Qdrant doesn't have a /health endpoint, but the root endpoint returns version info
     let url = format!("http://{}:{}/", config.qdrant_host, config.qdrant_rest_port);
 
     match reqwest::get(&url).await {
-        Ok(response) => Ok(response.status().is_success()),
+        Ok(response) => response.status().is_success(),
         Err(e) => {
             warn!("Qdrant health check failed: {e}");
-            Ok(false)
+            false
         }
     }
 }
 
 /// Check vLLM health status
-pub async fn check_vllm_health(api_base_url: &str) -> Result<bool> {
+pub async fn check_vllm_health(api_base_url: &str) -> bool {
     // vLLM has a /health endpoint
     let url = format!("{}/health", api_base_url.trim_end_matches("/v1"));
 
     match reqwest::get(&url).await {
-        Ok(response) => Ok(response.status().is_success()),
+        Ok(response) => response.status().is_success(),
         Err(e) => {
             warn!("vLLM health check failed: {e}");
-            Ok(false)
+            false
         }
     }
 }
@@ -218,7 +175,7 @@ pub async fn wait_for_qdrant(config: &StorageConfig, timeout: Duration) -> Resul
     let start = Instant::now();
 
     while start.elapsed() < timeout {
-        if check_qdrant_health(config).await? {
+        if check_qdrant_health(config).await {
             info!("Qdrant is healthy");
             return Ok(());
         }
@@ -240,7 +197,7 @@ pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> 
     let start = Instant::now();
 
     while start.elapsed() < timeout {
-        if check_vllm_health(api_base_url).await? {
+        if check_vllm_health(api_base_url).await {
             info!("vLLM is healthy");
             return Ok(());
         }
@@ -256,7 +213,7 @@ pub async fn wait_for_vllm(api_base_url: &str, timeout: Duration) -> Result<()> 
 }
 
 /// Check Postgres health status
-pub async fn check_postgres_health(config: &StorageConfig) -> Result<bool> {
+pub async fn check_postgres_health(config: &StorageConfig) -> bool {
     let connect_options = PgConnectOptions::new()
         .host(&config.postgres_host)
         .port(config.postgres_port)
@@ -266,15 +223,15 @@ pub async fn check_postgres_health(config: &StorageConfig) -> Result<bool> {
 
     match sqlx::PgPool::connect_with(connect_options).await {
         Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
-            Ok(_) => Ok(true),
+            Ok(_) => true,
             Err(e) => {
                 warn!("Postgres health check query failed: {e}");
-                Ok(false)
+                false
             }
         },
         Err(e) => {
             warn!("Postgres health check connection failed: {e}");
-            Ok(false)
+            false
         }
     }
 }
@@ -286,7 +243,7 @@ pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Res
     let start = Instant::now();
 
     while start.elapsed() < timeout {
-        if check_postgres_health(config).await? {
+        if check_postgres_health(config).await {
             info!("Postgres is healthy");
             return Ok(());
         }
@@ -306,11 +263,11 @@ pub async fn ensure_dependencies_running(
     config: &StorageConfig,
     api_base_url: Option<&str>,
 ) -> Result<()> {
-    let qdrant_healthy = check_qdrant_health(config).await?;
-    let postgres_healthy = check_postgres_health(config).await?;
-    let outbox_running = is_outbox_processor_running().unwrap_or(false);
+    let qdrant_healthy = check_qdrant_health(config).await;
+    let postgres_healthy = check_postgres_health(config).await;
+    let outbox_running = is_outbox_processor_running()?;
     let vllm_healthy = if let Some(url) = api_base_url {
-        check_vllm_health(url).await?
+        check_vllm_health(url).await
     } else {
         true // Skip vLLM check if no API URL provided
     };

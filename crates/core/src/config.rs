@@ -28,7 +28,7 @@ pub struct Config {
 }
 
 /// Configuration for embeddings generation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingsConfig {
     /// Provider type: "localapi", "api", "mock"
     #[serde(default = "default_provider")]
@@ -58,6 +58,20 @@ pub struct EmbeddingsConfig {
     pub embedding_dimension: usize,
 }
 
+impl std::fmt::Debug for EmbeddingsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmbeddingsConfig")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("batch_size", &self.batch_size)
+            .field("device", &self.device)
+            .field("api_base_url", &self.api_base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
+            .field("embedding_dimension", &self.embedding_dimension)
+            .finish()
+    }
+}
+
 /// Configuration for file watching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatcherConfig {
@@ -71,7 +85,7 @@ pub struct WatcherConfig {
 }
 
 /// Configuration for storage backend
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     /// Qdrant host address
     #[serde(default = "default_qdrant_host")]
@@ -115,6 +129,24 @@ pub struct StorageConfig {
     /// Postgres password
     #[serde(default = "default_postgres_password")]
     pub postgres_password: String,
+}
+
+impl std::fmt::Debug for StorageConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageConfig")
+            .field("qdrant_host", &self.qdrant_host)
+            .field("qdrant_port", &self.qdrant_port)
+            .field("qdrant_rest_port", &self.qdrant_rest_port)
+            .field("collection_name", &self.collection_name)
+            .field("auto_start_deps", &self.auto_start_deps)
+            .field("docker_compose_file", &self.docker_compose_file)
+            .field("postgres_host", &self.postgres_host)
+            .field("postgres_port", &self.postgres_port)
+            .field("postgres_database", &self.postgres_database)
+            .field("postgres_user", &self.postgres_user)
+            .field("postgres_password", &"***REDACTED***")
+            .finish()
+    }
 }
 
 /// Configuration for language support

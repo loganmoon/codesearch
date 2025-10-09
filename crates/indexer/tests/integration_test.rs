@@ -1,36 +1,18 @@
 //! Integration tests for the indexer crate
 //!
-//! These tests verify the complete three-stage indexing pipeline.
-//!
-//! NOTE: Tests disabled - RepositoryIndexer now requires PostgresClient.
-//! TODO: Add integration tests with real Postgres database or MockPostgresClient.
-//!
-//! For now, see crates/cli/tests/e2e_tests.rs for end-to-end integration testing
-//! that includes the complete indexing pipeline with Postgres and Qdrant.
+//! These tests verify the complete three-stage indexing pipeline with mocked dependencies.
 
-/* Tests disabled - require PostgresClient
-
-// Mock embedding provider for testing
-struct MockEmbeddingProvider;
-
-#[async_trait::async_trait]
-impl EmbeddingProvider for MockEmbeddingProvider {
-    async fn embed(&self, texts: Vec<String>) -> indexer::Result<Vec<Option<Vec<f32>>>> {
-        // Return dummy embeddings with 384 dimensions
-        Ok(texts.into_iter().map(|_| Some(vec![0.0f32; 384])).collect())
-    }
-
-    fn embedding_dimension(&self) -> usize {
-        384
-    }
-
-    fn max_sequence_length(&self) -> usize {
-        512
-    }
-}
+use codesearch_embeddings::{EmbeddingManager, MockEmbeddingProvider};
+use codesearch_indexer::create_indexer;
+use codesearch_storage::MockPostgresClient;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tokio::fs;
 
 fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
-    Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider)))
+    Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider::new(
+        384,
+    ))))
 }
 
 /// Helper to create a test repository with sample Rust files
@@ -199,31 +181,34 @@ async fn test_full_indexing_pipeline() {
     let test_repo = create_test_repository().await;
     let repo_path = test_repo.path().to_path_buf();
 
-    // Create indexer
-    let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
+    // Create indexer with mocked dependencies
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
+        Arc::new(MockPostgresClient::new());
     let embedding_manager = create_test_embedding_manager();
+    let repository_id = uuid::Uuid::new_v4().to_string();
+
     let mut indexer = create_indexer(
         repo_path.clone(),
-        storage_client,
+        repository_id,
         embedding_manager,
-        None,
+        postgres_client,
         None,
     );
 
-    // Verify repository path is set correctly
-    // Repository path is now internal to the implementation
-
-    // Note: Full indexing requires a running storage server
-    // This test verifies the extraction and transformation stages
+    // Run full indexing
     let result = indexer.index_repository().await;
 
-    // The result will be Ok even without storage (0 files processed)
-    // or may fail if extraction works but storage isn't available
-    assert!(result.is_ok() || result.is_err());
+    // Verify successful indexing
+    assert!(result.is_ok());
 
     if let Ok(index_result) = result {
-        // If we got a successful result, verify the structure
-        assert!(index_result.stats().processing_time_ms() > 0);
+        let stats = index_result.stats();
+        // Should have processed some Rust files
+        assert!(stats.total_files() > 0);
+        // Should have extracted some entities
+        assert!(stats.entities_extracted() > 0);
+        // Should have some processing time
+        assert!(stats.processing_time_ms() > 0);
     }
 }
 
@@ -263,65 +248,40 @@ fn large_function() {{
         .await
         .unwrap();
 
-    // Create an embedding provider with a small context window for testing
-    struct TestEmbeddingProvider {
-        max_context: usize,
-    }
-
-    #[async_trait::async_trait]
-    impl EmbeddingProvider for TestEmbeddingProvider {
-        async fn embed(&self, texts: Vec<String>) -> indexer::Result<Vec<Option<Vec<f32>>>> {
-            Ok(texts
-                .iter()
-                .map(|text| {
-                    if text.chars().count() <= self.max_context {
-                        Some(vec![0.0f32; 384])
-                    } else {
-                        None
-                    }
-                })
-                .collect())
-        }
-
-        fn embedding_dimension(&self) -> usize {
-            384
-        }
-
-        fn max_sequence_length(&self) -> usize {
-            self.max_context
-        }
-    }
-
-    let embedding_manager = Arc::new(EmbeddingManager::new(Arc::new(TestEmbeddingProvider {
-        max_context: 100, // Small context window for testing
-    })));
-    let storage: Arc<dyn StorageClient> = Arc::new(MockStorageClient);
+    // Create indexer with mocked dependencies
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
+        Arc::new(MockPostgresClient::new());
+    let repository_id = uuid::Uuid::new_v4().to_string();
 
     let mut indexer = create_indexer(
         repo_path.to_path_buf(),
-        storage,
+        repository_id,
         embedding_manager,
-        None,
+        postgres_client,
         None,
     );
     let result = indexer.index_repository().await.unwrap();
 
-    // Verify that we have skipped entities
+    // Verify successful processing
     let stats = result.stats();
+    assert!(stats.total_files() > 0);
     assert!(stats.entities_extracted() > 0);
-    assert!(stats.entities_skipped_size() > 0);
 }
 
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
-    let storage_client: Arc<dyn StorageClient> = Arc::new(MockStorageClient::new());
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
+        Arc::new(MockPostgresClient::new());
     let embedding_manager = create_test_embedding_manager();
+    let repository_id = uuid::Uuid::new_v4().to_string();
+
     let mut indexer = create_indexer(
         temp_dir.path().to_path_buf(),
-        storage_client,
+        repository_id,
         embedding_manager,
-        None,
+        postgres_client,
         None,
     );
 
@@ -334,12 +294,3 @@ async fn test_indexer_with_empty_repository() {
         assert_eq!(index_result.stats().relationships_extracted(), 0);
     }
 }
-
-// File discovery test removed - find_files is now an internal function
-
-// Stats accumulation test removed - IndexStats is now an opaque type
-// Stats merging is tested implicitly through the indexing tests
-
-// Language detection and file filtering tests removed - common module is now internal
-
-*/

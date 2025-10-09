@@ -17,8 +17,14 @@ trait SimpleTrait {
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
-    assert_eq!(entity.name, "SimpleTrait"); // TODO: Update test to use new CodeEntity structure
-                                            // Original test body commented out during migration
+    assert_eq!(entity.name, "SimpleTrait");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("method"));
 }
 
 #[test]
@@ -145,13 +151,40 @@ trait Complex: Display + Send + Sync + 'static {
 
     // Check first trait
     let entity = &entities[0];
-    assert_eq!(entity.name, "Display"); // TODO: Update test to use new CodeEntity structure
-                                        // Original test body commented out during migration
+    assert_eq!(entity.name, "Display");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check bounds (supertraits)
+    let bounds = entity.metadata.attributes.get("bounds");
+    assert!(bounds.is_some());
+    let bounds_str = bounds.unwrap();
+    assert!(bounds_str.contains("Debug"));
+    assert!(bounds_str.contains("Clone"));
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("fmt"));
 
     // Check second trait
     let entity = &entities[1];
-    assert_eq!(entity.name, "Complex"); // TODO: Update test to use new CodeEntity structure
-                                        // Original test body commented out during migration
+    assert_eq!(entity.name, "Complex");
+    assert_eq!(entity.entity_type, EntityType::Trait);
+
+    // Check bounds (supertraits)
+    let bounds = entity.metadata.attributes.get("bounds");
+    assert!(bounds.is_some());
+    let bounds_str = bounds.unwrap();
+    assert!(bounds_str.contains("Display"));
+    assert!(bounds_str.contains("Send"));
+    assert!(bounds_str.contains("Sync"));
+
+    // Check methods
+    let methods = entity.metadata.attributes.get("methods");
+    assert!(methods.is_some());
+    let methods_str = methods.unwrap();
+    assert!(methods_str.contains("process"));
 }
 
 #[test]

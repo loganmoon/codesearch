@@ -264,6 +264,67 @@ fn extract_impl_methods(
     Ok(entities)
 }
 
+/// Components for building impl block member entities (methods, associated constants)
+///
+/// This struct encapsulates the extracted components needed to build a CodeEntity
+/// for members of impl blocks. It's used as a parameter to `build_impl_entity` to
+/// avoid repetitive entity construction code.
+struct ImplEntityComponents {
+    /// The simple name of the entity (e.g., "method_name")
+    name: String,
+    /// The fully qualified name including impl context (e.g., "Type::method_name" or "<Type as Trait>::method_name")
+    qualified_name: String,
+    /// The type of entity (Method, Function, or Constant)
+    entity_type: EntityType,
+    /// The visibility of the entity
+    visibility: Visibility,
+    /// Entity-specific metadata (async, const, generics, etc.)
+    metadata: EntityMetadata,
+    /// Function signature if this is a method or associated function
+    signature: Option<FunctionSignature>,
+}
+
+/// Build a CodeEntity for impl block members (methods, associated constants)
+fn build_impl_entity(
+    node: Node,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    impl_qualified_name: &str,
+    components: ImplEntityComponents,
+) -> Result<CodeEntity> {
+    // Extract documentation
+    let documentation = extract_preceding_doc_comments(node, source);
+
+    // Get location and content
+    let location = SourceLocation::from_tree_sitter_node(node);
+    let content = node_to_text(node, source).ok();
+
+    // Generate entity_id
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &components.qualified_name);
+
+    CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(components.name)
+        .qualified_name(components.qualified_name)
+        .parent_scope(Some(impl_qualified_name.to_string()))
+        .entity_type(components.entity_type)
+        .location(location)
+        .visibility(components.visibility)
+        .documentation_summary(documentation)
+        .content(content)
+        .metadata(components.metadata)
+        .signature(components.signature)
+        .language(Language::Rust)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| Error::entity_extraction(format!("Failed to build entity: {e}")))
+}
+
 /// Determine if a function should be typed as a Method
 ///
 /// A function is classified as a method if it has a `self` parameter OR returns `Self`.
@@ -328,19 +389,6 @@ fn extract_associated_constant(
         .child_by_field_name("value")
         .and_then(|n| node_to_text(n, source).ok());
 
-    // Extract documentation
-    let documentation = extract_preceding_doc_comments(const_node, source);
-
-    // Get location and content
-    let location = SourceLocation::from_tree_sitter_node(const_node);
-    let content = node_to_text(const_node, source).ok();
-
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
-
     // Build metadata
     let mut metadata = EntityMetadata {
         is_const: true,
@@ -359,22 +407,22 @@ fn extract_associated_constant(
             .insert("value".to_string(), value_str.clone());
     }
 
-    CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(qualified_name)
-        .parent_scope(Some(impl_qualified_name.to_string()))
-        .entity_type(EntityType::Constant)
-        .location(location)
-        .visibility(visibility)
-        .documentation_summary(documentation)
-        .content(content)
-        .metadata(metadata)
-        .language(Language::Rust)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build constant entity: {e}")))
+    // Build the entity using the common helper
+    build_impl_entity(
+        const_node,
+        source,
+        file_path,
+        repository_id,
+        impl_qualified_name,
+        ImplEntityComponents {
+            name,
+            qualified_name,
+            entity_type: EntityType::Constant,
+            visibility,
+            metadata,
+            signature: None,
+        },
+    )
 }
 
 /// Find a child node by kind
@@ -430,19 +478,6 @@ fn extract_method(
     // Extract return type
     let return_type = extract_method_return_type(method_node, source);
 
-    // Extract documentation
-    let documentation = extract_preceding_doc_comments(method_node, source);
-
-    // Get location and content
-    let location = SourceLocation::from_tree_sitter_node(method_node);
-    let content = node_to_text(method_node, source).ok();
-
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
-
     // Build metadata
     let mut metadata = EntityMetadata {
         is_async,
@@ -476,23 +511,22 @@ fn extract_method(
         EntityType::Function
     };
 
-    CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(qualified_name)
-        .parent_scope(Some(impl_qualified_name.to_string()))
-        .entity_type(entity_type)
-        .location(location)
-        .visibility(visibility)
-        .documentation_summary(documentation)
-        .content(content)
-        .metadata(metadata)
-        .signature(Some(signature))
-        .language(Language::Rust)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build method entity: {e}")))
+    // Build the entity using the common helper
+    build_impl_entity(
+        method_node,
+        source,
+        file_path,
+        repository_id,
+        impl_qualified_name,
+        ImplEntityComponents {
+            name,
+            qualified_name,
+            entity_type,
+            visibility,
+            metadata,
+            signature: Some(signature),
+        },
+    )
 }
 
 /// Find method name in a function_item node

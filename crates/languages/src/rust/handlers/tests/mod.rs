@@ -1,11 +1,16 @@
 //! Comprehensive test suite for Rust extraction handlers
 
+mod constant_tests;
 mod edge_cases;
 mod enum_tests;
 mod fixtures;
 mod function_tests;
+mod impl_tests;
+mod macro_tests;
+mod module_tests;
 mod struct_tests;
 mod trait_tests;
+mod type_alias_tests;
 
 use crate::rust::queries;
 use codesearch_core::{error::Result, CodeEntity};

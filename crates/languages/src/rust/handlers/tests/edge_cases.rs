@@ -119,12 +119,21 @@ fn incomplete() {
     println!("Missing closing brace");
 "#;
 
-    // Should not panic, but might not extract properly
+    // tree-sitter is error-tolerant but incomplete functions may not match queries
     let result = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function);
 
-    // The extraction might fail or succeed with partial data
-    // Document the actual behavior
-    assert!(result.is_ok() || result.is_err());
+    // Should not panic - gracefully handles malformed code
+    assert!(result.is_ok(), "Should not panic on incomplete syntax");
+
+    // Document actual behavior: incomplete functions may or may not be extracted
+    // depending on how tree-sitter error recovery works
+    let entities = result.unwrap();
+    // Don't assert on entity count - behavior depends on tree-sitter's error recovery
+    // The important thing is we didn't panic
+    if !entities.is_empty() {
+        // If extracted, should have the correct name
+        assert_eq!(entities[0].name, "incomplete");
+    }
 }
 
 #[test]
@@ -235,4 +244,91 @@ struct Nested {
         assert!(ret_type.contains("Option"));
         assert!(ret_type.contains("Vec"));
     }
+}
+
+#[test]
+fn test_multibyte_utf8_in_struct_fields() {
+    use crate::rust::handlers::type_handlers::handle_struct;
+
+    // Test UTF-8 safety fixes in type_handlers.rs
+    let source = r#"
+struct User {
+    名前: String,
+    年齢: u32,
+    pub メール: String,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+        .expect("Should not panic with multi-byte UTF-8 in struct fields");
+
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0].name, "User");
+
+    // Verify fields were extracted without panicking
+    let fields = entities[0].metadata.attributes.get("fields");
+    assert!(fields.is_some());
+}
+
+#[test]
+fn test_multibyte_utf8_in_enum_variants() {
+    use crate::rust::handlers::type_handlers::handle_enum;
+
+    // Test UTF-8 safety in enum variant parsing
+    let source = r#"
+enum 状態 {
+    成功(String),
+    失敗 = 1,
+    待機中,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+        .expect("Should not panic with multi-byte UTF-8 in enum variants");
+
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0].name, "状態");
+}
+
+#[test]
+fn test_multibyte_utf8_in_function_parameters() {
+    use crate::rust::handlers::function_handlers::handle_function;
+
+    // Test UTF-8 safety in parameter extraction
+    let source = r#"
+fn プロセス(名前: String, 年齢: u32) -> String {
+    format!("{名前} is {年齢} years old")
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+        .expect("Should not panic with multi-byte UTF-8 in parameters");
+
+    assert_eq!(entities.len(), 1);
+    assert_eq!(entities[0].name, "プロセス");
+
+    // Verify parameters were extracted
+    if let Some(sig) = &entities[0].signature {
+        assert_eq!(sig.parameters.len(), 2);
+    }
+}
+
+#[test]
+fn test_derive_with_multibyte_utf8() {
+    use crate::rust::handlers::type_handlers::handle_struct;
+
+    // Test UTF-8 safety in derive attribute parsing
+    let source = r#"
+#[derive(Debug, Clone)]
+struct データ {
+    値: i32,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+        .expect("Should not panic with multi-byte UTF-8 in derives");
+
+    assert_eq!(entities.len(), 1);
+    // Verify derives were extracted
+    assert!(!entities[0].metadata.decorators.is_empty());
 }

@@ -10,7 +10,7 @@
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch};
+use tree_sitter::{Language, Parser, Query, QueryCursor, QueryMatch};
 
 /// Handler function type for processing query matches into entities
 pub type EntityHandler =
@@ -221,10 +221,4 @@ impl<'a> GenericExtractor<'a> {
 
         Ok(all_entities)
     }
-}
-
-/// Helper function to create a source location from a node
-#[allow(dead_code)]
-pub fn node_to_source_location(node: Node) -> codesearch_core::entities::SourceLocation {
-    codesearch_core::entities::SourceLocation::from_tree_sitter_node(node)
 }

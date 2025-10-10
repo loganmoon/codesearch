@@ -3,7 +3,12 @@
 use super::*;
 use codesearch_core::entities::{EntityType, Visibility};
 
+use crate::rust::handlers::constant_handlers::handle_constant;
 use crate::rust::handlers::function_handlers::handle_function;
+use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
+use crate::rust::handlers::macro_handlers::handle_macro;
+use crate::rust::handlers::module_handlers::handle_module;
+use crate::rust::handlers::type_alias_handlers::handle_type_alias;
 use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
 
 /// Large comprehensive Rust code sample (100+ lines)
@@ -16,6 +21,40 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::fmt::{self, Display, Debug};
 use std::io::{self, Read, Write};
+
+/// Maximum number of connections
+pub const MAX_CONNECTIONS: usize = 1000;
+
+/// Default timeout in seconds
+const DEFAULT_TIMEOUT: u64 = 30;
+
+/// Global configuration instance
+static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
+
+/// Standard result type for this module
+pub type Result<T> = std::result::Result<T, ProcessError>;
+
+/// Type alias for message handler callbacks
+type MessageHandler = Box<dyn Fn(&Message) -> Result<()> + Send>;
+
+/// Helper macro for creating messages
+#[macro_export]
+macro_rules! message {
+    (text $content:expr) => {
+        Message::Text($content.to_string())
+    };
+    (binary $data:expr) => {
+        Message::Binary($data.to_vec())
+    };
+}
+
+/// Internal debugging macro
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        println!($($arg)*);
+    };
+}
 
 /// Configuration options for the application
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +77,21 @@ impl Default for Config {
             debug: false,
             timeout: 30,
         }
+    }
+}
+
+impl Config {
+    pub fn new(hostname: String, port: u16) -> Self {
+        Self {
+            hostname,
+            port,
+            debug: false,
+            timeout: 30,
+        }
+    }
+
+    pub fn is_debug(&self) -> bool {
+        self.debug
     }
 }
 
@@ -199,6 +253,12 @@ mod tests {
     fn test_message_variants() {
         let msg = Message::Text("Hello".to_string());
         assert!(matches!(msg, Message::Text(_)));
+    }
+}
+
+pub mod utils {
+    pub fn helper_function() -> i32 {
+        42
     }
 }
 "####;
@@ -452,4 +512,186 @@ fn test_extremely_large_extraction_performance() {
     // Extraction should be fast, even for large files
     // Adjust threshold as needed based on performance requirements
     assert!(duration.as_millis() < 100);
+}
+
+#[test]
+fn test_large_file_impl_extraction() {
+    // Test inherent impl extraction
+    let impl_entities = extract_with_handler(LARGE_RUST_SAMPLE, queries::IMPL_QUERY, handle_impl)
+        .expect("Failed to extract impl blocks");
+
+    assert!(impl_entities.len() >= 2); // Config::new, Config::is_debug, Reference::new, Reference::get
+
+    // Verify some methods were extracted
+    let entity_names: Vec<&str> = impl_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(entity_names.contains(&"new") || entity_names.contains(&"Config"));
+
+    // Test trait impl extraction
+    let trait_impl_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::IMPL_TRAIT_QUERY,
+        handle_impl_trait,
+    )
+    .expect("Failed to extract trait impls");
+
+    assert!(!trait_impl_entities.is_empty()); // Display for ProcessError
+
+    // Verify trait impl has correct metadata
+    let display_impl = trait_impl_entities.iter().find(|e| {
+        e.metadata
+            .attributes
+            .get("implements_trait")
+            .map(|t| t.contains("Display"))
+            .unwrap_or(false)
+    });
+
+    assert!(display_impl.is_some(), "Should find Display trait impl");
+}
+
+#[test]
+fn test_large_file_module_extraction() {
+    let module_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::MODULE_QUERY, handle_module)
+            .expect("Failed to extract modules");
+
+    assert!(module_entities.len() >= 2); // tests, utils
+
+    let module_names: Vec<&str> = module_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(module_names.contains(&"tests"));
+    assert!(module_names.contains(&"utils"));
+
+    // Check that modules have correct entity type
+    for module in &module_entities {
+        assert_eq!(module.entity_type, EntityType::Module);
+    }
+
+    // Check visibility
+    let utils_module = module_entities
+        .iter()
+        .find(|e| e.name == "utils")
+        .expect("Should find utils module");
+    assert_eq!(utils_module.visibility, Visibility::Public);
+
+    let tests_module = module_entities
+        .iter()
+        .find(|e| e.name == "tests")
+        .expect("Should find tests module");
+    assert_eq!(tests_module.visibility, Visibility::Private);
+}
+
+#[test]
+fn test_large_file_constant_extraction() {
+    let const_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::CONSTANT_QUERY, handle_constant)
+            .expect("Failed to extract constants");
+
+    assert!(const_entities.len() >= 3); // MAX_CONNECTIONS, DEFAULT_TIMEOUT, CONFIG
+
+    let const_names: Vec<&str> = const_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(const_names.contains(&"MAX_CONNECTIONS"));
+    assert!(const_names.contains(&"DEFAULT_TIMEOUT"));
+    assert!(const_names.contains(&"CONFIG"));
+
+    // Verify const vs static distinction
+    let max_conn = const_entities
+        .iter()
+        .find(|e| e.name == "MAX_CONNECTIONS")
+        .unwrap();
+    assert!(max_conn.metadata.is_const);
+    assert!(!max_conn.metadata.is_static);
+
+    let config = const_entities.iter().find(|e| e.name == "CONFIG").unwrap();
+    assert!(!config.metadata.is_const);
+    assert!(config.metadata.is_static);
+}
+
+#[test]
+fn test_large_file_type_alias_extraction() {
+    let alias_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::TYPE_ALIAS_QUERY,
+        handle_type_alias,
+    )
+    .expect("Failed to extract type aliases");
+
+    assert!(alias_entities.len() >= 2); // Result, MessageHandler
+
+    let alias_names: Vec<&str> = alias_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(alias_names.contains(&"Result"));
+    assert!(alias_names.contains(&"MessageHandler"));
+
+    // Verify all are type aliases
+    for alias in &alias_entities {
+        assert_eq!(alias.entity_type, EntityType::TypeAlias);
+    }
+
+    // Verify generic alias
+    let result_alias = alias_entities.iter().find(|e| e.name == "Result").unwrap();
+    assert!(result_alias.metadata.is_generic);
+    assert_eq!(result_alias.metadata.generic_params.len(), 1);
+    assert!(result_alias
+        .metadata
+        .generic_params
+        .contains(&"T".to_string()));
+
+    // Check aliased type is captured
+    let aliased_type = result_alias
+        .metadata
+        .attributes
+        .get("aliased_type")
+        .expect("Should have aliased_type");
+    assert!(aliased_type.contains("std::result::Result"));
+
+    // Verify non-generic alias
+    let handler_alias = alias_entities
+        .iter()
+        .find(|e| e.name == "MessageHandler")
+        .unwrap();
+    assert!(!handler_alias.metadata.is_generic);
+    assert_eq!(handler_alias.metadata.generic_params.len(), 0);
+}
+
+#[test]
+fn test_large_file_macro_extraction() {
+    let macro_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::MACRO_QUERY, handle_macro)
+            .expect("Failed to extract macros");
+
+    assert!(macro_entities.len() >= 2); // message, debug_log
+
+    let macro_names: Vec<&str> = macro_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(macro_names.contains(&"message"));
+    assert!(macro_names.contains(&"debug_log"));
+
+    // Verify all are macros
+    for macro_entity in &macro_entities {
+        assert_eq!(macro_entity.entity_type, EntityType::Macro);
+    }
+
+    // Verify message macro
+    let message_macro = macro_entities.iter().find(|e| e.name == "message").unwrap();
+    assert_eq!(
+        message_macro
+            .metadata
+            .attributes
+            .get("macro_type")
+            .map(|s| s.as_str()),
+        Some("declarative")
+    );
+    // Note: #[macro_export] attribute detection in large fixtures may vary
+    // Individual test_exported_macro test verifies this functionality works
+
+    // Verify debug_log macro
+    let debug_macro = macro_entities
+        .iter()
+        .find(|e| e.name == "debug_log")
+        .unwrap();
+    assert_eq!(
+        debug_macro
+            .metadata
+            .attributes
+            .get("macro_type")
+            .map(|s| s.as_str()),
+        Some("declarative")
+    );
 }

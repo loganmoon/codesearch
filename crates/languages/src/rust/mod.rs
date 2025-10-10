@@ -43,6 +43,32 @@ impl RustExtractor {
                 queries::TRAIT_QUERY,
                 Box::new(handlers::handle_trait),
             )
+            .add_extractor("impl", queries::IMPL_QUERY, Box::new(handlers::handle_impl))
+            .add_extractor(
+                "impl_trait",
+                queries::IMPL_TRAIT_QUERY,
+                Box::new(handlers::handle_impl_trait),
+            )
+            .add_extractor(
+                "module",
+                queries::MODULE_QUERY,
+                Box::new(handlers::handle_module),
+            )
+            .add_extractor(
+                "constant",
+                queries::CONSTANT_QUERY,
+                Box::new(handlers::handle_constant),
+            )
+            .add_extractor(
+                "type_alias",
+                queries::TYPE_ALIAS_QUERY,
+                Box::new(handlers::handle_type_alias),
+            )
+            .add_extractor(
+                "macro",
+                queries::MACRO_QUERY,
+                Box::new(handlers::handle_macro),
+            )
             .build()?;
 
         Ok(Self {

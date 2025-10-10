@@ -39,7 +39,6 @@ struct ExtractionContext<'a, 'b> {
 }
 
 impl<'a, 'b> ExtractionContext<'a, 'b> {
-    #[allow(dead_code)]
     fn new(
         query_match: &'a QueryMatch<'a, 'b>,
         query: &'a Query,
@@ -62,7 +61,6 @@ impl<'a, 'b> ExtractionContext<'a, 'b> {
 // ============================================================================
 
 /// Generic extraction function that handles common patterns
-#[allow(dead_code)]
 fn extract_type_entity(
     ctx: &ExtractionContext,
     capture_name: &str,
@@ -80,7 +78,6 @@ fn extract_type_entity(
 // ============================================================================
 
 /// Process a struct query match and extract entity data
-#[allow(dead_code)]
 pub fn handle_struct(
     query_match: &QueryMatch,
     query: &Query,
@@ -120,7 +117,6 @@ pub fn handle_struct(
 }
 
 /// Process an enum query match and extract entity data
-#[allow(dead_code)]
 pub fn handle_enum(
     query_match: &QueryMatch,
     query: &Query,
@@ -153,7 +149,6 @@ pub fn handle_enum(
 }
 
 /// Process a trait query match and extract entity data
-#[allow(dead_code)]
 pub fn handle_trait(
     query_match: &QueryMatch,
     query: &Query,
@@ -207,7 +202,6 @@ pub fn handle_trait(
 // ============================================================================
 
 /// Extract the name from the query match
-#[allow(dead_code)]
 fn extract_name(ctx: &ExtractionContext) -> Result<String> {
     Ok(
         find_capture_node(ctx.query_match, ctx.query, capture_names::NAME)
@@ -217,7 +211,6 @@ fn extract_name(ctx: &ExtractionContext) -> Result<String> {
 }
 
 /// Build entity data from extracted information
-#[allow(dead_code)]
 fn build_entity_data(
     ctx: &ExtractionContext,
     name: &str,
@@ -272,7 +265,6 @@ fn build_entity_data(
 // ============================================================================
 
 /// Extract generic parameters
-#[allow(dead_code)]
 fn extract_generics(ctx: &ExtractionContext) -> Vec<String> {
     find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
         .map(|node| extract_generics_from_node(node, ctx.source))
@@ -284,7 +276,6 @@ fn extract_generics(ctx: &ExtractionContext) -> Vec<String> {
 // ============================================================================
 
 /// Extract derive attributes
-#[allow(dead_code)]
 fn extract_derives(ctx: &ExtractionContext) -> Vec<String> {
     ctx.query_match
         .captures
@@ -299,10 +290,9 @@ fn extract_derives(ctx: &ExtractionContext) -> Vec<String> {
                     if let Ok(text) = node_to_text(node, ctx.source) {
                         // Simple pattern matching for #[derive(...)]
                         if text.contains("derive(") {
-                            // Extract content between parentheses
-                            if let Some(start) = text.find('(') {
-                                if let Some(end) = text.rfind(')') {
-                                    let derive_content = &text[start + 1..end];
+                            // Extract content between parentheses - use split for UTF-8 safety
+                            if let Some(after_open) = text.split_once('(') {
+                                if let Some((derive_content, _)) = after_open.1.rsplit_once(')') {
                                     // Split by comma and clean up
                                     derives.extend(
                                         derive_content
@@ -328,7 +318,6 @@ fn extract_derives(ctx: &ExtractionContext) -> Vec<String> {
 // ============================================================================
 
 /// Extract struct fields
-#[allow(dead_code)]
 fn extract_struct_fields(ctx: &ExtractionContext) -> (Vec<FieldInfo>, bool) {
     find_capture_node(ctx.query_match, ctx.query, capture_names::FIELDS)
         .map(|node| {
@@ -344,7 +333,6 @@ fn extract_struct_fields(ctx: &ExtractionContext) -> (Vec<FieldInfo>, bool) {
 }
 
 /// Parse named fields from a struct
-#[allow(dead_code)]
 fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
     let mut cursor = node.walk();
 
@@ -361,9 +349,10 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
                 };
 
                 // Find field name and type separated by colon
-                if let Some(colon_pos) = text.find(':') {
-                    let name_part = text[..colon_pos].trim().trim_start_matches("pub").trim();
-                    let type_part = text[colon_pos + 1..].trim().trim_end_matches(',');
+                // Use split_once for UTF-8 safety
+                if let Some((name_part, type_part)) = text.split_once(':') {
+                    let name_part = name_part.trim().trim_start_matches("pub").trim();
+                    let type_part = type_part.trim().trim_end_matches(',');
 
                     Some(FieldInfo {
                         name: name_part.to_string(),
@@ -380,7 +369,6 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
 }
 
 /// Parse tuple fields from a struct
-#[allow(dead_code)]
 fn parse_tuple_fields(node: Node, source: &str) -> Vec<FieldInfo> {
     let mut cursor = node.walk();
     let mut fields = Vec::new();
@@ -424,7 +412,6 @@ fn parse_tuple_fields(node: Node, source: &str) -> Vec<FieldInfo> {
 // ============================================================================
 
 /// Extract enum variants
-#[allow(dead_code)]
 fn extract_enum_variants(ctx: &ExtractionContext) -> Vec<VariantInfo> {
     find_capture_node(ctx.query_match, ctx.query, capture_names::ENUM_BODY)
         .map(|node| {
@@ -438,7 +425,6 @@ fn extract_enum_variants(ctx: &ExtractionContext) -> Vec<VariantInfo> {
 }
 
 /// Parse a single enum variant
-#[allow(dead_code)]
 fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
     let text = node_to_text(node, source).ok()?;
 
@@ -447,17 +433,16 @@ fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .find(|s| !s.is_empty())?;
 
-    // Check for discriminant (= value)
+    // Check for discriminant (= value) - use split_once for UTF-8 safety
     let discriminant = text
-        .find('=')
-        .map(|eq_pos| text[eq_pos + 1..].trim().trim_end_matches(',').to_string());
+        .split_once('=')
+        .map(|(_, value)| value.trim().trim_end_matches(',').to_string());
 
     // Extract fields based on variant type
     let fields = if text.contains('(') && text.contains(')') {
-        // Tuple variant - extract fields between parentheses
-        if let Some(start) = text.find('(') {
-            if let Some(end) = text.find(')') {
-                let fields_text = &text[start + 1..end];
+        // Tuple variant - extract fields between parentheses - use split for UTF-8 safety
+        if let Some(after_paren) = text.split_once('(') {
+            if let Some((fields_text, _)) = after_paren.1.split_once(')') {
                 if !fields_text.trim().is_empty() {
                     fields_text
                         .split(',')
@@ -503,7 +488,6 @@ fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
 // ============================================================================
 
 /// Extract trait bounds
-#[allow(dead_code)]
 fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
     find_capture_node(ctx.query_match, ctx.query, capture_names::BOUNDS)
         .map(|node| {
@@ -524,7 +508,6 @@ fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
 }
 
 /// Extract trait members (associated types and methods)
-#[allow(dead_code)]
 fn extract_trait_members(ctx: &ExtractionContext) -> (Vec<String>, Vec<String>) {
     find_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT_BODY)
         .map(|node| {
@@ -554,7 +537,6 @@ fn extract_trait_members(ctx: &ExtractionContext) -> (Vec<String>, Vec<String>) 
 }
 
 /// Extract associated type name
-#[allow(dead_code)]
 fn extract_associated_type_name(node: Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     let children: Vec<_> = node.children(&mut cursor).collect();
@@ -565,7 +547,6 @@ fn extract_associated_type_name(node: Node, source: &str) -> Option<String> {
 }
 
 /// Extract method name
-#[allow(dead_code)]
 fn extract_method_name(node: Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     let children: Vec<_> = node.children(&mut cursor).collect();
@@ -582,7 +563,6 @@ fn extract_method_name(node: Node, source: &str) -> Option<String> {
 }
 
 /// Check if a trait has the unsafe modifier
-#[allow(dead_code)]
 fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
     // Get the trait node (this is the trait_item node)
     if let Ok(trait_node) = require_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT) {

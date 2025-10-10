@@ -12,13 +12,7 @@
 // ============================================================================
 
 /// Node kind constants for tree-sitter AST traversal
-#[allow(dead_code)]
 pub(crate) mod node_kinds {
-    // Type definitions
-    pub const STRUCT: &str = "struct";
-    pub const ENUM: &str = "enum";
-    pub const TRAIT: &str = "trait";
-
     // Function related
     pub const FUNCTION_ITEM: &str = "function_item";
     pub const FUNCTION_SIGNATURE_ITEM: &str = "function_signature_item";
@@ -28,15 +22,11 @@ pub(crate) mod node_kinds {
 
     // Attributes and modifiers
     pub const ATTRIBUTE_ITEM: &str = "attribute_item";
-    pub const ATTRIBUTE: &str = "attribute";
     pub const VISIBILITY_MODIFIER: &str = "visibility_modifier";
-    pub const MUTABLE_SPECIFIER: &str = "mutable_specifier";
-    pub const MUT_PATTERN: &str = "mut_pattern";
 
     // Identifiers
     pub const IDENTIFIER: &str = "identifier";
     pub const TYPE_IDENTIFIER: &str = "type_identifier";
-    pub const FIELD_IDENTIFIER: &str = "field_identifier";
     pub const SCOPED_IDENTIFIER: &str = "scoped_identifier";
     pub const SCOPED_TYPE_IDENTIFIER: &str = "scoped_type_identifier";
 
@@ -57,11 +47,6 @@ pub(crate) mod node_kinds {
     // Trait members
     pub const ASSOCIATED_TYPE: &str = "associated_type";
 
-    // Meta and token trees
-    pub const TOKEN_TREE: &str = "token_tree";
-    pub const META_ARGUMENTS: &str = "meta_arguments";
-    pub const META_ITEM: &str = "meta_item";
-
     // Comments
     pub const LINE_COMMENT: &str = "line_comment";
     pub const BLOCK_COMMENT: &str = "block_comment";
@@ -72,7 +57,6 @@ pub(crate) mod node_kinds {
 // ============================================================================
 
 /// Capture name constants for tree-sitter queries
-#[allow(dead_code)]
 pub(crate) mod capture_names {
     pub const NAME: &str = "name";
     pub const STRUCT: &str = "struct";
@@ -88,6 +72,10 @@ pub(crate) mod capture_names {
     pub const PARAMS: &str = "params";
     pub const RETURN: &str = "return";
     pub const MODIFIERS: &str = "modifiers";
+    pub const IMPL: &str = "impl";
+    pub const IMPL_TRAIT: &str = "impl_trait";
+    pub const IMPL_BODY: &str = "impl_body";
+    pub const TYPE: &str = "type";
 }
 
 // ============================================================================
@@ -95,7 +83,6 @@ pub(crate) mod capture_names {
 // ============================================================================
 
 /// Visibility keywords
-#[allow(dead_code)]
 pub(crate) mod visibility_keywords {
     pub const PUB: &str = "pub";
     pub const CRATE: &str = "crate";
@@ -105,7 +92,6 @@ pub(crate) mod visibility_keywords {
 }
 
 /// Function modifier keywords
-#[allow(dead_code)]
 pub(crate) mod function_modifiers {
     pub const ASYNC: &str = "async";
     pub const UNSAFE: &str = "unsafe";
@@ -113,7 +99,6 @@ pub(crate) mod function_modifiers {
 }
 
 /// Other language keywords
-#[allow(dead_code)]
 pub(crate) mod keywords {
     pub const FN: &str = "fn";
     pub const SELF: &str = "self";
@@ -124,9 +109,7 @@ pub(crate) mod keywords {
 // ============================================================================
 
 /// Special identifiers and names
-#[allow(dead_code)]
 pub(crate) mod special_idents {
-    pub const DERIVE: &str = "derive";
     pub const ANONYMOUS: &str = "anonymous";
     pub const VARIADIC: &str = "...";
 }
@@ -136,7 +119,6 @@ pub(crate) mod special_idents {
 // ============================================================================
 
 /// Documentation comment prefixes
-#[allow(dead_code)]
 pub(crate) mod doc_prefixes {
     pub const LINE_OUTER: &str = "///";
     pub const LINE_INNER: &str = "//!";
@@ -150,16 +132,11 @@ pub(crate) mod doc_prefixes {
 // ============================================================================
 
 /// Punctuation tokens
-#[allow(dead_code)]
 pub(crate) mod punctuation {
     pub const OPEN_PAREN: &str = "(";
     pub const CLOSE_PAREN: &str = ")";
-    pub const OPEN_BRACKET: &str = "[";
-    pub const CLOSE_BRACKET: &str = "]";
     pub const OPEN_ANGLE: &str = "<";
     pub const CLOSE_ANGLE: &str = ">";
     pub const COMMA: &str = ",";
-    pub const COLON: &str = ":";
-    pub const EQUALS: &str = "=";
     pub const PLUS: &str = "+";
 }

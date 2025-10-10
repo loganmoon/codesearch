@@ -10,16 +10,12 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handlers::common::{
-    extract_preceding_doc_comments, extract_visibility, node_to_text, require_capture_node,
+    build_entity, extract_common_components, node_to_text, require_capture_node,
 };
 use crate::rust::handlers::constants::capture_names;
-use codesearch_core::entities::{
-    CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation,
-};
-use codesearch_core::entity_id::generate_entity_id;
-use codesearch_core::error::{Error, Result};
+use codesearch_core::entities::{EntityMetadata, EntityType};
+use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
@@ -32,12 +28,19 @@ pub fn handle_macro(
     file_path: &Path,
     repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    // Extract name
-    let name_node = require_capture_node(query_match, query, capture_names::NAME)?;
-    let name = node_to_text(name_node, source)?;
-
     // Extract the main macro node
     let main_node = require_capture_node(query_match, query, "macro")?;
+
+    // Extract common components
+    let components = extract_common_components(
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
+        capture_names::NAME,
+        main_node,
+    )?;
 
     // Check for #[macro_export] attribute
     // Use the first capture node like extract_derives does
@@ -47,26 +50,6 @@ pub fn handle_macro(
         .map(|c| c.node)
         .unwrap_or(main_node);
     let is_exported = check_macro_export(check_node, source);
-
-    // Extract visibility (macros typically don't have visibility modifiers directly)
-    let visibility = extract_visibility(query_match, query);
-
-    // Extract documentation
-    let documentation = extract_preceding_doc_comments(main_node, source);
-
-    // Build qualified name via parent traversal (macros are typically top-level)
-    let parent_scope = build_qualified_name_from_ast(main_node, source, "rust");
-    let qualified_name = if parent_scope.is_empty() {
-        name.clone()
-    } else {
-        format!("{parent_scope}::{name}")
-    };
-
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
@@ -81,31 +64,8 @@ pub fn handle_macro(
         .attributes
         .insert("exported".to_string(), is_exported.to_string());
 
-    // Get location and content
-    let location = SourceLocation::from_tree_sitter_node(main_node);
-    let content = node_to_text(main_node, source).ok();
-
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(qualified_name)
-        .parent_scope(if parent_scope.is_empty() {
-            None
-        } else {
-            Some(parent_scope)
-        })
-        .entity_type(EntityType::Macro)
-        .location(location)
-        .visibility(visibility)
-        .documentation_summary(documentation)
-        .content(content)
-        .metadata(metadata)
-        .language(Language::Rust)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))?;
+    // Build the entity using the common helper
+    let entity = build_entity(components, EntityType::Macro, metadata, None)?;
 
     Ok(vec![entity])
 }

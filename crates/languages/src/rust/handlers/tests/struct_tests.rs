@@ -1,6 +1,7 @@
 //! Tests for struct extraction handler
 
 use super::*;
+use crate::rust::entities::FieldInfo;
 use crate::rust::handlers::type_handlers::handle_struct;
 use codesearch_core::entities::{EntityType, Visibility};
 
@@ -46,13 +47,14 @@ struct TupleStruct(i32, String, bool);
         Some("tuple")
     );
 
-    // Check fields (stored as comma-separated in attributes)
+    // Check fields (stored as JSON in attributes)
     let fields_str = entity
         .metadata
         .attributes
         .get("fields")
         .expect("Tuple struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 3);
 }
 
@@ -83,12 +85,15 @@ struct User {
         .attributes
         .get("fields")
         .expect("Struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 4);
-    assert!(fields.contains(&"id"));
-    assert!(fields.contains(&"name"));
-    assert!(fields.contains(&"email"));
-    assert!(fields.contains(&"is_active"));
+
+    let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    assert!(field_names.contains(&"id"));
+    assert!(field_names.contains(&"name"));
+    assert!(field_names.contains(&"email"));
+    assert!(field_names.contains(&"is_active"));
 }
 
 #[test]
@@ -124,7 +129,8 @@ where
         .attributes
         .get("fields")
         .expect("Struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 3);
 }
 
@@ -186,7 +192,8 @@ struct Reference<'a, 'b: 'a> {
         .attributes
         .get("fields")
         .expect("Struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 2);
 }
 
@@ -242,10 +249,13 @@ where
         .attributes
         .get("fields")
         .expect("Struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 2);
-    assert!(fields.contains(&"data"));
-    assert!(fields.contains(&"cache"));
+
+    let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    assert!(field_names.contains(&"data"));
+    assert!(field_names.contains(&"cache"));
 }
 
 #[test]
@@ -272,8 +282,17 @@ pub struct MixedVisibility {
         .attributes
         .get("fields")
         .expect("Struct should have fields");
-    let fields: Vec<&str> = fields_str.split(',').collect();
+    let fields: Vec<FieldInfo> =
+        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
     assert_eq!(fields.len(), 3);
-    // Note: Individual field visibility is not currently preserved in the simplified model
-    // This is a trade-off for simplification
+
+    // Now we CAN check individual field visibility since we're storing FieldInfo!
+    let public_field = fields.iter().find(|f| f.name == "public_field").unwrap();
+    assert_eq!(public_field.visibility, Visibility::Public);
+
+    let private_field = fields.iter().find(|f| f.name == "private_field").unwrap();
+    assert_eq!(private_field.visibility, Visibility::Private);
+
+    let crate_field = fields.iter().find(|f| f.name == "crate_field").unwrap();
+    assert_eq!(crate_field.visibility, Visibility::Public); // pub(crate) is captured as Public
 }

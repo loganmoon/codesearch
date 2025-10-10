@@ -7,20 +7,14 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handlers::common::{
-    extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
-    find_capture_node, node_to_text, require_capture_node,
+    build_entity, extract_common_components, extract_generics_from_node, find_capture_node,
+    node_to_text, require_capture_node,
 };
-use crate::rust::handlers::constants::{
-    capture_names, keywords, node_kinds, punctuation, special_idents,
-};
-use codesearch_core::entities::{
-    CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation, Visibility,
-};
-use codesearch_core::entity_id::generate_entity_id;
-use codesearch_core::error::{Error, Result};
+use crate::rust::handlers::constants::{capture_names, keywords, node_kinds, punctuation};
+use codesearch_core::entities::{EntityMetadata, EntityType, Visibility};
+use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
@@ -67,10 +61,9 @@ fn extract_type_entity(
     entity_type: EntityType,
     build_metadata: impl FnOnce(&ExtractionContext) -> EntityMetadata,
 ) -> Result<CodeEntity> {
-    let name = extract_name(ctx)?;
     let main_node = require_capture_node(ctx.query_match, ctx.query, capture_name)?;
     let metadata = build_metadata(ctx);
-    build_entity_data(ctx, &name, main_node, entity_type, metadata)
+    build_entity_data(ctx, main_node, entity_type, metadata)
 }
 
 // ============================================================================
@@ -105,10 +98,9 @@ pub fn handle_struct(
 
         // Store field info as JSON in attributes
         if !fields.is_empty() {
-            let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-            metadata
-                .attributes
-                .insert("fields".to_string(), field_names.join(","));
+            if let Ok(json) = serde_json::to_string(&fields) {
+                metadata.attributes.insert("fields".to_string(), json);
+            }
         }
 
         metadata
@@ -135,12 +127,11 @@ pub fn handle_enum(
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.decorators = derives;
 
-        // Store variant info in attributes
+        // Store variant info as JSON in attributes
         if !variants.is_empty() {
-            let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-            metadata
-                .attributes
-                .insert("variants".to_string(), variant_names.join(","));
+            if let Ok(json) = serde_json::to_string(&variants) {
+                metadata.attributes.insert("variants".to_string(), json);
+            }
         }
 
         metadata
@@ -201,63 +192,26 @@ pub fn handle_trait(
 // Core Extraction Functions
 // ============================================================================
 
-/// Extract the name from the query match
-fn extract_name(ctx: &ExtractionContext) -> Result<String> {
-    Ok(
-        find_capture_node(ctx.query_match, ctx.query, capture_names::NAME)
-            .and_then(|node| node_to_text(node, ctx.source).ok())
-            .unwrap_or_else(|| special_idents::ANONYMOUS.to_string()),
-    )
-}
-
 /// Build entity data from extracted information
 fn build_entity_data(
     ctx: &ExtractionContext,
-    name: &str,
     main_node: Node,
     entity_type: EntityType,
     metadata: EntityMetadata,
 ) -> Result<CodeEntity> {
-    let location = SourceLocation::from_tree_sitter_node(main_node);
-    let content = node_to_text(main_node, ctx.source).ok();
-    let visibility = extract_visibility(ctx.query_match, ctx.query);
-    let documentation = extract_preceding_doc_comments(main_node, ctx.source);
+    // Extract common components using the shared helper
+    let components = extract_common_components(
+        ctx.query_match,
+        ctx.query,
+        ctx.source,
+        ctx.file_path,
+        ctx.repository_id,
+        capture_names::NAME,
+        main_node,
+    )?;
 
-    // Build qualified name via parent traversal
-    let parent_scope = build_qualified_name_from_ast(main_node, ctx.source, "rust");
-    let qualified_name = if parent_scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{parent_scope}::{name}")
-    };
-
-    // Generate entity_id from repository + file_path + qualified name
-    let file_path_str = ctx
-        .file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
-
-    CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(ctx.repository_id.to_string())
-        .name(name.to_string())
-        .qualified_name(qualified_name)
-        .parent_scope(if parent_scope.is_empty() {
-            None
-        } else {
-            Some(parent_scope)
-        })
-        .entity_type(entity_type)
-        .location(location.clone())
-        .visibility(visibility)
-        .documentation_summary(documentation)
-        .content(content)
-        .metadata(metadata)
-        .language(Language::Rust)
-        .file_path(ctx.file_path.to_path_buf())
-        .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
+    // Build the entity using the common helper
+    build_entity(components, entity_type, metadata, None)
 }
 
 // ============================================================================
@@ -351,11 +305,17 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
                 // Find field name and type separated by colon
                 // Use split_once for UTF-8 safety
                 if let Some((name_part, type_part)) = text.split_once(':') {
-                    let name_part = name_part.trim().trim_start_matches("pub").trim();
+                    // Extract the field name by taking the last word before the colon
+                    // This handles pub, pub(crate), pub(super), etc.
+                    let field_name = name_part
+                        .split_whitespace()
+                        .last()
+                        .unwrap_or(name_part.trim())
+                        .to_string();
                     let type_part = type_part.trim().trim_end_matches(',');
 
                     Some(FieldInfo {
-                        name: name_part.to_string(),
+                        name: field_name,
                         field_type: type_part.to_string(),
                         visibility,
                         attributes: Vec::new(),

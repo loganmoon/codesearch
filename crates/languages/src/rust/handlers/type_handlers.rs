@@ -290,10 +290,9 @@ fn extract_derives(ctx: &ExtractionContext) -> Vec<String> {
                     if let Ok(text) = node_to_text(node, ctx.source) {
                         // Simple pattern matching for #[derive(...)]
                         if text.contains("derive(") {
-                            // Extract content between parentheses
-                            if let Some(start) = text.find('(') {
-                                if let Some(end) = text.rfind(')') {
-                                    let derive_content = &text[start + 1..end];
+                            // Extract content between parentheses - use split for UTF-8 safety
+                            if let Some(after_open) = text.split_once('(') {
+                                if let Some((derive_content, _)) = after_open.1.rsplit_once(')') {
                                     // Split by comma and clean up
                                     derives.extend(
                                         derive_content
@@ -350,9 +349,10 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
                 };
 
                 // Find field name and type separated by colon
-                if let Some(colon_pos) = text.find(':') {
-                    let name_part = text[..colon_pos].trim().trim_start_matches("pub").trim();
-                    let type_part = text[colon_pos + 1..].trim().trim_end_matches(',');
+                // Use split_once for UTF-8 safety
+                if let Some((name_part, type_part)) = text.split_once(':') {
+                    let name_part = name_part.trim().trim_start_matches("pub").trim();
+                    let type_part = type_part.trim().trim_end_matches(',');
 
                     Some(FieldInfo {
                         name: name_part.to_string(),
@@ -433,17 +433,16 @@ fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .find(|s| !s.is_empty())?;
 
-    // Check for discriminant (= value)
+    // Check for discriminant (= value) - use split_once for UTF-8 safety
     let discriminant = text
-        .find('=')
-        .map(|eq_pos| text[eq_pos + 1..].trim().trim_end_matches(',').to_string());
+        .split_once('=')
+        .map(|(_, value)| value.trim().trim_end_matches(',').to_string());
 
     // Extract fields based on variant type
     let fields = if text.contains('(') && text.contains(')') {
-        // Tuple variant - extract fields between parentheses
-        if let Some(start) = text.find('(') {
-            if let Some(end) = text.find(')') {
-                let fields_text = &text[start + 1..end];
+        // Tuple variant - extract fields between parentheses - use split for UTF-8 safety
+        if let Some(after_paren) = text.split_once('(') {
+            if let Some((fields_text, _)) = after_paren.1.split_once(')') {
                 if !fields_text.trim().is_empty() {
                     fields_text
                         .split(',')

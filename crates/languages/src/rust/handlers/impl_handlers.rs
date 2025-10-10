@@ -265,18 +265,29 @@ fn extract_impl_methods(
 }
 
 /// Determine if a function should be typed as a Method
-/// A function is a method if it has a self parameter OR returns Self
+///
+/// A function is classified as a method if it has a `self` parameter OR returns `Self`.
+///
+/// ## Semantic Choice
+/// This classification diverges from standard Rust semantics where functions like
+/// `fn new() -> Self` are considered "associated functions" rather than methods.
+/// However, for semantic code search purposes, we classify functions returning `Self`
+/// as methods because they are conceptually instance-related operations.
+///
+/// ## Implementation Notes
+/// - Uses word-boundary matching to avoid false positives (e.g., `SelfService`, `SelfReference`)
+/// - Handles common `Self` variations: `Self`, `Option<Self>`, `Result<Self, E>`, etc.
 fn is_method(parameters: &[(String, String)], return_type: &Option<String>) -> bool {
     // Check for self parameter (any variant: self, &self, &mut self, mut self)
     let has_self_param = parameters.iter().any(|(name, _)| {
         name == "self" || name.starts_with("&self") || name.starts_with("mut self")
     });
 
-    // Check for Self return type
-    let returns_self = return_type
-        .as_ref()
-        .map(|rt| rt.contains("Self"))
-        .unwrap_or(false);
+    // Check for Self return type using word-boundary matching
+    let returns_self = return_type.as_ref().is_some_and(|rt| {
+        rt.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|token| token == "Self")
+    });
 
     has_self_param || returns_self
 }
@@ -366,24 +377,12 @@ fn extract_associated_constant(
         .map_err(|e| Error::entity_extraction(format!("Failed to build constant entity: {e}")))
 }
 
-/// Find the function_modifiers node in a function_item node
-fn find_modifiers_node(node: Node) -> Option<Node> {
+/// Find a child node by kind
+#[allow(clippy::manual_find)]
+fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
     for child in node.children(&mut cursor) {
-        if child.kind() == "function_modifiers" {
-            return Some(child);
-        }
-    }
-    None
-}
-
-/// Find the parameters node in a function_item node
-fn find_parameters_node(node: Node) -> Option<Node> {
-    let mut cursor = node.walk();
-    #[allow(clippy::manual_find)]
-    for child in node.children(&mut cursor) {
-        if child.kind() == "parameters" {
+        if child.kind() == kind {
             return Some(child);
         }
     }
@@ -415,7 +414,7 @@ fn extract_method(
     let visibility = extract_method_visibility(method_node);
 
     // Extract modifiers by finding the function_modifiers node
-    let (is_async, is_unsafe, is_const) = find_modifiers_node(method_node)
+    let (is_async, is_unsafe, is_const) = find_child_by_kind(method_node, "function_modifiers")
         .map(extract_function_modifiers)
         .unwrap_or((false, false, false));
 
@@ -423,7 +422,7 @@ fn extract_method(
     let generics = extract_method_generics(method_node, source);
 
     // Extract parameters by finding the parameters node
-    let parameters = find_parameters_node(method_node)
+    let parameters = find_child_by_kind(method_node, "parameters")
         .map(|params_node| extract_function_parameters(params_node, source))
         .transpose()?
         .unwrap_or_default();

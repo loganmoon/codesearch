@@ -102,12 +102,20 @@ pub fn extract_preceding_doc_comments(node: Node, source: &str) -> Option<String
     }
 }
 
+/// Maximum number of documentation lines to collect to prevent unbounded resource consumption
+const MAX_DOC_LINES: usize = 1000;
+
 /// Collect documentation lines from preceding siblings
 fn collect_doc_lines(node: Node, source: &str) -> Vec<String> {
     let mut doc_lines = Vec::new();
     let mut current = node.prev_sibling();
 
     while let Some(sibling) = current {
+        // Prevent unbounded resource consumption
+        if doc_lines.len() >= MAX_DOC_LINES {
+            break;
+        }
+
         match sibling.kind() {
             node_kinds::LINE_COMMENT => {
                 if let Some(doc_text) = extract_line_doc_text(sibling, source) {
@@ -256,6 +264,16 @@ pub fn extract_function_parameters(
 }
 
 /// Extract pattern and type parts from a parameter node
+///
+/// # UTF-8 Safety
+/// Uses `split_once(':')` instead of byte-index splitting to ensure UTF-8
+/// character boundaries are respected. This prevents panics when parameter
+/// names or types contain multi-byte Unicode characters.
+///
+/// For example, with a parameter like `名前: String`, using byte indices from
+/// `find(':')` could panic if the split point falls within the multi-byte
+/// character sequence. `split_once` safely handles this by operating on
+/// character boundaries.
 pub fn extract_parameter_parts(node: Node, source: &str) -> Result<Option<(String, String)>> {
     let full_text = node_to_text(node, source)?;
 

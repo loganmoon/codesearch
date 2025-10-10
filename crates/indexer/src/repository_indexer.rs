@@ -2,9 +2,10 @@
 //!
 //! Provides the main three-stage indexing pipeline for processing repositories.
 
-use crate::common::find_files;
+use crate::common::{find_files, get_current_commit, path_to_str};
+use crate::config::IndexerConfig;
 use crate::entity_processor;
-use crate::{IndexResult, IndexStats};
+use crate::{IndexError, IndexResult, IndexStats};
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_embeddings::EmbeddingManager;
@@ -12,37 +13,10 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, error, info};
 
-/// Progress tracking for indexing operations (internal)
-#[derive(Debug, Clone)]
-struct IndexProgress {
-    pub processed_files: usize,
-    pub failed_files: usize,
-    pub current_file: Option<String>,
-}
-
-impl IndexProgress {
-    fn new(_total_files: usize) -> Self {
-        Self {
-            processed_files: 0,
-            failed_files: 0,
-            current_file: None,
-        }
-    }
-
-    fn update(&mut self, file: &str, success: bool) {
-        self.current_file = Some(file.to_string());
-        if success {
-            self.processed_files += 1;
-        } else {
-            self.failed_files += 1;
-        }
-    }
-}
-
 /// Main repository indexer
 pub struct RepositoryIndexer {
     repository_path: PathBuf,
-    repository_id: String,
+    repository_id: uuid::Uuid,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
@@ -56,14 +30,17 @@ impl RepositoryIndexer {
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let repository_id = uuid::Uuid::parse_str(&repository_id)
+            .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
+        Ok(Self {
             repository_path,
             repository_id,
             embedding_manager,
             postgres_client,
             git_repo,
-        }
+        })
     }
 
     /// Get the repository path
@@ -73,7 +50,7 @@ impl RepositoryIndexer {
 
     /// Process a batch of files for better performance
     async fn process_batch(&mut self, file_paths: &[PathBuf]) -> Result<IndexStats> {
-        debug!("Processing batch of {} files", file_paths.len());
+        debug!(batch_size = file_paths.len(), "Processing batch of files");
 
         // Process statistics
         let mut stats = IndexStats::default();
@@ -81,35 +58,37 @@ impl RepositoryIndexer {
         // Collect all entities from the batch
         let mut batch_entities = Vec::new();
 
-        // Track all processed file paths for stale entity detection
-        let mut processed_files: Vec<PathBuf> = Vec::new();
+        // Track indices of successfully processed files (to avoid cloning paths)
+        let mut processed_indices = Vec::new();
 
         // Extract entities from all files
-        for file_path in file_paths {
-            match entity_processor::extract_entities_from_file(file_path, &self.repository_id).await
-            {
+        let repo_id_str = self.repository_id.to_string();
+        for (idx, file_path) in file_paths.iter().enumerate() {
+            match entity_processor::extract_entities_from_file(file_path, &repo_id_str).await {
                 Ok(entities) => {
                     let entity_count = entities.len();
                     batch_entities.extend(entities);
                     stats.set_entities_extracted(stats.entities_extracted() + entity_count);
-                    processed_files.push(file_path.clone());
+                    processed_indices.push(idx);
                 }
                 Err(e) => {
-                    error!("Failed to extract from {}: {}", file_path.display(), e);
+                    error!(
+                        file_path = %file_path.display(),
+                        error = %e,
+                        "Failed to extract entities"
+                    );
                     stats.increment_failed_files();
                 }
             }
         }
 
-        // Get repository_id and git_commit for all files
-        let repository_id = uuid::Uuid::parse_str(&self.repository_id)
-            .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
-        let git_commit = self.current_git_commit().await.ok();
+        // Get git_commit for all files
+        let git_commit = get_current_commit(self.git_repo.as_ref(), &self.repository_path);
 
         // Process entities with embeddings using shared logic
         let (batch_stats, entities_by_file) = entity_processor::process_entity_batch(
             batch_entities,
-            repository_id,
+            self.repository_id,
             git_commit.clone(),
             &self.embedding_manager,
             self.postgres_client.as_ref(),
@@ -119,17 +98,16 @@ impl RepositoryIndexer {
         stats.entities_skipped_size = batch_stats.entities_skipped_size;
 
         // Detect and handle stale entities for ALL processed files (even empty ones)
-        for file_path in processed_files {
-            let file_path_str = file_path
-                .to_str()
-                .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+        for &idx in &processed_indices {
+            let file_path = &file_paths[idx];
+            let file_path_str = path_to_str(file_path)?;
             let entity_ids = entities_by_file
                 .get(file_path_str)
                 .cloned()
                 .unwrap_or_default();
 
             entity_processor::update_file_snapshot_and_mark_stale(
-                repository_id,
+                self.repository_id,
                 file_path_str,
                 entity_ids,
                 git_commit.clone(),
@@ -140,59 +118,55 @@ impl RepositoryIndexer {
 
         Ok(stats)
     }
-
-    /// Get current Git commit hash
-    async fn current_git_commit(&self) -> Result<String> {
-        if let Some(git) = &self.git_repo {
-            git.current_commit_hash()
-                .map_err(|e| Error::Storage(format!("Failed to get Git commit: {e}")))
-        } else {
-            Ok("no-git".to_string())
-        }
-    }
 }
 
 #[async_trait]
 impl crate::Indexer for RepositoryIndexer {
     /// Index the entire repository
     async fn index_repository(&mut self) -> Result<IndexResult> {
-        info!("Starting repository indexing: {:?}", self.repository_path);
+        info!(
+            repository_path = %self.repository_path.display(),
+            "Starting repository indexing"
+        );
         let start_time = Instant::now();
 
         // Find all files to process
         let files = find_files(&self.repository_path)?;
-        info!("Found {} files to process", files.len());
+        info!(file_count = files.len(), "Found files to process");
 
-        // Create progress tracking
-        let mut progress = IndexProgress::new(files.len());
-
-        // Process statistics
+        // Process statistics and errors
         let mut stats = IndexStats::new();
+        let mut errors = Vec::new();
 
         // Process files in batches for better performance
-        const BATCH_SIZE: usize = 100; // Configurable batch size
+        let config = IndexerConfig::default();
 
-        for chunk in files.chunks(BATCH_SIZE) {
+        for chunk in files.chunks(config.index_batch_size) {
             match self.process_batch(chunk).await {
                 Ok(batch_stats) => {
                     stats.merge(batch_stats);
-                    for file_path in chunk {
-                        progress.update(&file_path.to_string_lossy(), true);
-                    }
                 }
                 Err(e) => {
-                    error!("Failed to process batch: {}", e);
+                    error!(
+                        error = %e,
+                        batch_size = chunk.len(),
+                        "Failed to process batch, falling back to individual file processing"
+                    );
                     // Process failed batch files individually as fallback (batch size of 1)
                     for file_path in chunk {
                         match self.process_batch(std::slice::from_ref(file_path)).await {
                             Ok(file_stats) => {
                                 stats.merge(file_stats);
-                                progress.update(&file_path.to_string_lossy(), true);
                             }
                             Err(e) => {
-                                error!("Failed to process file {:?}: {}", file_path, e);
+                                let file_path_str = file_path.display().to_string();
+                                error!(
+                                    file_path = %file_path_str,
+                                    error = %e,
+                                    "Failed to process individual file"
+                                );
+                                errors.push(IndexError::new(file_path_str, e.to_string()));
                                 stats.increment_failed_files();
-                                progress.update(&file_path.to_string_lossy(), false);
                             }
                         }
                     }
@@ -200,21 +174,20 @@ impl crate::Indexer for RepositoryIndexer {
             }
         }
 
-        info!("Indexing complete");
-
         // Calculate final statistics
         stats.set_total_files(files.len());
         stats.set_processing_time_ms(start_time.elapsed().as_millis() as u64);
 
         info!(
-            "Indexing complete: {} files, {} entities, {} relationships in {:.2}s",
-            stats.total_files(),
-            stats.entities_extracted(),
-            stats.relationships_extracted(),
-            stats.processing_time_ms() as f64 / 1000.0
+            total_files = stats.total_files(),
+            entities_extracted = stats.entities_extracted(),
+            processing_time_s = stats.processing_time_ms() as f64 / 1000.0,
+            failed_files = stats.failed_files(),
+            error_count = errors.len(),
+            "Indexing complete"
         );
 
-        Ok(IndexResult::new(stats, Vec::new()))
+        Ok(IndexResult::new(stats, errors))
     }
 }
 

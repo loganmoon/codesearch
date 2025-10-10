@@ -3,6 +3,7 @@
 //! This module provides common functions for entity extraction, embedding generation,
 //! and storage that are used by both full repository indexing and incremental file updates.
 
+use crate::common::{path_to_str, ResultExt};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
@@ -18,7 +19,14 @@ const DELIM: &str = " ";
 
 /// Extract embeddable content from a CodeEntity
 pub fn extract_embedding_content(entity: &CodeEntity) -> String {
-    let mut content = String::with_capacity(500);
+    // Calculate accurate capacity
+    let estimated_size = entity.name.len()
+        + entity.qualified_name.len()
+        + entity.documentation_summary.as_ref().map_or(0, |s| s.len())
+        + entity.content.as_ref().map_or(0, |s| s.len())
+        + 100; // Extra padding for delimiters and formatting
+
+    let mut content = String::with_capacity(estimated_size);
 
     // Add entity type and name
     content.push_str(&format!("{} {}", entity.entity_type, entity.name));
@@ -124,7 +132,7 @@ pub async fn process_entity_batch(
     let option_embeddings = embedding_manager
         .embed(embedding_texts)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to generate embeddings: {e}")))?;
+        .storage_err("Failed to generate embeddings")?;
 
     // Filter entities with valid embeddings
     let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> = Vec::new();
@@ -159,7 +167,7 @@ pub async fn process_entity_batch(
     let metadata_map = postgres_client
         .get_entities_metadata_batch(repo_id, &entity_ids)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to fetch entity metadata: {e}")))?;
+        .storage_err("Failed to fetch entity metadata")?;
 
     // Prepare batch data directly as references (no intermediate cloning)
     let mut batch_refs = Vec::new();
@@ -182,11 +190,7 @@ pub async fn process_entity_batch(
         };
 
         // Track for file snapshot
-        let file_path_str = entity
-            .file_path
-            .to_str()
-            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?
-            .to_string();
+        let file_path_str = path_to_str(&entity.file_path)?.to_string();
         entities_by_file
             .entry(file_path_str)
             .or_default()
@@ -205,7 +209,7 @@ pub async fn process_entity_batch(
     postgres_client
         .store_entities_with_outbox_batch(repo_id, &batch_refs)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to store entities: {e}")))?;
+        .storage_err("Failed to store entities")?;
 
     debug!(
         "Successfully stored {} entities",
@@ -226,7 +230,7 @@ pub async fn update_file_snapshot_and_mark_stale(
     let old_entity_ids = postgres_client
         .get_file_snapshot(repo_id, file_path)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to get file snapshot: {e}")))?
+        .storage_err("Failed to get file snapshot")?
         .unwrap_or_default();
 
     let stale_ids: Vec<String> = old_entity_ids
@@ -243,17 +247,13 @@ pub async fn update_file_snapshot_and_mark_stale(
         postgres_client
             .mark_entities_deleted_with_outbox(repo_id, &stale_ids)
             .await
-            .map_err(|e| {
-                Error::Storage(format!(
-                    "Failed to mark entities as deleted with outbox: {e}"
-                ))
-            })?;
+            .storage_err("Failed to mark entities as deleted with outbox")?;
     }
 
     postgres_client
         .update_file_snapshot(repo_id, file_path, new_entity_ids, git_commit)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to update file snapshot: {e}")))?;
+        .storage_err("Failed to update file snapshot")?;
 
     Ok(stale_count)
 }
@@ -269,7 +269,7 @@ pub async fn mark_file_entities_deleted(
     let entity_ids = postgres_client
         .get_file_snapshot(repo_id, file_path)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to get file snapshot: {e}")))?
+        .storage_err("Failed to get file snapshot")?
         .unwrap_or_default();
 
     if entity_ids.is_empty() {
@@ -281,11 +281,7 @@ pub async fn mark_file_entities_deleted(
     postgres_client
         .mark_entities_deleted_with_outbox(repo_id, &entity_ids)
         .await
-        .map_err(|e| {
-            Error::Storage(format!(
-                "Failed to mark entities as deleted with outbox: {e}"
-            ))
-        })?;
+        .storage_err("Failed to mark entities as deleted with outbox")?;
 
     info!("Marked {} entities as deleted", count);
     Ok(count)

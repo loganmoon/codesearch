@@ -4,9 +4,40 @@
 //! pattern matching, and other common tasks.
 
 use codesearch_core::error::{Error, Result};
+use codesearch_watcher::GitRepository;
 use glob::glob;
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
+
+/// Convert a Path to &str with proper error handling
+pub fn path_to_str(path: &Path) -> Result<&str> {
+    path.to_str()
+        .ok_or_else(|| Error::Storage(format!("Invalid file path: {}", path.display())))
+}
+
+/// Get current git commit from a repository, with fallback behavior
+pub fn get_current_commit(git_repo: Option<&GitRepository>, repo_root: &Path) -> Option<String> {
+    git_repo
+        .and_then(|repo| repo.current_commit_hash().ok())
+        .or_else(|| {
+            GitRepository::open(repo_root)
+                .ok()
+                .and_then(|repo| repo.current_commit_hash().ok())
+        })
+}
+
+/// Extension trait for Result types to add storage error context
+pub trait ResultExt<T> {
+    /// Convert error to Storage error with context message
+    #[allow(dead_code)] // Will be used in later phases
+    fn storage_err(self, msg: &str) -> Result<T>;
+}
+
+impl<T, E: std::fmt::Display> ResultExt<T> for std::result::Result<T, E> {
+    fn storage_err(self, msg: &str) -> Result<T> {
+        self.map_err(|e| Error::Storage(format!("{msg}: {e}")))
+    }
+}
 
 /// Default patterns to exclude from indexing
 const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[

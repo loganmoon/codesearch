@@ -2,9 +2,9 @@
 //!
 //! Processes file change events from the watcher in batches for optimal throughput.
 
+use crate::common::{get_current_commit, path_to_str};
 use crate::entity_processor;
 use crate::Result;
-use codesearch_core::error::Error;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::FileChange;
@@ -25,6 +25,17 @@ pub struct ProcessingStats {
     pub entities_deleted: usize,
 }
 
+impl ProcessingStats {
+    /// Merge another stats instance into this one
+    pub fn merge(&mut self, other: ProcessingStats) {
+        self.files_processed += other.files_processed;
+        self.files_failed += other.files_failed;
+        self.entities_added += other.entities_added;
+        self.entities_updated += other.entities_updated;
+        self.entities_deleted += other.entities_deleted;
+    }
+}
+
 /// Process a batch of file changes (always batched, even if batch size is 1)
 pub async fn process_file_changes(
     changes: Vec<FileChange>,
@@ -37,7 +48,10 @@ pub async fn process_file_changes(
         return Ok(ProcessingStats::default());
     }
 
-    info!("Processing batch of {} file changes", changes.len());
+    info!(
+        batch_size = changes.len(),
+        "Processing batch of file changes"
+    );
     let mut stats = ProcessingStats::default();
 
     // Separate changes by type
@@ -64,9 +78,7 @@ pub async fn process_file_changes(
 
     // Handle renames (delete old, index new)
     for (from, to) in renames {
-        let from_str = from
-            .to_str()
-            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+        let from_str = path_to_str(&from)?;
 
         if let Err(e) = entity_processor::mark_file_entities_deleted(
             repo_id,
@@ -76,9 +88,9 @@ pub async fn process_file_changes(
         .await
         {
             warn!(
-                "Failed to handle rename deletion for {}: {}",
-                from.display(),
-                e
+                file_path = %from.display(),
+                error = %e,
+                "Failed to handle rename deletion"
             );
             stats.files_failed += 1;
         } else {
@@ -89,9 +101,7 @@ pub async fn process_file_changes(
 
     // Process deletions
     for path in files_to_delete {
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+        let path_str = path_to_str(&path)?;
 
         match entity_processor::mark_file_entities_deleted(
             repo_id,
@@ -105,7 +115,11 @@ pub async fn process_file_changes(
                 stats.entities_deleted += count;
             }
             Err(e) => {
-                warn!("Failed to handle deletion for {}: {}", path.display(), e);
+                warn!(
+                    file_path = %path.display(),
+                    error = %e,
+                    "Failed to handle deletion"
+                );
                 stats.files_failed += 1;
             }
         }
@@ -129,18 +143,22 @@ pub async fn process_file_changes(
                 stats.entities_updated += batch_stats.entities_updated;
             }
             Err(e) => {
-                warn!("Batch processing failed: {}", e);
+                warn!(
+                    error = %e,
+                    file_count = files_to_index.len(),
+                    "Batch processing failed"
+                );
                 stats.files_failed += files_to_index.len();
             }
         }
     }
 
     info!(
-        "Batch complete: {} processed, {} failed, {} entities added/updated, {} deleted",
-        stats.files_processed,
-        stats.files_failed,
-        stats.entities_added + stats.entities_updated,
-        stats.entities_deleted
+        files_processed = stats.files_processed,
+        files_failed = stats.files_failed,
+        entities_modified = stats.entities_added + stats.entities_updated,
+        entities_deleted = stats.entities_deleted,
+        "Batch complete"
     );
 
     Ok(stats)
@@ -166,7 +184,43 @@ async fn process_file_batch(
             repo_root.join(file_path)
         };
 
-        match entity_processor::extract_entities_from_file(&absolute_path, &repo_id.to_string())
+        // Validate path is within repository bounds (prevent path traversal)
+        let canonical_path = match absolute_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    file_path = %file_path.display(),
+                    error = %e,
+                    "Failed to canonicalize path"
+                );
+                stats.files_failed += 1;
+                continue;
+            }
+        };
+
+        let canonical_repo = match repo_root.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    repo_root = %repo_root.display(),
+                    error = %e,
+                    "Failed to canonicalize repository root"
+                );
+                stats.files_failed += 1;
+                continue;
+            }
+        };
+
+        if !canonical_path.starts_with(&canonical_repo) {
+            warn!(
+                file_path = %file_path.display(),
+                "Path traversal attempt detected: file is outside repository"
+            );
+            stats.files_failed += 1;
+            continue;
+        }
+
+        match entity_processor::extract_entities_from_file(&canonical_path, &repo_id.to_string())
             .await
         {
             Ok(entities) => {
@@ -174,17 +228,18 @@ async fn process_file_batch(
                 stats.files_processed += 1;
             }
             Err(e) => {
-                warn!("Failed to extract from {}: {}", file_path.display(), e);
+                warn!(
+                    file_path = %file_path.display(),
+                    error = %e,
+                    "Failed to extract entities"
+                );
                 stats.files_failed += 1;
             }
         }
     }
 
     // Get git commit
-    let git_repo = codesearch_watcher::GitRepository::open(repo_root).ok();
-    let git_commit = git_repo
-        .as_ref()
-        .and_then(|repo| repo.current_commit_hash().ok());
+    let git_commit = get_current_commit(None, repo_root);
 
     // Process entities with embeddings using shared logic
     let (batch_stats, entities_by_file) = entity_processor::process_entity_batch(
@@ -201,9 +256,7 @@ async fn process_file_batch(
 
     // Update file snapshots and handle stale entities
     for file_path in file_paths {
-        let file_path_str = file_path
-            .to_str()
-            .ok_or_else(|| Error::Storage("Invalid file path".to_string()))?;
+        let file_path_str = path_to_str(file_path)?;
 
         let new_entity_ids = entities_by_file
             .get(file_path_str)
@@ -219,9 +272,64 @@ async fn process_file_batch(
         )
         .await
         {
-            warn!("Failed to update snapshot for {}: {}", file_path_str, e);
+            warn!(
+                file_path = file_path_str,
+                error = %e,
+                "Failed to update file snapshot"
+            );
         }
     }
 
     Ok(stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_processing_stats_merge() {
+        let mut stats1 = ProcessingStats {
+            files_processed: 5,
+            files_failed: 1,
+            entities_added: 10,
+            entities_updated: 3,
+            entities_deleted: 2,
+        };
+
+        let stats2 = ProcessingStats {
+            files_processed: 3,
+            files_failed: 2,
+            entities_added: 7,
+            entities_updated: 1,
+            entities_deleted: 0,
+        };
+
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.files_processed, 8);
+        assert_eq!(stats1.files_failed, 3);
+        assert_eq!(stats1.entities_added, 17);
+        assert_eq!(stats1.entities_updated, 4);
+        assert_eq!(stats1.entities_deleted, 2);
+    }
+
+    #[test]
+    fn test_processing_stats_merge_with_empty() {
+        let mut stats = ProcessingStats {
+            files_processed: 5,
+            files_failed: 1,
+            entities_added: 10,
+            entities_updated: 3,
+            entities_deleted: 2,
+        };
+
+        stats.merge(ProcessingStats::default());
+
+        assert_eq!(stats.files_processed, 5);
+        assert_eq!(stats.files_failed, 1);
+        assert_eq!(stats.entities_added, 10);
+        assert_eq!(stats.entities_updated, 3);
+        assert_eq!(stats.entities_deleted, 2);
+    }
 }

@@ -13,13 +13,19 @@ use std::path::PathBuf;
 
 // Private implementation modules
 mod common;
+mod config;
 mod entity_processor;
+mod event_batcher;
 mod repository_indexer;
-mod types;
 
 // Public modules for file change processing
 pub mod catch_up_indexer;
 pub mod file_change_processor;
+
+use event_batcher::EventBatcher;
+
+// Re-export config for public use
+pub use config::IndexerConfig;
 
 // Re-export error types from core
 pub use codesearch_core::error::{Error, Result};
@@ -44,13 +50,29 @@ pub trait Indexer: Send + Sync {
     async fn index_repository(&mut self) -> Result<IndexResult>;
 }
 
+/// A partial error that occurred during indexing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexError {
+    /// The file path where the error occurred
+    pub file_path: String,
+    /// The error message
+    pub message: String,
+}
+
+impl IndexError {
+    /// Create a new IndexError
+    pub fn new(file_path: String, message: String) -> Self {
+        Self { file_path, message }
+    }
+}
+
 /// Result of an indexing operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexResult {
     /// Statistics about the indexing operation
     stats: IndexStats,
     /// Any errors that occurred (non-fatal)
-    errors: Vec<String>,
+    errors: Vec<IndexError>,
 }
 
 impl IndexResult {
@@ -60,12 +82,12 @@ impl IndexResult {
     }
 
     /// Get any errors that occurred during indexing
-    pub fn errors(&self) -> &[String] {
+    pub fn errors(&self) -> &[IndexError] {
         &self.errors
     }
 
     /// Create a new IndexResult (for internal use)
-    pub(crate) fn new(stats: IndexStats, errors: Vec<String>) -> Self {
+    pub(crate) fn new(stats: IndexStats, errors: Vec<IndexError>) -> Self {
         Self { stats, errors }
     }
 }
@@ -79,20 +101,10 @@ pub struct IndexStats {
     failed_files: usize,
     /// Number of entities extracted
     entities_extracted: usize,
-    /// Number of relationships extracted
-    relationships_extracted: usize,
-    /// Number of functions indexed
-    functions_indexed: usize,
-    /// Number of types indexed
-    types_indexed: usize,
-    /// Number of variables indexed
-    variables_indexed: usize,
     /// Number of entities skipped due to size limits
     entities_skipped_size: usize,
     /// Processing time in milliseconds
     processing_time_ms: u64,
-    /// Memory usage in bytes (approximate)
-    memory_usage_bytes: Option<u64>,
 }
 
 impl IndexStats {
@@ -111,26 +123,6 @@ impl IndexStats {
         self.entities_extracted
     }
 
-    /// Get the number of relationships extracted
-    pub fn relationships_extracted(&self) -> usize {
-        self.relationships_extracted
-    }
-
-    /// Get the number of functions indexed
-    pub fn functions_indexed(&self) -> usize {
-        self.functions_indexed
-    }
-
-    /// Get the number of types indexed
-    pub fn types_indexed(&self) -> usize {
-        self.types_indexed
-    }
-
-    /// Get the number of variables indexed
-    pub fn variables_indexed(&self) -> usize {
-        self.variables_indexed
-    }
-
     /// Get the number of entities skipped due to size limits
     pub fn entities_skipped_size(&self) -> usize {
         self.entities_skipped_size
@@ -141,30 +133,13 @@ impl IndexStats {
         self.processing_time_ms
     }
 
-    /// Get the memory usage in bytes if available
-    pub fn memory_usage_bytes(&self) -> Option<u64> {
-        self.memory_usage_bytes
-    }
-
     /// Merge another stats instance into this one (for internal use)
     pub(crate) fn merge(&mut self, other: IndexStats) {
         self.total_files += other.total_files;
         self.failed_files += other.failed_files;
         self.entities_extracted += other.entities_extracted;
-        self.relationships_extracted += other.relationships_extracted;
-        self.functions_indexed += other.functions_indexed;
-        self.types_indexed += other.types_indexed;
-        self.variables_indexed += other.variables_indexed;
         self.entities_skipped_size += other.entities_skipped_size;
         self.processing_time_ms += other.processing_time_ms;
-
-        // For memory, take the max if both are present
-        self.memory_usage_bytes = match (self.memory_usage_bytes, other.memory_usage_bytes) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
-        };
     }
 
     /// Create stats with specific values (for internal use)
@@ -191,26 +166,89 @@ impl IndexStats {
 }
 
 /// Create a new repository indexer
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `repository_id` is not a valid UUID string
+/// - The repository path is invalid or inaccessible
+///
+/// # Example
+///
+/// ```ignore
+/// use codesearch_indexer::create_indexer;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> codesearch_indexer::Result<()> {
+/// let indexer = create_indexer(
+///     PathBuf::from("/path/to/repo"),
+///     "550e8400-e29b-41d4-a716-446655440000".to_string(),
+///     embedding_manager,
+///     postgres_client,
+///     None
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
-) -> Box<dyn Indexer> {
-    Box::new(repository_indexer::RepositoryIndexer::new(
+) -> Result<Box<dyn Indexer>> {
+    Ok(Box::new(repository_indexer::RepositoryIndexer::new(
         repository_path,
         repository_id,
         embedding_manager,
         postgres_client,
         git_repo,
-    ))
+    )?))
 }
 
 /// Start watching for file changes and processing them in the background
 ///
 /// Spawns a background task that consumes file change events from the watcher
-/// and processes them in batches.
+/// and processes them in batches using the default `IndexerConfig` settings.
+///
+/// # Behavior
+///
+/// - Events are batched by size (default: 10) and timeout (default: 1000ms)
+/// - Processes batch when full OR when timeout expires with pending events
+/// - Continues until the event_rx channel is closed
+/// - Errors during processing are logged but do not stop the task
+///
+/// # Returns
+///
+/// A `JoinHandle` that completes with `Ok(())` when the channel closes normally.
+/// The task will not return an error - all processing errors are logged internally.
+///
+/// # Example
+///
+/// ```ignore
+/// use codesearch_indexer::start_watching;
+/// use tokio::sync::mpsc;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> codesearch_indexer::Result<()> {
+/// let (tx, rx) = mpsc::channel(100);
+///
+/// let task = start_watching(
+///     rx,
+///     repo_id,
+///     repo_root,
+///     embedding_manager,
+///     postgres_client,
+/// );
+///
+/// // Task runs until tx is dropped or channel is closed
+/// // Join handle can be awaited for graceful shutdown
+/// let _ = task.await;
+/// # Ok(())
+/// # }
+/// ```
 pub fn start_watching(
     mut event_rx: Receiver<FileChange>,
     repo_id: uuid::Uuid,
@@ -221,28 +259,21 @@ pub fn start_watching(
     tokio::spawn(async move {
         tracing::info!("File watcher indexer task started");
 
-        // Buffer for batching events
-        const BATCH_SIZE: usize = 10;
-        const BATCH_TIMEOUT_MS: u64 = 1000;
-
-        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        let config = IndexerConfig::default();
+        let mut batcher = EventBatcher::new(config.watch_batch_size, config.watch_timeout_ms);
 
         loop {
-            let mut timeout = Box::pin(tokio::time::sleep(tokio::time::Duration::from_millis(
-                BATCH_TIMEOUT_MS,
-            )));
+            let timeout = tokio::time::sleep(batcher.timeout());
 
             tokio::select! {
                 // Receive event
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(event) => {
-                            batch.push(event);
-
-                            // Process batch if full
-                            if batch.len() >= BATCH_SIZE {
+                            // Add event to batch, process if full
+                            if let Some(batch) = batcher.push(event) {
                                 if let Err(e) = process_file_changes(
-                                    std::mem::take(&mut batch),
+                                    batch,
                                     repo_id,
                                     &repo_root,
                                     &embedding_manager,
@@ -262,10 +293,11 @@ pub fn start_watching(
                 }
 
                 // Timeout - process partial batch
-                _ = &mut timeout => {
-                    if !batch.is_empty() {
+                _ = timeout => {
+                    if !batcher.is_empty() {
+                        let batch = batcher.flush();
                         if let Err(e) = process_file_changes(
-                            std::mem::take(&mut batch),
+                            batch,
                             repo_id,
                             &repo_root,
                             &embedding_manager,
@@ -282,4 +314,55 @@ pub fn start_watching(
 
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_stats_merge() {
+        let mut stats1 = IndexStats {
+            total_files: 10,
+            failed_files: 2,
+            entities_extracted: 50,
+            entities_skipped_size: 3,
+            processing_time_ms: 1000,
+        };
+
+        let stats2 = IndexStats {
+            total_files: 5,
+            failed_files: 1,
+            entities_extracted: 20,
+            entities_skipped_size: 1,
+            processing_time_ms: 500,
+        };
+
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.total_files, 15);
+        assert_eq!(stats1.failed_files, 3);
+        assert_eq!(stats1.entities_extracted, 70);
+        assert_eq!(stats1.entities_skipped_size, 4);
+        assert_eq!(stats1.processing_time_ms, 1500);
+    }
+
+    #[test]
+    fn test_index_stats_merge_with_empty() {
+        let mut stats = IndexStats {
+            total_files: 10,
+            failed_files: 2,
+            entities_extracted: 50,
+            entities_skipped_size: 3,
+            processing_time_ms: 1000,
+        };
+
+        stats.merge(IndexStats::default());
+
+        assert_eq!(stats.total_files, 10);
+        assert_eq!(stats.failed_files, 2);
+        assert_eq!(stats.entities_extracted, 50);
+        assert_eq!(stats.entities_skipped_size, 3);
+        assert_eq!(stats.processing_time_ms, 1000);
+    }
 }

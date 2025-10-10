@@ -193,7 +193,8 @@ async fn test_full_indexing_pipeline() {
         embedding_manager,
         postgres_client,
         None,
-    );
+    )
+    .unwrap();
 
     // Run full indexing
     let result = indexer.index_repository().await;
@@ -260,7 +261,8 @@ fn large_function() {{
         embedding_manager,
         postgres_client,
         None,
-    );
+    )
+    .unwrap();
     let result = indexer.index_repository().await.unwrap();
 
     // Verify successful processing
@@ -283,7 +285,8 @@ async fn test_indexer_with_empty_repository() {
         embedding_manager,
         postgres_client,
         None,
-    );
+    )
+    .unwrap();
 
     let result = indexer.index_repository().await;
     assert!(result.is_ok());
@@ -291,6 +294,5 @@ async fn test_indexer_with_empty_repository() {
     if let Ok(index_result) = result {
         assert_eq!(index_result.stats().total_files(), 0);
         assert_eq!(index_result.stats().entities_extracted(), 0);
-        assert_eq!(index_result.stats().relationships_extracted(), 0);
     }
 }

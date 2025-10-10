@@ -2,8 +2,7 @@
 //!
 //! This module handles catching up the index when offline changes have occurred.
 
-use crate::{file_change_processor::process_file_changes, Result};
-use codesearch_core::error::Error;
+use crate::{common::ResultExt, file_change_processor::process_file_changes, Result};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::{DiffStats, FileChange, FileDiffChangeType, FileMetadata, GitRepository};
@@ -39,12 +38,12 @@ pub async fn catch_up_from_git(
     let last_indexed_commit = postgres_client
         .get_last_indexed_commit(repo_id)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to get last indexed commit: {e}")))?;
+        .storage_err("Failed to get last indexed commit")?;
 
     // Get current HEAD commit
     let current_commit = git_repo
         .current_commit_hash()
-        .map_err(|e| Error::Storage(format!("Failed to get current commit: {e}")))?;
+        .storage_err("Failed to get current commit")?;
 
     // Check if we need to catch up
     if let Some(ref last_commit) = last_indexed_commit {
@@ -68,14 +67,14 @@ pub async fn catch_up_from_git(
     // Get changed files using git diff
     let changed_files = git_repo
         .get_changed_files_between_commits(last_indexed_commit.as_deref(), &current_commit)
-        .map_err(|e| Error::Storage(format!("Failed to get changed files from git: {e}")))?;
+        .storage_err("Failed to get changed files from git")?;
 
     if changed_files.is_empty() {
         info!("No file changes detected");
         postgres_client
             .set_last_indexed_commit(repo_id, &current_commit)
             .await
-            .map_err(|e| Error::Storage(format!("Failed to update last indexed commit: {e}")))?;
+            .storage_err("Failed to update last indexed commit")?;
         return Ok(stats);
     }
 
@@ -129,7 +128,7 @@ pub async fn catch_up_from_git(
     postgres_client
         .set_last_indexed_commit(repo_id, &current_commit)
         .await
-        .map_err(|e| Error::Storage(format!("Failed to update last indexed commit: {e}")))?;
+        .storage_err("Failed to update last indexed commit")?;
 
     info!(
         "Catch-up indexing completed at commit {} ({} processed, {} failed)",

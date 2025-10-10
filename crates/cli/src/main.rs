@@ -229,6 +229,8 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Drop all indexed data from storage (requires confirmation)
+    Drop,
 }
 
 #[tokio::main]
@@ -249,6 +251,11 @@ async fn main() -> Result<()> {
             // Find repository root
             let repo_root = find_repository_root()?;
             index_repository(&repo_root, cli.config.as_deref(), force).await
+        }
+        Some(Commands::Drop) => {
+            // Find repository root
+            let repo_root = find_repository_root()?;
+            drop_data(&repo_root, cli.config.as_deref()).await
         }
         None => {
             // Default behavior - show help
@@ -465,6 +472,118 @@ async fn index_repository(
             warn!("  ... and {} more errors", result.errors().len() - 5);
         }
     }
+
+    Ok(())
+}
+
+/// Drop all indexed data from storage
+async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
+    info!("Preparing to drop all indexed data");
+
+    // Load configuration or use defaults
+    let current_dir = env::current_dir()?;
+    let config_file = if let Some(path) = config_path {
+        path.to_path_buf()
+    } else {
+        current_dir.join("codesearch.toml")
+    };
+
+    let config = if config_file.exists() {
+        // Try to load config, but handle missing collection_name gracefully
+        match Config::from_file(&config_file) {
+            Ok(mut config) => {
+                if config.storage.collection_name.is_empty() {
+                    config.storage.collection_name =
+                        StorageConfig::generate_collection_name(repo_root)?;
+                }
+                config
+            }
+            Err(_) => {
+                // Config file exists but is invalid or missing required fields
+                // Generate collection name and create default config
+                let collection_name = StorageConfig::generate_collection_name(repo_root)?;
+                let storage_config = create_default_storage_config(collection_name);
+                Config::builder(storage_config).build()
+            }
+        }
+    } else {
+        // Generate collection name and create default config
+        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
+        let storage_config = create_default_storage_config(collection_name);
+        Config::builder(storage_config).build()
+    };
+
+    // Display warning
+    println!("\nWARNING: This will permanently delete all indexed data from:");
+    println!("  - Qdrant collection: {}", config.storage.collection_name);
+    println!(
+        "  - PostgreSQL database: {}",
+        config.storage.postgres_database
+    );
+    println!("\nThis action cannot be undone.");
+    print!("\nType 'yes' to confirm: ");
+
+    // Flush stdout to ensure prompt is displayed
+    use std::io::{self, Write};
+    io::stdout().flush()?;
+
+    // Read user confirmation
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let confirmation = input.trim();
+
+    if confirmation != "yes" {
+        println!("Operation cancelled.");
+        return Ok(());
+    }
+
+    info!("User confirmed drop operation, proceeding...");
+
+    // Ensure dependencies are running if auto-start is enabled
+    if config.storage.auto_start_deps {
+        let api_base_url = get_api_base_url_if_local_api(&config);
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
+    }
+
+    // Create collection manager
+    let collection_manager = codesearch_storage::create_collection_manager(&config.storage)
+        .await
+        .context("Failed to create collection manager")?;
+
+    // Check if collection exists before trying to delete
+    let collection_exists = collection_manager
+        .collection_exists(&config.storage.collection_name)
+        .await
+        .context("Failed to check if collection exists")?;
+
+    if collection_exists {
+        info!("Deleting Qdrant collection...");
+        collection_manager
+            .delete_collection(&config.storage.collection_name)
+            .await
+            .context("Failed to delete Qdrant collection")?;
+        info!("Qdrant collection deleted successfully");
+    } else {
+        info!(
+            "Qdrant collection '{}' does not exist, skipping",
+            config.storage.collection_name
+        );
+    }
+
+    // Create PostgreSQL client
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to create PostgreSQL client")?;
+
+    info!("Dropping PostgreSQL data...");
+    postgres_client
+        .drop_all_data()
+        .await
+        .context("Failed to drop PostgreSQL data")?;
+    info!("PostgreSQL data dropped successfully");
+
+    println!("\nAll indexed data has been successfully removed.");
+    println!("You can re-index the repository using 'codesearch index'.");
 
     Ok(())
 }

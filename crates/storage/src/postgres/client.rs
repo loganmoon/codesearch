@@ -817,6 +817,47 @@ impl PostgresClient {
 
         Ok(())
     }
+
+    /// Drop all data from all tables
+    pub async fn drop_all_data(&self) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // Truncate all tables with CASCADE to handle foreign key constraints
+        // Order matters - truncate child tables first
+        sqlx::query("TRUNCATE TABLE entity_outbox CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to truncate entity_outbox: {e}")))?;
+
+        sqlx::query("TRUNCATE TABLE file_entity_snapshots CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                Error::storage(format!("Failed to truncate file_entity_snapshots: {e}"))
+            })?;
+
+        sqlx::query("TRUNCATE TABLE entity_metadata CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to truncate entity_metadata: {e}")))?;
+
+        sqlx::query("TRUNCATE TABLE repositories CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to truncate repositories: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        tracing::info!("Dropped all data from PostgreSQL tables");
+
+        Ok(())
+    }
 }
 
 // Trait implementation delegates to inherent methods for testability and flexibility
@@ -931,5 +972,9 @@ impl super::PostgresClientTrait for PostgresClient {
     async fn set_last_indexed_commit(&self, repository_id: Uuid, commit_hash: &str) -> Result<()> {
         self.set_last_indexed_commit(repository_id, commit_hash)
             .await
+    }
+
+    async fn drop_all_data(&self) -> Result<()> {
+        self.drop_all_data().await
     }
 }

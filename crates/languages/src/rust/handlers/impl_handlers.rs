@@ -264,13 +264,23 @@ fn extract_impl_methods(
     Ok(entities)
 }
 
-/// Components for building impl block member entities
+/// Components for building impl block member entities (methods, associated constants)
+///
+/// This struct encapsulates the extracted components needed to build a CodeEntity
+/// for members of impl blocks. It's used as a parameter to `build_impl_entity` to
+/// avoid repetitive entity construction code.
 struct ImplEntityComponents {
+    /// The simple name of the entity (e.g., "method_name")
     name: String,
+    /// The fully qualified name including impl context (e.g., "Type::method_name" or "<Type as Trait>::method_name")
     qualified_name: String,
+    /// The type of entity (Method, Function, or Constant)
     entity_type: EntityType,
+    /// The visibility of the entity
     visibility: Visibility,
+    /// Entity-specific metadata (async, const, generics, etc.)
     metadata: EntityMetadata,
+    /// Function signature if this is a method or associated function
     signature: Option<FunctionSignature>,
 }
 

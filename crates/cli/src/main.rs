@@ -355,7 +355,7 @@ async fn serve(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
             embedding_manager,
             postgres_client.clone(),
             git_repo,
-        );
+        )?;
 
         let result = indexer
             .index_repository()
@@ -435,7 +435,7 @@ async fn index_repository(
         embedding_manager,
         postgres_client,
         git_repo,
-    );
+    )?;
 
     // Run indexing
     let result = indexer
@@ -459,7 +459,7 @@ async fn index_repository(
     if result.stats().failed_files() > 0 && !result.errors().is_empty() {
         warn!("Errors encountered during indexing:");
         for err in result.errors().iter().take(5) {
-            warn!("  - {}", err);
+            warn!("  - {:?}", err);
         }
         if result.errors().len() > 5 {
             warn!("  ... and {} more errors", result.errors().len() - 5);

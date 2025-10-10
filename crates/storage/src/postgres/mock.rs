@@ -482,6 +482,16 @@ impl PostgresClientTrait for MockPostgresClient {
         // Mock implementation: do nothing
         Ok(())
     }
+
+    async fn drop_all_data(&self) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+        data.repositories.clear();
+        data.collection_to_repo.clear();
+        data.entities.clear();
+        data.snapshots.clear();
+        data.outbox.clear();
+        Ok(())
+    }
 }
 
 // Test helper methods (not part of the trait)

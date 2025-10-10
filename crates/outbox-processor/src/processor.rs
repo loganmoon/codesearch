@@ -347,6 +347,10 @@ mod tests {
         async fn set_last_indexed_commit(&self, _: Uuid, _: &str) -> Result<()> {
             Ok(())
         }
+
+        async fn drop_all_data(&self) -> Result<()> {
+            Ok(())
+        }
     }
 
     // Mock Qdrant client

@@ -121,4 +121,10 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Set the last indexed commit for a repository
     async fn set_last_indexed_commit(&self, repository_id: Uuid, commit_hash: &str) -> Result<()>;
+
+    /// Drop all data from all tables (destructive operation)
+    ///
+    /// Truncates all tables in the database, removing all data while preserving the schema.
+    /// This is a destructive operation that cannot be undone.
+    async fn drop_all_data(&self) -> Result<()>;
 }

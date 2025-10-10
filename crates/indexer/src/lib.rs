@@ -166,6 +166,31 @@ impl IndexStats {
 }
 
 /// Create a new repository indexer
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `repository_id` is not a valid UUID string
+/// - The repository path is invalid or inaccessible
+///
+/// # Example
+///
+/// ```ignore
+/// use codesearch_indexer::create_indexer;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> codesearch_indexer::Result<()> {
+/// let indexer = create_indexer(
+///     PathBuf::from("/path/to/repo"),
+///     "550e8400-e29b-41d4-a716-446655440000".to_string(),
+///     embedding_manager,
+///     postgres_client,
+///     None
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
@@ -185,7 +210,45 @@ pub fn create_indexer(
 /// Start watching for file changes and processing them in the background
 ///
 /// Spawns a background task that consumes file change events from the watcher
-/// and processes them in batches.
+/// and processes them in batches using the default `IndexerConfig` settings.
+///
+/// # Behavior
+///
+/// - Events are batched by size (default: 10) and timeout (default: 1000ms)
+/// - Processes batch when full OR when timeout expires with pending events
+/// - Continues until the event_rx channel is closed
+/// - Errors during processing are logged but do not stop the task
+///
+/// # Returns
+///
+/// A `JoinHandle` that completes with `Ok(())` when the channel closes normally.
+/// The task will not return an error - all processing errors are logged internally.
+///
+/// # Example
+///
+/// ```ignore
+/// use codesearch_indexer::start_watching;
+/// use tokio::sync::mpsc;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// # async fn example() -> codesearch_indexer::Result<()> {
+/// let (tx, rx) = mpsc::channel(100);
+///
+/// let task = start_watching(
+///     rx,
+///     repo_id,
+///     repo_root,
+///     embedding_manager,
+///     postgres_client,
+/// );
+///
+/// // Task runs until tx is dropped or channel is closed
+/// // Join handle can be awaited for graceful shutdown
+/// let _ = task.await;
+/// # Ok(())
+/// # }
+/// ```
 pub fn start_watching(
     mut event_rx: Receiver<FileChange>,
     repo_id: uuid::Uuid,
@@ -251,4 +314,55 @@ pub fn start_watching(
 
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_stats_merge() {
+        let mut stats1 = IndexStats {
+            total_files: 10,
+            failed_files: 2,
+            entities_extracted: 50,
+            entities_skipped_size: 3,
+            processing_time_ms: 1000,
+        };
+
+        let stats2 = IndexStats {
+            total_files: 5,
+            failed_files: 1,
+            entities_extracted: 20,
+            entities_skipped_size: 1,
+            processing_time_ms: 500,
+        };
+
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.total_files, 15);
+        assert_eq!(stats1.failed_files, 3);
+        assert_eq!(stats1.entities_extracted, 70);
+        assert_eq!(stats1.entities_skipped_size, 4);
+        assert_eq!(stats1.processing_time_ms, 1500);
+    }
+
+    #[test]
+    fn test_index_stats_merge_with_empty() {
+        let mut stats = IndexStats {
+            total_files: 10,
+            failed_files: 2,
+            entities_extracted: 50,
+            entities_skipped_size: 3,
+            processing_time_ms: 1000,
+        };
+
+        stats.merge(IndexStats::default());
+
+        assert_eq!(stats.total_files, 10);
+        assert_eq!(stats.failed_files, 2);
+        assert_eq!(stats.entities_extracted, 50);
+        assert_eq!(stats.entities_skipped_size, 3);
+        assert_eq!(stats.processing_time_ms, 1000);
+    }
 }

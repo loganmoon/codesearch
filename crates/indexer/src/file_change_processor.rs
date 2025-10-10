@@ -184,7 +184,43 @@ async fn process_file_batch(
             repo_root.join(file_path)
         };
 
-        match entity_processor::extract_entities_from_file(&absolute_path, &repo_id.to_string())
+        // Validate path is within repository bounds (prevent path traversal)
+        let canonical_path = match absolute_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    file_path = %file_path.display(),
+                    error = %e,
+                    "Failed to canonicalize path"
+                );
+                stats.files_failed += 1;
+                continue;
+            }
+        };
+
+        let canonical_repo = match repo_root.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(
+                    repo_root = %repo_root.display(),
+                    error = %e,
+                    "Failed to canonicalize repository root"
+                );
+                stats.files_failed += 1;
+                continue;
+            }
+        };
+
+        if !canonical_path.starts_with(&canonical_repo) {
+            warn!(
+                file_path = %file_path.display(),
+                "Path traversal attempt detected: file is outside repository"
+            );
+            stats.files_failed += 1;
+            continue;
+        }
+
+        match entity_processor::extract_entities_from_file(&canonical_path, &repo_id.to_string())
             .await
         {
             Ok(entities) => {
@@ -245,4 +281,55 @@ async fn process_file_batch(
     }
 
     Ok(stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_processing_stats_merge() {
+        let mut stats1 = ProcessingStats {
+            files_processed: 5,
+            files_failed: 1,
+            entities_added: 10,
+            entities_updated: 3,
+            entities_deleted: 2,
+        };
+
+        let stats2 = ProcessingStats {
+            files_processed: 3,
+            files_failed: 2,
+            entities_added: 7,
+            entities_updated: 1,
+            entities_deleted: 0,
+        };
+
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.files_processed, 8);
+        assert_eq!(stats1.files_failed, 3);
+        assert_eq!(stats1.entities_added, 17);
+        assert_eq!(stats1.entities_updated, 4);
+        assert_eq!(stats1.entities_deleted, 2);
+    }
+
+    #[test]
+    fn test_processing_stats_merge_with_empty() {
+        let mut stats = ProcessingStats {
+            files_processed: 5,
+            files_failed: 1,
+            entities_added: 10,
+            entities_updated: 3,
+            entities_deleted: 2,
+        };
+
+        stats.merge(ProcessingStats::default());
+
+        assert_eq!(stats.files_processed, 5);
+        assert_eq!(stats.files_failed, 1);
+        assert_eq!(stats.entities_added, 10);
+        assert_eq!(stats.entities_updated, 3);
+        assert_eq!(stats.entities_deleted, 2);
+    }
 }

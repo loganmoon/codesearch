@@ -9,7 +9,7 @@ use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
 use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -135,7 +135,8 @@ pub async fn process_entity_batch(
         .storage_err("Failed to generate embeddings")?;
 
     // Filter entities with valid embeddings
-    let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> = Vec::new();
+    let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> =
+        Vec::with_capacity(entities.len());
     for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
         if let Some(embedding) = opt_embedding {
             entity_embedding_pairs.push((entity, embedding));
@@ -170,7 +171,7 @@ pub async fn process_entity_batch(
         .storage_err("Failed to fetch entity metadata")?;
 
     // Prepare batch data directly as references (no intermediate cloning)
-    let mut batch_refs = Vec::new();
+    let mut batch_refs = Vec::with_capacity(entity_embedding_pairs.len());
 
     for (entity, embedding) in &entity_embedding_pairs {
         let existing_metadata = metadata_map.get(&entity.entity_id);
@@ -233,9 +234,11 @@ pub async fn update_file_snapshot_and_mark_stale(
         .storage_err("Failed to get file snapshot")?
         .unwrap_or_default();
 
+    // Use HashSet for O(1) lookups instead of O(n) Vec::contains
+    let new_entity_set: HashSet<&String> = new_entity_ids.iter().collect();
     let stale_ids: Vec<String> = old_entity_ids
         .iter()
-        .filter(|old_id| !new_entity_ids.contains(old_id))
+        .filter(|old_id| !new_entity_set.contains(old_id))
         .cloned()
         .collect();
 

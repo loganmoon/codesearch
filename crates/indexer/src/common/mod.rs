@@ -29,7 +29,6 @@ pub fn get_current_commit(git_repo: Option<&GitRepository>, repo_root: &Path) ->
 /// Extension trait for Result types to add storage error context
 pub trait ResultExt<T> {
     /// Convert error to Storage error with context message
-    #[allow(dead_code)] // Will be used in later phases
     fn storage_err(self, msg: &str) -> Result<T>;
 }
 
@@ -135,7 +134,13 @@ pub fn should_include_file(file_path: &Path) -> bool {
         }
     }
 
-    // Check if it's a regular file (not a directory or symlink)
+    // Reject symlinks to prevent following links outside repository
+    if file_path.is_symlink() {
+        debug!("Excluding symlink: {}", path_str);
+        return false;
+    }
+
+    // Check if it's a regular file (not a directory)
     if !file_path.is_file() {
         return false;
     }
@@ -200,5 +205,56 @@ mod tests {
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() {}").expect("Failed to write test file");
         assert!(should_include_file(&test_file));
+    }
+
+    #[test]
+    fn test_path_to_str_valid_utf8() {
+        let path = Path::new("/valid/path/file.rs");
+        let result = path_to_str(path);
+        assert!(result.is_ok());
+        assert_eq!(result.expect("Should convert path"), "/valid/path/file.rs");
+    }
+
+    #[test]
+    fn test_path_to_str_handles_conversion() {
+        // Test with a normal path that should convert successfully
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let test_file = temp_dir.path().join("test.rs");
+        let result = path_to_str(&test_file);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_current_commit_with_none() {
+        // Test fallback behavior when git_repo is None
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let result = get_current_commit(None, temp_dir.path());
+        // Should be None since temp_dir is not a git repo
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_result_ext_storage_err() {
+        // Test the ResultExt trait
+        let error_result: std::result::Result<(), String> = Err("test error".to_string());
+        let converted = error_result.storage_err("context message");
+
+        assert!(converted.is_err());
+        if let Err(Error::Storage(msg)) = converted {
+            assert!(msg.contains("context message"));
+            assert!(msg.contains("test error"));
+        } else {
+            panic!("Expected Storage error");
+        }
+    }
+
+    #[test]
+    fn test_result_ext_storage_err_ok() {
+        // Test that Ok values pass through unchanged
+        let ok_result: std::result::Result<i32, String> = Ok(42);
+        let converted = ok_result.storage_err("context");
+
+        assert!(converted.is_ok());
+        assert_eq!(converted.expect("Should be Ok"), 42);
     }
 }

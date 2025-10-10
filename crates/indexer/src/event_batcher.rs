@@ -51,6 +51,7 @@ impl<T> EventBatcher<T> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
 
     #[test]
@@ -62,7 +63,7 @@ mod tests {
 
         let batch = batcher.push("c");
         assert!(batch.is_some());
-        assert_eq!(batch.unwrap(), vec!["a", "b", "c"]);
+        assert_eq!(batch.expect("Should have batch"), vec!["a", "b", "c"]);
         assert!(batcher.is_empty());
     }
 

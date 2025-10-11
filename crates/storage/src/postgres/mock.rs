@@ -68,6 +68,7 @@ struct MockData {
 /// Mock PostgreSQL client for testing
 pub struct MockPostgresClient {
     data: Arc<Mutex<MockData>>,
+    max_entity_batch_size: usize,
 }
 
 impl MockPostgresClient {
@@ -75,6 +76,7 @@ impl MockPostgresClient {
     pub fn new() -> Self {
         Self {
             data: Arc::new(Mutex::new(MockData::default())),
+            max_entity_batch_size: 1000, // Default for tests
         }
     }
 
@@ -163,6 +165,10 @@ impl Default for MockPostgresClient {
 
 #[async_trait]
 impl PostgresClientTrait for MockPostgresClient {
+    fn max_entity_batch_size(&self) -> usize {
+        self.max_entity_batch_size
+    }
+
     async fn run_migrations(&self) -> Result<()> {
         // Mock - no migrations needed
         Ok(())
@@ -294,12 +300,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -324,12 +329,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -374,12 +378,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(Vec::new());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entities.len() > MAX_BATCH_SIZE {
+        if entities.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entities.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 

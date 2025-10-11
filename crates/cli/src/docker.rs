@@ -248,23 +248,23 @@ pub async fn check_postgres_health(config: &StorageConfig) -> bool {
         .port(config.postgres_port)
         .username(&config.postgres_user)
         .password(&config.postgres_password)
-        .database(&config.postgres_database);
+        .database("postgres");
 
     match sqlx::PgPool::connect_with(connect_options).await {
         Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => true,
             Err(e) => {
                 warn!(
-                    "Postgres health check query failed at {}:{}/{}: {e}",
-                    config.postgres_host, config.postgres_port, config.postgres_database
+                    "Postgres health check query failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
                 );
                 false
             }
         },
         Err(e) => {
             warn!(
-                "Postgres health check connection failed at {}:{}/{}: {e}",
-                config.postgres_host, config.postgres_port, config.postgres_database
+                "Postgres health check connection failed at {}:{}/postgres: {e}",
+                config.postgres_host, config.postgres_port
             );
             false
         }

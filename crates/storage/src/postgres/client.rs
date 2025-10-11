@@ -122,11 +122,15 @@ pub type EntityOutboxBatchEntry<'a> = (
 
 pub struct PostgresClient {
     pool: PgPool,
+    max_entity_batch_size: usize,
 }
 
 impl PostgresClient {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, max_entity_batch_size: usize) -> Self {
+        Self {
+            pool,
+            max_entity_batch_size,
+        }
     }
 
     /// Run database migrations
@@ -193,6 +197,18 @@ impl PostgresClient {
         Ok(record.map(|(id,)| id))
     }
 
+    /// Get collection name by repository ID
+    pub async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let record: Option<(String,)> =
+            sqlx::query_as("SELECT collection_name FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query collection name: {e}")))?;
+
+        Ok(record.map(|(name,)| name))
+    }
+
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     pub async fn get_entity_metadata(
         &self,
@@ -224,12 +240,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -338,12 +353,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_refs.len() > MAX_BATCH_SIZE {
+        if entity_refs.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_refs.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -386,12 +400,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -441,12 +454,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -523,12 +535,11 @@ impl PostgresClient {
         }
 
         // Validate batch size
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entities.len() > MAX_BATCH_SIZE {
+        if entities.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entities.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -623,7 +634,27 @@ impl PostgresClient {
             .build()
             .execute(&mut *tx)
             .await
-            .map_err(|e| Error::storage(format!("Failed to bulk insert entity metadata: {e}")))?;
+            .map_err(|e| {
+                // Extract entity IDs for debugging duplicate key errors
+                let entity_ids: Vec<String> = validated_entities
+                    .iter()
+                    .map(|(entity, _, _, _, _, _, _, _)| entity.entity_id.clone())
+                    .collect();
+                let unique_ids: std::collections::HashSet<_> = entity_ids.iter().collect();
+
+                if entity_ids.len() != unique_ids.len() {
+                    Error::storage(format!(
+                        "Failed to bulk insert entity metadata (detected {} duplicate entity_ids in batch of {}): {e}",
+                        entity_ids.len() - unique_ids.len(),
+                        entity_ids.len()
+                    ))
+                } else {
+                    Error::storage(format!(
+                        "Failed to bulk insert entity metadata (batch size {}): {e}",
+                        entity_ids.len()
+                    ))
+                }
+            })?;
 
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
@@ -863,6 +894,10 @@ impl PostgresClient {
 // Trait implementation delegates to inherent methods for testability and flexibility
 #[async_trait]
 impl super::PostgresClientTrait for PostgresClient {
+    fn max_entity_batch_size(&self) -> usize {
+        self.max_entity_batch_size
+    }
+
     async fn run_migrations(&self) -> Result<()> {
         self.run_migrations().await
     }
@@ -879,6 +914,10 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
         self.get_repository_id(collection_name).await
+    }
+
+    async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        self.get_collection_name(repository_id).await
     }
 
     async fn get_entity_metadata(

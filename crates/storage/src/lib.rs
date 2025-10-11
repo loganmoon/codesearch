@@ -156,6 +156,52 @@ pub async fn create_collection_manager(
 pub async fn create_postgres_client(
     config: &StorageConfig,
 ) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
+    // First, connect to the default 'postgres' database to check if target database exists
+    let default_connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database("postgres");
+
+    let default_pool = sqlx::PgPool::connect_with(default_connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!(
+                "Failed to connect to default Postgres database: {e}"
+            ))
+        })?;
+
+    // Check if target database exists
+    let db_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(&config.postgres_database)
+            .fetch_one(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to check database existence: {e}"
+                ))
+            })?;
+
+    // Create database if it doesn't exist
+    if !db_exists {
+        let create_db_query = format!("CREATE DATABASE \"{}\"", &config.postgres_database);
+        sqlx::query(&create_db_query)
+            .execute(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to create database '{}': {e}",
+                    config.postgres_database
+                ))
+            })?;
+    }
+
+    // Close connection to default database
+    default_pool.close().await;
+
+    // Now connect to the target database
     let connect_options = PgConnectOptions::new()
         .host(&config.postgres_host)
         .port(config.postgres_port)
@@ -169,5 +215,8 @@ pub async fn create_postgres_client(
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
         })?;
 
-    Ok(Arc::new(postgres::PostgresClient::new(pool)) as Arc<dyn postgres::PostgresClientTrait>)
+    Ok(Arc::new(postgres::PostgresClient::new(
+        pool,
+        config.max_entity_batch_size,
+    )) as Arc<dyn postgres::PostgresClientTrait>)
 }

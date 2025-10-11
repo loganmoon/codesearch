@@ -92,6 +92,7 @@ impl RepositoryIndexer {
             git_commit.clone(),
             &self.embedding_manager,
             self.postgres_client.as_ref(),
+            self.postgres_client.max_entity_batch_size(),
         )
         .await?;
 

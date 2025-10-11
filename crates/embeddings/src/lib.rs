@@ -17,9 +17,7 @@ mod mock_provider;
 pub mod provider;
 
 pub use api_provider::create_api_provider;
-pub use config::{
-    BackendType, DeviceType, EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType,
-};
+pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType};
 pub use error::EmbeddingError;
 pub use mock_provider::MockEmbeddingProvider;
 pub use provider::EmbeddingProvider;

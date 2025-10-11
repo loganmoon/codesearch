@@ -14,6 +14,9 @@ pub use client::{OutboxEntry, OutboxOperation, TargetStore};
 /// Trait for PostgreSQL metadata operations
 #[async_trait]
 pub trait PostgresClientTrait: Send + Sync {
+    /// Get the maximum entity batch size for batch operations
+    fn max_entity_batch_size(&self) -> usize;
+
     /// Run database migrations
     async fn run_migrations(&self) -> Result<()>;
 
@@ -27,6 +30,9 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Get repository by collection name
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>>;
+
+    /// Get collection name by repository ID
+    async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>>;
 
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     async fn get_entity_metadata(

@@ -42,6 +42,7 @@ fn create_default_storage_config(collection_name: String) -> StorageConfig {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        max_entity_batch_size: 1000,
     }
 }
 
@@ -76,11 +77,7 @@ async fn create_embedding_manager(config: &Config) -> Result<Arc<EmbeddingManage
         .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension)
-        .device(match config.embeddings.device.as_str() {
-            "cuda" => codesearch_embeddings::DeviceType::Cuda,
-            _ => codesearch_embeddings::DeviceType::Cpu,
-        });
+        .embedding_dimension(config.embeddings.embedding_dimension);
 
     if let Some(ref api_base_url) = config.embeddings.api_base_url {
         embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());

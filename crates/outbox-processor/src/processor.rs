@@ -251,6 +251,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PostgresClientTrait for MockPostgresClient {
+        fn max_entity_batch_size(&self) -> usize {
+            1000
+        }
+
         async fn run_migrations(&self) -> Result<()> {
             Ok(())
         }

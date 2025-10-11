@@ -94,6 +94,10 @@ fn load_config_from_env() -> Result<Config> {
             .unwrap_or_else(|_| "codesearch".to_string()),
         auto_start_deps: false,
         docker_compose_file: None,
+        max_entity_batch_size: std::env::var("MAX_ENTITY_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1000),
     };
 
     Ok(Config::builder(storage_config).build())

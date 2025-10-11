@@ -108,6 +108,7 @@ pub struct OutboxEntry {
     pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub retry_count: i32,
     pub last_error: Option<String>,
+    pub collection_name: String,
 }
 
 /// Type alias for a single entity batch entry with outbox data
@@ -447,6 +448,7 @@ impl PostgresClient {
     pub async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
         if entity_ids.is_empty() {
@@ -490,7 +492,7 @@ impl PostgresClient {
 
         // 2. Create outbox entries for all deletes
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, created_at) "
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
         );
 
         outbox_query.push_values(entity_ids, |mut b, entity_id| {
@@ -503,6 +505,7 @@ impl PostgresClient {
                 .push_bind(OutboxOperation::Delete.to_string())
                 .push_bind(TargetStore::Qdrant.to_string())
                 .push_bind(payload)
+                .push_bind(collection_name)
                 .push("NOW()");
         });
 
@@ -528,6 +531,7 @@ impl PostgresClient {
     pub async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
         if entities.is_empty() {
@@ -659,7 +663,7 @@ impl PostgresClient {
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
-                repository_id, entity_id, operation, target_store, payload
+                repository_id, entity_id, operation, target_store, payload, collection_name
             ) ",
         );
 
@@ -686,7 +690,8 @@ impl PostgresClient {
                     .push_bind(&entity.entity_id)
                     .push_bind(op.to_string())
                     .push_bind(target.to_string())
-                    .push_bind(payload);
+                    .push_bind(payload)
+                    .push_bind(collection_name);
             },
         );
 
@@ -713,7 +718,7 @@ impl PostgresClient {
     ) -> Result<Vec<OutboxEntry>> {
         let entries = sqlx::query_as::<_, OutboxEntry>(
             "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
-                    created_at, processed_at, retry_count, last_error
+                    created_at, processed_at, retry_count, last_error, collection_name
              FROM entity_outbox
              WHERE target_store = $1 AND processed_at IS NULL
              ORDER BY created_at ASC
@@ -972,18 +977,20 @@ impl super::PostgresClientTrait for PostgresClient {
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
-        self.mark_entities_deleted_with_outbox(repository_id, entity_ids)
+        self.mark_entities_deleted_with_outbox(repository_id, collection_name, entity_ids)
             .await
     }
 
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
-        self.store_entities_with_outbox_batch(repository_id, entities)
+        self.store_entities_with_outbox_batch(repository_id, collection_name, entities)
             .await
     }
 

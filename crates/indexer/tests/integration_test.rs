@@ -4,7 +4,7 @@
 
 use codesearch_embeddings::{EmbeddingManager, MockEmbeddingProvider};
 use codesearch_indexer::create_indexer;
-use codesearch_storage::MockPostgresClient;
+use codesearch_storage::{MockPostgresClient, PostgresClientTrait};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
@@ -182,10 +182,17 @@ async fn test_full_indexing_pipeline() {
     let repo_path = test_repo.path().to_path_buf();
 
     // Create indexer with mocked dependencies
-    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
-        Arc::new(MockPostgresClient::new());
+    let postgres_client = Arc::new(MockPostgresClient::new());
+
+    // Register repository with mock client
+    let repository_id = postgres_client
+        .ensure_repository(&repo_path, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
     let embedding_manager = create_test_embedding_manager();
-    let repository_id = uuid::Uuid::new_v4().to_string();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
 
     let mut indexer = create_indexer(
         repo_path.clone(),
@@ -250,10 +257,17 @@ fn large_function() {{
         .unwrap();
 
     // Create indexer with mocked dependencies
+    let postgres_client = Arc::new(MockPostgresClient::new());
+
+    // Register repository with mock client
+    let repository_id = postgres_client
+        .ensure_repository(repo_path, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
     let embedding_manager = create_test_embedding_manager();
-    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
-        Arc::new(MockPostgresClient::new());
-    let repository_id = uuid::Uuid::new_v4().to_string();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
 
     let mut indexer = create_indexer(
         repo_path.to_path_buf(),
@@ -274,10 +288,17 @@ fn large_function() {{
 #[tokio::test]
 async fn test_indexer_with_empty_repository() {
     let temp_dir = TempDir::new().unwrap();
-    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> =
-        Arc::new(MockPostgresClient::new());
+    let postgres_client = Arc::new(MockPostgresClient::new());
+
+    // Register repository with mock client
+    let repository_id = postgres_client
+        .ensure_repository(temp_dir.path(), "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
     let embedding_manager = create_test_embedding_manager();
-    let repository_id = uuid::Uuid::new_v4().to_string();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
 
     let mut indexer = create_indexer(
         temp_dir.path().to_path_buf(),

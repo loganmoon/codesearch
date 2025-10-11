@@ -97,6 +97,7 @@ pub trait PostgresClientTrait: Send + Sync {
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()>;
 
@@ -106,6 +107,7 @@ pub trait PostgresClientTrait: Send + Sync {
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>>;
 

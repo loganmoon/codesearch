@@ -238,9 +238,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_detects_stale_entities() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -308,9 +313,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_detects_renamed_function() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -394,9 +404,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_empty_file() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -545,8 +560,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_writes_delete_to_outbox() {
-        let repo_uuid = Uuid::new_v4();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
 
         let file_path = "test.rs";
 

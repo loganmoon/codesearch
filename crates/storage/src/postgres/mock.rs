@@ -52,6 +52,7 @@ impl From<MockOutboxEntry> for OutboxEntry {
             processed_at: entry.processed_at,
             retry_count: entry.retry_count,
             last_error: entry.last_error,
+            collection_name: "mock_collection".to_string(), // Mock uses a placeholder
         }
     }
 }
@@ -211,6 +212,14 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(data.collection_to_repo.get(collection_name).copied())
     }
 
+    async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let data = self.data.lock().unwrap();
+        Ok(data
+            .repositories
+            .get(&repository_id)
+            .map(|(_, _, collection_name)| collection_name.clone()))
+    }
+
     async fn get_entity_metadata(
         &self,
         repository_id: Uuid,
@@ -323,6 +332,7 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        _collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
         if entity_ids.is_empty() {
@@ -372,6 +382,7 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        _collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
         if entities.is_empty() {

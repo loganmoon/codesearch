@@ -305,8 +305,15 @@ async fn process_entity_chunk(
         ));
     }
 
+    // Fetch collection_name for this repository
+    let collection_name = postgres_client
+        .get_collection_name(repo_id)
+        .await
+        .storage_err("Failed to get collection name")?
+        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+
     postgres_client
-        .store_entities_with_outbox_batch(repo_id, &batch_refs)
+        .store_entities_with_outbox_batch(repo_id, &collection_name, &batch_refs)
         .await
         .storage_err("Failed to store entities")?;
 
@@ -345,8 +352,15 @@ pub async fn update_file_snapshot_and_mark_stale(
     if !stale_ids.is_empty() {
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
+        // Fetch collection_name for this repository
+        let collection_name = postgres_client
+            .get_collection_name(repo_id)
+            .await
+            .storage_err("Failed to get collection name")?
+            .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, &collection_name, &stale_ids)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
     }
@@ -379,8 +393,15 @@ pub async fn mark_file_entities_deleted(
 
     let count = entity_ids.len();
 
+    // Fetch collection_name for this repository
+    let collection_name = postgres_client
+        .get_collection_name(repo_id)
+        .await
+        .storage_err("Failed to get collection name")?
+        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+
     postgres_client
-        .mark_entities_deleted_with_outbox(repo_id, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, &collection_name, &entity_ids)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 

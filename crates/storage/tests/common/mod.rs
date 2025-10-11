@@ -74,6 +74,7 @@ pub fn create_storage_config(
         postgres_database: postgres_database.to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        max_entity_batch_size: 1000,
     }
 }
 

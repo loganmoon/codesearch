@@ -272,6 +272,10 @@ mod tests {
             Ok(Some(Uuid::new_v4()))
         }
 
+        async fn get_collection_name(&self, _: Uuid) -> Result<Option<String>> {
+            Ok(Some("mock_collection".to_string()))
+        }
+
         async fn get_entity_metadata(
             &self,
             _: Uuid,
@@ -311,13 +315,19 @@ mod tests {
             Ok(())
         }
 
-        async fn mark_entities_deleted_with_outbox(&self, _: Uuid, _: &[String]) -> Result<()> {
+        async fn mark_entities_deleted_with_outbox(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: &[String],
+        ) -> Result<()> {
             Ok(())
         }
 
         async fn store_entities_with_outbox_batch(
             &self,
             _: Uuid,
+            _: &str,
             _: &[EntityOutboxBatchEntry<'_>],
         ) -> Result<Vec<Uuid>> {
             Ok(vec![])
@@ -457,6 +467,7 @@ mod tests {
             processed_at: None,
             retry_count,
             last_error: None,
+            collection_name: "mock_collection".to_string(),
         }
     }
 

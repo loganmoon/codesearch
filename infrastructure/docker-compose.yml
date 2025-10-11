@@ -1,0 +1,86 @@
+# Shared Infrastructure for Codesearch Multi-Repository Setup
+#
+# This provides PostgreSQL, Qdrant, and outbox-processor services
+# that multiple repositories can connect to.
+#
+# Setup:
+#   1. Copy this directory to a location of your choice (e.g., ~/codesearch-infrastructure)
+#   2. Update the outbox-processor build context path below to point to your codesearch repository
+#   3. Start infrastructure: docker compose up -d
+#   4. Point each repository to localhost via environment variables (see .env.codesearch.example)
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: codesearch-postgres
+    ports:
+      - "127.0.0.1:5432:5432"  # Expose to host for native CLI
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesearch -d codesearch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest-unprivileged
+    container_name: codesearch-qdrant
+    ports:
+      - "127.0.0.1:6333:6333"  # REST API
+      - "127.0.0.1:6334:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  outbox-processor:
+    build:
+      context: ..  # Path to codesearch repository (relative to this file)
+      dockerfile: Dockerfile.outbox-processor
+    container_name: codesearch-outbox-processor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=codesearch-postgres  # Use container name
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+      - QDRANT_HOST=codesearch-qdrant  # Use container name
+      - QDRANT_PORT=6334
+      - QDRANT_REST_PORT=6333
+      - RUST_LOG=${RUST_LOG:-info}
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+networks:
+  codesearch:
+    name: codesearch-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local

@@ -7,6 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod docker;
+mod infrastructure;
 mod storage_init;
 
 use anyhow::{anyhow, Context, Result};
@@ -143,6 +144,10 @@ async fn ensure_storage_initialized(
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
+        // First, ensure shared infrastructure is running (or start it if needed)
+        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+
+        // Then ensure all services are healthy
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
@@ -538,6 +543,10 @@ async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
+        // First, ensure shared infrastructure is running (or start it if needed)
+        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+
+        // Then ensure all services are healthy
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }

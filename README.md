@@ -1,78 +1,87 @@
 # codesearch
 
-## Multi-Repository Setup
+## Multi-Repository Support
 
-To index and serve multiple repositories simultaneously using shared infrastructure:
+Codesearch automatically manages shared infrastructure for multiple repositories.
 
-### Step 1: Start Shared Infrastructure (One-time)
+### First Use
 
-1. Copy the infrastructure directory to a location of your choice:
-   ```bash
-   cp -r infrastructure ~/codesearch-infrastructure
-   cd ~/codesearch-infrastructure
-   ```
+Simply run from any repository:
+```bash
+cd /path/to/repo
+codesearch index
+```
 
-2. If your codesearch repository is not in the parent directory, update the `outbox-processor` build context in `docker-compose.yml` to point to your codesearch source.
+The first run will automatically:
+1. Create infrastructure directory at `~/.codesearch/infrastructure/`
+2. Download and start containers (PostgreSQL, Qdrant, vLLM, outbox-processor)
+3. Wait for all services to be healthy (may take 1-2 minutes for vLLM to load models)
+4. Index your repository
 
-3. Start shared services:
-   ```bash
-   docker compose up -d
-   ```
+**Security**: All services are bound to 127.0.0.1 only (not accessible from network).
 
-4. Verify services are healthy:
-   ```bash
-   docker ps  # All containers should show "healthy"
-   curl http://localhost:6333/health  # Qdrant should respond
-   psql -h localhost -U codesearch -d codesearch -c "SELECT 1;"  # Postgres should respond
-   ```
+### Subsequent Repositories
 
-### Step 2: Index Each Repository
+From any other repository, just run:
+```bash
+cd /path/to/another-repo
+codesearch index
+```
 
-For each repository you want to index:
+It will detect existing infrastructure and connect automatically. No configuration needed!
 
-1. Navigate to repository:
-   ```bash
-   cd /path/to/repo-a
-   ```
+### How It Works
 
-2. Set environment variables (create `.env.codesearch` file):
-   ```bash
-   cat > .env.codesearch <<EOF
-   export POSTGRES_HOST=localhost
-   export QDRANT_HOST=localhost
-   export POSTGRES_PASSWORD=codesearch
-   export CODESEARCH__STORAGE__AUTO_START_DEPS=false
-   EOF
-   ```
+The first `codesearch index` or `codesearch serve` command will:
+- Detect no shared infrastructure exists
+- Acquire a lock file (`~/.codesearch/.infrastructure.lock`) to prevent race conditions
+- Write `docker-compose.yml` to `~/.codesearch/infrastructure/`
+- Start all services and wait for health checks
+- Release the lock and proceed with indexing
 
-3. Index the repository:
-   ```bash
-   source .env.codesearch
-   codesearch index
-   ```
-
-4. Start server (optional, for MCP):
-   ```bash
-   codesearch serve
-   ```
+Subsequent commands detect running infrastructure and connect directly.
 
 ### Verifying Multi-Repository Setup
 
-1. Check PostgreSQL for multiple repositories:
-   ```bash
-   psql -h localhost -U codesearch -d codesearch -c \
-     "SELECT repository_name, collection_name FROM repositories;"
-   ```
-   Should show multiple rows (one per indexed repository)
+Check PostgreSQL for multiple repositories:
+```bash
+docker exec codesearch-postgres psql -U codesearch -d codesearch -c \
+  "SELECT repository_name, collection_name FROM repositories;"
+```
+Should show multiple rows (one per indexed repository).
 
-2. Check Qdrant for multiple collections:
-   ```bash
-   curl -s http://localhost:6333/collections | jq '.result.collections'
-   ```
-   Should show multiple collections (one per repository)
+Check Qdrant for multiple collections:
+```bash
+curl -s http://localhost:6333/collections | jq '.result.collections'
+```
+Should show multiple collections (one per repository).
 
-3. Monitor outbox processor logs:
-   ```bash
-   docker logs -f codesearch-outbox-processor
-   ```
-   Should show processing entries from multiple collections
+### Manual Control (Optional)
+
+View infrastructure status:
+```bash
+docker ps | grep codesearch
+```
+
+Stop shared infrastructure:
+```bash
+cd ~/.codesearch/infrastructure
+docker compose down
+```
+
+Restart shared infrastructure:
+```bash
+cd ~/.codesearch/infrastructure
+docker compose up -d
+```
+
+### Troubleshooting
+
+**Lock timeout**: If initialization hangs, remove stale lock:
+```bash
+rm ~/.codesearch/.infrastructure.lock
+```
+
+**Port conflicts**: Ensure ports 5432, 6333, 6334, and 8000 are available.
+
+**vLLM startup**: First run may take 1-2 minutes for vLLM to download and load the embedding model.

@@ -293,11 +293,52 @@ pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Res
     ))
 }
 
+/// Check if we're in shared infrastructure mode
+///
+/// Returns true if shared infrastructure containers exist (regardless of their state)
+pub fn is_shared_infrastructure_mode() -> Result<bool> {
+    // Check if any of the expected shared infrastructure containers exist
+    // We use "docker ps -a" to check for existence (running or stopped)
+    let containers = [
+        "codesearch-postgres",
+        "codesearch-qdrant",
+        "codesearch-vllm",
+        "codesearch-outbox-processor",
+    ];
+
+    for container in &containers {
+        let output = Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                &format!("name={container}"),
+                "--format",
+                "{{.Names}}",
+            ])
+            .output()
+            .context("Failed to check for shared infrastructure containers")?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains(container) {
+                // At least one shared infrastructure container exists
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 /// Ensure dependencies are running, starting them if necessary
 pub async fn ensure_dependencies_running(
     config: &StorageConfig,
     api_base_url: Option<&str>,
 ) -> Result<()> {
+    // Check if we're in shared infrastructure mode
+    let shared_mode = is_shared_infrastructure_mode()?;
+
     let qdrant_healthy = check_qdrant_health(config).await;
     let postgres_healthy = check_postgres_health(config).await;
     let outbox_running = is_outbox_processor_running()?;
@@ -313,6 +354,37 @@ pub async fn ensure_dependencies_running(
         return Ok(());
     }
 
+    // In shared infrastructure mode, don't start per-repo docker compose
+    if shared_mode {
+        info!("Shared infrastructure mode detected - skipping per-repository docker compose");
+
+        // Just verify health or fail
+        if !qdrant_healthy || !postgres_healthy || !outbox_running || !vllm_healthy {
+            let mut msg = String::new();
+            msg.push_str(
+                "Shared infrastructure containers exist but some services are not healthy:\n",
+            );
+            if !postgres_healthy {
+                msg.push_str("  - PostgreSQL is not responding\n");
+            }
+            if !qdrant_healthy {
+                msg.push_str("  - Qdrant is not responding\n");
+            }
+            if !outbox_running {
+                msg.push_str("  - Outbox Processor is not running\n");
+            }
+            if !vllm_healthy {
+                msg.push_str("  - vLLM is not responding\n");
+            }
+            msg.push_str("\nTry restarting shared infrastructure:\n");
+            msg.push_str("  cd ~/.codesearch/infrastructure && docker compose restart");
+            return Err(anyhow!(msg));
+        }
+
+        return Ok(());
+    }
+
+    // Not in shared mode - use regular per-repo docker compose logic
     // Check if auto-start is enabled
     if !config.auto_start_deps {
         let mut msg = String::new();

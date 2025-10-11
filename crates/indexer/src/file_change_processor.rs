@@ -248,6 +248,7 @@ async fn process_file_batch(
         git_commit.clone(),
         embedding_manager,
         postgres_client.as_ref(),
+        postgres_client.max_entity_batch_size(),
     )
     .await?;
 

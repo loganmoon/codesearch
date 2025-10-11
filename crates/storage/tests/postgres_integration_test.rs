@@ -117,7 +117,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
             Some("abc123".to_string()),
         )];
         client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         let entities = client
@@ -161,7 +161,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             Some("abc123".to_string()),
         )];
         client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         entity.content = Some("fn test_func() { /* updated */ }".to_string());
@@ -174,7 +174,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             Some("def456".to_string()),
         )];
         client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         let entities = client
@@ -253,7 +253,7 @@ async fn test_get_file_snapshot() -> Result<()> {
         ];
 
         client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         // Update file snapshots
@@ -431,7 +431,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
                 None,
             )];
             client
-                .store_entities_with_outbox_batch(repository_id, &batch)
+                .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
                 .await?;
         }
 
@@ -526,7 +526,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
                 None,
             )];
             client
-                .store_entities_with_outbox_batch(repository_id, &batch)
+                .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
                 .await?;
         }
 
@@ -624,7 +624,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
         ];
 
         let outbox_ids = client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         let insert_id = outbox_ids[0];
@@ -672,7 +672,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
         )];
 
         let outbox_ids = client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
         let outbox_id = outbox_ids[0];
 
@@ -718,7 +718,7 @@ async fn test_outbox_record_failure() -> Result<()> {
         )];
 
         let outbox_ids = client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
         let outbox_id = outbox_ids[0];
 
@@ -792,7 +792,7 @@ async fn test_transaction_rollback() -> Result<()> {
             None,
         )];
         client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         let entities = client

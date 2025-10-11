@@ -1,8 +1,11 @@
 [indexer]
 
 [embeddings]
-provider = "mock"
-
+provider = "localapi"
+model = "BAAI/bge-code-v1"
+batch_size = 1000
+api_base_url = "http://localhost:8000/v1"
+embedding_dimension = 1536
 
 [watcher]
 debounce_ms = 500
@@ -19,7 +22,8 @@ ignore_patterns = [
 qdrant_host = "localhost"
 qdrant_port = 6334
 qdrant_rest_port = 6333
-auto_start_deps = false
+collection_name = "codesearch_2692001907bae15d5a4b45ad9dd260fd"
+auto_start_deps = true
 postgres_host = "localhost"
 postgres_port = 5432
 postgres_database = "codesearch"
@@ -30,8 +34,8 @@ postgres_password = "codesearch"
 enabled = ["rust"]
 
 [languages.python]
-preserve_docstrings = false
-include_type_hints = false
+preserve_docstrings = true
+include_type_hints = true
 
 [languages.javascript]
 preserve_jsx = true

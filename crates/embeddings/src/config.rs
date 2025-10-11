@@ -1,7 +1,6 @@
 //! Configuration for embedding generation
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 
 /// Embedding provider type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -11,28 +10,6 @@ pub enum EmbeddingProviderType {
     LocalApi,
     /// Mock provider for testing
     Mock,
-}
-
-/// Device type for computation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum DeviceType {
-    /// CPU computation
-    #[default]
-    Cpu,
-    /// CUDA GPU computation
-    Cuda,
-    /// Metal GPU computation (Apple Silicon)
-    Metal,
-}
-
-/// Backend type for embeddings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum BackendType {
-    /// Candle backend - more flexible, supports any HuggingFace model
-    #[default]
-    Candle,
-    /// ONNX backend - potentially faster for supported models. Currently not implemented.
-    Onnx,
 }
 
 /// Configuration for embedding generation
@@ -56,26 +33,11 @@ pub struct EmbeddingConfig {
     /// Embedding dimension size
     pub(crate) embedding_dimension: usize,
 
-    /// Device to use for computation
-    pub(crate) device: DeviceType,
-
-    /// Backend to use for inference
-    #[serde(default)]
-    pub(crate) backend: BackendType,
-
     /// Maximum number of concurrent workers
     pub(crate) max_workers: usize,
-
-    /// Model cache directory
-    pub(crate) model_cache_dir: PathBuf,
 }
 
 impl EmbeddingConfig {
-    /// Get the model cache directory as a Path
-    pub fn model_cache_path(&self) -> &Path {
-        &self.model_cache_dir
-    }
-
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), String> {
         if self.batch_size == 0 {
@@ -109,10 +71,7 @@ impl Default for EmbeddingConfig {
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
             embedding_dimension: 1536,
-            device: DeviceType::default(),
-            backend: BackendType::default(),
             max_workers: 4,
-            model_cache_dir: PathBuf::from("./models"),
         }
     }
 }
@@ -125,10 +84,7 @@ pub struct EmbeddingConfigBuilder {
     api_base_url: Option<Option<String>>,
     api_key: Option<Option<String>>,
     embedding_dimension: Option<usize>,
-    device: Option<DeviceType>,
-    backend: Option<BackendType>,
     max_workers: Option<usize>,
-    model_cache_dir: Option<PathBuf>,
 }
 
 impl EmbeddingConfigBuilder {
@@ -141,10 +97,7 @@ impl EmbeddingConfigBuilder {
             api_base_url: None,
             api_key: None,
             embedding_dimension: None,
-            device: None,
-            backend: None,
             max_workers: None,
-            model_cache_dir: None,
         }
     }
 
@@ -184,27 +137,9 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the device type
-    pub fn device(mut self, device: DeviceType) -> Self {
-        self.device = Some(device);
-        self
-    }
-
-    /// Set the backend type
-    pub fn backend(mut self, backend: BackendType) -> Self {
-        self.backend = Some(backend);
-        self
-    }
-
     /// Set the maximum number of workers
     pub fn max_workers(mut self, max_workers: usize) -> Self {
         self.max_workers = Some(max_workers);
-        self
-    }
-
-    /// Set the model cache directory
-    pub fn model_cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
-        self.model_cache_dir = Some(dir.into());
         self
     }
 
@@ -221,10 +156,7 @@ impl EmbeddingConfigBuilder {
             embedding_dimension: self
                 .embedding_dimension
                 .unwrap_or(defaults.embedding_dimension),
-            device: self.device.unwrap_or(defaults.device),
-            backend: self.backend.unwrap_or(defaults.backend),
             max_workers: self.max_workers.unwrap_or(defaults.max_workers),
-            model_cache_dir: self.model_cache_dir.unwrap_or(defaults.model_cache_dir),
         }
     }
 }

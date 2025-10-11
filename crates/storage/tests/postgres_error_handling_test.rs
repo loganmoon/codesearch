@@ -57,6 +57,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
         for i in 0..10 {
             let client_clone = Arc::clone(&client);
             let repo_id = repository_id;
+            let collection_name_clone = collection_name.clone();
             tasks.push(tokio::spawn(async move {
                 let entity = create_test_entity(
                     &format!("concurrent_{i}"),
@@ -74,7 +75,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
                     None,
                 )];
                 client_clone
-                    .store_entities_with_outbox_batch(repo_id, &batch)
+                    .store_entities_with_outbox_batch(repo_id, &collection_name_clone, &batch)
                     .await
             }));
         }
@@ -138,6 +139,8 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         // Spawn concurrent updates
         let client1 = Arc::clone(&client);
         let client2 = Arc::clone(&client);
+        let collection_name1 = collection_name.clone();
+        let collection_name2 = collection_name;
 
         let task1 = tokio::spawn(async move {
             let embedding = vec![0.1; 384];
@@ -151,7 +154,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
                 None,
             )];
             client1
-                .store_entities_with_outbox_batch(repository_id, &batch)
+                .store_entities_with_outbox_batch(repository_id, &collection_name1, &batch)
                 .await
         });
 
@@ -167,7 +170,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
                 None,
             )];
             client2
-                .store_entities_with_outbox_batch(repository_id, &batch)
+                .store_entities_with_outbox_batch(repository_id, &collection_name2, &batch)
                 .await
         });
 
@@ -310,7 +313,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
                 None,
             )];
             client
-                .store_entities_with_outbox_batch(repository_id, &batch)
+                .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
                 .await?;
         }
 
@@ -353,6 +356,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
         let mut tasks = vec![];
         for i in 0..10 {
             let client_clone = Arc::clone(&client);
+            let collection_name_clone = collection_name.clone();
             tasks.push(tokio::spawn(async move {
                 let entity = create_test_entity(
                     &format!("concurrent_{i}"),
@@ -371,7 +375,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
                 )];
 
                 client_clone
-                    .store_entities_with_outbox_batch(repository_id, &batch)
+                    .store_entities_with_outbox_batch(repository_id, &collection_name_clone, &batch)
                     .await
             }));
         }
@@ -425,7 +429,7 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
         )];
 
         let outbox_ids = client
-            .store_entities_with_outbox_batch(repository_id, &batch)
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
             .await?;
 
         let outbox_id = outbox_ids[0];

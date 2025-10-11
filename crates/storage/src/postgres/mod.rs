@@ -17,6 +17,12 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Get the maximum entity batch size for batch operations
     fn max_entity_batch_size(&self) -> usize;
 
+    /// Get direct access to the connection pool for custom queries
+    ///
+    /// This is used by the outbox processor for bulk operations that
+    /// don't fit the standard trait methods.
+    fn get_pool(&self) -> &sqlx::PgPool;
+
     /// Run database migrations
     async fn run_migrations(&self) -> Result<()>;
 

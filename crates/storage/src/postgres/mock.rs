@@ -170,6 +170,12 @@ impl PostgresClientTrait for MockPostgresClient {
         self.max_entity_batch_size
     }
 
+    fn get_pool(&self) -> &sqlx::PgPool {
+        // Mock doesn't have a real pool - this should not be called in tests
+        // If you need to test code that uses get_pool(), use integration tests with a real database
+        panic!("MockPostgresClient::get_pool() should not be called - use integration tests with a real database")
+    }
+
     async fn run_migrations(&self) -> Result<()> {
         // Mock - no migrations needed
         Ok(())

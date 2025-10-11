@@ -42,21 +42,27 @@ async fn main() -> Result<()> {
     info!("Database migrations completed successfully");
 
     info!(
-        "Connecting to Qdrant at {}:{} (collection: {})",
-        config.storage.qdrant_host, config.storage.qdrant_port, config.storage.collection_name
+        "Connecting to Qdrant at {}:{}",
+        config.storage.qdrant_host, config.storage.qdrant_port
     );
-    let storage_client =
-        match create_storage_client(&config.storage, &config.storage.collection_name).await {
-            Ok(client) => client,
-            Err(e) => {
-                error!("Failed to connect to Qdrant: {e}");
-                return Err(e);
-            }
-        };
+    // Verify Qdrant is reachable by creating a test client
+    match create_storage_client(&config.storage, "test_connection").await {
+        Ok(_) => info!("Qdrant connection verified"),
+        Err(e) => {
+            error!("Failed to connect to Qdrant: {e}");
+            return Err(e);
+        }
+    }
+
+    let qdrant_config = codesearch_storage::QdrantConfig {
+        host: config.storage.qdrant_host.clone(),
+        port: config.storage.qdrant_port,
+        rest_port: config.storage.qdrant_rest_port,
+    };
 
     let processor = OutboxProcessor::new(
         postgres_client,
-        storage_client,
+        qdrant_config,
         Duration::from_millis(1000), // Poll every 1s
         100,                         // Batch size
         3,                           // Max retries

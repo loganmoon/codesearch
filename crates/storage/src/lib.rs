@@ -137,6 +137,33 @@ pub async fn create_storage_client(
     Ok(Arc::new(client))
 }
 
+/// Configuration for creating Qdrant clients
+#[derive(Debug, Clone)]
+pub struct QdrantConfig {
+    pub host: String,
+    pub port: u16,
+    pub rest_port: u16,
+}
+
+/// Create a StorageClient for a specific collection using provided config
+pub async fn create_storage_client_from_config(
+    config: &QdrantConfig,
+    collection_name: &str,
+) -> Result<Arc<dyn StorageClient>> {
+    let url = format!("http://{}:{}", config.host, config.port);
+    let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {e}"))
+    })?;
+
+    let client = qdrant::client::QdrantStorageClient::new(
+        Arc::new(qdrant_client),
+        collection_name.to_string(),
+    )
+    .await?;
+
+    Ok(Arc::new(client))
+}
+
 /// Factory function to create a collection manager for lifecycle operations
 pub async fn create_collection_manager(
     config: &StorageConfig,

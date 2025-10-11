@@ -134,6 +134,14 @@ impl PostgresClient {
         }
     }
 
+    /// Get direct access to the connection pool for custom queries
+    ///
+    /// This is used by the outbox processor for bulk operations that
+    /// don't fit the standard trait methods.
+    pub fn get_pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     /// Run database migrations
     pub async fn run_migrations(&self) -> Result<()> {
         sqlx::migrate!("../../migrations")
@@ -901,6 +909,10 @@ impl PostgresClient {
 impl super::PostgresClientTrait for PostgresClient {
     fn max_entity_batch_size(&self) -> usize {
         self.max_entity_batch_size
+    }
+
+    fn get_pool(&self) -> &PgPool {
+        self.get_pool()
     }
 
     async fn run_migrations(&self) -> Result<()> {

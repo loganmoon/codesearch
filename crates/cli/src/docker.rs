@@ -8,97 +8,6 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-/// Check if Docker is installed and available
-pub fn is_docker_available() -> bool {
-    Command::new("docker")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Check if Docker Compose is installed and available
-pub fn is_docker_compose_available() -> bool {
-    // Try docker compose (v2) first
-    if Command::new("docker")
-        .args(["compose", "version"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    {
-        return true;
-    }
-
-    // Fall back to docker-compose (v1)
-    Command::new("docker-compose")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Get the Docker Compose command (v2 or v1)
-fn get_compose_command() -> (&'static str, Vec<&'static str>) {
-    // Prefer docker compose (v2)
-    if Command::new("docker")
-        .args(["compose", "version"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    {
-        ("docker", vec!["compose"])
-    } else {
-        ("docker-compose", vec![])
-    }
-}
-
-/// Start containerized dependencies
-pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
-    if !is_docker_available() {
-        return Err(anyhow!(
-            "Docker is not installed. Please install Docker from https://docs.docker.com/get-docker/"
-        ));
-    }
-
-    if !is_docker_compose_available() {
-        return Err(anyhow!(
-            "Docker Compose is not installed. Please install Docker Compose from https://docs.docker.com/compose/install/"
-        ));
-    }
-
-    let (cmd, mut args) = get_compose_command();
-
-    // Add compose file if specified
-    if let Some(file) = compose_file {
-        args.push("-f");
-        args.push(file);
-    }
-
-    args.extend([
-        "up",
-        "-d",
-        "qdrant",
-        "postgres",
-        "outbox-processor",
-        "vllm-embeddings",
-    ]);
-
-    info!("Starting containerized dependencies...");
-
-    let output = Command::new(cmd)
-        .args(&args)
-        .output()
-        .context("Failed to execute docker compose")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("Failed to start dependencies:\n{stderr}"));
-    }
-
-    info!("Dependencies started successfully");
-    Ok(())
-}
-
 /// Generic helper to check if a container is running
 fn is_container_running(container_name: &str) -> Result<bool> {
     let filter_arg = format!("name={container_name}");
@@ -248,23 +157,23 @@ pub async fn check_postgres_health(config: &StorageConfig) -> bool {
         .port(config.postgres_port)
         .username(&config.postgres_user)
         .password(&config.postgres_password)
-        .database(&config.postgres_database);
+        .database("postgres");
 
     match sqlx::PgPool::connect_with(connect_options).await {
         Ok(pool) => match sqlx::query("SELECT 1").execute(&pool).await {
             Ok(_) => true,
             Err(e) => {
                 warn!(
-                    "Postgres health check query failed at {}:{}/{}: {e}",
-                    config.postgres_host, config.postgres_port, config.postgres_database
+                    "Postgres health check query failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
                 );
                 false
             }
         },
         Err(e) => {
             warn!(
-                "Postgres health check connection failed at {}:{}/{}: {e}",
-                config.postgres_host, config.postgres_port, config.postgres_database
+                "Postgres health check connection failed at {}:{}/postgres: {e}",
+                config.postgres_host, config.postgres_port
             );
             false
         }
@@ -272,18 +181,61 @@ pub async fn check_postgres_health(config: &StorageConfig) -> bool {
 }
 
 /// Wait for Postgres to become healthy
+///
+/// This function reuses a single connection across multiple health checks to avoid
+/// the overhead of creating 30+ connections during startup.
 pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Result<()> {
     info!("Waiting for Postgres to become healthy...");
 
     let start = Instant::now();
+    let connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database("postgres");
 
+    // Try to establish connection, retrying on failures
+    let mut pool = None;
     while start.elapsed() < timeout {
-        if check_postgres_health(config).await {
-            info!("Postgres is healthy");
-            return Ok(());
+        match sqlx::PgPool::connect_with(connect_options.clone()).await {
+            Ok(p) => {
+                pool = Some(p);
+                break;
+            }
+            Err(e) => {
+                warn!(
+                    "Postgres connection attempt failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
+                );
+                sleep(Duration::from_secs(1)).await;
+            }
         }
+    }
 
-        sleep(Duration::from_secs(1)).await;
+    let pool = pool.ok_or_else(|| {
+        anyhow!(
+            "Postgres failed to accept connections within {} seconds. \
+             Check logs with: docker logs codesearch-postgres",
+            timeout.as_secs()
+        )
+    })?;
+
+    // Connection established, now verify it's healthy with queries
+    while start.elapsed() < timeout {
+        match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => {
+                info!("Postgres is healthy");
+                return Ok(());
+            }
+            Err(e) => {
+                warn!(
+                    "Postgres health check query failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
+                );
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
     }
 
     Err(anyhow!(
@@ -293,7 +245,10 @@ pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Res
     ))
 }
 
-/// Ensure dependencies are running, starting them if necessary
+/// Ensure dependencies are running
+///
+/// All codesearch installations use shared infrastructure. This function verifies
+/// that all required services are healthy, providing helpful error messages if not.
 pub async fn ensure_dependencies_running(
     config: &StorageConfig,
     api_base_url: Option<&str>,
@@ -313,53 +268,27 @@ pub async fn ensure_dependencies_running(
         return Ok(());
     }
 
-    // Check if auto-start is enabled
-    if !config.auto_start_deps {
-        let mut msg = String::new();
-        if !qdrant_healthy {
-            msg.push_str("Qdrant is not running. ");
-        }
-        if !postgres_healthy {
-            msg.push_str("Postgres is not running. ");
-        }
-        if !outbox_running {
-            msg.push_str("Outbox Processor is not running. ");
-        }
-        if !vllm_healthy {
-            msg.push_str("vLLM is not running. ");
-        }
-        msg.push_str("Start them manually with: docker compose up -d\n");
-        msg.push_str("Or enable auto_start_deps in your configuration");
-        return Err(anyhow!(msg));
-    }
-
-    // Check if containers exist but are not running
-    if !is_qdrant_running()?
-        || !is_postgres_running()?
-        || !outbox_running
-        || (api_base_url.is_some() && !is_vllm_running()?)
-    {
-        info!("Starting containerized dependencies...");
-        start_dependencies(config.docker_compose_file.as_deref())?;
-    }
-
-    // Wait for health
-    if !qdrant_healthy {
-        wait_for_qdrant(config, Duration::from_secs(60)).await?;
-    }
+    // Some services are not healthy - provide helpful error message
+    let mut msg = String::new();
+    msg.push_str("Some required services are not healthy:\n");
     if !postgres_healthy {
-        wait_for_postgres(config, Duration::from_secs(30)).await?;
+        msg.push_str("  - PostgreSQL is not responding\n");
     }
-    // Outbox processor doesn't have a health endpoint - just wait a bit for it to start
+    if !qdrant_healthy {
+        msg.push_str("  - Qdrant is not responding\n");
+    }
     if !outbox_running {
-        info!("Waiting for outbox processor to start...");
-        sleep(Duration::from_secs(2)).await;
+        msg.push_str("  - Outbox Processor is not running\n");
     }
-    if let Some(url) = api_base_url {
-        if !vllm_healthy {
-            wait_for_vllm(url, Duration::from_secs(60)).await?;
-        }
+    if !vllm_healthy {
+        msg.push_str("  - vLLM is not responding\n");
     }
+    msg.push_str(
+        "\nShared infrastructure should start automatically on first `codesearch index`.\n",
+    );
+    msg.push_str(
+        "If services are stopped, try: cd ~/.codesearch/infrastructure && docker compose restart",
+    );
 
-    Ok(())
+    Err(anyhow!(msg))
 }

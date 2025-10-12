@@ -96,6 +96,7 @@ impl FromStr for TargetStore {
 /// * `processed_at` - When this entry was successfully processed (None if pending)
 /// * `retry_count` - Number of times processing has been attempted
 /// * `last_error` - Error message from the most recent failed processing attempt
+/// * `collection_name` - Target collection name in the external store (e.g., Qdrant collection)
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct OutboxEntry {
     pub outbox_id: Uuid,
@@ -108,6 +109,7 @@ pub struct OutboxEntry {
     pub processed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub retry_count: i32,
     pub last_error: Option<String>,
+    pub collection_name: String,
 }
 
 /// Type alias for a single entity batch entry with outbox data
@@ -122,11 +124,23 @@ pub type EntityOutboxBatchEntry<'a> = (
 
 pub struct PostgresClient {
     pool: PgPool,
+    max_entity_batch_size: usize,
 }
 
 impl PostgresClient {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, max_entity_batch_size: usize) -> Self {
+        Self {
+            pool,
+            max_entity_batch_size,
+        }
+    }
+
+    /// Get direct access to the connection pool for custom queries
+    ///
+    /// This is used by the outbox processor for bulk operations that
+    /// don't fit the standard trait methods.
+    pub fn get_pool(&self) -> &PgPool {
+        &self.pool
     }
 
     /// Run database migrations
@@ -193,6 +207,18 @@ impl PostgresClient {
         Ok(record.map(|(id,)| id))
     }
 
+    /// Get collection name by repository ID
+    pub async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let record: Option<(String,)> =
+            sqlx::query_as("SELECT collection_name FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query collection name: {e}")))?;
+
+        Ok(record.map(|(name,)| name))
+    }
+
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     pub async fn get_entity_metadata(
         &self,
@@ -224,12 +250,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -338,12 +363,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_refs.len() > MAX_BATCH_SIZE {
+        if entity_refs.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_refs.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -386,12 +410,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -434,6 +457,7 @@ impl PostgresClient {
     pub async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
         if entity_ids.is_empty() {
@@ -441,12 +465,11 @@ impl PostgresClient {
         }
 
         // Validate batch size to prevent resource exhaustion
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -478,7 +501,7 @@ impl PostgresClient {
 
         // 2. Create outbox entries for all deletes
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, created_at) "
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
         );
 
         outbox_query.push_values(entity_ids, |mut b, entity_id| {
@@ -491,6 +514,7 @@ impl PostgresClient {
                 .push_bind(OutboxOperation::Delete.to_string())
                 .push_bind(TargetStore::Qdrant.to_string())
                 .push_bind(payload)
+                .push_bind(collection_name)
                 .push("NOW()");
         });
 
@@ -516,6 +540,7 @@ impl PostgresClient {
     pub async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
         if entities.is_empty() {
@@ -523,12 +548,11 @@ impl PostgresClient {
         }
 
         // Validate batch size
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entities.len() > MAX_BATCH_SIZE {
+        if entities.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entities.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -623,12 +647,32 @@ impl PostgresClient {
             .build()
             .execute(&mut *tx)
             .await
-            .map_err(|e| Error::storage(format!("Failed to bulk insert entity metadata: {e}")))?;
+            .map_err(|e| {
+                // Extract entity IDs for debugging duplicate key errors
+                let entity_ids: Vec<String> = validated_entities
+                    .iter()
+                    .map(|(entity, _, _, _, _, _, _, _)| entity.entity_id.clone())
+                    .collect();
+                let unique_ids: std::collections::HashSet<_> = entity_ids.iter().collect();
+
+                if entity_ids.len() != unique_ids.len() {
+                    Error::storage(format!(
+                        "Failed to bulk insert entity metadata (detected {} duplicate entity_ids in batch of {}): {e}",
+                        entity_ids.len() - unique_ids.len(),
+                        entity_ids.len()
+                    ))
+                } else {
+                    Error::storage(format!(
+                        "Failed to bulk insert entity metadata (batch size {}): {e}",
+                        entity_ids.len()
+                    ))
+                }
+            })?;
 
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
-                repository_id, entity_id, operation, target_store, payload
+                repository_id, entity_id, operation, target_store, payload, collection_name
             ) ",
         );
 
@@ -655,7 +699,8 @@ impl PostgresClient {
                     .push_bind(&entity.entity_id)
                     .push_bind(op.to_string())
                     .push_bind(target.to_string())
-                    .push_bind(payload);
+                    .push_bind(payload)
+                    .push_bind(collection_name);
             },
         );
 
@@ -682,7 +727,7 @@ impl PostgresClient {
     ) -> Result<Vec<OutboxEntry>> {
         let entries = sqlx::query_as::<_, OutboxEntry>(
             "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
-                    created_at, processed_at, retry_count, last_error
+                    created_at, processed_at, retry_count, last_error, collection_name
              FROM entity_outbox
              WHERE target_store = $1 AND processed_at IS NULL
              ORDER BY created_at ASC
@@ -863,6 +908,14 @@ impl PostgresClient {
 // Trait implementation delegates to inherent methods for testability and flexibility
 #[async_trait]
 impl super::PostgresClientTrait for PostgresClient {
+    fn max_entity_batch_size(&self) -> usize {
+        self.max_entity_batch_size
+    }
+
+    fn get_pool(&self) -> &PgPool {
+        self.get_pool()
+    }
+
     async fn run_migrations(&self) -> Result<()> {
         self.run_migrations().await
     }
@@ -879,6 +932,10 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
         self.get_repository_id(collection_name).await
+    }
+
+    async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        self.get_collection_name(repository_id).await
     }
 
     async fn get_entity_metadata(
@@ -933,18 +990,20 @@ impl super::PostgresClientTrait for PostgresClient {
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
-        self.mark_entities_deleted_with_outbox(repository_id, entity_ids)
+        self.mark_entities_deleted_with_outbox(repository_id, collection_name, entity_ids)
             .await
     }
 
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
-        self.store_entities_with_outbox_batch(repository_id, entities)
+        self.store_entities_with_outbox_batch(repository_id, collection_name, entities)
             .await
     }
 

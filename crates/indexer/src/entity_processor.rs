@@ -116,6 +116,7 @@ pub async fn process_entity_batch(
     git_commit: Option<String>,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
+    max_batch_size: usize,
 ) -> Result<(BatchProcessingStats, HashMap<String, Vec<String>>)> {
     let mut stats = BatchProcessingStats::default();
     let mut entities_by_file: HashMap<String, Vec<String>> = HashMap::new();
@@ -123,6 +124,103 @@ pub async fn process_entity_batch(
     if entities.is_empty() {
         return Ok((stats, entities_by_file));
     }
+
+    // Deduplicate entities by entity_id (keep last occurrence to match PostgreSQL ON CONFLICT behavior)
+    let original_count = entities.len();
+    let mut unique_entities = HashMap::new();
+    for entity in entities {
+        if let Some(previous) = unique_entities.insert(entity.entity_id.clone(), entity) {
+            debug!(
+                "Duplicate entity_id detected in batch: {} in file {} (qualified_name: {})",
+                previous.entity_id,
+                previous.file_path.display(),
+                previous.qualified_name
+            );
+        }
+    }
+    let entities: Vec<CodeEntity> = unique_entities.into_values().collect();
+
+    if entities.len() < original_count {
+        info!(
+            "Deduplicated batch: {} entities -> {} unique entities ({} duplicates removed)",
+            original_count,
+            entities.len(),
+            original_count - entities.len()
+        );
+    }
+
+    // Fetch collection_name once for all chunks
+    let collection_name = postgres_client
+        .get_collection_name(repo_id)
+        .await
+        .storage_err("Failed to get collection name")?
+        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+
+    // Chunk entities if batch exceeds max size
+    let chunks: Vec<Vec<CodeEntity>> = entities
+        .chunks(max_batch_size)
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    let num_chunks = chunks.len();
+    let total_entities = entities.len();
+
+    if num_chunks > 1 {
+        info!(
+            "Processing {} entities in {} chunks of max {} entities each",
+            total_entities, num_chunks, max_batch_size
+        );
+    }
+
+    // Process each chunk separately
+    for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
+        if num_chunks > 1 {
+            info!(
+                "Processing chunk {}/{} with {} entities",
+                chunk_idx + 1,
+                num_chunks,
+                chunk.len()
+            );
+        }
+
+        let (chunk_stats, chunk_entities_by_file) = process_entity_chunk(
+            chunk,
+            repo_id,
+            &collection_name,
+            git_commit.clone(),
+            embedding_manager,
+            postgres_client,
+        )
+        .await?;
+
+        // Aggregate stats
+        stats.entities_added += chunk_stats.entities_added;
+        stats.entities_updated += chunk_stats.entities_updated;
+        stats.entities_skipped_size += chunk_stats.entities_skipped_size;
+
+        // Merge entities_by_file
+        for (file_path, entity_ids) in chunk_entities_by_file {
+            entities_by_file
+                .entry(file_path)
+                .or_default()
+                .extend(entity_ids);
+        }
+    }
+
+    Ok((stats, entities_by_file))
+}
+
+/// Process a single chunk of entities (internal helper)
+async fn process_entity_chunk(
+    entities: Vec<CodeEntity>,
+    repo_id: Uuid,
+    collection_name: &str,
+    git_commit: Option<String>,
+    embedding_manager: &Arc<EmbeddingManager>,
+    postgres_client: &(dyn PostgresClientTrait + Send + Sync),
+) -> Result<(BatchProcessingStats, HashMap<String, Vec<String>>)> {
+    let mut stats = BatchProcessingStats::default();
+    let mut entities_by_file: HashMap<String, Vec<String>> = HashMap::new();
 
     info!("Generating embeddings for {} entities", entities.len());
 
@@ -139,6 +237,15 @@ pub async fn process_entity_batch(
         Vec::with_capacity(entities.len());
     for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
         if let Some(embedding) = opt_embedding {
+            // Validate embedding is not all zeros
+            let is_all_zeros = embedding.iter().all(|&v| v == 0.0);
+            if is_all_zeros {
+                debug!(
+                    "Warning: embedding is all zeros for entity {} in {}",
+                    entity.qualified_name,
+                    entity.file_path.display()
+                );
+            }
             entity_embedding_pairs.push((entity, embedding));
         } else {
             stats.entities_skipped_size += 1;
@@ -207,8 +314,9 @@ pub async fn process_entity_batch(
         ));
     }
 
+    // Use cached collection_name passed from parent function
     postgres_client
-        .store_entities_with_outbox_batch(repo_id, &batch_refs)
+        .store_entities_with_outbox_batch(repo_id, collection_name, &batch_refs)
         .await
         .storage_err("Failed to store entities")?;
 
@@ -223,6 +331,7 @@ pub async fn process_entity_batch(
 /// Update file snapshot and mark stale entities as deleted
 pub async fn update_file_snapshot_and_mark_stale(
     repo_id: Uuid,
+    collection_name: &str,
     file_path: &str,
     new_entity_ids: Vec<String>,
     git_commit: Option<String>,
@@ -248,7 +357,7 @@ pub async fn update_file_snapshot_and_mark_stale(
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
     }
@@ -264,6 +373,7 @@ pub async fn update_file_snapshot_and_mark_stale(
 /// Mark all entities in a file as deleted (for file deletion)
 pub async fn mark_file_entities_deleted(
     repo_id: Uuid,
+    collection_name: &str,
     file_path: &str,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
 ) -> Result<usize> {
@@ -282,7 +392,7 @@ pub async fn mark_file_entities_deleted(
     let count = entity_ids.len();
 
     postgres_client
-        .mark_entities_deleted_with_outbox(repo_id, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 

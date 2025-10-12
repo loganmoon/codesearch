@@ -24,6 +24,9 @@ pub use postgres::{OutboxOperation, PostgresClientTrait};
 // Re-export types needed by outbox-processor
 pub use postgres::{OutboxEntry, TargetStore};
 
+// Re-export concrete implementation for testing
+pub use postgres::PostgresClient;
+
 // Re-export mock for testing
 pub use postgres::mock::MockPostgresClient;
 
@@ -137,6 +140,33 @@ pub async fn create_storage_client(
     Ok(Arc::new(client))
 }
 
+/// Configuration for creating Qdrant clients
+#[derive(Debug, Clone)]
+pub struct QdrantConfig {
+    pub host: String,
+    pub port: u16,
+    pub rest_port: u16,
+}
+
+/// Create a StorageClient for a specific collection using provided config
+pub async fn create_storage_client_from_config(
+    config: &QdrantConfig,
+    collection_name: &str,
+) -> Result<Arc<dyn StorageClient>> {
+    let url = format!("http://{}:{}", config.host, config.port);
+    let qdrant_client = qdrant_client::Qdrant::from_url(&url).build().map_err(|e| {
+        codesearch_core::error::Error::storage(format!("Failed to connect to Qdrant: {e}"))
+    })?;
+
+    let client = qdrant::client::QdrantStorageClient::new(
+        Arc::new(qdrant_client),
+        collection_name.to_string(),
+    )
+    .await?;
+
+    Ok(Arc::new(client))
+}
+
 /// Factory function to create a collection manager for lifecycle operations
 pub async fn create_collection_manager(
     config: &StorageConfig,
@@ -156,6 +186,52 @@ pub async fn create_collection_manager(
 pub async fn create_postgres_client(
     config: &StorageConfig,
 ) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
+    // First, connect to the default 'postgres' database to check if target database exists
+    let default_connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database("postgres");
+
+    let default_pool = sqlx::PgPool::connect_with(default_connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!(
+                "Failed to connect to default Postgres database: {e}"
+            ))
+        })?;
+
+    // Check if target database exists
+    let db_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(&config.postgres_database)
+            .fetch_one(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to check database existence: {e}"
+                ))
+            })?;
+
+    // Create database if it doesn't exist
+    if !db_exists {
+        let create_db_query = format!("CREATE DATABASE \"{}\"", &config.postgres_database);
+        sqlx::query(&create_db_query)
+            .execute(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to create database '{}': {e}",
+                    config.postgres_database
+                ))
+            })?;
+    }
+
+    // Close connection to default database
+    default_pool.close().await;
+
+    // Now connect to the target database
     let connect_options = PgConnectOptions::new()
         .host(&config.postgres_host)
         .port(config.postgres_port)
@@ -169,5 +245,8 @@ pub async fn create_postgres_client(
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
         })?;
 
-    Ok(Arc::new(postgres::PostgresClient::new(pool)) as Arc<dyn postgres::PostgresClientTrait>)
+    Ok(Arc::new(postgres::PostgresClient::new(
+        pool,
+        config.max_entity_batch_size,
+    )) as Arc<dyn postgres::PostgresClientTrait>)
 }

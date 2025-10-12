@@ -52,6 +52,7 @@ impl From<MockOutboxEntry> for OutboxEntry {
             processed_at: entry.processed_at,
             retry_count: entry.retry_count,
             last_error: entry.last_error,
+            collection_name: "mock_collection".to_string(), // Mock uses a placeholder
         }
     }
 }
@@ -68,6 +69,7 @@ struct MockData {
 /// Mock PostgreSQL client for testing
 pub struct MockPostgresClient {
     data: Arc<Mutex<MockData>>,
+    max_entity_batch_size: usize,
 }
 
 impl MockPostgresClient {
@@ -75,6 +77,7 @@ impl MockPostgresClient {
     pub fn new() -> Self {
         Self {
             data: Arc::new(Mutex::new(MockData::default())),
+            max_entity_batch_size: 1000, // Default for tests
         }
     }
 
@@ -163,6 +166,16 @@ impl Default for MockPostgresClient {
 
 #[async_trait]
 impl PostgresClientTrait for MockPostgresClient {
+    fn max_entity_batch_size(&self) -> usize {
+        self.max_entity_batch_size
+    }
+
+    fn get_pool(&self) -> &sqlx::PgPool {
+        // Mock doesn't have a real pool - this should not be called in tests
+        // If you need to test code that uses get_pool(), use integration tests with a real database
+        panic!("MockPostgresClient::get_pool() should not be called - use integration tests with a real database")
+    }
+
     async fn run_migrations(&self) -> Result<()> {
         // Mock - no migrations needed
         Ok(())
@@ -203,6 +216,14 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {
         let data = self.data.lock().unwrap();
         Ok(data.collection_to_repo.get(collection_name).copied())
+    }
+
+    async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let data = self.data.lock().unwrap();
+        Ok(data
+            .repositories
+            .get(&repository_id)
+            .map(|(_, _, collection_name)| collection_name.clone()))
     }
 
     async fn get_entity_metadata(
@@ -294,12 +315,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -318,18 +338,18 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
+        _collection_name: &str,
         entity_ids: &[String],
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entity_ids.len() > MAX_BATCH_SIZE {
+        if entity_ids.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 
@@ -368,18 +388,18 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn store_entities_with_outbox_batch(
         &self,
         repository_id: Uuid,
+        _collection_name: &str,
         entities: &[EntityOutboxBatchEntry<'_>],
     ) -> Result<Vec<Uuid>> {
         if entities.is_empty() {
             return Ok(Vec::new());
         }
 
-        const MAX_BATCH_SIZE: usize = 1000;
-        if entities.len() > MAX_BATCH_SIZE {
+        if entities.len() > self.max_entity_batch_size {
             return Err(codesearch_core::error::Error::storage(format!(
                 "Batch size {} exceeds maximum allowed size of {}",
                 entities.len(),
-                MAX_BATCH_SIZE
+                self.max_entity_batch_size
             )));
         }
 

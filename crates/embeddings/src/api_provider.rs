@@ -53,9 +53,9 @@ impl OpenAiApiProvider {
         // Perform health check (warn on failure, don't block)
         Self::check_health(&client).await;
 
-        // Use a reasonable max_context default (most models support 512-8192 tokens)
-        // Simple heuristic: ~4 chars per token, so 32768 chars ≈ 8192 tokens
-        let max_context = 32768;
+        // Use a reasonable max_context default
+        // Simple heuristic: ~4 chars per token with safety margin
+        let max_context = (32768.0f64 * 4.0f64 * 0.8f64).floor() as usize;
 
         Ok(Self {
             client,

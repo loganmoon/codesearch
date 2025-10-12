@@ -92,10 +92,18 @@ impl RepositoryIndexer {
             git_commit.clone(),
             &self.embedding_manager,
             self.postgres_client.as_ref(),
+            self.postgres_client.max_entity_batch_size(),
         )
         .await?;
 
         stats.entities_skipped_size = batch_stats.entities_skipped_size;
+
+        // Fetch collection_name once for all files in this batch
+        let collection_name = self
+            .postgres_client
+            .get_collection_name(self.repository_id)
+            .await?
+            .ok_or_else(|| Error::Storage("Repository collection_name not found".to_string()))?;
 
         // Detect and handle stale entities for ALL processed files (even empty ones)
         for &idx in &processed_indices {
@@ -108,6 +116,7 @@ impl RepositoryIndexer {
 
             entity_processor::update_file_snapshot_and_mark_stale(
                 self.repository_id,
+                &collection_name,
                 file_path_str,
                 entity_ids,
                 git_commit.clone(),
@@ -237,9 +246,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_detects_stale_entities() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -268,6 +282,7 @@ mod tests {
         // Run update_file_snapshot_and_mark_stale
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -307,9 +322,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_detects_renamed_function() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -332,6 +352,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -367,6 +388,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -393,9 +415,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_empty_file() {
-        let repo_uuid = Uuid::new_v4();
-        let repo_id = repo_uuid.to_string();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
+        let repo_id = repo_uuid.to_string();
 
         let file_path = "test.rs";
 
@@ -429,6 +456,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -477,6 +505,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -518,6 +547,7 @@ mod tests {
         // Re-index with same entities
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             entities.clone(),
             None,
@@ -544,8 +574,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_file_change_writes_delete_to_outbox() {
-        let repo_uuid = Uuid::new_v4();
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
+
+        // Register repository with mock and get the repo UUID
+        let repo_uuid = postgres
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
+            .await
+            .unwrap();
 
         let file_path = "test.rs";
 
@@ -559,6 +594,7 @@ mod tests {
         // Remove entity
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             vec![],
             None,
@@ -595,6 +631,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             git_commit.clone(),

@@ -1,0 +1,134 @@
+# Shared Infrastructure for Codesearch Multi-Repository Setup
+#
+# This provides PostgreSQL, Qdrant, vLLM embeddings, and outbox-processor services
+# that multiple repositories can connect to.
+#
+# This file is automatically managed by the codesearch CLI.
+# It will be created in ~/.codesearch/infrastructure/ on first use.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: codesearch-postgres
+    ports:
+      - "127.0.0.1:5432:5432"  # Expose to host for native CLI
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesearch -d codesearch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest-unprivileged
+    container_name: codesearch-qdrant
+    ports:
+      - "127.0.0.1:6333:6333"  # REST API
+      - "127.0.0.1:6334:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  vllm-embeddings:
+    image: vllm/vllm-openai:latest
+    container_name: codesearch-vllm
+    ports:
+      - "127.0.0.1:8000:8000"  # OpenAI-compatible API - localhost only
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ipc: host
+    command:
+      - "--model"
+      - "BAAI/bge-code-v1"
+      - "--revision"
+      - "bd67852057c5d7ddcc7b8234d9d6c410117ed851"
+      - "--task"
+      - "embed"
+      - "--gpu-memory-utilization"
+      - "0.8"
+      - "--dtype"
+      - "float32"
+      - "--max-model-len"
+      - "32768"
+      - "--max-num-batched-tokens"
+      - "32768"
+      - "--max-num-seqs"
+      - "1024"
+      - "--trust-remote-code"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # Allow time for model loading
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  outbox-processor:
+    image: codesearch-outbox-processor:latest
+    container_name: codesearch-outbox-processor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      vllm-embeddings:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=codesearch-postgres  # Use container name
+      - POSTGRES_PORT=5432
+      - POSTGRES_DATABASE=codesearch
+      - POSTGRES_USER=codesearch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
+      - QDRANT_HOST=codesearch-qdrant  # Use container name
+      - QDRANT_PORT=6334
+      - QDRANT_REST_PORT=6333
+      - RUST_LOG=${RUST_LOG:-info}
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+networks:
+  codesearch:
+    name: codesearch-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local

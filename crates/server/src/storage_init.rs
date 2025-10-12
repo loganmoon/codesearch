@@ -23,11 +23,7 @@ pub(crate) async fn create_embedding_manager(config: &Config) -> Result<Arc<Embe
         .provider(parse_provider_type(&config.embeddings.provider))
         .model(config.embeddings.model.clone())
         .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension)
-        .device(match config.embeddings.device.as_str() {
-            "cuda" => codesearch_embeddings::DeviceType::Cuda,
-            _ => codesearch_embeddings::DeviceType::Cpu,
-        });
+        .embedding_dimension(config.embeddings.embedding_dimension);
 
     if let Some(ref api_base_url) = config.embeddings.api_base_url {
         embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());

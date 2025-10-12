@@ -100,6 +100,7 @@ pub struct StorageConfig {
     pub qdrant_rest_port: u16,
 
     /// Collection name for storing entities
+    #[serde(default)]
     pub collection_name: String,
 
     /// Automatically start containerized dependencies
@@ -129,6 +130,10 @@ pub struct StorageConfig {
     /// Postgres password
     #[serde(default = "default_postgres_password")]
     pub postgres_password: String,
+
+    /// Maximum number of entities per batch operation
+    #[serde(default = "default_max_entity_batch_size")]
+    pub max_entity_batch_size: usize,
 }
 
 impl std::fmt::Debug for StorageConfig {
@@ -145,6 +150,7 @@ impl std::fmt::Debug for StorageConfig {
             .field("postgres_database", &self.postgres_database)
             .field("postgres_user", &self.postgres_user)
             .field("postgres_password", &"***REDACTED***")
+            .field("max_entity_batch_size", &self.max_entity_batch_size)
             .finish()
     }
 }
@@ -287,6 +293,10 @@ fn default_postgres_user() -> String {
 
 fn default_postgres_password() -> String {
     DEFAULT_POSTGRES_PASSWORD.to_string()
+}
+
+fn default_max_entity_batch_size() -> usize {
+    1000
 }
 
 impl Default for EmbeddingsConfig {

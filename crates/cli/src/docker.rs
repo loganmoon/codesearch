@@ -8,97 +8,6 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-/// Check if Docker is installed and available
-pub fn is_docker_available() -> bool {
-    Command::new("docker")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Check if Docker Compose is installed and available
-pub fn is_docker_compose_available() -> bool {
-    // Try docker compose (v2) first
-    if Command::new("docker")
-        .args(["compose", "version"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    {
-        return true;
-    }
-
-    // Fall back to docker-compose (v1)
-    Command::new("docker-compose")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Get the Docker Compose command (v2 or v1)
-fn get_compose_command() -> (&'static str, Vec<&'static str>) {
-    // Prefer docker compose (v2)
-    if Command::new("docker")
-        .args(["compose", "version"])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    {
-        ("docker", vec!["compose"])
-    } else {
-        ("docker-compose", vec![])
-    }
-}
-
-/// Start containerized dependencies
-pub fn start_dependencies(compose_file: Option<&str>) -> Result<()> {
-    if !is_docker_available() {
-        return Err(anyhow!(
-            "Docker is not installed. Please install Docker from https://docs.docker.com/get-docker/"
-        ));
-    }
-
-    if !is_docker_compose_available() {
-        return Err(anyhow!(
-            "Docker Compose is not installed. Please install Docker Compose from https://docs.docker.com/compose/install/"
-        ));
-    }
-
-    let (cmd, mut args) = get_compose_command();
-
-    // Add compose file if specified
-    if let Some(file) = compose_file {
-        args.push("-f");
-        args.push(file);
-    }
-
-    args.extend([
-        "up",
-        "-d",
-        "qdrant",
-        "postgres",
-        "outbox-processor",
-        "vllm-embeddings",
-    ]);
-
-    info!("Starting containerized dependencies...");
-
-    let output = Command::new(cmd)
-        .args(&args)
-        .output()
-        .context("Failed to execute docker compose")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("Failed to start dependencies:\n{stderr}"));
-    }
-
-    info!("Dependencies started successfully");
-    Ok(())
-}
-
 /// Generic helper to check if a container is running
 fn is_container_running(container_name: &str) -> Result<bool> {
     let filter_arg = format!("name={container_name}");
@@ -336,52 +245,14 @@ pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Res
     ))
 }
 
-/// Check if we're in shared infrastructure mode
+/// Ensure dependencies are running
 ///
-/// Returns true if shared infrastructure containers exist (regardless of their state)
-pub fn is_shared_infrastructure_mode() -> Result<bool> {
-    // Check if any of the expected shared infrastructure containers exist
-    // We use "docker ps -a" to check for existence (running or stopped)
-    let containers = [
-        "codesearch-postgres",
-        "codesearch-qdrant",
-        "codesearch-vllm",
-        "codesearch-outbox-processor",
-    ];
-
-    for container in &containers {
-        let output = Command::new("docker")
-            .args([
-                "ps",
-                "-a",
-                "--filter",
-                &format!("name={container}"),
-                "--format",
-                "{{.Names}}",
-            ])
-            .output()
-            .context("Failed to check for shared infrastructure containers")?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.contains(container) {
-                // At least one shared infrastructure container exists
-                return Ok(true);
-            }
-        }
-    }
-
-    Ok(false)
-}
-
-/// Ensure dependencies are running, starting them if necessary
+/// All codesearch installations use shared infrastructure. This function verifies
+/// that all required services are healthy, providing helpful error messages if not.
 pub async fn ensure_dependencies_running(
     config: &StorageConfig,
     api_base_url: Option<&str>,
 ) -> Result<()> {
-    // Check if we're in shared infrastructure mode
-    let shared_mode = is_shared_infrastructure_mode()?;
-
     let qdrant_healthy = check_qdrant_health(config).await;
     let postgres_healthy = check_postgres_health(config).await;
     let outbox_running = is_outbox_processor_running()?;
@@ -397,84 +268,27 @@ pub async fn ensure_dependencies_running(
         return Ok(());
     }
 
-    // In shared infrastructure mode, don't start per-repo docker compose
-    if shared_mode {
-        info!("Shared infrastructure mode detected - skipping per-repository docker compose");
-
-        // Just verify health or fail
-        if !qdrant_healthy || !postgres_healthy || !outbox_running || !vllm_healthy {
-            let mut msg = String::new();
-            msg.push_str(
-                "Shared infrastructure containers exist but some services are not healthy:\n",
-            );
-            if !postgres_healthy {
-                msg.push_str("  - PostgreSQL is not responding\n");
-            }
-            if !qdrant_healthy {
-                msg.push_str("  - Qdrant is not responding\n");
-            }
-            if !outbox_running {
-                msg.push_str("  - Outbox Processor is not running\n");
-            }
-            if !vllm_healthy {
-                msg.push_str("  - vLLM is not responding\n");
-            }
-            msg.push_str("\nTry restarting shared infrastructure:\n");
-            msg.push_str("  cd ~/.codesearch/infrastructure && docker compose restart");
-            return Err(anyhow!(msg));
-        }
-
-        return Ok(());
-    }
-
-    // Not in shared mode - use regular per-repo docker compose logic
-    // Check if auto-start is enabled
-    if !config.auto_start_deps {
-        let mut msg = String::new();
-        if !qdrant_healthy {
-            msg.push_str("Qdrant is not running. ");
-        }
-        if !postgres_healthy {
-            msg.push_str("Postgres is not running. ");
-        }
-        if !outbox_running {
-            msg.push_str("Outbox Processor is not running. ");
-        }
-        if !vllm_healthy {
-            msg.push_str("vLLM is not running. ");
-        }
-        msg.push_str("Start them manually with: docker compose up -d\n");
-        msg.push_str("Or enable auto_start_deps in your configuration");
-        return Err(anyhow!(msg));
-    }
-
-    // Check if containers exist but are not running
-    if !is_qdrant_running()?
-        || !is_postgres_running()?
-        || !outbox_running
-        || (api_base_url.is_some() && !is_vllm_running()?)
-    {
-        info!("Starting containerized dependencies...");
-        start_dependencies(config.docker_compose_file.as_deref())?;
-    }
-
-    // Wait for health
-    if !qdrant_healthy {
-        wait_for_qdrant(config, Duration::from_secs(60)).await?;
-    }
+    // Some services are not healthy - provide helpful error message
+    let mut msg = String::new();
+    msg.push_str("Some required services are not healthy:\n");
     if !postgres_healthy {
-        wait_for_postgres(config, Duration::from_secs(30)).await?;
+        msg.push_str("  - PostgreSQL is not responding\n");
     }
-    // Outbox processor doesn't have a health endpoint - just wait a bit for it to start
+    if !qdrant_healthy {
+        msg.push_str("  - Qdrant is not responding\n");
+    }
     if !outbox_running {
-        info!("Waiting for outbox processor to start...");
-        sleep(Duration::from_secs(2)).await;
+        msg.push_str("  - Outbox Processor is not running\n");
     }
-    if let Some(url) = api_base_url {
-        if !vllm_healthy {
-            wait_for_vllm(url, Duration::from_secs(60)).await?;
-        }
+    if !vllm_healthy {
+        msg.push_str("  - vLLM is not responding\n");
     }
+    msg.push_str(
+        "\nShared infrastructure should start automatically on first `codesearch index`.\n",
+    );
+    msg.push_str(
+        "If services are stopped, try: cd ~/.codesearch/infrastructure && docker compose restart",
+    );
 
-    Ok(())
+    Err(anyhow!(msg))
 }

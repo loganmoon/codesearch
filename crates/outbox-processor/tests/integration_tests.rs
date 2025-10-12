@@ -186,3 +186,529 @@ async fn test_client_cache_reuses_clients() {
 
     // Test passed if we got here without panicking
 }
+
+#[tokio::test]
+async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::error::Error>> {
+    // Setup database
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository for foreign key
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create 3 collections with staggered timestamps
+    let collection_a = "collection-a";
+    let collection_b = "collection-b";
+    let collection_c = "collection-c";
+
+    // Insert entries with specific timestamp order across collections
+    // Collection A: t=1, t=4, t=7
+    // Collection B: t=2, t=5, t=8
+    // Collection C: t=3, t=6, t=9
+    let base_time = chrono::Utc::now() - chrono::Duration::hours(1);
+
+    for i in 0..9 {
+        let collection = match i % 3 {
+            0 => collection_a,
+            1 => collection_b,
+            _ => collection_c,
+        };
+
+        let entity_id = format!("entity-{i}");
+        let created_at = base_time + chrono::Duration::seconds(i as i64);
+
+        // Create entity metadata first
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+
+        // Create outbox entry
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, created_at, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind(created_at)
+        .bind(collection)
+        .execute(&pool)
+        .await?;
+    }
+
+    // Query to verify entries were created across collections
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT collection_name) FROM entity_outbox WHERE processed_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(count, 3, "Should have entries in 3 collections");
+
+    // Verify global ordering (fetch without processing)
+    let entries: Vec<(String, String)> = sqlx::query_as(
+        "SELECT collection_name, entity_id FROM entity_outbox
+         WHERE processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 9",
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    // Should be interleaved: A, B, C, A, B, C, A, B, C
+    assert_eq!(entries[0].0, collection_a);
+    assert_eq!(entries[1].0, collection_b);
+    assert_eq!(entries[2].0, collection_c);
+    assert_eq!(entries[3].0, collection_a);
+    assert_eq!(entries[4].0, collection_b);
+    assert_eq!(entries[5].0, collection_c);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std::error::Error>> {
+    // This test verifies that if Qdrant write fails, ALL entries remain unprocessed
+    // Note: This test only verifies the database state, not actual Qdrant interaction
+    // (Full E2E testing with Qdrant failures would require mocking or E2E suite)
+
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create test data
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection-1")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create 5 entries
+    for i in 0..5 {
+        let entity_id = format!("entity-{i}");
+
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind("test-collection")
+        .execute(&pool)
+        .await?;
+    }
+
+    // Simulate transaction with manual rollback
+    let mut tx = pool.begin().await?;
+
+    let entries: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT outbox_id FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 5
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind("qdrant")
+    .fetch_all(&mut *tx)
+    .await?;
+
+    assert_eq!(entries.len(), 5, "Should lock 5 entries");
+
+    // Simulate marking as processed
+    let mut query_builder = sqlx::QueryBuilder::new(
+        "UPDATE entity_outbox SET processed_at = NOW() WHERE outbox_id IN (",
+    );
+    let mut separated = query_builder.separated(", ");
+    for id in &entries {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+    query_builder.build().execute(&mut *tx).await?;
+
+    // Verify entries are marked within transaction
+    let processed_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NOT NULL")
+            .fetch_one(&mut *tx)
+            .await?;
+    assert_eq!(processed_count, 5, "Should see 5 processed within tx");
+
+    // Rollback (simulating Qdrant failure)
+    tx.rollback().await?;
+
+    // Verify ALL entries remain unprocessed after rollback
+    let unprocessed_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(
+        unprocessed_count, 5,
+        "All entries should be unprocessed after rollback"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::error::Error>> {
+    // Verify that entries are fetched in strict created_at order across collections
+
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection-2")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create entries with specific timestamps
+    // Collection A has 100 old entries (t=0 to t=99)
+    // Collection B has 10 very new entries (t=1000 to t=1009)
+    // Expected: First batch should contain ONLY Collection A entries
+
+    let base_time = chrono::Utc::now() - chrono::Duration::hours(2);
+
+    // Collection A: 100 old entries
+    for i in 0..100 {
+        let entity_id = format!("entity-a-{i}");
+        let created_at = base_time + chrono::Duration::seconds(i);
+
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, created_at, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind(created_at)
+        .bind("collection-a")
+        .execute(&pool)
+        .await?;
+    }
+
+    // Collection B: 10 new entries
+    for i in 0..10 {
+        let entity_id = format!("entity-b-{i}");
+        let created_at = base_time + chrono::Duration::seconds(1000 + i);
+
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, created_at, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind(created_at)
+        .bind("collection-b")
+        .execute(&pool)
+        .await?;
+    }
+
+    // Fetch first batch (batch_size=50)
+    let entries: Vec<(String, String)> = sqlx::query_as(
+        "SELECT collection_name, entity_id FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 50",
+    )
+    .bind("qdrant")
+    .fetch_all(&pool)
+    .await?;
+
+    assert_eq!(entries.len(), 50, "Should fetch 50 entries");
+
+    // ALL should be from collection A (oldest entries)
+    for (collection, _) in &entries {
+        assert_eq!(
+            collection, "collection-a",
+            "First batch should only contain oldest collection"
+        );
+    }
+
+    // Verify entity IDs are in order (entity-a-0 to entity-a-49)
+    assert_eq!(entries[0].1, "entity-a-0");
+    assert_eq!(entries[49].1, "entity-a-49");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std::error::Error>> {
+    // Verify that entries exceeding max_retries are marked as processed
+
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection-3")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create entry with retry_count = 3 (at max_retries limit)
+    let entity_id = "entity-max-retries";
+
+    sqlx::query(
+        "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+    )
+    .bind(repo_id)
+    .bind(entity_id)
+    .bind(format!("qualified::{entity_id}"))
+    .bind(entity_id)
+    .bind("function")
+    .bind("rust")
+    .bind("/test/file.rs")
+    .bind("public")
+    .bind(serde_json::json!({}))
+    .bind("abc123")
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await?;
+
+    let outbox_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO entity_outbox (outbox_id, repository_id, entity_id, operation, target_store,
+         payload, collection_name, retry_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(outbox_id)
+    .bind(repo_id)
+    .bind(entity_id)
+    .bind("INSERT")
+    .bind("qdrant")
+    .bind(serde_json::json!({
+        "entity_id": entity_id,
+        "embedding": vec![0.1; 384],
+        "qdrant_point_id": Uuid::new_v4().to_string()
+    }))
+    .bind("test-collection")
+    .bind(3) // At max_retries (default max_retries = 3)
+    .execute(&pool)
+    .await?;
+
+    // Simulate processor logic: check retry_count and mark as processed
+    let mut tx = pool.begin().await?;
+
+    let entries: Vec<(Uuid, i32)> = sqlx::query_as(
+        "SELECT outbox_id, retry_count FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 10
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind("qdrant")
+    .fetch_all(&mut *tx)
+    .await?;
+
+    assert_eq!(entries.len(), 1, "Should find 1 entry");
+    assert_eq!(entries[0].1, 3, "Entry should have retry_count = 3");
+
+    // Processor would mark this as processed
+    let max_retries = 3;
+    let failed_ids: Vec<Uuid> = entries
+        .into_iter()
+        .filter(|(_, retry_count)| *retry_count >= max_retries)
+        .map(|(id, _)| id)
+        .collect();
+
+    assert_eq!(failed_ids.len(), 1, "Should identify 1 failed entry");
+
+    sqlx::query("UPDATE entity_outbox SET processed_at = NOW() WHERE outbox_id = $1")
+        .bind(failed_ids[0])
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+
+    // Verify entry is now processed
+    let unprocessed_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(unprocessed_count, 0, "Entry should be marked processed");
+
+    Ok(())
+}

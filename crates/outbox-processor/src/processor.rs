@@ -5,6 +5,7 @@ use codesearch_storage::{
 use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
 use dashmap::DashMap;
 use sqlx::{Postgres, QueryBuilder};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -73,49 +74,7 @@ impl OutboxProcessor {
     }
 
     async fn process_batch(&self) -> Result<()> {
-        // Query 1: Get distinct collections with pending entries (1 query, not N)
-        let collections_with_work: Vec<String> = sqlx::query_scalar(
-            "SELECT DISTINCT collection_name
-             FROM entity_outbox
-             WHERE target_store = $1 AND processed_at IS NULL
-             LIMIT 100",
-        )
-        .bind(TargetStore::Qdrant.to_string())
-        .fetch_all(self.postgres_client.get_pool())
-        .await
-        .map_err(|e| Error::storage(format!("Failed to query collections: {e}")))?;
-
-        if collections_with_work.is_empty() {
-            return Ok(());
-        }
-
-        debug!(
-            "Found {} collections with pending outbox entries",
-            collections_with_work.len()
-        );
-
-        // Process each collection's batch
-        for collection_name in collections_with_work {
-            if let Err(e) = self.process_collection_batch(&collection_name).await {
-                error!(
-                    collection = %collection_name,
-                    error = %e,
-                    "Failed to process collection batch"
-                );
-                // Continue to next collection instead of failing entire batch
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Process all pending entries for a single collection in a transaction
-    ///
-    /// CRITICAL: Uses SELECT FOR UPDATE to lock entries, writes to Qdrant,
-    /// then marks as processed - all in a single transaction. This ensures
-    /// work is only marked complete after successful Qdrant write.
-    async fn process_collection_batch(&self, collection_name: &str) -> Result<()> {
-        // Start transaction
+        // Step 1: Begin single transaction for entire batch
         let mut tx = self
             .postgres_client
             .get_pool()
@@ -123,149 +82,184 @@ impl OutboxProcessor {
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
-        // Query 2: Lock and fetch unprocessed entries for THIS collection
-        // CRITICAL: SELECT FOR UPDATE locks the rows for the duration of the transaction
+        // Step 2: Single query across ALL collections, global ordering
         let entries: Vec<OutboxEntry> = sqlx::query_as(
-            "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
-                    created_at, processed_at, retry_count, last_error, collection_name
+            "SELECT outbox_id, repository_id, entity_id, operation, target_store,
+                    payload, created_at, processed_at, retry_count, last_error,
+                    collection_name
              FROM entity_outbox
              WHERE target_store = $1
-               AND collection_name = $2
                AND processed_at IS NULL
              ORDER BY created_at ASC
-             LIMIT $3
+             LIMIT $2
              FOR UPDATE SKIP LOCKED",
         )
         .bind(TargetStore::Qdrant.to_string())
-        .bind(collection_name)
         .bind(self.batch_size)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| Error::storage(format!("Failed to fetch outbox entries: {e}")))?;
 
+        // Step 3: Early return if no work
         if entries.is_empty() {
-            // No work to do, commit empty transaction
             tx.commit()
                 .await
-                .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+                .map_err(|e| Error::storage(format!("Failed to commit empty transaction: {e}")))?;
             return Ok(());
         }
 
+        // Step 4: Group entries by collection_name using HashMap
+        let mut entries_by_collection: HashMap<String, Vec<OutboxEntry>> = HashMap::new();
+        for entry in entries {
+            entries_by_collection
+                .entry(entry.collection_name.clone())
+                .or_default()
+                .push(entry);
+        }
+
         debug!(
-            collection = %collection_name,
-            entry_count = entries.len(),
-            "Processing outbox entries for collection"
+            "Processing batch with {} entries across {} collections",
+            entries_by_collection
+                .values()
+                .map(|v| v.len())
+                .sum::<usize>(),
+            entries_by_collection.len()
         );
 
-        // Get or create cached client for this collection
-        let storage_client = self
-            .get_or_create_client_for_collection(collection_name)
-            .await?;
+        // Step 5: Process each collection's subset
+        for (collection_name, collection_entries) in entries_by_collection {
+            // Get or create Qdrant client (cached)
+            let storage_client = self
+                .get_or_create_client_for_collection(&collection_name)
+                .await?;
 
-        // Separate INSERT/UPDATE from DELETE (same as before)
-        let mut insert_update_entries = Vec::new();
-        let mut delete_entries = Vec::new();
-        let mut failed_entry_ids = Vec::new();
+            // Separate INSERT/UPDATE from DELETE, track failures
+            let mut insert_update_entries = Vec::new();
+            let mut delete_entries = Vec::new();
+            let mut failed_entry_ids = Vec::new();
 
-        for entry in entries {
-            // Check retry limit
-            if entry.retry_count >= self.max_retries {
-                warn!(
-                    outbox_id = %entry.outbox_id,
-                    retry_count = entry.retry_count,
-                    "Entry exceeded max retries, marking as processed"
-                );
-                failed_entry_ids.push(entry.outbox_id);
-                continue;
-            }
-
-            match entry.operation.as_str() {
-                "INSERT" | "UPDATE" => insert_update_entries.push(entry),
-                "DELETE" => delete_entries.push(entry),
-                _ => {
-                    error!(operation = %entry.operation, "Unknown operation");
+            for entry in collection_entries {
+                // Check retry limit
+                if entry.retry_count >= self.max_retries {
+                    warn!(
+                        outbox_id = %entry.outbox_id,
+                        retry_count = entry.retry_count,
+                        "Entry exceeded max retries, marking as processed"
+                    );
                     failed_entry_ids.push(entry.outbox_id);
+                    continue;
+                }
+
+                // Categorize by operation
+                match entry.operation.as_str() {
+                    "INSERT" | "UPDATE" => insert_update_entries.push(entry),
+                    "DELETE" => delete_entries.push(entry),
+                    _ => {
+                        error!(
+                            collection = %collection_name,
+                            operation = %entry.operation,
+                            "Unknown operation type"
+                        );
+                        failed_entry_ids.push(entry.outbox_id);
+                    }
                 }
             }
-        }
 
-        // Bulk mark failed entries as processed (within transaction)
-        if !failed_entry_ids.is_empty() {
-            self.bulk_mark_processed_in_tx(&mut tx, &failed_entry_ids)
-                .await?;
-        }
+            // Bulk mark entries that exceeded retry count
+            if !failed_entry_ids.is_empty() {
+                self.bulk_mark_processed_in_tx(&mut tx, &failed_entry_ids)
+                    .await?;
+            }
 
-        // Process INSERT/UPDATE entries
-        if !insert_update_entries.is_empty() {
-            // Write to Qdrant first (outside transaction)
-            if let Err(e) = self
-                .write_to_qdrant_insert_update(&storage_client, &insert_update_entries)
-                .await
-            {
-                error!(error = %e, "Failed to write to Qdrant, rolling back transaction");
-                tx.rollback()
+            // Process INSERT/UPDATE operations
+            if !insert_update_entries.is_empty() {
+                if let Err(e) = self
+                    .write_to_qdrant_insert_update(&storage_client, &insert_update_entries)
                     .await
-                    .map_err(|e| Error::storage(format!("Failed to rollback: {e}")))?;
-                // Record failures for these entries (in new transaction)
+                {
+                    error!(
+                        collection = %collection_name,
+                        error = %e,
+                        "Failed to write INSERT/UPDATE to Qdrant, rolling back entire batch"
+                    );
+
+                    // Rollback main transaction
+                    tx.rollback().await.map_err(|e| {
+                        Error::storage(format!("Failed to rollback transaction: {e}"))
+                    })?;
+
+                    // Record failures in separate transaction
+                    let ids: Vec<Uuid> =
+                        insert_update_entries.iter().map(|e| e.outbox_id).collect();
+                    let mut failure_tx =
+                        self.postgres_client.get_pool().begin().await.map_err(|e| {
+                            Error::storage(format!("Failed to begin failure transaction: {e}"))
+                        })?;
+                    self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
+                        .await?;
+                    failure_tx.commit().await.map_err(|e| {
+                        Error::storage(format!("Failed to commit failure transaction: {e}"))
+                    })?;
+
+                    return Err(e);
+                }
+
+                // Mark as processed
                 let ids: Vec<Uuid> = insert_update_entries.iter().map(|e| e.outbox_id).collect();
-                let mut failure_tx =
-                    self.postgres_client.get_pool().begin().await.map_err(|e| {
-                        Error::storage(format!("Failed to begin failure transaction: {e}"))
-                    })?;
-                self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
-                    .await?;
-                failure_tx.commit().await.map_err(|e| {
-                    Error::storage(format!("Failed to commit failure transaction: {e}"))
-                })?;
-                return Err(e);
+                self.bulk_mark_processed_in_tx(&mut tx, &ids).await?;
             }
 
-            // Qdrant write succeeded, mark as processed (within transaction)
-            let ids: Vec<Uuid> = insert_update_entries.iter().map(|e| e.outbox_id).collect();
-            self.bulk_mark_processed_in_tx(&mut tx, &ids).await?;
-        }
-
-        // Process DELETE entries
-        if !delete_entries.is_empty() {
-            // Delete from Qdrant first (outside transaction)
-            if let Err(e) = self
-                .write_to_qdrant_delete(&storage_client, &delete_entries)
-                .await
-            {
-                error!(error = %e, "Failed to delete from Qdrant, rolling back transaction");
-                tx.rollback()
+            // Process DELETE operations
+            if !delete_entries.is_empty() {
+                if let Err(e) = self
+                    .write_to_qdrant_delete(&storage_client, &delete_entries)
                     .await
-                    .map_err(|e| Error::storage(format!("Failed to rollback: {e}")))?;
-                // Record failures (in new transaction)
-                let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
-                let mut failure_tx =
-                    self.postgres_client.get_pool().begin().await.map_err(|e| {
-                        Error::storage(format!("Failed to begin failure transaction: {e}"))
+                {
+                    error!(
+                        collection = %collection_name,
+                        error = %e,
+                        "Failed to write DELETE to Qdrant, rolling back entire batch"
+                    );
+
+                    // Rollback main transaction
+                    tx.rollback().await.map_err(|e| {
+                        Error::storage(format!("Failed to rollback transaction: {e}"))
                     })?;
-                self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
-                    .await?;
-                failure_tx.commit().await.map_err(|e| {
-                    Error::storage(format!("Failed to commit failure transaction: {e}"))
-                })?;
-                return Err(e);
+
+                    // Record failures in separate transaction
+                    let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
+                    let mut failure_tx =
+                        self.postgres_client.get_pool().begin().await.map_err(|e| {
+                            Error::storage(format!("Failed to begin failure transaction: {e}"))
+                        })?;
+                    self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
+                        .await?;
+                    failure_tx.commit().await.map_err(|e| {
+                        Error::storage(format!("Failed to commit failure transaction: {e}"))
+                    })?;
+
+                    return Err(e);
+                }
+
+                // Mark as processed
+                let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
+                self.bulk_mark_processed_in_tx(&mut tx, &ids).await?;
             }
 
-            // Qdrant delete succeeded, mark as processed (within transaction)
-            let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
-            self.bulk_mark_processed_in_tx(&mut tx, &ids).await?;
+            debug!(
+                collection = %collection_name,
+                processed = insert_update_entries.len() + delete_entries.len(),
+                failed = failed_entry_ids.len(),
+                "Processed collection entries"
+            );
         }
 
-        // Commit transaction - all entries successfully processed
+        // Step 6: Commit entire batch
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
-        info!(
-            collection = %collection_name,
-            entries_processed = insert_update_entries.len() + delete_entries.len() + failed_entry_ids.len(),
-            "Successfully processed batch"
-        );
-
+        debug!("Successfully processed entire batch");
         Ok(())
     }
 

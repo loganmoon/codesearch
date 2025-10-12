@@ -68,6 +68,8 @@ services:
     command:
       - "--model"
       - "BAAI/bge-code-v1"
+      - "--revision"
+      - "bd67852057c5d7ddcc7b8234d9d6c410117ed851"
       - "--task"
       - "embed"
       - "--gpu-memory-utilization"

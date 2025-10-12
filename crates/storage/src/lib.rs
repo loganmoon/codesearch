@@ -24,6 +24,9 @@ pub use postgres::{OutboxOperation, PostgresClientTrait};
 // Re-export types needed by outbox-processor
 pub use postgres::{OutboxEntry, TargetStore};
 
+// Re-export concrete implementation for testing
+pub use postgres::PostgresClient;
+
 // Re-export mock for testing
 pub use postgres::mock::MockPostgresClient;
 

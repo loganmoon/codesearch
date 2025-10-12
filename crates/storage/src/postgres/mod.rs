@@ -6,10 +6,10 @@ use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use uuid::Uuid;
 
-pub(crate) use client::{EntityOutboxBatchEntry, PostgresClient};
-
-// Re-export types needed externally
-pub use client::{OutboxEntry, OutboxOperation, TargetStore};
+// Re-export client types
+pub use client::{
+    EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
+};
 
 /// Trait for PostgreSQL metadata operations
 #[async_trait]

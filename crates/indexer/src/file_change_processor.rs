@@ -54,6 +54,16 @@ pub async fn process_file_changes(
     );
     let mut stats = ProcessingStats::default();
 
+    // Fetch collection_name once for all operations in this batch
+    let collection_name = postgres_client
+        .get_collection_name(repo_id)
+        .await?
+        .ok_or_else(|| {
+            codesearch_core::error::Error::Storage(
+                "Repository collection_name not found".to_string(),
+            )
+        })?;
+
     // Separate changes by type
     let mut files_to_index = Vec::new();
     let mut files_to_delete = Vec::new();
@@ -82,6 +92,7 @@ pub async fn process_file_changes(
 
         if let Err(e) = entity_processor::mark_file_entities_deleted(
             repo_id,
+            &collection_name,
             from_str,
             postgres_client.as_ref(),
         )
@@ -105,6 +116,7 @@ pub async fn process_file_changes(
 
         match entity_processor::mark_file_entities_deleted(
             repo_id,
+            &collection_name,
             path_str,
             postgres_client.as_ref(),
         )
@@ -130,6 +142,7 @@ pub async fn process_file_changes(
         match process_file_batch(
             &files_to_index,
             repo_id,
+            &collection_name,
             repo_root,
             embedding_manager,
             postgres_client,
@@ -168,6 +181,7 @@ pub async fn process_file_changes(
 async fn process_file_batch(
     file_paths: &[PathBuf],
     repo_id: Uuid,
+    collection_name: &str,
     repo_root: &Path,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
@@ -266,6 +280,7 @@ async fn process_file_batch(
 
         if let Err(e) = entity_processor::update_file_snapshot_and_mark_stale(
             repo_id,
+            collection_name,
             file_path_str,
             new_entity_ids,
             git_commit.clone(),

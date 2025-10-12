@@ -108,11 +108,13 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
     Ok(infra_dir)
 }
 
-/// Build outbox-processor Docker image from current repository
+/// Build outbox-processor Docker image from current directory
 ///
-/// This must be called before starting infrastructure to ensure the image is available.
-/// The image is built from the repository where codesearch is being run, ensuring
-/// the correct build context regardless of where the docker-compose.yml is located.
+/// IMPORTANT: This function requires codesearch to be run from the codesearch source
+/// repository root on first use. The Docker build context is `std::env::current_dir()`,
+/// so the Dockerfile.outbox-processor and source code must be accessible from the
+/// current working directory. After the first build, the cached image can be used
+/// from any directory.
 fn build_outbox_processor_image() -> Result<()> {
     info!("Building outbox-processor Docker image...");
 

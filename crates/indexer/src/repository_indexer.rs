@@ -98,6 +98,13 @@ impl RepositoryIndexer {
 
         stats.entities_skipped_size = batch_stats.entities_skipped_size;
 
+        // Fetch collection_name once for all files in this batch
+        let collection_name = self
+            .postgres_client
+            .get_collection_name(self.repository_id)
+            .await?
+            .ok_or_else(|| Error::Storage("Repository collection_name not found".to_string()))?;
+
         // Detect and handle stale entities for ALL processed files (even empty ones)
         for &idx in &processed_indices {
             let file_path = &file_paths[idx];
@@ -109,6 +116,7 @@ impl RepositoryIndexer {
 
             entity_processor::update_file_snapshot_and_mark_stale(
                 self.repository_id,
+                &collection_name,
                 file_path_str,
                 entity_ids,
                 git_commit.clone(),
@@ -274,6 +282,7 @@ mod tests {
         // Run update_file_snapshot_and_mark_stale
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -343,6 +352,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -378,6 +388,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -445,6 +456,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -493,6 +505,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             None,
@@ -534,6 +547,7 @@ mod tests {
         // Re-index with same entities
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             entities.clone(),
             None,
@@ -580,6 +594,7 @@ mod tests {
         // Remove entity
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             vec![],
             None,
@@ -616,6 +631,7 @@ mod tests {
 
         entity_processor::update_file_snapshot_and_mark_stale(
             repo_uuid,
+            "test_collection",
             file_path,
             new_entities.clone(),
             git_commit.clone(),

@@ -331,6 +331,7 @@ async fn process_entity_chunk(
 /// Update file snapshot and mark stale entities as deleted
 pub async fn update_file_snapshot_and_mark_stale(
     repo_id: Uuid,
+    collection_name: &str,
     file_path: &str,
     new_entity_ids: Vec<String>,
     git_commit: Option<String>,
@@ -355,15 +356,8 @@ pub async fn update_file_snapshot_and_mark_stale(
     if !stale_ids.is_empty() {
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
-        // Fetch collection_name for this repository
-        let collection_name = postgres_client
-            .get_collection_name(repo_id)
-            .await
-            .storage_err("Failed to get collection name")?
-            .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
-
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, &collection_name, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
     }
@@ -379,6 +373,7 @@ pub async fn update_file_snapshot_and_mark_stale(
 /// Mark all entities in a file as deleted (for file deletion)
 pub async fn mark_file_entities_deleted(
     repo_id: Uuid,
+    collection_name: &str,
     file_path: &str,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
 ) -> Result<usize> {
@@ -396,15 +391,8 @@ pub async fn mark_file_entities_deleted(
 
     let count = entity_ids.len();
 
-    // Fetch collection_name for this repository
-    let collection_name = postgres_client
-        .get_collection_name(repo_id)
-        .await
-        .storage_err("Failed to get collection name")?
-        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
-
     postgres_client
-        .mark_entities_deleted_with_outbox(repo_id, &collection_name, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 

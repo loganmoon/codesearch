@@ -3,6 +3,7 @@ use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
 use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
+use dashmap::DashMap;
 use sqlx::{Postgres, QueryBuilder};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,7 @@ pub struct OutboxProcessor {
     poll_interval: Duration,
     batch_size: i64,
     max_retries: i32,
+    client_cache: Arc<DashMap<String, Arc<dyn StorageClient>>>,
 }
 
 impl OutboxProcessor {
@@ -32,16 +34,29 @@ impl OutboxProcessor {
             poll_interval,
             batch_size,
             max_retries,
+            client_cache: Arc::new(DashMap::new()),
         }
     }
 
-    /// Create a StorageClient for a specific collection
-    /// This is cheap - just wraps the Qdrant connection with collection context
-    async fn create_client_for_collection(
+    /// Get or create a StorageClient for a specific collection (with caching)
+    ///
+    /// Clients are cached per collection to avoid recreating them on every poll cycle.
+    async fn get_or_create_client_for_collection(
         &self,
         collection_name: &str,
     ) -> Result<Arc<dyn StorageClient>> {
-        create_storage_client_from_config(&self.qdrant_config, collection_name).await
+        // Check cache first
+        if let Some(client) = self.client_cache.get(collection_name) {
+            return Ok(Arc::clone(client.value()));
+        }
+
+        // Create new client and cache it
+        let client =
+            create_storage_client_from_config(&self.qdrant_config, collection_name).await?;
+        self.client_cache
+            .insert(collection_name.to_string(), Arc::clone(&client));
+
+        Ok(client)
     }
 
     /// Start processing loop (runs indefinitely until process is killed)
@@ -142,8 +157,10 @@ impl OutboxProcessor {
             "Processing outbox entries for collection"
         );
 
-        // Create client for this collection (cheap operation, outside transaction)
-        let storage_client = self.create_client_for_collection(collection_name).await?;
+        // Get or create cached client for this collection
+        let storage_client = self
+            .get_or_create_client_for_collection(collection_name)
+            .await?;
 
         // Separate INSERT/UPDATE from DELETE (same as before)
         let mut insert_update_entries = Vec::new();
@@ -446,12 +463,13 @@ impl OutboxProcessor {
     }
 }
 
-// TODO: Tests need to be refactored for Phase 2 SQL-based implementation
-// The new implementation uses real SQL queries (SELECT FOR UPDATE, etc.)
-// which cannot be easily mocked. Tests should be rewritten to either:
-// 1. Use a real test database (e.g., testcontainers)
-// 2. Test at integration level rather than unit level
 /*
+ * Tests have been moved to tests/integration_tests.rs
+ * They now use testcontainers for real PostgreSQL and Qdrant instances
+ * to properly test SQL-based transactions (SELECT FOR UPDATE, etc.)
+ */
+
+/* OLD TESTS - Preserved for reference, no longer functional
 #[cfg(test)]
 mod tests {
     use super::*;

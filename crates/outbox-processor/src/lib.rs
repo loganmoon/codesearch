@@ -3,3 +3,6 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 pub mod processor;
+
+// Re-export for ease of use
+pub use processor::OutboxProcessor;

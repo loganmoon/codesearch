@@ -96,6 +96,7 @@ impl FromStr for TargetStore {
 /// * `processed_at` - When this entry was successfully processed (None if pending)
 /// * `retry_count` - Number of times processing has been attempted
 /// * `last_error` - Error message from the most recent failed processing attempt
+/// * `collection_name` - Target collection name in the external store (e.g., Qdrant collection)
 #[derive(sqlx::FromRow, Debug, Clone)]
 pub struct OutboxEntry {
     pub outbox_id: Uuid,

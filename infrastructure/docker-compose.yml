@@ -97,9 +97,7 @@ services:
     restart: unless-stopped
 
   outbox-processor:
-    build:
-      context: ..  # Path to codesearch repository (relative to this file)
-      dockerfile: Dockerfile.outbox-processor
+    image: codesearch-outbox-processor:latest
     container_name: codesearch-outbox-processor
     depends_on:
       postgres:

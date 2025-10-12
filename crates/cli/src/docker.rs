@@ -272,18 +272,61 @@ pub async fn check_postgres_health(config: &StorageConfig) -> bool {
 }
 
 /// Wait for Postgres to become healthy
+///
+/// This function reuses a single connection across multiple health checks to avoid
+/// the overhead of creating 30+ connections during startup.
 pub async fn wait_for_postgres(config: &StorageConfig, timeout: Duration) -> Result<()> {
     info!("Waiting for Postgres to become healthy...");
 
     let start = Instant::now();
+    let connect_options = PgConnectOptions::new()
+        .host(&config.postgres_host)
+        .port(config.postgres_port)
+        .username(&config.postgres_user)
+        .password(&config.postgres_password)
+        .database("postgres");
 
+    // Try to establish connection, retrying on failures
+    let mut pool = None;
     while start.elapsed() < timeout {
-        if check_postgres_health(config).await {
-            info!("Postgres is healthy");
-            return Ok(());
+        match sqlx::PgPool::connect_with(connect_options.clone()).await {
+            Ok(p) => {
+                pool = Some(p);
+                break;
+            }
+            Err(e) => {
+                warn!(
+                    "Postgres connection attempt failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
+                );
+                sleep(Duration::from_secs(1)).await;
+            }
         }
+    }
 
-        sleep(Duration::from_secs(1)).await;
+    let pool = pool.ok_or_else(|| {
+        anyhow!(
+            "Postgres failed to accept connections within {} seconds. \
+             Check logs with: docker logs codesearch-postgres",
+            timeout.as_secs()
+        )
+    })?;
+
+    // Connection established, now verify it's healthy with queries
+    while start.elapsed() < timeout {
+        match sqlx::query("SELECT 1").execute(&pool).await {
+            Ok(_) => {
+                info!("Postgres is healthy");
+                return Ok(());
+            }
+            Err(e) => {
+                warn!(
+                    "Postgres health check query failed at {}:{}/postgres: {e}",
+                    config.postgres_host, config.postgres_port
+                );
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
     }
 
     Err(anyhow!(

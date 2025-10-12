@@ -12,6 +12,42 @@ use tracing::info;
 
 use crate::docker;
 
+/// RAII guard for file locking
+///
+/// Automatically releases the file lock when dropped, preventing lock leaks
+/// even when errors occur during critical sections.
+struct LockGuard {
+    file: File,
+}
+
+impl LockGuard {
+    /// Acquire an exclusive lock on the file, blocking until acquired
+    fn try_lock_exclusive(file: File, timeout: Duration) -> Result<Self> {
+        let start = Instant::now();
+
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(Self { file }),
+                Err(e) if start.elapsed() >= timeout => {
+                    return Err(anyhow!("Timeout waiting for lock: {e}"));
+                }
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        // Best effort unlock - log but don't panic if it fails
+        if let Err(e) = fs2::FileExt::unlock(&self.file) {
+            tracing::warn!("Failed to unlock file during drop: {e}");
+        }
+    }
+}
+
 /// Embedded docker-compose.yml for shared infrastructure
 const INFRASTRUCTURE_COMPOSE: &str = include_str!("../../../infrastructure/docker-compose.yml");
 
@@ -38,7 +74,7 @@ pub fn is_shared_infrastructure_running() -> Result<bool> {
 }
 
 /// Ensure shared infrastructure directory and compose file exist
-fn ensure_infrastructure_files() -> Result<PathBuf> {
+async fn ensure_infrastructure_files() -> Result<PathBuf> {
     let infra_dir = get_infrastructure_dir()?;
 
     // Create directory if it doesn't exist
@@ -54,7 +90,8 @@ fn ensure_infrastructure_files() -> Result<PathBuf> {
     let compose_path = infra_dir.join("docker-compose.yml");
     let should_write = if compose_path.exists() {
         // Check if content matches embedded version
-        let existing = fs::read_to_string(&compose_path)
+        let existing = tokio::fs::read_to_string(&compose_path)
+            .await
             .context("Failed to read existing docker-compose.yml")?;
         existing != INFRASTRUCTURE_COMPOSE
     } else {
@@ -63,11 +100,55 @@ fn ensure_infrastructure_files() -> Result<PathBuf> {
 
     if should_write {
         info!("Writing docker-compose.yml to {}", compose_path.display());
-        fs::write(&compose_path, INFRASTRUCTURE_COMPOSE)
+        tokio::fs::write(&compose_path, INFRASTRUCTURE_COMPOSE)
+            .await
             .context("Failed to write docker-compose.yml")?;
     }
 
     Ok(infra_dir)
+}
+
+/// Build outbox-processor Docker image from current repository
+///
+/// This must be called before starting infrastructure to ensure the image is available.
+/// The image is built from the repository where codesearch is being run, ensuring
+/// the correct build context regardless of where the docker-compose.yml is located.
+fn build_outbox_processor_image() -> Result<()> {
+    info!("Building outbox-processor Docker image...");
+
+    // Get current working directory (the repository root)
+    let repo_root = std::env::current_dir().context("Failed to get current directory")?;
+
+    let dockerfile_path = repo_root.join("Dockerfile.outbox-processor");
+    if !dockerfile_path.exists() {
+        return Err(anyhow!(
+            "Dockerfile.outbox-processor not found at {}. \
+             Make sure you're running from a codesearch repository.",
+            dockerfile_path.display()
+        ));
+    }
+
+    // Build the image with the repository root as context
+    let output = Command::new("docker")
+        .args([
+            "build",
+            "-t",
+            "codesearch-outbox-processor:latest",
+            "-f",
+            "Dockerfile.outbox-processor",
+            ".",
+        ])
+        .current_dir(&repo_root)
+        .output()
+        .context("Failed to execute docker build")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("Failed to build outbox-processor image:\n{stderr}"));
+    }
+
+    info!("Outbox-processor image built successfully");
+    Ok(())
 }
 
 /// Start shared infrastructure using docker compose
@@ -171,44 +252,40 @@ pub async fn ensure_shared_infrastructure(config: &StorageConfig) -> Result<()> 
     }
 
     info!("Acquiring infrastructure initialization lock...");
-    let lock_file = File::create(&lock_path).context("Failed to create lock file")?;
 
-    // Try to acquire exclusive lock with timeout
-    let lock_start = Instant::now();
+    // Open or create lock file and immediately acquire lock
+    // This uses File::options to atomically open and prepare for locking,
+    // eliminating the TOCTOU race between file creation and lock acquisition
+    // We don't truncate because the lock file is just for coordination
+    let lock_file = File::options()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .context("Failed to open lock file")?;
+
     let lock_timeout = Duration::from_secs(60);
-
-    while lock_start.elapsed() < lock_timeout {
-        match lock_file.try_lock_exclusive() {
-            Ok(()) => {
-                info!("Lock acquired, proceeding with initialization");
-                break;
-            }
-            Err(_) => {
-                if lock_start.elapsed().as_secs() % 10 == 0 {
-                    info!("Waiting for another process to finish infrastructure initialization...");
-                }
-                sleep(Duration::from_millis(500)).await;
-            }
-        }
-    }
-
-    if lock_start.elapsed() >= lock_timeout {
-        return Err(anyhow!(
-            "Timeout waiting for infrastructure initialization lock. \
+    let _lock_guard = LockGuard::try_lock_exclusive(lock_file, lock_timeout).context(format!(
+        "Timeout waiting for infrastructure initialization lock. \
              If no other process is running, remove the lock file at: {}",
-            lock_path.display()
-        ));
-    }
+        lock_path.display()
+    ))?;
+
+    info!("Lock acquired, proceeding with initialization");
 
     // Double-check if infrastructure was started by another process
     if is_shared_infrastructure_running()? {
         info!("Infrastructure was started by another process");
-        fs2::FileExt::unlock(&lock_file).context("Failed to unlock infrastructure lock")?;
+        // Lock will be automatically released when _lock_guard drops
         return Ok(());
     }
 
     // Ensure infrastructure files exist
-    let infra_dir = ensure_infrastructure_files()?;
+    let infra_dir = ensure_infrastructure_files().await?;
+
+    // Build outbox-processor image from current repository
+    // This must happen before docker compose up to ensure the image exists
+    build_outbox_processor_image()?;
 
     // Start infrastructure
     start_infrastructure(&infra_dir)?;
@@ -216,9 +293,7 @@ pub async fn ensure_shared_infrastructure(config: &StorageConfig) -> Result<()> 
     // Wait for services to be healthy
     wait_for_all_services(config).await?;
 
-    // Release lock
-    fs2::FileExt::unlock(&lock_file).context("Failed to unlock infrastructure lock")?;
-
+    // Lock will be automatically released when _lock_guard drops
     info!("Shared infrastructure initialization complete");
     Ok(())
 }

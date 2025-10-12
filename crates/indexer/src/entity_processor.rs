@@ -149,6 +149,13 @@ pub async fn process_entity_batch(
         );
     }
 
+    // Fetch collection_name once for all chunks
+    let collection_name = postgres_client
+        .get_collection_name(repo_id)
+        .await
+        .storage_err("Failed to get collection name")?
+        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+
     // Chunk entities if batch exceeds max size
     let chunks: Vec<Vec<CodeEntity>> = entities
         .chunks(max_batch_size)
@@ -179,6 +186,7 @@ pub async fn process_entity_batch(
         let (chunk_stats, chunk_entities_by_file) = process_entity_chunk(
             chunk,
             repo_id,
+            &collection_name,
             git_commit.clone(),
             embedding_manager,
             postgres_client,
@@ -206,6 +214,7 @@ pub async fn process_entity_batch(
 async fn process_entity_chunk(
     entities: Vec<CodeEntity>,
     repo_id: Uuid,
+    collection_name: &str,
     git_commit: Option<String>,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
@@ -305,15 +314,9 @@ async fn process_entity_chunk(
         ));
     }
 
-    // Fetch collection_name for this repository
-    let collection_name = postgres_client
-        .get_collection_name(repo_id)
-        .await
-        .storage_err("Failed to get collection name")?
-        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
-
+    // Use cached collection_name passed from parent function
     postgres_client
-        .store_entities_with_outbox_batch(repo_id, &collection_name, &batch_refs)
+        .store_entities_with_outbox_batch(repo_id, collection_name, &batch_refs)
         .await
         .storage_err("Failed to store entities")?;
 

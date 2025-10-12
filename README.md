@@ -15,7 +15,7 @@ codesearch index
 The first run will automatically:
 1. Create infrastructure directory at `~/.codesearch/infrastructure/`
 2. Download and start containers (PostgreSQL, Qdrant, vLLM, outbox-processor)
-3. Wait for all services to be healthy (may take 1-2 minutes for vLLM to load models)
+3. Wait for all services to be healthy (may take up to 1 minute for vLLM to load models)
 4. Index your repository
 
 **Security**: All services are bound to 127.0.0.1 only (not accessible from network).
@@ -84,4 +84,4 @@ rm ~/.codesearch/.infrastructure.lock
 
 **Port conflicts**: Ensure ports 5432, 6333, 6334, and 8000 are available.
 
-**vLLM startup**: First run may take 1-2 minutes for vLLM to download and load the embedding model.
+**vLLM startup**: First run may take up to 1 minute for vLLM to download and load the embedding model.

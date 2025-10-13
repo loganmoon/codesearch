@@ -1,0 +1,29 @@
+# Build artifacts
+target/
+*.log
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+README*
+LICENSE*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CI/CD
+.github/
+
+# Temporary test files
+/tmp/
+*.tmp

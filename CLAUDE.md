@@ -75,6 +75,25 @@ cargo run -- index                       # Index the repository
 cargo run -- serve                       # Start MCP server
 ```
 
+## Outbox Processor Development
+
+When developing the outbox processor, use development mode for fast iteration:
+
+```bash
+# Set up dev mode (one-time)
+cargo install cargo-watch
+cargo build --release --bin outbox-processor
+
+# Start auto-rebuild (Terminal 1)
+./scripts/dev-watch-outbox.sh
+
+# Run with dev mode enabled (Terminal 2)
+export CODESEARCH_DEV_MODE=1
+codesearch index
+```
+
+See `docs/development.md` for details on all three workflow modes.
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.

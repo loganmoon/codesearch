@@ -1,0 +1,19 @@
+# Development override for docker-compose.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This mounts the locally-built binary into the container, allowing rapid
+# iteration without Docker rebuilds. Use with cargo-watch for hot reload.
+
+services:
+  outbox-processor:
+    # Use volume mount instead of building image
+    volumes:
+      - ../target/release/outbox-processor:/usr/local/bin/outbox-processor:ro
+    # Override image to use base debian (binary comes from volume)
+    image: debian:bookworm-slim
+    # Ensure runtime dependencies are available
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+        exec /usr/local/bin/outbox-processor

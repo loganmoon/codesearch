@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::docker;
 
@@ -50,6 +50,10 @@ impl Drop for LockGuard {
 
 /// Embedded docker-compose.yml for shared infrastructure
 const INFRASTRUCTURE_COMPOSE: &str = include_str!("../../../infrastructure/docker-compose.yml");
+
+/// Embedded docker-compose.dev.yml for development mode
+const INFRASTRUCTURE_COMPOSE_DEV: &str =
+    include_str!("../../../infrastructure/docker-compose.dev.yml");
 
 /// Get the infrastructure directory path
 fn get_infrastructure_dir() -> Result<PathBuf> {
@@ -105,7 +109,61 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
             .context("Failed to write docker-compose.yml")?;
     }
 
+    // Write docker-compose.dev.yml if it doesn't exist or is outdated
+    let dev_compose_path = infra_dir.join("docker-compose.dev.yml");
+    let should_write_dev = if dev_compose_path.exists() {
+        let existing = tokio::fs::read_to_string(&dev_compose_path)
+            .await
+            .context("Failed to read existing docker-compose.dev.yml")?;
+        existing != INFRASTRUCTURE_COMPOSE_DEV
+    } else {
+        true
+    };
+
+    if should_write_dev {
+        info!(
+            "Writing docker-compose.dev.yml to {}",
+            dev_compose_path.display()
+        );
+        tokio::fs::write(&dev_compose_path, INFRASTRUCTURE_COMPOSE_DEV)
+            .await
+            .context("Failed to write docker-compose.dev.yml")?;
+    }
+
     Ok(infra_dir)
+}
+
+/// Check if image rebuild should be forced via environment variable
+fn should_force_rebuild() -> bool {
+    std::env::var("CODESEARCH_FORCE_REBUILD")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Check if development mode is enabled via environment variable
+fn is_dev_mode() -> bool {
+    std::env::var("CODESEARCH_DEV_MODE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// Check if the outbox-processor Docker image exists
+///
+/// Returns true if the image exists locally, false otherwise.
+/// Note: This does not check if the image is up-to-date with source code,
+/// only if it exists at all.
+fn is_outbox_image_present() -> Result<bool> {
+    // Force rebuild if requested
+    if should_force_rebuild() {
+        return Ok(false);
+    }
+
+    let output = Command::new("docker")
+        .args(["image", "inspect", "codesearch-outbox-processor:latest"])
+        .output()
+        .context("Failed to check if outbox-processor image exists")?;
+
+    Ok(output.status.success())
 }
 
 /// Build outbox-processor Docker image from current directory
@@ -116,6 +174,12 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
 /// current working directory. After the first build, the cached image can be used
 /// from any directory.
 fn build_outbox_processor_image() -> Result<()> {
+    // Skip if image already exists
+    if is_outbox_image_present()? {
+        info!("Outbox processor image already exists, skipping build");
+        return Ok(());
+    }
+
     info!("Building outbox-processor Docker image...");
 
     // Get current working directory (the repository root)
@@ -182,9 +246,24 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         .to_str()
         .ok_or_else(|| anyhow!("Invalid path for docker-compose.yml"))?;
 
+    args.extend(["-f", compose_file_str]);
+
+    // Add dev compose override if in dev mode
+    let dev_compose_path = infra_dir.join("docker-compose.dev.yml");
+    let dev_compose_str;
+    if is_dev_mode() {
+        if dev_compose_path.exists() {
+            info!("Using development compose override");
+            dev_compose_str = dev_compose_path
+                .to_str()
+                .ok_or_else(|| anyhow!("Invalid path for docker-compose.dev.yml"))?;
+            args.extend(["-f", dev_compose_str]);
+        } else {
+            warn!("CODESEARCH_DEV_MODE set but docker-compose.dev.yml not found, ignoring");
+        }
+    }
+
     args.extend([
-        "-f",
-        compose_file_str,
         "up",
         "-d",
         "postgres",
@@ -286,8 +365,12 @@ pub async fn ensure_shared_infrastructure(config: &StorageConfig) -> Result<()> 
     let infra_dir = ensure_infrastructure_files().await?;
 
     // Build outbox-processor image from current repository
-    // This must happen before docker compose up to ensure the image exists
-    build_outbox_processor_image()?;
+    // Skip in dev mode (assumes binary is volume-mounted)
+    if !is_dev_mode() {
+        build_outbox_processor_image()?;
+    } else {
+        info!("Development mode enabled, skipping image build (using volume mount)");
+    }
 
     // Start infrastructure
     start_infrastructure(&infra_dir)?;

@@ -5,7 +5,6 @@ use codesearch_storage::{
 use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
 use dashmap::DashMap;
 use sqlx::{Postgres, QueryBuilder};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -145,17 +144,22 @@ impl OutboxProcessor {
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
-        // Step 2: Single query across ALL collections, global ordering
+        // Step 2: Single query across ALL collections with CTE
+        // Uses CTE to select batch with global ordering, then sorts by collection for grouping
         let entries: Vec<OutboxEntry> = sqlx::query_as(
-            "SELECT outbox_id, repository_id, entity_id, operation, target_store,
-                    payload, created_at, processed_at, retry_count, last_error,
-                    collection_name
-             FROM entity_outbox
-             WHERE target_store = $1
-               AND processed_at IS NULL
-             ORDER BY created_at ASC
-             LIMIT $2
-             FOR UPDATE SKIP LOCKED",
+            "WITH batch AS (
+                 SELECT outbox_id, repository_id, entity_id, operation, target_store,
+                        payload, created_at, processed_at, retry_count, last_error,
+                        collection_name
+                 FROM entity_outbox
+                 WHERE target_store = $1
+                   AND processed_at IS NULL
+                 ORDER BY created_at ASC
+                 LIMIT $2
+                 FOR UPDATE SKIP LOCKED
+             )
+             SELECT * FROM batch
+             ORDER BY collection_name, created_at",
         )
         .bind(TargetStore::Qdrant.to_string())
         .bind(self.batch_size)
@@ -171,37 +175,41 @@ impl OutboxProcessor {
             return Ok(());
         }
 
-        // Step 4: Group entries by collection_name using HashMap
-        let mut entries_by_collection: HashMap<String, Vec<OutboxEntry>> = HashMap::new();
-        for entry in entries {
-            entries_by_collection
-                .entry(entry.collection_name.clone())
-                .or_default()
-                .push(entry);
-        }
+        // Step 4: Process entries grouped by collection using slices (zero-copy)
+        // Entries are already sorted by collection_name, find slice boundaries
+        let total_entries = entries.len();
+        let mut start_idx = 0;
+        let mut collection_count = 0;
 
-        debug!(
-            "Processing batch with {} entries across {} collections",
-            entries_by_collection
-                .values()
-                .map(|v| v.len())
-                .sum::<usize>(),
-            entries_by_collection.len()
-        );
+        while start_idx < entries.len() {
+            collection_count += 1;
+            let collection_name = &entries[start_idx].collection_name;
 
-        // Step 5: Process each collection's subset
-        for (collection_name, collection_entries) in entries_by_collection {
+            // Find the end index for this collection
+            let mut end_idx = start_idx + 1;
+            while end_idx < entries.len() && entries[end_idx].collection_name == *collection_name {
+                end_idx += 1;
+            }
+
+            let collection_slice = &entries[start_idx..end_idx];
+
+            debug!(
+                collection = %collection_name,
+                entries_in_collection = collection_slice.len(),
+                "Processing collection"
+            );
+
             // Get or create Qdrant client (cached)
             let storage_client = self
-                .get_or_create_client_for_collection(&collection_name)
+                .get_or_create_client_for_collection(collection_name)
                 .await?;
 
             // Separate INSERT/UPDATE from DELETE, track failures
-            let mut insert_update_entries = Vec::new();
-            let mut delete_entries = Vec::new();
+            let mut insert_update_entries: Vec<&OutboxEntry> = Vec::new();
+            let mut delete_entries: Vec<&OutboxEntry> = Vec::new();
             let mut failed_entry_ids = Vec::new();
 
-            for entry in collection_entries {
+            for entry in collection_slice {
                 // Check retry limit
                 if entry.retry_count >= self.max_retries {
                     warn!(
@@ -244,13 +252,13 @@ impl OutboxProcessor {
                         insert_update_entries.iter().map(|e| e.outbox_id).collect();
                     let context = FailureContext {
                         operation_type: "INSERT/UPDATE",
-                        collection_name: &collection_name,
+                        collection_name,
                         entry_count: insert_update_entries.len(),
-                        first_entity_id: insert_update_entries.first().map(|e| e.entity_id.as_str()),
+                        first_entity_id: insert_update_entries
+                            .first()
+                            .map(|e| e.entity_id.as_str()),
                     };
-                    return self
-                        .handle_qdrant_write_failure(tx, ids, e, context)
-                        .await;
+                    return self.handle_qdrant_write_failure(tx, ids, e, context).await;
                 }
 
                 // Mark as processed
@@ -267,13 +275,11 @@ impl OutboxProcessor {
                     let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
                     let context = FailureContext {
                         operation_type: "DELETE",
-                        collection_name: &collection_name,
+                        collection_name,
                         entry_count: delete_entries.len(),
                         first_entity_id: delete_entries.first().map(|e| e.entity_id.as_str()),
                     };
-                    return self
-                        .handle_qdrant_write_failure(tx, ids, e, context)
-                        .await;
+                    return self.handle_qdrant_write_failure(tx, ids, e, context).await;
                 }
 
                 // Mark as processed
@@ -287,14 +293,21 @@ impl OutboxProcessor {
                 failed = failed_entry_ids.len(),
                 "Processed collection entries"
             );
+
+            // Move to next collection
+            start_idx = end_idx;
         }
 
-        // Step 6: Commit entire batch
+        // Step 5: Commit entire batch
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
-        debug!("Successfully processed entire batch");
+        debug!(
+            total_entries = total_entries,
+            collections = collection_count,
+            "Successfully processed entire batch"
+        );
         Ok(())
     }
 
@@ -440,7 +453,7 @@ impl OutboxProcessor {
     async fn write_to_qdrant_insert_update(
         &self,
         storage_client: &Arc<dyn StorageClient>,
-        entries: &[OutboxEntry],
+        entries: &[&OutboxEntry],
     ) -> Result<()> {
         let mut embedded_entities = Vec::with_capacity(entries.len());
 
@@ -482,7 +495,7 @@ impl OutboxProcessor {
     async fn write_to_qdrant_delete(
         &self,
         storage_client: &Arc<dyn StorageClient>,
-        entries: &[OutboxEntry],
+        entries: &[&OutboxEntry],
     ) -> Result<()> {
         // Collect all entity_ids from all DELETE entries
         let mut all_entity_ids = Vec::new();

@@ -70,6 +70,7 @@ impl TestPostgres {
             .with_user("codesearch")
             .with_password("codesearch")
             .with_db_name("codesearch")
+            .with_tag("18")
             .start()
             .await
             .context("Failed to start Postgres container")?;

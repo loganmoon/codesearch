@@ -409,10 +409,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
 
     // Entry should exist (we might not have processed it yet depending on timing)
     if let Some((retry_count, last_error)) = entry {
-        eprintln!(
-            "Entry state: retry_count={retry_count}, last_error={:?}",
-            last_error
-        );
+        eprintln!("Entry state: retry_count={retry_count}, last_error={last_error:?}");
         // Either retried or error recorded would indicate proper failure handling
     }
 

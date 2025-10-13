@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use testcontainers::core::ImageExt;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres;
 use uuid::Uuid;
@@ -39,7 +40,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
 
 #[tokio::test]
 async fn test_outbox_processor_basic_initialization() {
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -82,7 +83,7 @@ async fn test_outbox_processor_basic_initialization() {
 
 #[tokio::test]
 async fn test_outbox_entries_can_be_created_and_queried() {
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -147,7 +148,7 @@ async fn test_outbox_entries_can_be_created_and_queried() {
 
 #[tokio::test]
 async fn test_client_cache_reuses_clients() {
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -190,7 +191,7 @@ async fn test_client_cache_reuses_clients() {
 #[tokio::test]
 async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::error::Error>> {
     // Setup database
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -316,7 +317,7 @@ async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std
     // Note: This test only verifies the database state, not actual Qdrant interaction
     // (Full E2E testing with Qdrant failures would require mocking or E2E suite)
 
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -441,7 +442,7 @@ async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std
 async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::error::Error>> {
     // Verify that entries are fetched in strict created_at order across collections
 
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -597,7 +598,7 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
 async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std::error::Error>> {
     // Verify that entries exceeding max_retries are marked as processed
 
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -716,7 +717,7 @@ async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std:
 #[tokio::test]
 async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std::error::Error>> {
     // Test DELETE operation with entity_ids array in payload
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -801,7 +802,7 @@ async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std
 async fn test_delete_operation_with_single_entity_id_fallback(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Test DELETE operation falling back to single entity_id when entity_ids not present
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()
@@ -885,7 +886,7 @@ async fn test_delete_operation_with_single_entity_id_fallback(
 #[tokio::test]
 async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn std::error::Error>> {
     // Test that INSERT, UPDATE, and DELETE operations can be processed in the same batch
-    let postgres_node = Postgres::default().start().await.unwrap();
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
         "postgres://postgres:postgres@127.0.0.1:{}/postgres",
         postgres_node.get_host_port_ipv4(5432).await.unwrap()

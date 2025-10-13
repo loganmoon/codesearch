@@ -3,12 +3,15 @@
 use anyhow::{anyhow, Context, Result};
 use codesearch_core::config::StorageConfig;
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::docker;
 
@@ -45,6 +48,137 @@ impl Drop for LockGuard {
         if let Err(e) = fs2::FileExt::unlock(&self.file) {
             tracing::warn!("Failed to unlock file during drop: {e}");
         }
+    }
+}
+
+/// Calculate SHA256 hash of a file
+fn hash_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path).context(format!("Failed to open file: {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Calculate a combined hash of all files that affect the outbox processor build
+///
+/// This includes:
+/// - All source files in crates/outbox-processor, crates/core, crates/storage
+/// - All Cargo.toml and Cargo.lock files
+/// - The Dockerfile.outbox-processor
+///
+/// Returns None if running from a directory without the source code.
+fn calculate_outbox_source_hash() -> Result<Option<String>> {
+    let repo_root = std::env::current_dir().context("Failed to get current directory")?;
+
+    // Check if this looks like the codesearch repo
+    let dockerfile = repo_root.join("Dockerfile.outbox-processor");
+    if !dockerfile.exists() {
+        // Not in repo, return None
+        return Ok(None);
+    }
+
+    // Use BTreeMap to ensure deterministic ordering
+    let mut file_hashes = BTreeMap::new();
+
+    // Files to hash (in deterministic order due to BTreeMap)
+    let patterns = [
+        "Cargo.toml",
+        "Cargo.lock",
+        "Dockerfile.outbox-processor",
+        "crates/outbox-processor/Cargo.toml",
+        "crates/core/Cargo.toml",
+        "crates/storage/Cargo.toml",
+    ];
+
+    for pattern in &patterns {
+        let path = repo_root.join(pattern);
+        if path.exists() {
+            let hash = hash_file(&path)?;
+            file_hashes.insert(pattern.to_string(), hash);
+        }
+    }
+
+    // Hash all Rust source files in the relevant crates
+    let source_dirs = [
+        "crates/outbox-processor/src",
+        "crates/core/src",
+        "crates/storage/src",
+    ];
+
+    for dir in &source_dirs {
+        let dir_path = repo_root.join(dir);
+        if dir_path.exists() {
+            for entry in walkdir::WalkDir::new(&dir_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
+            {
+                let path = entry.path();
+                let relative = path
+                    .strip_prefix(&repo_root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
+                let hash = hash_file(path)?;
+                file_hashes.insert(relative, hash);
+            }
+        }
+    }
+
+    // Combine all file hashes into a single hash
+    let mut combined_hasher = Sha256::new();
+    for (file_path, file_hash) in &file_hashes {
+        combined_hasher.update(file_path.as_bytes());
+        combined_hasher.update(b":");
+        combined_hasher.update(file_hash.as_bytes());
+        combined_hasher.update(b"\n");
+    }
+
+    let final_hash = format!("{:x}", combined_hasher.finalize());
+    debug!(
+        "Calculated outbox source hash: {} (from {} files)",
+        final_hash,
+        file_hashes.len()
+    );
+
+    Ok(Some(final_hash))
+}
+
+/// Get the source hash label from an existing Docker image
+///
+/// Returns None if the image doesn't exist or doesn't have the label.
+fn get_image_source_hash() -> Result<Option<String>> {
+    let output = Command::new("docker")
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"codesearch.source-hash\"}}",
+            "codesearch-outbox-processor:latest",
+        ])
+        .output()
+        .context("Failed to inspect Docker image")?;
+
+    if !output.status.success() {
+        // Image doesn't exist
+        return Ok(None);
+    }
+
+    let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if label_value.is_empty() || label_value == "<no value>" {
+        // Image exists but has no label
+        Ok(None)
+    } else {
+        Ok(Some(label_value))
     }
 }
 
@@ -108,6 +242,54 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
     Ok(infra_dir)
 }
 
+/// Check if the outbox-processor Docker image needs to be rebuilt
+///
+/// Returns true if the image is up-to-date, false if it needs rebuilding.
+///
+/// An image needs rebuilding if:
+/// - It doesn't exist
+/// - The source hash doesn't match (source code has changed)
+/// - We're not running from the source repository (fallback to existence check)
+fn is_outbox_image_up_to_date() -> Result<bool> {
+    // Calculate current source hash
+    let current_hash = calculate_outbox_source_hash()?;
+
+    // If we're not in the source repo, fall back to simple existence check
+    let Some(current_hash) = current_hash else {
+        debug!("Not in source repository, checking if image exists");
+        let output = Command::new("docker")
+            .args(["image", "inspect", "codesearch-outbox-processor:latest"])
+            .output()
+            .context("Failed to check if outbox-processor image exists")?;
+        return Ok(output.status.success());
+    };
+
+    // Get the hash from the existing image
+    let image_hash = get_image_source_hash()?;
+
+    match image_hash {
+        Some(image_hash) if image_hash == current_hash => {
+            info!(
+                "Outbox processor image is up-to-date (hash: {})",
+                &current_hash[..12]
+            );
+            Ok(true)
+        }
+        Some(image_hash) => {
+            info!(
+                "Outbox processor source has changed (image: {}, current: {})",
+                &image_hash[..12],
+                &current_hash[..12]
+            );
+            Ok(false)
+        }
+        None => {
+            info!("Outbox processor image not found or has no hash label");
+            Ok(false)
+        }
+    }
+}
+
 /// Build outbox-processor Docker image from current directory
 ///
 /// IMPORTANT: This function requires codesearch to be run from the codesearch source
@@ -116,6 +298,11 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
 /// current working directory. After the first build, the cached image can be used
 /// from any directory.
 fn build_outbox_processor_image() -> Result<()> {
+    // Skip if image is up-to-date
+    if is_outbox_image_up_to_date()? {
+        return Ok(());
+    }
+
     info!("Building outbox-processor Docker image...");
 
     // Get current working directory (the repository root)
@@ -130,12 +317,19 @@ fn build_outbox_processor_image() -> Result<()> {
         ));
     }
 
-    // Build the image with the repository root as context
+    // Calculate the source hash to embed as a label
+    let source_hash = calculate_outbox_source_hash()?
+        .ok_or_else(|| anyhow!("Cannot calculate source hash outside of source repository"))?;
+
+    // Build the image with the repository root as context and add source hash label
+    let label_arg = format!("codesearch.source-hash={source_hash}");
     let output = Command::new("docker")
         .args([
             "build",
             "-t",
             "codesearch-outbox-processor:latest",
+            "--label",
+            &label_arg,
             "-f",
             "Dockerfile.outbox-processor",
             ".",
@@ -149,7 +343,10 @@ fn build_outbox_processor_image() -> Result<()> {
         return Err(anyhow!("Failed to build outbox-processor image:\n{stderr}"));
     }
 
-    info!("Outbox-processor image built successfully");
+    info!(
+        "Outbox-processor image built successfully (hash: {})",
+        &source_hash[..12]
+    );
     Ok(())
 }
 
@@ -182,9 +379,9 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         .to_str()
         .ok_or_else(|| anyhow!("Invalid path for docker-compose.yml"))?;
 
+    args.extend(["-f", compose_file_str]);
+
     args.extend([
-        "-f",
-        compose_file_str,
         "up",
         "-d",
         "postgres",
@@ -286,7 +483,6 @@ pub async fn ensure_shared_infrastructure(config: &StorageConfig) -> Result<()> 
     let infra_dir = ensure_infrastructure_files().await?;
 
     // Build outbox-processor image from current repository
-    // This must happen before docker compose up to ensure the image exists
     build_outbox_processor_image()?;
 
     // Start infrastructure

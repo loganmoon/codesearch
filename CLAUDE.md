@@ -75,6 +75,14 @@ cargo run -- index                       # Index the repository
 cargo run -- serve                       # Start MCP server
 ```
 
+**Docker Builds:**
+
+The outbox processor Docker image automatically rebuilds when source files change. The build system calculates a SHA256 hash of all relevant source files and only rebuilds if the hash has changed.
+
+```bash
+codesearch index                          # Automatically rebuilds image if source changed
+```
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.

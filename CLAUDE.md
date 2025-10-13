@@ -65,6 +65,9 @@ cargo test --test <test-name>             # Run specific integration test
 cargo test --package codesearch-e2e-tests -- --ignored           # Run all E2E tests
 cargo test --package codesearch-e2e-tests -- --ignored test_name # Run specific E2E test
 
+# Note: E2E tests manage their own containers (separate from production infrastructure)
+# E2E test containers use different names and don't conflict with `codesearch-*` containers
+
 cargo clippy --workspace                  # Lint with strict rules
 cargo fmt                                 # Format code
 ```
@@ -82,6 +85,46 @@ The outbox processor Docker image automatically rebuilds when source files chang
 ```bash
 codesearch index                          # Automatically rebuilds image if source changed
 ```
+
+**Docker Infrastructure Management:**
+
+The codesearch CLI uses shared Docker infrastructure located at `~/.codesearch/infrastructure/`.
+All repositories connect to the same Postgres, Qdrant, vLLM, and outbox-processor containers.
+
+Starting infrastructure (automatic on first `codesearch index`):
+```bash
+codesearch index                          # Auto-starts infrastructure if needed
+```
+
+Checking infrastructure status:
+```bash
+docker ps --filter "name=codesearch"      # Show running containers
+docker ps -a --filter "name=codesearch"   # Show all containers (including stopped)
+```
+
+Stopping infrastructure:
+```bash
+cd ~/.codesearch/infrastructure
+docker compose stop                       # Stop containers (keeps them for restart)
+docker compose down                       # Stop AND remove containers
+```
+
+Troubleshooting:
+```bash
+# View logs for a specific service
+docker logs codesearch-postgres
+docker logs codesearch-qdrant
+docker logs codesearch-vllm
+docker logs codesearch-outbox-processor
+
+# Manually clean up stale containers (usually not needed, CLI auto-cleans)
+docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm codesearch-outbox-processor
+
+# Nuclear option: remove all stopped containers
+docker container prune -f
+```
+
+**Note**: The CLI automatically detects and cleans up stopped infrastructure containers before starting new ones, so manual cleanup is rarely needed.
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

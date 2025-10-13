@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
         Duration::from_millis(1000), // Poll every 1s
         100,                         // Batch size
         3,                           // Max retries
+        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
     );
 
     info!("Outbox processor configuration loaded successfully");

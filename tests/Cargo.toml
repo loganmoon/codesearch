@@ -11,6 +11,7 @@ codesearch-storage = { path = "../crates/storage" }
 codesearch-indexer = { path = "../crates/indexer" }
 codesearch-embeddings = { path = "../crates/embeddings" }
 codesearch-watcher = { path = "../crates/watcher" }
+codesearch-outbox-processor = { path = "../crates/outbox-processor" }
 
 # Test dependencies
 tokio = { workspace = true }

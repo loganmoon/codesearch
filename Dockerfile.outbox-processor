@@ -33,9 +33,7 @@ RUN mkdir -p crates/core/src crates/storage/src crates/outbox-processor/src test
 COPY crates ./crates
 COPY tests/src ./tests/src
 
-# Touch main.rs to force rebuild of outbox-processor only
-RUN touch crates/outbox-processor/src/main.rs && \
-    cargo build --release --bin outbox-processor
+RUN cargo build --release --bin outbox-processor
 
 # Runtime stage (unchanged)
 FROM debian:bookworm-slim

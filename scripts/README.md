@@ -40,50 +40,6 @@ cargo test --workspace --no-default-features
 cargo fmt && cargo clippy --workspace --all-targets --no-default-features -- -D warnings && cargo test --workspace --no-default-features
 ```
 
-## Development Workflows
-
-### Outbox Processor Development Mode
-
-For rapid iteration when developing the outbox processor:
-
-#### Setup (One-time)
-
-1. Install cargo-watch:
-   ```bash
-   cargo install cargo-watch
-   ```
-
-2. Build initial binary:
-   ```bash
-   cargo build --release --bin outbox-processor
-   ```
-
-#### Usage
-
-**Terminal 1: Start auto-rebuild watch**
-```bash
-./scripts/dev-watch-outbox.sh
-```
-
-**Terminal 2: Start infrastructure with development mode**
-```bash
-cd infrastructure
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-```
-
-#### How It Works
-
-- cargo-watch monitors source files and rebuilds on changes (10-30 seconds)
-- Docker container mounts the binary via volume
-- Container restarts automatically pick up new binary
-- No Docker rebuild needed during development
-
-#### When to Use Each Mode
-
-- **Development mode** (volume mount): Active development on outbox processor
-- **Optimized Docker** (cached layers): Testing containerization, integration testing
-- **Skip build** (existing image): Working on other components
-
 ### Hook Files
 
 - `hooks/pre-commit`: Main pre-commit hook with all quality checks

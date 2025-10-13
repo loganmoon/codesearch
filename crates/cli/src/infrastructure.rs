@@ -242,13 +242,6 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
     Ok(infra_dir)
 }
 
-/// Check if image rebuild should be forced via environment variable
-fn should_force_rebuild() -> bool {
-    std::env::var("CODESEARCH_FORCE_REBUILD")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 /// Check if the outbox-processor Docker image needs to be rebuilt
 ///
 /// Returns true if the image is up-to-date, false if it needs rebuilding.
@@ -256,15 +249,8 @@ fn should_force_rebuild() -> bool {
 /// An image needs rebuilding if:
 /// - It doesn't exist
 /// - The source hash doesn't match (source code has changed)
-/// - CODESEARCH_FORCE_REBUILD environment variable is set
 /// - We're not running from the source repository (fallback to existence check)
 fn is_outbox_image_up_to_date() -> Result<bool> {
-    // Force rebuild if requested
-    if should_force_rebuild() {
-        info!("CODESEARCH_FORCE_REBUILD is set, will rebuild image");
-        return Ok(false);
-    }
-
     // Calculate current source hash
     let current_hash = calculate_outbox_source_hash()?;
 

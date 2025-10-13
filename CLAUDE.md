@@ -75,24 +75,13 @@ cargo run -- index                       # Index the repository
 cargo run -- serve                       # Start MCP server
 ```
 
-## Outbox Processor Development
+**Docker Builds:**
 
-When developing the outbox processor, use development mode for fast iteration:
+The outbox processor Docker image automatically rebuilds when source files change. The build system calculates a SHA256 hash of all relevant source files and only rebuilds if the hash has changed.
 
 ```bash
-# Set up dev mode (one-time)
-cargo install cargo-watch
-cargo build --release --bin outbox-processor
-
-# Start auto-rebuild (Terminal 1)
-./scripts/dev-watch-outbox.sh
-
-# Run with dev mode enabled (Terminal 2)
-export CODESEARCH_DEV_MODE=1
-codesearch index
+codesearch index                          # Automatically rebuilds image if source changed
 ```
-
-See `docs/development.md` for details on all three workflow modes.
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

@@ -6,203 +6,22 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-mod docker;
-mod infrastructure;
-mod storage_init;
+// Use the library modules
+use codesearch::init::{
+    create_default_storage_config, ensure_storage_initialized, get_api_base_url_if_local_api,
+};
+use codesearch::{docker, infrastructure};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::{Config, StorageConfig};
-use codesearch_embeddings::EmbeddingManager;
 use codesearch_indexer::{Indexer, RepositoryIndexer};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tracing::{info, warn};
 
-/// Convert provider string to EmbeddingProviderType enum
-fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProviderType {
-    match provider.to_lowercase().as_str() {
-        "localapi" | "api" => codesearch_embeddings::EmbeddingProviderType::LocalApi,
-        "mock" => codesearch_embeddings::EmbeddingProviderType::Mock,
-        _ => codesearch_embeddings::EmbeddingProviderType::LocalApi, // Default to LocalApi
-    }
-}
-
-/// Create default storage configuration for a repository
-fn create_default_storage_config(collection_name: String) -> StorageConfig {
-    StorageConfig {
-        qdrant_host: "localhost".to_string(),
-        qdrant_port: 6334,
-        qdrant_rest_port: 6333,
-        collection_name,
-        auto_start_deps: true,
-        docker_compose_file: None,
-        postgres_host: "localhost".to_string(),
-        postgres_port: 5432,
-        postgres_database: "codesearch".to_string(),
-        postgres_user: "codesearch".to_string(),
-        postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
-    }
-}
-
-/// Ensure config has a collection name, generating one if needed
-fn ensure_collection_name(mut config: Config, repo_root: &Path) -> Result<Config> {
-    if config.storage.collection_name.is_empty() {
-        config.storage.collection_name = StorageConfig::generate_collection_name(repo_root)?;
-        info!(
-            "Generated collection name: {}",
-            config.storage.collection_name
-        );
-    }
-    Ok(config)
-}
-
-/// Get API base URL if provider is LocalApi, None otherwise
-fn get_api_base_url_if_local_api(config: &Config) -> Option<&str> {
-    let provider_type = parse_provider_type(&config.embeddings.provider);
-    if matches!(
-        provider_type,
-        codesearch_embeddings::EmbeddingProviderType::LocalApi
-    ) {
-        config.embeddings.api_base_url.as_deref()
-    } else {
-        None
-    }
-}
-
-/// Helper function to create an embedding manager from configuration
-async fn create_embedding_manager(config: &Config) -> Result<Arc<EmbeddingManager>> {
-    let mut embeddings_config_builder = codesearch_embeddings::EmbeddingConfigBuilder::default()
-        .provider(parse_provider_type(&config.embeddings.provider))
-        .model(config.embeddings.model.clone())
-        .batch_size(config.embeddings.batch_size)
-        .embedding_dimension(config.embeddings.embedding_dimension);
-
-    if let Some(ref api_base_url) = config.embeddings.api_base_url {
-        embeddings_config_builder = embeddings_config_builder.api_base_url(api_base_url.clone());
-    }
-
-    let api_key = config
-        .embeddings
-        .api_key
-        .clone()
-        .or_else(|| std::env::var("VLLM_API_KEY").ok());
-    if let Some(key) = api_key {
-        embeddings_config_builder = embeddings_config_builder.api_key(key);
-    }
-
-    let embeddings_config = embeddings_config_builder.build();
-
-    let embedding_manager = codesearch_embeddings::EmbeddingManager::from_config(embeddings_config)
-        .await
-        .context("Failed to create embedding manager")?;
-
-    Ok(Arc::new(embedding_manager))
-}
-
-/// Ensure storage is initialized, creating config and collection if needed
-async fn ensure_storage_initialized(
-    repo_root: &Path,
-    config_path: Option<&Path>,
-) -> Result<Config> {
-    let current_dir = env::current_dir()?;
-
-    // Create default configuration if it doesn't exist
-    let config_file = if let Some(path) = config_path {
-        path.to_path_buf()
-    } else {
-        current_dir.join("codesearch.toml")
-    };
-
-    if !config_file.exists() {
-        // Generate collection name from repository path
-        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
-        info!("Generated collection name: {}", collection_name);
-
-        let storage_config = create_default_storage_config(collection_name);
-        let config = Config::builder(storage_config).build();
-
-        config
-            .save(&config_file)
-            .with_context(|| format!("Failed to save config to {config_file:?}"))?;
-        info!("Created default configuration at {:?}", config_file);
-    }
-
-    // Load configuration
-    let config = Config::from_file(&config_file)?;
-
-    // Ensure collection name is set
-    let needs_save = config.storage.collection_name.is_empty();
-    let config = ensure_collection_name(config, repo_root)?;
-    if needs_save {
-        config.save(&config_file)?;
-    }
-
-    config.validate()?;
-
-    // Ensure dependencies are running if auto-start is enabled
-    if config.storage.auto_start_deps {
-        // First, ensure shared infrastructure is running (or start it if needed)
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
-
-        // Then ensure all services are healthy
-        let api_base_url = get_api_base_url_if_local_api(&config);
-        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
-    }
-
-    // Create embedding manager to get dimensions
-    let embedding_manager = create_embedding_manager(&config).await?;
-
-    // Get embedding dimensions from the provider
-    let dimensions = embedding_manager.provider().embedding_dimension();
-    info!("Embedding model dimensions: {}", dimensions);
-
-    // Create collection manager with retry logic
-    let collection_manager = storage_init::create_collection_manager_with_retry(&config.storage)
-        .await
-        .context("Failed to create collection manager")?;
-
-    // Initialize collection with proper error handling
-    storage_init::initialize_collection(
-        collection_manager.as_ref(),
-        &config.storage.collection_name,
-        dimensions,
-    )
-    .await
-    .context("Failed to initialize collection")?;
-
-    // Perform health check with diagnostics
-    storage_init::verify_storage_health(collection_manager.as_ref())
-        .await
-        .context("Storage backend verification failed")?;
-
-    // Create PostgresClient and run migrations
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to create PostgreSQL client")?;
-
-    postgres_client
-        .run_migrations()
-        .await
-        .context("Failed to run database migrations")?;
-
-    info!("Database migrations completed");
-
-    // Register repository in Postgres
-    let repository_id = postgres_client
-        .ensure_repository(repo_root, &config.storage.collection_name, None)
-        .await
-        .context("Failed to register repository")?;
-
-    info!("Repository registered with ID: {}", repository_id);
-    info!("Storage initialized successfully");
-    info!("  Collection: {}", config.storage.collection_name);
-    info!("  Dimensions: {}", dimensions);
-
-    Ok(config)
-}
+// Re-use create_embedding_manager from lib
+use codesearch::create_embedding_manager;
 
 #[derive(Parser)]
 #[command(name = "codesearch")]

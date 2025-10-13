@@ -12,6 +12,14 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// Context information for Qdrant write failure handling
+struct FailureContext<'a> {
+    operation_type: &'a str,
+    collection_name: &'a str,
+    entry_count: usize,
+    first_entity_id: Option<&'a str>,
+}
+
 pub struct OutboxProcessor {
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: QdrantConfig,
@@ -73,6 +81,61 @@ impl OutboxProcessor {
         }
     }
 
+    /// Handle Qdrant write failure by rolling back transaction and recording failures
+    ///
+    /// This helper consolidates error handling for both INSERT/UPDATE and DELETE operations.
+    /// It ensures atomic failure handling by:
+    /// 1. Rolling back the main transaction
+    /// 2. Recording failures in a separate transaction
+    async fn handle_qdrant_write_failure(
+        &self,
+        tx: sqlx::Transaction<'_, Postgres>,
+        entry_ids: Vec<Uuid>,
+        error: Error,
+        context: FailureContext<'_>,
+    ) -> Result<()> {
+        error!(
+            operation = context.operation_type,
+            collection = %context.collection_name,
+            entry_count = context.entry_count,
+            first_entity_id = ?context.first_entity_id,
+            error = %error,
+            "Failed to write to Qdrant, rolling back entire batch"
+        );
+
+        tx.rollback()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to rollback transaction: {e}")))?;
+
+        let mut failure_tx = self
+            .postgres_client
+            .get_pool()
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin failure transaction: {e}")))?;
+        self.bulk_record_failures_in_tx(&mut failure_tx, &entry_ids, &error.to_string())
+            .await?;
+        failure_tx
+            .commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit failure transaction: {e}")))?;
+
+        Err(error)
+    }
+
+    /// Process a single batch of outbox entries using a single transaction.
+    ///
+    /// # Guarantees
+    /// 1. All entries processed within a single PostgreSQL transaction
+    /// 2. Qdrant writes occur BEFORE PostgreSQL commits (write-ahead pattern)
+    /// 3. On Qdrant failure, entire batch rolls back
+    /// 4. Entries exceeding retry limits are marked processed
+    /// 5. Global ordering by created_at ensures fairness across collections
+    ///
+    /// # Error Handling
+    /// - Qdrant failures: Rollback transaction, record failures separately
+    /// - Entry preparation failures: Fail entire batch (all-or-nothing)
+    /// - Max retry entries: Mark processed without Qdrant write
     async fn process_batch(&self) -> Result<()> {
         // Step 1: Begin single transaction for entire batch
         let mut tx = self
@@ -177,31 +240,17 @@ impl OutboxProcessor {
                     .write_to_qdrant_insert_update(&storage_client, &insert_update_entries)
                     .await
                 {
-                    error!(
-                        collection = %collection_name,
-                        error = %e,
-                        "Failed to write INSERT/UPDATE to Qdrant, rolling back entire batch"
-                    );
-
-                    // Rollback main transaction
-                    tx.rollback().await.map_err(|e| {
-                        Error::storage(format!("Failed to rollback transaction: {e}"))
-                    })?;
-
-                    // Record failures in separate transaction
                     let ids: Vec<Uuid> =
                         insert_update_entries.iter().map(|e| e.outbox_id).collect();
-                    let mut failure_tx =
-                        self.postgres_client.get_pool().begin().await.map_err(|e| {
-                            Error::storage(format!("Failed to begin failure transaction: {e}"))
-                        })?;
-                    self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
-                        .await?;
-                    failure_tx.commit().await.map_err(|e| {
-                        Error::storage(format!("Failed to commit failure transaction: {e}"))
-                    })?;
-
-                    return Err(e);
+                    let context = FailureContext {
+                        operation_type: "INSERT/UPDATE",
+                        collection_name: &collection_name,
+                        entry_count: insert_update_entries.len(),
+                        first_entity_id: insert_update_entries.first().map(|e| e.entity_id.as_str()),
+                    };
+                    return self
+                        .handle_qdrant_write_failure(tx, ids, e, context)
+                        .await;
                 }
 
                 // Mark as processed
@@ -215,30 +264,16 @@ impl OutboxProcessor {
                     .write_to_qdrant_delete(&storage_client, &delete_entries)
                     .await
                 {
-                    error!(
-                        collection = %collection_name,
-                        error = %e,
-                        "Failed to write DELETE to Qdrant, rolling back entire batch"
-                    );
-
-                    // Rollback main transaction
-                    tx.rollback().await.map_err(|e| {
-                        Error::storage(format!("Failed to rollback transaction: {e}"))
-                    })?;
-
-                    // Record failures in separate transaction
                     let ids: Vec<Uuid> = delete_entries.iter().map(|e| e.outbox_id).collect();
-                    let mut failure_tx =
-                        self.postgres_client.get_pool().begin().await.map_err(|e| {
-                            Error::storage(format!("Failed to begin failure transaction: {e}"))
-                        })?;
-                    self.bulk_record_failures_in_tx(&mut failure_tx, &ids, &e.to_string())
-                        .await?;
-                    failure_tx.commit().await.map_err(|e| {
-                        Error::storage(format!("Failed to commit failure transaction: {e}"))
-                    })?;
-
-                    return Err(e);
+                    let context = FailureContext {
+                        operation_type: "DELETE",
+                        collection_name: &collection_name,
+                        entry_count: delete_entries.len(),
+                        first_entity_id: delete_entries.first().map(|e| e.entity_id.as_str()),
+                    };
+                    return self
+                        .handle_qdrant_write_failure(tx, ids, e, context)
+                        .await;
                 }
 
                 // Mark as processed

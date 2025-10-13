@@ -712,3 +712,339 @@ async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std:
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std::error::Error>> {
+    // Test DELETE operation with entity_ids array in payload
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create multiple entity metadata entries
+    for i in 0..3 {
+        let entity_id = format!("entity-{i}");
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+    }
+
+    // Create DELETE outbox entry with entity_ids array
+    sqlx::query(
+        "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+         payload, collection_name)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(repo_id)
+    .bind("entity-0") // Primary entity_id (not used when entity_ids present)
+    .bind("DELETE")
+    .bind("qdrant")
+    .bind(serde_json::json!({
+        "entity_ids": ["entity-0", "entity-1", "entity-2"]
+    }))
+    .bind("test-collection")
+    .execute(&pool)
+    .await?;
+
+    // Verify entry was created
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM entity_outbox WHERE operation = 'DELETE' AND processed_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(count, 1, "Should have 1 unprocessed DELETE entry");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_delete_operation_with_single_entity_id_fallback(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Test DELETE operation falling back to single entity_id when entity_ids not present
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create entity metadata
+    let entity_id = "single-entity";
+    sqlx::query(
+        "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+    )
+    .bind(repo_id)
+    .bind(entity_id)
+    .bind(format!("qualified::{entity_id}"))
+    .bind(entity_id)
+    .bind("function")
+    .bind("rust")
+    .bind("/test/file.rs")
+    .bind("public")
+    .bind(serde_json::json!({}))
+    .bind("abc123")
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await?;
+
+    // Create DELETE outbox entry WITHOUT entity_ids array (uses entity_id field)
+    sqlx::query(
+        "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+         payload, collection_name)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(repo_id)
+    .bind(entity_id)
+    .bind("DELETE")
+    .bind("qdrant")
+    .bind(serde_json::json!({})) // Empty payload - should fallback to entity_id field
+    .bind("test-collection")
+    .execute(&pool)
+    .await?;
+
+    // Verify entry was created
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM entity_outbox WHERE operation = 'DELETE' AND entity_id = $1 AND processed_at IS NULL"
+    )
+    .bind(entity_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        count, 1,
+        "Should have 1 unprocessed DELETE entry with fallback entity_id"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn std::error::Error>> {
+    // Test that INSERT, UPDATE, and DELETE operations can be processed in the same batch
+    let postgres_node = Postgres::default().start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create entity metadata for multiple entities
+    for i in 0..5 {
+        let entity_id = format!("entity-{i}");
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+    }
+
+    // Create mixed operations in same batch
+    // 2 INSERT operations
+    for i in 0..2 {
+        let entity_id = format!("entity-{i}");
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind("test-collection")
+        .execute(&pool)
+        .await?;
+    }
+
+    // 2 UPDATE operations
+    for i in 2..4 {
+        let entity_id = format!("entity-{i}");
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("UPDATE")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.2; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind("test-collection")
+        .execute(&pool)
+        .await?;
+    }
+
+    // 1 DELETE operation
+    sqlx::query(
+        "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+         payload, collection_name)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(repo_id)
+    .bind("entity-4")
+    .bind("DELETE")
+    .bind("qdrant")
+    .bind(serde_json::json!({
+        "entity_ids": ["entity-4"]
+    }))
+    .bind("test-collection")
+    .execute(&pool)
+    .await?;
+
+    // Verify all entries were created
+    let insert_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM entity_outbox WHERE operation = 'INSERT' AND processed_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(insert_count, 2, "Should have 2 INSERT entries");
+
+    let update_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM entity_outbox WHERE operation = 'UPDATE' AND processed_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(update_count, 2, "Should have 2 UPDATE entries");
+
+    let delete_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM entity_outbox WHERE operation = 'DELETE' AND processed_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(delete_count, 1, "Should have 1 DELETE entry");
+
+    // Verify they would be fetched in same batch (global ordering)
+    let entries: Vec<(String, String)> = sqlx::query_as(
+        "SELECT operation, entity_id FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 10",
+    )
+    .bind("qdrant")
+    .fetch_all(&pool)
+    .await?;
+
+    assert_eq!(entries.len(), 5, "Should fetch all 5 entries in one batch");
+    assert!(
+        entries.iter().any(|(op, _)| op == "INSERT"),
+        "Batch should contain INSERT"
+    );
+    assert!(
+        entries.iter().any(|(op, _)| op == "UPDATE"),
+        "Batch should contain UPDATE"
+    );
+    assert!(
+        entries.iter().any(|(op, _)| op == "DELETE"),
+        "Batch should contain DELETE"
+    );
+
+    Ok(())
+}

@@ -377,6 +377,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         Duration::from_millis(100),
         10,
         3,
+        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
     );
 
     // Run one batch

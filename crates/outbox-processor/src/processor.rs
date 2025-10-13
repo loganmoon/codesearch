@@ -25,16 +25,21 @@ pub struct OutboxProcessor {
     poll_interval: Duration,
     batch_size: i64,
     max_retries: i32,
+    max_embedding_dim: usize,
     client_cache: Arc<DashMap<String, Arc<dyn StorageClient>>>,
 }
 
 impl OutboxProcessor {
+    /// Default maximum embedding dimensions to prevent memory exhaustion attacks
+    pub const DEFAULT_MAX_EMBEDDING_DIM: usize = 100_000;
+
     pub fn new(
         postgres_client: Arc<dyn PostgresClientTrait>,
         qdrant_config: QdrantConfig,
         poll_interval: Duration,
         batch_size: i64,
         max_retries: i32,
+        max_embedding_dim: usize,
     ) -> Self {
         Self {
             postgres_client,
@@ -42,6 +47,7 @@ impl OutboxProcessor {
             poll_interval,
             batch_size,
             max_retries,
+            max_embedding_dim,
             client_cache: Arc::new(DashMap::new()),
         }
     }
@@ -167,11 +173,9 @@ impl OutboxProcessor {
         .await
         .map_err(|e| Error::storage(format!("Failed to fetch outbox entries: {e}")))?;
 
-        // Step 3: Early return if no work
+        // Step 3: Early return if no work (drop transaction without commit to avoid overhead)
         if entries.is_empty() {
-            tx.commit()
-                .await
-                .map_err(|e| Error::storage(format!("Failed to commit empty transaction: {e}")))?;
+            drop(tx);
             return Ok(());
         }
 
@@ -345,12 +349,11 @@ impl OutboxProcessor {
             .map_err(|e| Error::storage(format!("Invalid qdrant_point_id: {e}")))?;
 
         // Validate embedding dimensions (prevent memory exhaustion)
-        const MAX_EMBEDDING_DIM: usize = 100_000;
-        if embedding.len() > MAX_EMBEDDING_DIM {
+        if embedding.len() > self.max_embedding_dim {
             return Err(Error::storage(format!(
                 "Embedding dimensions {} exceeds maximum allowed size of {}",
                 embedding.len(),
-                MAX_EMBEDDING_DIM
+                self.max_embedding_dim
             )));
         }
 
@@ -450,6 +453,9 @@ impl OutboxProcessor {
     ///
     /// CRITICAL: This ONLY writes to Qdrant. The caller is responsible for
     /// marking entries as processed in the transaction AFTER this succeeds.
+    ///
+    /// Note: Qdrant writes are idempotent (same point ID = same data), making
+    /// retries safe if the DB commit fails after a successful Qdrant write.
     async fn write_to_qdrant_insert_update(
         &self,
         storage_client: &Arc<dyn StorageClient>,

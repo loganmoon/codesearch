@@ -76,6 +76,7 @@ async fn test_outbox_processor_basic_initialization() {
         Duration::from_secs(1),
         10,
         3,
+        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
     );
 
     // If we get here, initialization succeeded
@@ -179,6 +180,7 @@ async fn test_client_cache_reuses_clients() {
         Duration::from_secs(1),
         10,
         3,
+        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
     );
 
     // Access the cache through a method call
@@ -1046,6 +1048,142 @@ async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn s
         entries.iter().any(|(op, _)| op == "DELETE"),
         "Batch should contain DELETE"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_concurrent_processor_isolation_with_skip_locked(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Verify that SELECT FOR UPDATE SKIP LOCKED prevents concurrent processors
+    // from processing the same entries
+
+    let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+        postgres_node.get_host_port_ipv4(5432).await.unwrap()
+    );
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10) // Need more connections for concurrent test
+        .connect(&connection_string)
+        .await
+        .expect("Failed to connect to Postgres");
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, last_indexed_commit)
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(repo_id)
+    .bind("/test/repo")
+    .bind("test-repo")
+    .bind("test-collection")
+    .bind("abc123")
+    .execute(&pool)
+    .await?;
+
+    // Create 10 test entries
+    for i in 0..10 {
+        let entity_id = format!("entity-{i}");
+        sqlx::query(
+            "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind(format!("qualified::{entity_id}"))
+        .bind(&entity_id)
+        .bind("function")
+        .bind("rust")
+        .bind("/test/file.rs")
+        .bind("public")
+        .bind(serde_json::json!({}))
+        .bind("abc123")
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store,
+             payload, collection_name)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(repo_id)
+        .bind(&entity_id)
+        .bind("INSERT")
+        .bind("qdrant")
+        .bind(serde_json::json!({
+            "entity_id": entity_id,
+            "embedding": vec![0.1; 384],
+            "qdrant_point_id": Uuid::new_v4().to_string()
+        }))
+        .bind("test-collection")
+        .execute(&pool)
+        .await?;
+    }
+
+    // Start transaction 1 and lock first 5 entries
+    let mut tx1 = pool.begin().await?;
+    let locked_by_tx1: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT outbox_id FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 5
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind("qdrant")
+    .fetch_all(&mut *tx1)
+    .await?;
+
+    assert_eq!(
+        locked_by_tx1.len(),
+        5,
+        "Transaction 1 should lock 5 entries"
+    );
+
+    // Try to acquire locks with transaction 2 (should skip locked entries)
+    let mut tx2 = pool.begin().await?;
+    let locked_by_tx2: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT outbox_id FROM entity_outbox
+         WHERE target_store = $1 AND processed_at IS NULL
+         ORDER BY created_at ASC LIMIT 10
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind("qdrant")
+    .fetch_all(&mut *tx2)
+    .await?;
+
+    // Transaction 2 should only get the remaining 5 entries (skipping the locked ones)
+    assert_eq!(
+        locked_by_tx2.len(),
+        5,
+        "Transaction 2 should lock 5 different entries (skipping locked ones)"
+    );
+
+    // Verify no overlap between locked entries
+    for id in &locked_by_tx2 {
+        assert!(
+            !locked_by_tx1.contains(id),
+            "Transaction 2 should not lock any entries locked by Transaction 1"
+        );
+    }
+
+    // Both transactions together should cover all 10 entries
+    let total_locked = locked_by_tx1.len() + locked_by_tx2.len();
+    assert_eq!(
+        total_locked, 10,
+        "Both transactions should cover all 10 entries"
+    );
+
+    // Cleanup
+    tx1.rollback().await?;
+    tx2.rollback().await?;
 
     Ok(())
 }

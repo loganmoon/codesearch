@@ -64,9 +64,8 @@ async fn main() -> Result<()> {
     // Execute commands
     match cli.command {
         Some(Commands::Serve) => {
-            // Find repository root
-            let repo_root = find_repository_root()?;
-            serve(&repo_root, cli.config.as_deref()).await
+            // Serve doesn't need to be run from a repository
+            serve(cli.config.as_deref()).await
         }
         Some(Commands::Index { force }) => {
             // Find repository root
@@ -132,81 +131,89 @@ fn find_repository_root() -> Result<PathBuf> {
 }
 
 /// Start the MCP server
-async fn serve(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
+async fn serve(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to start MCP server...");
 
-    // Ensure storage is initialized
-    let config = ensure_storage_initialized(repo_root, config_path).await?;
+    // Load configuration (from global config by default)
+    let config = codesearch::init::load_config_for_serve(config_path).await?;
 
-    // Check if repository has been indexed
+    // Connect to Postgres to look up repository info
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
         .await
         .context("Failed to connect to Postgres")?;
 
-    let repository_id = postgres_client
-        .get_repository_id(&config.storage.collection_name)
+    // Get repository information by collection name
+    let repo_info = postgres_client
+        .get_repository_by_collection(&config.storage.collection_name)
         .await
-        .context("Failed to query repository")?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Repository not found for collection '{}'. This is unexpected after initialization.",
-                config.storage.collection_name
-            )
-        })?;
+        .context("Failed to query repository")?;
 
-    // Check if repository has been indexed by checking for last indexed commit
+    let (repository_id, repo_path, repo_name) = match repo_info {
+        Some(info) => info,
+        None => {
+            // List available repositories to help the user
+            let all_repos = postgres_client
+                .list_all_repositories()
+                .await
+                .context("Failed to list repositories")?;
+
+            if all_repos.is_empty() {
+                anyhow::bail!(
+                    "No indexed repositories found.\n\
+                    Run 'codesearch index' from a git repository to create an index."
+                );
+            } else {
+                let available: Vec<String> = all_repos
+                    .iter()
+                    .map(|(_, collection, path)| format!("  - {} ({})", collection, path.display()))
+                    .collect();
+
+                anyhow::bail!(
+                    "Repository with collection '{}' not found.\n\
+                    Available repositories:\n{}\n\n\
+                    Update your configuration or run 'codesearch index' to index a new repository.",
+                    config.storage.collection_name,
+                    available.join("\n")
+                );
+            }
+        }
+    };
+
+    // Verify the repository path still exists
+    if !repo_path.exists() {
+        anyhow::bail!(
+            "Repository path {} no longer exists.\n\
+            The repository may have been moved or deleted.\n\
+            Run 'codesearch index' from the new location to re-index.",
+            repo_path.display()
+        );
+    }
+
+    info!("Found repository: {} at {}", repo_name, repo_path.display());
+
+    // Check if repository has been indexed
     let last_indexed_commit = postgres_client
         .get_last_indexed_commit(repository_id)
         .await
         .context("Failed to check indexing status")?;
 
     if last_indexed_commit.is_none() {
-        info!("Repository not yet indexed. Running initial indexing...");
-
-        // Run indexing inline (we already have repo_root and config)
-        let embedding_manager = create_embedding_manager(&config).await?;
-
-        let git_repo = match codesearch_watcher::GitRepository::open(repo_root) {
-            Ok(repo) => {
-                info!("Git repository detected");
-                Some(repo)
-            }
-            Err(e) => {
-                warn!("Not a Git repository or failed to open: {e}");
-                None
-            }
-        };
-
-        let mut indexer = RepositoryIndexer::new(
-            repo_root.to_path_buf(),
-            repository_id.to_string(),
-            embedding_manager,
-            postgres_client.clone(),
-            git_repo,
-        )?;
-
-        let result = indexer
-            .index_repository()
-            .await
-            .context("Failed to index repository")?;
-
-        info!("Initial indexing completed successfully");
-        info!("  Files processed: {}", result.stats().total_files());
-        info!(
-            "  Entities extracted: {}",
-            result.stats().entities_extracted()
-        );
-    } else {
-        info!(
-            "Repository already indexed (last commit: {})",
-            last_indexed_commit.as_deref().unwrap_or("unknown")
+        anyhow::bail!(
+            "Repository at {} has not been indexed yet.\n\
+            Run 'codesearch index' from that directory to index it.",
+            repo_path.display()
         );
     }
 
+    info!(
+        "Repository indexed (last commit: {})",
+        last_indexed_commit.as_deref().unwrap_or("unknown")
+    );
+
     info!("Starting MCP server...");
 
-    // Delegate to server crate
-    codesearch_server::run_server(config)
+    // Delegate to server crate with repository path and ID
+    codesearch_server::run_server(config, repo_path, repository_id)
         .await
         .map_err(|e| anyhow!("MCP server error: {e}"))
 }

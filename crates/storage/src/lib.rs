@@ -12,7 +12,12 @@ mod postgres;
 mod qdrant;
 
 use async_trait::async_trait;
-use codesearch_core::{config::StorageConfig, entities::EntityType, error::Result, CodeEntity};
+use codesearch_core::{
+    config::StorageConfig,
+    entities::EntityType,
+    error::{Error, Result},
+    CodeEntity,
+};
 use sqlx::postgres::PgConnectOptions;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +36,33 @@ pub use postgres::PostgresClient;
 pub use postgres::mock::MockPostgresClient;
 
 pub use uuid::Uuid;
+
+/// Validate a database name for PostgreSQL
+///
+/// Ensures the database name:
+/// - Contains only alphanumeric characters, underscores, and hyphens
+/// - Does not exceed PostgreSQL's 63-character limit
+///
+/// This prevents SQL injection in CREATE DATABASE statements.
+fn validate_database_name(name: &str) -> Result<()> {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(Error::storage(format!(
+            "Invalid database name '{name}': only alphanumeric, underscore, and hyphen allowed"
+        )));
+    }
+    if name.len() > 63 {
+        return Err(Error::storage(
+            "Database name exceeds PostgreSQL's 63-character limit".to_string(),
+        ));
+    }
+    if name.is_empty() {
+        return Err(Error::storage("Database name cannot be empty".to_string()));
+    }
+    Ok(())
+}
 
 /// Search filters for querying entities
 #[derive(Debug, Default, Clone)]
@@ -148,6 +180,17 @@ pub struct QdrantConfig {
     pub rest_port: u16,
 }
 
+/// Configuration for creating Postgres clients
+#[derive(Debug, Clone)]
+pub struct PostgresConfig {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    pub max_entity_batch_size: usize,
+}
+
 /// Create a StorageClient for a specific collection using provided config
 pub async fn create_storage_client_from_config(
     config: &QdrantConfig,
@@ -216,6 +259,9 @@ pub async fn create_postgres_client(
 
     // Create database if it doesn't exist
     if !db_exists {
+        // Validate database name before using it in CREATE DATABASE
+        validate_database_name(&config.postgres_database)?;
+
         let create_db_query = format!("CREATE DATABASE \"{}\"", &config.postgres_database);
         sqlx::query(&create_db_query)
             .execute(&default_pool)
@@ -238,6 +284,78 @@ pub async fn create_postgres_client(
         .username(&config.postgres_user)
         .password(&config.postgres_password)
         .database(&config.postgres_database);
+
+    let pool = sqlx::PgPool::connect_with(connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
+        })?;
+
+    Ok(Arc::new(postgres::PostgresClient::new(
+        pool,
+        config.max_entity_batch_size,
+    )) as Arc<dyn postgres::PostgresClientTrait>)
+}
+
+/// Create a Postgres client using provided config
+pub async fn create_postgres_client_from_config(
+    config: &PostgresConfig,
+) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
+    // First, connect to the default 'postgres' database to check if target database exists
+    let default_connect_options = PgConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.user)
+        .password(&config.password)
+        .database("postgres");
+
+    let default_pool = sqlx::PgPool::connect_with(default_connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!(
+                "Failed to connect to default Postgres database: {e}"
+            ))
+        })?;
+
+    // Check if target database exists
+    let db_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(&config.database)
+            .fetch_one(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to check database existence: {e}"
+                ))
+            })?;
+
+    // Create database if it doesn't exist
+    if !db_exists {
+        // Validate database name before using it in CREATE DATABASE
+        validate_database_name(&config.database)?;
+
+        let create_db_query = format!("CREATE DATABASE \"{}\"", &config.database);
+        sqlx::query(&create_db_query)
+            .execute(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to create database '{}': {e}",
+                    config.database
+                ))
+            })?;
+    }
+
+    // Close connection to default database
+    default_pool.close().await;
+
+    // Now connect to the target database
+    let connect_options = PgConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.user)
+        .password(&config.password)
+        .database(&config.database);
 
     let pool = sqlx::PgPool::connect_with(connect_options)
         .await

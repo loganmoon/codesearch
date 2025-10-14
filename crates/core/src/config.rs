@@ -1,7 +1,17 @@
 use crate::error::{Error, Result};
 use config::{Config as ConfigLib, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Returns the path to the global configuration file
+///
+/// The global config is stored at `~/.codesearch/config.toml` and contains
+/// the default collection name and settings for the codesearch server.
+pub fn global_config_path() -> Result<PathBuf> {
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| Error::config("Unable to determine home directory".to_string()))?;
+    Ok(home_dir.join(".codesearch").join("config.toml"))
+}
 
 /// Indexer configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21,6 +31,10 @@ pub struct Config {
 
     /// Storage configuration
     pub storage: StorageConfig,
+
+    /// Server configuration
+    #[serde(default)]
+    pub server: ServerConfig,
 
     /// Language configuration
     #[serde(default)]
@@ -153,6 +167,14 @@ impl std::fmt::Debug for StorageConfig {
             .field("max_entity_batch_size", &self.max_entity_batch_size)
             .finish()
     }
+}
+
+/// Configuration for MCP server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// Port to listen on (host is always 127.0.0.1 for localhost-only access)
+    #[serde(default = "default_server_port")]
+    pub port: u16,
 }
 
 /// Configuration for language support
@@ -299,6 +321,10 @@ fn default_max_entity_batch_size() -> usize {
     1000
 }
 
+fn default_server_port() -> u16 {
+    3000
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -318,6 +344,14 @@ impl Default for WatcherConfig {
         Self {
             debounce_ms: default_debounce_ms(),
             ignore_patterns: default_ignore_patterns(),
+        }
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            port: default_server_port(),
         }
     }
 }
@@ -953,6 +987,7 @@ pub struct ConfigBuilder {
     embeddings: EmbeddingsConfig,
     watcher: WatcherConfig,
     storage: StorageConfig,
+    server: ServerConfig,
     languages: LanguagesConfig,
 }
 
@@ -964,6 +999,7 @@ impl ConfigBuilder {
             embeddings: EmbeddingsConfig::default(),
             watcher: WatcherConfig::default(),
             storage,
+            server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
         }
     }
@@ -993,6 +1029,7 @@ impl ConfigBuilder {
             embeddings: self.embeddings,
             watcher: self.watcher,
             storage: self.storage,
+            server: self.server,
             languages: self.languages,
         }
     }

@@ -226,6 +226,41 @@ impl PostgresClientTrait for MockPostgresClient {
             .map(|(_, _, collection_name)| collection_name.clone()))
     }
 
+    async fn get_repository_by_collection(
+        &self,
+        collection_name: &str,
+    ) -> Result<Option<(Uuid, std::path::PathBuf, String)>> {
+        let data = self.data.lock().unwrap();
+
+        if let Some(repo_id) = data.collection_to_repo.get(collection_name) {
+            if let Some((path, name, _)) = data.repositories.get(repo_id) {
+                return Ok(Some((
+                    *repo_id,
+                    std::path::PathBuf::from(path),
+                    name.clone(),
+                )));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
+        let data = self.data.lock().unwrap();
+
+        Ok(data
+            .repositories
+            .iter()
+            .map(|(repo_id, (path, _, collection_name))| {
+                (
+                    *repo_id,
+                    collection_name.clone(),
+                    std::path::PathBuf::from(path),
+                )
+            })
+            .collect())
+    }
+
     async fn get_entity_metadata(
         &self,
         repository_id: Uuid,

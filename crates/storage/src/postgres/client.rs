@@ -219,6 +219,37 @@ impl PostgresClient {
         Ok(record.map(|(name,)| name))
     }
 
+    /// Get repository information by collection name
+    pub async fn get_repository_by_collection(
+        &self,
+        collection_name: &str,
+    ) -> Result<Option<(Uuid, std::path::PathBuf, String)>> {
+        let record: Option<(Uuid, String, String)> = sqlx::query_as(
+            "SELECT repository_id, repository_path, repository_name FROM repositories WHERE collection_name = $1"
+        )
+        .bind(collection_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to query repository by collection: {e}")))?;
+
+        Ok(record.map(|(id, path, name)| (id, std::path::PathBuf::from(path), name)))
+    }
+
+    /// List all repositories in the database
+    pub async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
+        let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT repository_id, collection_name, repository_path FROM repositories ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to list repositories: {e}")))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, name, path)| (id, name, std::path::PathBuf::from(path)))
+            .collect())
+    }
+
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     pub async fn get_entity_metadata(
         &self,
@@ -936,6 +967,17 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
         self.get_collection_name(repository_id).await
+    }
+
+    async fn get_repository_by_collection(
+        &self,
+        collection_name: &str,
+    ) -> Result<Option<(Uuid, std::path::PathBuf, String)>> {
+        self.get_repository_by_collection(collection_name).await
+    }
+
+    async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
+        self.list_all_repositories().await
     }
 
     async fn get_entity_metadata(

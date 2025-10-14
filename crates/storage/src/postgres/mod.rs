@@ -40,6 +40,19 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Get collection name by repository ID
     async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>>;
 
+    /// Get repository information by collection name
+    ///
+    /// Returns (repository_id, repository_path, repository_name) if found
+    async fn get_repository_by_collection(
+        &self,
+        collection_name: &str,
+    ) -> Result<Option<(Uuid, std::path::PathBuf, String)>>;
+
+    /// List all repositories in the database
+    ///
+    /// Returns a vector of (repository_id, collection_name, repository_path) tuples
+    async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>>;
+
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
     async fn get_entity_metadata(
         &self,

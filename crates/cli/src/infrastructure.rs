@@ -107,11 +107,12 @@ fn calculate_outbox_source_hash() -> Result<Option<String>> {
         }
     }
 
-    // Hash all Rust source files in the relevant crates
+    // Hash all Rust source files in the relevant crates and SQL migration files
     let source_dirs = [
         "crates/outbox-processor/src",
         "crates/core/src",
         "crates/storage/src",
+        "migrations",
     ];
 
     for dir in &source_dirs {
@@ -120,7 +121,11 @@ fn calculate_outbox_source_hash() -> Result<Option<String>> {
             for entry in walkdir::WalkDir::new(&dir_path)
                 .into_iter()
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "rs" || ext == "sql")
+                })
             {
                 let path = entry.path();
                 let relative = path

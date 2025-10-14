@@ -7,7 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-use codesearch_core::error::Result;
+use codesearch_core::error::{Result, ResultExt};
 use std::sync::Arc;
 
 mod api_provider;
@@ -21,6 +21,52 @@ pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType}
 pub use error::EmbeddingError;
 pub use mock_provider::MockEmbeddingProvider;
 pub use provider::EmbeddingProvider;
+
+/// Helper function to parse provider type from string
+fn parse_provider_type(provider: &str) -> EmbeddingProviderType {
+    match provider.to_lowercase().as_str() {
+        "localapi" | "api" => EmbeddingProviderType::LocalApi,
+        "mock" => EmbeddingProviderType::Mock,
+        _ => EmbeddingProviderType::LocalApi,
+    }
+}
+
+/// Create an embedding manager from codesearch Config
+///
+/// This is a convenience function that converts from the main Config's EmbeddingsConfig
+/// to the embeddings crate's EmbeddingConfig and creates an EmbeddingManager.
+///
+/// It also handles reading the API key from the VLLM_API_KEY environment variable
+/// if not specified in the config.
+pub async fn create_embedding_manager_from_app_config(
+    embeddings_config: &codesearch_core::config::EmbeddingsConfig,
+) -> Result<Arc<EmbeddingManager>> {
+    let mut config_builder = EmbeddingConfigBuilder::default()
+        .provider(parse_provider_type(&embeddings_config.provider))
+        .model(embeddings_config.model.clone())
+        .batch_size(embeddings_config.batch_size)
+        .embedding_dimension(embeddings_config.embedding_dimension);
+
+    if let Some(ref api_base_url) = embeddings_config.api_base_url {
+        config_builder = config_builder.api_base_url(api_base_url.clone());
+    }
+
+    let api_key = embeddings_config
+        .api_key
+        .clone()
+        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+    if let Some(key) = api_key {
+        config_builder = config_builder.api_key(key);
+    }
+
+    let embedding_config = config_builder.build();
+
+    let embedding_manager = EmbeddingManager::from_config(embedding_config)
+        .await
+        .context("Failed to create embedding manager")?;
+
+    Ok(Arc::new(embedding_manager))
+}
 
 /// Manager for handling embedding generation with immutable configuration
 pub struct EmbeddingManager {

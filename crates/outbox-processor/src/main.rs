@@ -2,10 +2,10 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-use codesearch_core::config::{Config, StorageConfig};
 use codesearch_core::error::Result;
+use codesearch_outbox_processor::config::OutboxProcessorConfig;
 use codesearch_outbox_processor::processor::OutboxProcessor;
-use codesearch_storage::{create_postgres_client, create_storage_client};
+use codesearch_storage::{create_postgres_client_from_config, create_storage_client_from_config};
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -20,13 +20,13 @@ async fn main() -> Result<()> {
 
     info!("Starting outbox processor");
 
-    let config = load_config_from_env()?;
+    let config = OutboxProcessorConfig::load_from_env()?;
 
     info!(
         "Connecting to Postgres at {}:{}",
-        config.storage.postgres_host, config.storage.postgres_port
+        config.postgres.host, config.postgres.port
     );
-    let postgres_client = match create_postgres_client(&config.storage).await {
+    let postgres_client = match create_postgres_client_from_config(&config.postgres).await {
         Ok(client) => client,
         Err(e) => {
             error!("Failed to connect to Postgres: {e}");
@@ -43,10 +43,10 @@ async fn main() -> Result<()> {
 
     info!(
         "Connecting to Qdrant at {}:{}",
-        config.storage.qdrant_host, config.storage.qdrant_port
+        config.qdrant.host, config.qdrant.port
     );
     // Verify Qdrant is reachable by creating a test client
-    match create_storage_client(&config.storage, "test_connection").await {
+    match create_storage_client_from_config(&config.qdrant, "test_connection").await {
         Ok(_) => info!("Qdrant connection verified"),
         Err(e) => {
             error!("Failed to connect to Qdrant: {e}");
@@ -54,19 +54,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    let qdrant_config = codesearch_storage::QdrantConfig {
-        host: config.storage.qdrant_host.clone(),
-        port: config.storage.qdrant_port,
-        rest_port: config.storage.qdrant_rest_port,
-    };
-
     let processor = OutboxProcessor::new(
         postgres_client,
-        qdrant_config,
-        Duration::from_millis(1000), // Poll every 1s
-        100,                         // Batch size
-        3,                           // Max retries
-        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
+        config.qdrant.clone(),
+        Duration::from_millis(config.poll_interval_ms),
+        config.batch_size,
+        config.max_retries,
+        config.max_embedding_dim,
     );
 
     info!("Outbox processor configuration loaded successfully");
@@ -74,38 +68,4 @@ async fn main() -> Result<()> {
     processor.start().await?;
 
     Ok(())
-}
-
-fn load_config_from_env() -> Result<Config> {
-    let storage_config = StorageConfig {
-        postgres_host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
-        postgres_port: std::env::var("POSTGRES_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(5432),
-        postgres_database: std::env::var("POSTGRES_DATABASE")
-            .unwrap_or_else(|_| "codesearch".to_string()),
-        postgres_user: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "codesearch".to_string()),
-        postgres_password: std::env::var("POSTGRES_PASSWORD")
-            .unwrap_or_else(|_| "codesearch".to_string()),
-        qdrant_host: std::env::var("QDRANT_HOST").unwrap_or_else(|_| "localhost".to_string()),
-        qdrant_port: std::env::var("QDRANT_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(6334),
-        qdrant_rest_port: std::env::var("QDRANT_REST_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(6333),
-        collection_name: std::env::var("QDRANT_COLLECTION")
-            .unwrap_or_else(|_| "codesearch".to_string()),
-        auto_start_deps: false,
-        docker_compose_file: None,
-        max_entity_batch_size: std::env::var("MAX_ENTITY_BATCH_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1000),
-    };
-
-    Ok(Config::builder(storage_config).build())
 }

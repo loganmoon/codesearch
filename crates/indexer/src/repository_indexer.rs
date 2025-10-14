@@ -187,6 +187,14 @@ impl crate::Indexer for RepositoryIndexer {
         stats.set_total_files(files.len());
         stats.set_processing_time_ms(start_time.elapsed().as_millis() as u64);
 
+        // Set last indexed commit to track that indexing has completed
+        let commit_hash = get_current_commit(self.git_repo.as_ref(), &self.repository_path)
+            .unwrap_or_else(|| "indexed".to_string());
+        self.postgres_client
+            .set_last_indexed_commit(self.repository_id, &commit_hash)
+            .await?;
+        info!(commit = %commit_hash, "Updated last indexed commit");
+
         info!(
             total_files = stats.total_files(),
             entities_extracted = stats.entities_extracted(),

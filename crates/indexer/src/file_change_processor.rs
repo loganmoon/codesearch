@@ -169,7 +169,8 @@ pub async fn process_file_changes(
     info!(
         files_processed = stats.files_processed,
         files_failed = stats.files_failed,
-        entities_modified = stats.entities_added + stats.entities_updated,
+        entities_added = stats.entities_added,
+        entities_updated = stats.entities_updated,
         entities_deleted = stats.entities_deleted,
         "Batch complete"
     );

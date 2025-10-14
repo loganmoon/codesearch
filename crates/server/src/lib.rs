@@ -28,6 +28,7 @@ pub use codesearch_core::error::{Error, Result};
 ///
 /// * `config` - Application configuration with storage, embeddings, and repository settings
 /// * `repo_root` - Path to the repository root directory
+/// * `repository_id` - UUID of the repository in the database
 ///
 /// # Returns
 ///
@@ -35,6 +36,7 @@ pub use codesearch_core::error::{Error, Result};
 pub async fn run_server(
     config: codesearch_core::config::Config,
     repo_root: std::path::PathBuf,
+    repository_id: uuid::Uuid,
 ) -> Result<()> {
-    mcp_server::run_server_impl(config, repo_root).await
+    mcp_server::run_server_impl(config, repo_root, repository_id).await
 }

@@ -212,8 +212,8 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     info!("Starting MCP server...");
 
-    // Delegate to server crate with repository path
-    codesearch_server::run_server(config, repo_path)
+    // Delegate to server crate with repository path and ID
+    codesearch_server::run_server(config, repo_path, repository_id)
         .await
         .map_err(|e| anyhow!("MCP server error: {e}"))
 }

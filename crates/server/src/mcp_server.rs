@@ -160,10 +160,11 @@ impl CodeSearchMcpServer {
             })?;
 
         // Convert to HashMap for efficient lookup
-        let entities_map: std::collections::HashMap<String, _> = entities_vec
-            .into_iter()
-            .map(|e| (e.entity_id.clone(), e))
-            .collect();
+        let mut entities_map: std::collections::HashMap<String, _> =
+            std::collections::HashMap::with_capacity(entities_vec.len());
+        for entity in entities_vec {
+            entities_map.insert(entity.entity_id.clone(), entity);
+        }
 
         // Format results with full entity details
         let formatted_results: Vec<_> = results
@@ -353,7 +354,8 @@ struct ServerClients {
 /// Initialize all server clients
 async fn initialize_server_clients(
     config: &Config,
-) -> std::result::Result<(ServerClients, uuid::Uuid), codesearch_core::Error> {
+    repository_id: uuid::Uuid,
+) -> std::result::Result<ServerClients, codesearch_core::Error> {
     let storage = create_storage_client(&config.storage, &config.storage.collection_name)
         .await
         .context("Failed to create storage client")?;
@@ -364,27 +366,13 @@ async fn initialize_server_clients(
         .await
         .context("Failed to connect to Postgres")?;
 
-    let repository_id = postgres
-        .get_repository_id(&config.storage.collection_name)
-        .await
-        .context("Failed to query repository")?
-        .ok_or_else(|| {
-            Error::config(format!(
-                "Repository not found for collection '{}'. Run 'codesearch serve' or 'codesearch index' to initialize.",
-                config.storage.collection_name
-            ))
-        })?;
+    info!("Using repository ID: {repository_id}");
 
-    info!("Repository ID: {repository_id}");
-
-    Ok((
-        ServerClients {
-            storage,
-            postgres,
-            embedding_manager,
-        },
-        repository_id,
-    ))
+    Ok(ServerClients {
+        storage,
+        postgres,
+        embedding_manager,
+    })
 }
 
 /// Run catch-up indexing for offline changes
@@ -518,10 +506,11 @@ async fn run_mcp_server_with_shutdown(
 pub(crate) async fn run_server_impl(
     config: Config,
     repo_root: PathBuf,
+    repository_id: uuid::Uuid,
 ) -> std::result::Result<(), codesearch_core::Error> {
     verify_collection_exists(&config.storage.collection_name, &config.storage).await?;
 
-    let (clients, repository_id) = initialize_server_clients(&config).await?;
+    let clients = initialize_server_clients(&config, repository_id).await?;
 
     run_catchup_indexing(&repo_root, repository_id, &clients).await?;
 

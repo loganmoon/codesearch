@@ -43,11 +43,9 @@ pub fn ensure_collection_name(mut config: Config, repo_root: &Path) -> Result<Co
 
 /// Get API base URL if provider is LocalApi, None otherwise
 pub fn get_api_base_url_if_local_api(config: &Config) -> Option<&str> {
-    let provider_type = crate::parse_provider_type(&config.embeddings.provider);
-    if matches!(
-        provider_type,
-        codesearch_embeddings::EmbeddingProviderType::LocalApi
-    ) {
+    // Check if provider is LocalApi (matches "localapi" or "api")
+    let provider_lower = config.embeddings.provider.to_lowercase();
+    if provider_lower == "localapi" || provider_lower == "api" {
         config.embeddings.api_base_url.as_deref()
     } else {
         None
@@ -191,8 +189,13 @@ async fn update_global_config(config: &Config) -> Result<()> {
 
 /// Load configuration for the serve command
 ///
-/// This function loads the configuration file (from the global location if no path is provided),
-/// starts infrastructure if needed, but does NOT create or modify any files or databases.
+/// This function loads the configuration file (from the global location if no path is provided)
+/// and ensures infrastructure dependencies are running if auto-start is enabled.
+///
+/// **Note:** If `auto_start_deps` is enabled in the config, this function will start Docker
+/// containers (Postgres, Qdrant, vLLM, outbox-processor) via `docker compose`. It does not
+/// create or modify configuration files or databases, but it can create/start Docker containers.
+///
 /// It expects that `codesearch index` has already been run to set up the initial configuration.
 pub async fn load_config_for_serve(config_path: Option<&Path>) -> Result<Config> {
     use codesearch_core::config::global_config_path;

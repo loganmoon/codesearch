@@ -12,7 +12,12 @@ mod postgres;
 mod qdrant;
 
 use async_trait::async_trait;
-use codesearch_core::{config::StorageConfig, entities::EntityType, error::Result, CodeEntity};
+use codesearch_core::{
+    config::StorageConfig,
+    entities::EntityType,
+    error::{Error, Result},
+    CodeEntity,
+};
 use sqlx::postgres::PgConnectOptions;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +36,33 @@ pub use postgres::PostgresClient;
 pub use postgres::mock::MockPostgresClient;
 
 pub use uuid::Uuid;
+
+/// Validate a database name for PostgreSQL
+///
+/// Ensures the database name:
+/// - Contains only alphanumeric characters, underscores, and hyphens
+/// - Does not exceed PostgreSQL's 63-character limit
+///
+/// This prevents SQL injection in CREATE DATABASE statements.
+fn validate_database_name(name: &str) -> Result<()> {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(Error::storage(format!(
+            "Invalid database name '{name}': only alphanumeric, underscore, and hyphen allowed"
+        )));
+    }
+    if name.len() > 63 {
+        return Err(Error::storage(
+            "Database name exceeds PostgreSQL's 63-character limit".to_string(),
+        ));
+    }
+    if name.is_empty() {
+        return Err(Error::storage("Database name cannot be empty".to_string()));
+    }
+    Ok(())
+}
 
 /// Search filters for querying entities
 #[derive(Debug, Default, Clone)]
@@ -227,6 +259,9 @@ pub async fn create_postgres_client(
 
     // Create database if it doesn't exist
     if !db_exists {
+        // Validate database name before using it in CREATE DATABASE
+        validate_database_name(&config.postgres_database)?;
+
         let create_db_query = format!("CREATE DATABASE \"{}\"", &config.postgres_database);
         sqlx::query(&create_db_query)
             .execute(&default_pool)
@@ -296,6 +331,9 @@ pub async fn create_postgres_client_from_config(
 
     // Create database if it doesn't exist
     if !db_exists {
+        // Validate database name before using it in CREATE DATABASE
+        validate_database_name(&config.database)?;
+
         let create_db_query = format!("CREATE DATABASE \"{}\"", &config.database);
         sqlx::query(&create_db_query)
             .execute(&default_pool)

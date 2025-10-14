@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
 
     info!("Starting outbox processor");
 
-    let config = OutboxProcessorConfig::load_from_env();
+    let config = OutboxProcessorConfig::load_from_env()?;
 
     info!(
         "Connecting to Postgres at {}:{}",

@@ -27,11 +27,14 @@ pub use codesearch_core::error::{Error, Result};
 /// # Arguments
 ///
 /// * `config` - Application configuration with storage, embeddings, and repository settings
+/// * `repo_root` - Path to the repository root directory
 ///
 /// # Returns
 ///
 /// Returns `Ok(())` on clean shutdown, or an error if startup fails.
-pub async fn run_server(config: codesearch_core::config::Config) -> Result<()> {
-    // Stub implementation - will be filled in Phase 2
-    mcp_server::run_server_impl(config).await
+pub async fn run_server(
+    config: codesearch_core::config::Config,
+    repo_root: std::path::PathBuf,
+) -> Result<()> {
+    mcp_server::run_server_impl(config, repo_root).await
 }

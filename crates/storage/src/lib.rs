@@ -148,6 +148,17 @@ pub struct QdrantConfig {
     pub rest_port: u16,
 }
 
+/// Configuration for creating Postgres clients
+#[derive(Debug, Clone)]
+pub struct PostgresConfig {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: String,
+    pub max_entity_batch_size: usize,
+}
+
 /// Create a StorageClient for a specific collection using provided config
 pub async fn create_storage_client_from_config(
     config: &QdrantConfig,
@@ -238,6 +249,75 @@ pub async fn create_postgres_client(
         .username(&config.postgres_user)
         .password(&config.postgres_password)
         .database(&config.postgres_database);
+
+    let pool = sqlx::PgPool::connect_with(connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
+        })?;
+
+    Ok(Arc::new(postgres::PostgresClient::new(
+        pool,
+        config.max_entity_batch_size,
+    )) as Arc<dyn postgres::PostgresClientTrait>)
+}
+
+/// Create a Postgres client using provided config
+pub async fn create_postgres_client_from_config(
+    config: &PostgresConfig,
+) -> Result<Arc<dyn postgres::PostgresClientTrait>> {
+    // First, connect to the default 'postgres' database to check if target database exists
+    let default_connect_options = PgConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.user)
+        .password(&config.password)
+        .database("postgres");
+
+    let default_pool = sqlx::PgPool::connect_with(default_connect_options)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::storage(format!(
+                "Failed to connect to default Postgres database: {e}"
+            ))
+        })?;
+
+    // Check if target database exists
+    let db_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(&config.database)
+            .fetch_one(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to check database existence: {e}"
+                ))
+            })?;
+
+    // Create database if it doesn't exist
+    if !db_exists {
+        let create_db_query = format!("CREATE DATABASE \"{}\"", &config.database);
+        sqlx::query(&create_db_query)
+            .execute(&default_pool)
+            .await
+            .map_err(|e| {
+                codesearch_core::error::Error::storage(format!(
+                    "Failed to create database '{}': {e}",
+                    config.database
+                ))
+            })?;
+    }
+
+    // Close connection to default database
+    default_pool.close().await;
+
+    // Now connect to the target database
+    let connect_options = PgConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.user)
+        .password(&config.password)
+        .database(&config.database);
 
     let pool = sqlx::PgPool::connect_with(connect_options)
         .await

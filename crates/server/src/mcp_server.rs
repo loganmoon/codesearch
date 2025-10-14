@@ -1,3 +1,4 @@
+use axum::Router;
 use codesearch_core::error::{Error, ResultExt};
 use codesearch_core::{config::Config, entities::EntityType};
 use codesearch_embeddings::EmbeddingManager;
@@ -16,10 +17,15 @@ use rmcp::{
     },
     schemars::JsonSchema,
     service::RequestContext,
-    tool, tool_handler, tool_router, RoleServer, ServerHandler, ServiceExt,
+    tool, tool_handler, tool_router,
+    transport::streamable_http_server::{
+        session::local::LocalSessionManager,
+        tower::{StreamableHttpServerConfig, StreamableHttpService},
+    },
+    RoleServer, ServerHandler,
 };
 use serde::Deserialize;
-use std::{path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::info;
 
 const DEFAULT_DEBOUNCE_MS: u64 = 500;
@@ -41,7 +47,8 @@ struct CodeSearchMcpServer {
 /// Request parameters for search_code tool
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SearchCodeRequest {
-    /// Semantic search query describing the code you're looking for
+    /// Semantic search query. Works best with code-like patterns (e.g., function signatures,
+    /// type names, code snippets) rather than abstract descriptions.
     query: String,
 
     /// Maximum number of results (1-100)
@@ -65,9 +72,10 @@ fn default_limit() -> Option<usize> {
 #[tool_router]
 impl CodeSearchMcpServer {
     #[tool(
-        description = "Search for code entities semantically using natural language queries. \
-                          Returns similar functions, classes, and other code constructs with full \
-                          details including content, documentation, and signature."
+        description = "Semantic code search using embeddings. Works best with code-like queries \
+                          (function signatures, type names, code patterns) rather than abstract descriptions. \
+                          Examples: 'async fn process(data: Vec<T>)', 'impl StorageClient', 'QueryMatch source'. \
+                          Returns matching functions, structs, impls, and other code entities with full details."
     )]
     async fn search_code(
         &self,
@@ -79,10 +87,17 @@ impl CodeSearchMcpServer {
         // Extract query to avoid clone
         let query_text = request.query;
 
+        // Format query with BGE instruction for proper semantic matching
+        // BGE-code-v1 requires this format to distinguish queries from documents
+        let bge_instruction = "Represent this code search query for retrieving semantically \
+                               similar code snippets, function implementations, type definitions, \
+                               and code patterns";
+        let formatted_query = format!("<instruct>{bge_instruction}\n<query>{query_text}");
+
         // Generate query embedding
         let embeddings = self
             .embedding_manager
-            .embed(vec![query_text.clone()])
+            .embed(vec![formatted_query])
             .await
             .map_err(|e| {
                 McpError::new(
@@ -437,41 +452,54 @@ async fn run_mcp_server_with_shutdown(
     server: CodeSearchMcpServer,
     mut watcher: FileWatcher,
     watcher_task: tokio::task::JoinHandle<codesearch_core::Result<()>>,
+    port: u16,
 ) -> std::result::Result<(), codesearch_core::Error> {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+    // Create HTTP service configuration
+    let config = StreamableHttpServerConfig {
+        sse_keep_alive: Some(std::time::Duration::from_secs(30)),
+        stateful_mode: false, // Stateless for localhost-only deployment
+    };
 
-    tokio::spawn(async move {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {
-                info!("Received Ctrl+C, initiating graceful shutdown");
-                let _ = shutdown_tx.send(()).await;
-            }
-            Err(e) => {
-                tracing::error!("Error setting up signal handler: {e}");
-            }
-        }
+    // Create session manager
+    let session_manager = Arc::new(LocalSessionManager::default());
+
+    // Create StreamableHttpService
+    let server_clone = server.clone();
+    let http_service =
+        StreamableHttpService::new(move || Ok(server_clone.clone()), session_manager, config);
+
+    // Create axum router
+    let app = Router::new().nest_service("/mcp", http_service);
+
+    // Bind to localhost only (127.0.0.1)
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| Error::config(format!("Failed to bind to {addr}: {e}")))?;
+
+    println!("🚀 Starting MCP server on http://{addr}/mcp");
+    info!("MCP server listening on http://{addr}/mcp");
+
+    // Spawn server task
+    let server_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .map_err(|e| Error::config(format!("Server error: {e}")))
     });
 
-    println!("🚀 Starting MCP server on stdio...");
-    let transport = (tokio::io::stdin(), tokio::io::stdout());
-    let server_handle = server
-        .serve(transport)
-        .await
-        .map_err(|e| Error::config(format!("Failed to start MCP server: {e}")))?;
-
-    info!("MCP server connected and running");
-
-    tokio::select! {
-        quit_reason = server_handle.waiting() => {
-            match quit_reason {
-                Ok(reason) => info!("MCP server stopped normally. Reason: {reason:?}"),
-                Err(e) => tracing::error!("MCP server error: {e}"),
-            }
+    // Wait for Ctrl+C
+    match tokio::signal::ctrl_c().await {
+        Ok(()) => {
+            info!("Received Ctrl+C, initiating graceful shutdown");
         }
-        _ = shutdown_rx.recv() => {
-            info!("Shutdown signal received");
+        Err(e) => {
+            tracing::error!("Error setting up signal handler: {e}");
         }
     }
+
+    // Abort server task
+    server_task.abort();
+    let _ = server_task.await;
 
     info!("Stopping file watcher...");
     watcher.stop().await?;
@@ -489,12 +517,11 @@ async fn run_mcp_server_with_shutdown(
 /// Run the MCP server implementation
 pub(crate) async fn run_server_impl(
     config: Config,
+    repo_root: PathBuf,
 ) -> std::result::Result<(), codesearch_core::Error> {
     verify_collection_exists(&config.storage.collection_name, &config.storage).await?;
 
     let (clients, repository_id) = initialize_server_clients(&config).await?;
-
-    let repo_root = crate::storage_init::find_repository_root()?;
 
     run_catchup_indexing(&repo_root, repository_id, &clients).await?;
 
@@ -509,7 +536,7 @@ pub(crate) async fn run_server_impl(
         clients.postgres,
     );
 
-    run_mcp_server_with_shutdown(mcp_server, watcher, watcher_task).await?;
+    run_mcp_server_with_shutdown(mcp_server, watcher, watcher_task, config.server.port).await?;
 
     Ok(())
 }

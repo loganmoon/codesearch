@@ -4,9 +4,9 @@
 //! and finding the repository root.
 
 use codesearch_core::config::Config;
-use codesearch_core::error::{Error, Result, ResultExt};
+use codesearch_core::error::{Result, ResultExt};
 use codesearch_embeddings::EmbeddingManager;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 /// Helper function to parse provider type from string
 fn parse_provider_type(provider: &str) -> codesearch_embeddings::EmbeddingProviderType {
@@ -45,25 +45,4 @@ pub(crate) async fn create_embedding_manager(config: &Config) -> Result<Arc<Embe
         .context("Failed to create embedding manager")?;
 
     Ok(Arc::new(embedding_manager))
-}
-
-/// Find the git repository root by walking up the directory tree
-pub(crate) fn find_repository_root() -> Result<PathBuf> {
-    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
-
-    let mut path = current_dir.as_path();
-    loop {
-        if path.join(".git").is_dir() {
-            return Ok(path.to_path_buf());
-        }
-
-        match path.parent() {
-            Some(parent) => path = parent,
-            None => {
-                return Err(Error::config(
-                    "Not a git repository (or any parent up to mount point)",
-                ))
-            }
-        }
-    }
 }

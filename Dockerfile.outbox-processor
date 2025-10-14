@@ -8,34 +8,16 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Layer 1: Copy dependency manifests only
-# This layer is cached unless Cargo.toml or Cargo.lock changes
+# Copy all source files
 COPY Cargo.toml Cargo.lock ./
-COPY crates/core/Cargo.toml ./crates/core/Cargo.toml
-COPY crates/storage/Cargo.toml ./crates/storage/Cargo.toml
-COPY crates/outbox-processor/Cargo.toml ./crates/outbox-processor/Cargo.toml
-COPY tests/Cargo.toml ./tests/Cargo.toml
+COPY crates ./crates
+COPY tests ./tests
 COPY migrations ./migrations
 
-# Layer 2: Build dependencies with dummy source files
-# This layer is cached unless dependencies change
-RUN mkdir -p crates/core/src crates/storage/src crates/outbox-processor/src tests/src && \
-    echo "pub fn dummy() {}" > crates/core/src/lib.rs && \
-    echo "pub fn dummy() {}" > crates/storage/src/lib.rs && \
-    echo "fn main() {}" > crates/outbox-processor/src/main.rs && \
-    touch crates/outbox-processor/src/lib.rs && \
-    echo "pub fn dummy() {}" > tests/src/lib.rs && \
-    cargo build --release --bin outbox-processor && \
-    rm -rf crates/*/src
-
-# Layer 3: Copy real source and rebuild
-# This layer is invalidated on ANY source change, but dependencies are cached
-COPY crates ./crates
-COPY tests/src ./tests/src
-
+# Build the binary
 RUN cargo build --release --bin outbox-processor
 
-# Runtime stage (unchanged)
+# Runtime stage
 FROM debian:bookworm-slim
 
 # Install runtime dependencies

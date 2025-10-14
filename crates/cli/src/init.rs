@@ -162,5 +162,71 @@ pub async fn ensure_storage_initialized(
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);
 
+    // Update global config with this collection as the default
+    update_global_config(&config).await?;
+
+    Ok(config)
+}
+
+/// Update the global config with the current collection as the default
+async fn update_global_config(config: &Config) -> Result<()> {
+    use codesearch_core::config::global_config_path;
+
+    let global_config_path = global_config_path()?;
+
+    // Create the .codesearch directory if it doesn't exist
+    if let Some(parent) = global_config_path.parent() {
+        std::fs::create_dir_all(parent).context("Failed to create .codesearch directory")?;
+    }
+
+    // Save the config to the global location
+    config
+        .save(&global_config_path)
+        .context("Failed to save global config")?;
+
+    info!("Updated global config at {}", global_config_path.display());
+
+    Ok(())
+}
+
+/// Load configuration for the serve command
+///
+/// This function loads the configuration file (from the global location if no path is provided),
+/// starts infrastructure if needed, but does NOT create or modify any files or databases.
+/// It expects that `codesearch index` has already been run to set up the initial configuration.
+pub async fn load_config_for_serve(config_path: Option<&Path>) -> Result<Config> {
+    use codesearch_core::config::global_config_path;
+
+    // Determine which config file to use
+    let config_file = if let Some(path) = config_path {
+        path.to_path_buf()
+    } else {
+        global_config_path().context("Failed to determine global config path")?
+    };
+
+    // Config must exist - we don't create it for serve
+    if !config_file.exists() {
+        anyhow::bail!(
+            "Configuration file not found at {}.\n\
+            Run 'codesearch index' from a git repository to create an initial configuration.",
+            config_file.display()
+        );
+    }
+
+    // Load the configuration
+    let config = Config::from_file(&config_file)
+        .with_context(|| format!("Failed to load config from {}", config_file.display()))?;
+
+    // Validate the config
+    config.validate()?;
+
+    // Ensure infrastructure is running if auto-start is enabled
+    if config.storage.auto_start_deps {
+        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+
+        let api_base_url = get_api_base_url_if_local_api(&config);
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
+    }
+
     Ok(config)
 }

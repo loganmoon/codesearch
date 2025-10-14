@@ -19,7 +19,7 @@ pub struct WatcherConfig {
     pub follow_symlinks: bool,
     /// Maximum recursion depth for directory watching (default: 50)
     pub recursive_depth: u32,
-    /// Maximum number of events in queue (default: 10000)
+    /// Maximum number of events in queue (default: 100000)
     pub max_queue_size: usize,
     /// Batch size for processing events (default: 100)
     pub batch_size: usize,
@@ -56,27 +56,47 @@ impl WatcherConfig {
     }
 
     /// Get default ignore patterns for common files
+    ///
+    /// These patterns prevent processing of temporary files created by editors,
+    /// build systems, and version control, which can saturate event channels
+    /// during heavy activity and cause unnecessary processing errors.
     pub fn default_ignore_patterns() -> Vec<String> {
         vec![
+            // Editor temporary files (prevent channel saturation and canonicalization errors)
+            "*.tmp".to_string(),   // Files ending in .tmp
+            "*.tmp.*".to_string(), // VS Code temp files: file.rs.tmp.12345.67890
+            ".*.sw?".to_string(),  // Vim swap files: .file.swp, .file.swo, .file.swn
+            ".*.swx".to_string(),  // Extended Vim swap files
+            "*.swp".to_string(),   // Vim swap files (non-hidden)
+            "*.swo".to_string(),   // Vim swap files (non-hidden)
+            "*~".to_string(),      // Backup files (Vim, Emacs, etc.)
+            "*.bak".to_string(),   // Backup files
+            "*.orig".to_string(),  // Merge conflict originals
+            "*.rej".to_string(),   // Patch rejects
+            "#*#".to_string(),     // Emacs auto-save files
+            ".#*".to_string(),     // Emacs lock files
+            "4913".to_string(),    // Vim backup files (specific pattern)
+            // Log files
             "*.log".to_string(),
-            "*.tmp".to_string(),
-            "*.swp".to_string(),
-            "*.swo".to_string(),
-            "*~".to_string(),
+            // OS-specific files
             ".DS_Store".to_string(),
             "Thumbs.db".to_string(),
+            // Build artifacts and dependencies
             "node_modules/**".to_string(),
             "target/**".to_string(),
+            "dist/**".to_string(),
+            "build/**".to_string(),
+            // Version control
             ".git/**".to_string(),
             ".svn/**".to_string(),
             ".hg/**".to_string(),
+            // Python artifacts
             "__pycache__/**".to_string(),
             "*.pyc".to_string(),
             ".pytest_cache/**".to_string(),
             ".coverage".to_string(),
             "*.egg-info/**".to_string(),
-            "dist/**".to_string(),
-            "build/**".to_string(),
+            // IDE files
             ".idea/**".to_string(),
             ".vscode/**".to_string(),
             "*.iml".to_string(),
@@ -94,7 +114,7 @@ impl Default for WatcherConfig {
             max_file_size: 10 * 1024 * 1024, // 10MB
             follow_symlinks: false,
             recursive_depth: 50,
-            max_queue_size: 10000,
+            max_queue_size: 100000, // Increased to handle burst activity from editors
             batch_size: 100,
             batch_timeout_ms: 1000,
             enable_metrics: false,
@@ -452,5 +472,55 @@ mod tests {
 
         assert_eq!(config.debounce_duration(), Duration::from_millis(500));
         assert_eq!(config.batch_timeout_duration(), Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_default_ignore_patterns_includes_editor_temp_files() {
+        let patterns = WatcherConfig::default_ignore_patterns();
+
+        // Verify VS Code temp file pattern
+        assert!(
+            patterns.contains(&"*.tmp.*".to_string()),
+            "Should include VS Code temp file pattern *.tmp.*"
+        );
+
+        // Verify Vim swap file patterns
+        assert!(
+            patterns.contains(&".*.sw?".to_string()),
+            "Should include Vim swap file pattern .*.sw?"
+        );
+        assert!(
+            patterns.contains(&"*.swp".to_string()),
+            "Should include Vim swap file pattern *.swp"
+        );
+
+        // Verify Emacs patterns
+        assert!(
+            patterns.contains(&"#*#".to_string()),
+            "Should include Emacs auto-save pattern #*#"
+        );
+        assert!(
+            patterns.contains(&".#*".to_string()),
+            "Should include Emacs lock file pattern .#*"
+        );
+
+        // Verify backup patterns
+        assert!(
+            patterns.contains(&"*.bak".to_string()),
+            "Should include backup file pattern *.bak"
+        );
+        assert!(
+            patterns.contains(&"*.orig".to_string()),
+            "Should include merge conflict pattern *.orig"
+        );
+    }
+
+    #[test]
+    fn test_max_queue_size_increased() {
+        let config = WatcherConfig::default();
+        assert_eq!(
+            config.max_queue_size, 100000,
+            "Channel size should be increased to 100000 to handle burst activity"
+        );
     }
 }

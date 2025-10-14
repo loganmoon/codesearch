@@ -49,8 +49,8 @@ impl EmbeddingConfig {
         if self.max_workers == 0 {
             return Err("Max workers must be greater than 0".to_string());
         }
-        if self.max_workers > 32 {
-            return Err("Max workers too large (max 32)".to_string());
+        if self.max_workers > 256 {
+            return Err("Max workers too large (max 256)".to_string());
         }
         if self.model.is_empty() {
             return Err("Model name cannot be empty".to_string());
@@ -67,11 +67,11 @@ impl Default for EmbeddingConfig {
         Self {
             provider: EmbeddingProviderType::default(),
             model: "BAAI/bge-code-v1".to_string(),
-            batch_size: 32,
+            batch_size: 128,
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
             embedding_dimension: 1536,
-            max_workers: 4,
+            max_workers: 64,
         }
     }
 }

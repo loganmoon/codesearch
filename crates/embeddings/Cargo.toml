@@ -13,6 +13,7 @@ anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 async-openai = "0.29.3"
+futures = "0.3"
 
 # Additional dependencies
 serde = { workspace = true }

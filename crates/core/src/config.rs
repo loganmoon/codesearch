@@ -70,6 +70,10 @@ pub struct EmbeddingsConfig {
     /// Embedding dimension size
     #[serde(default = "default_embedding_dimension")]
     pub embedding_dimension: usize,
+
+    /// Maximum number of concurrent embedding workers
+    #[serde(default = "default_embedding_max_workers")]
+    pub max_workers: usize,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -82,6 +86,7 @@ impl std::fmt::Debug for EmbeddingsConfig {
             .field("api_base_url", &self.api_base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
             .field("embedding_dimension", &self.embedding_dimension)
+            .field("max_workers", &self.max_workers)
             .finish()
     }
 }
@@ -239,7 +244,7 @@ fn default_enabled_languages() -> Vec<String> {
 }
 
 fn default_batch_size() -> usize {
-    32
+    128
 }
 
 fn default_device() -> String {
@@ -260,6 +265,10 @@ fn default_api_base_url() -> Option<String> {
 
 fn default_embedding_dimension() -> usize {
     1536
+}
+
+fn default_embedding_max_workers() -> usize {
+    64
 }
 
 fn default_true() -> bool {
@@ -335,6 +344,7 @@ impl Default for EmbeddingsConfig {
             api_base_url: default_api_base_url(),
             api_key: None,
             embedding_dimension: default_embedding_dimension(),
+            max_workers: default_embedding_max_workers(),
         }
     }
 }
@@ -542,6 +552,19 @@ impl Config {
             return Err(Error::config(
                 "embedding_dimension must be greater than 0".to_string(),
             ));
+        }
+
+        // Validate max_workers
+        if self.embeddings.max_workers == 0 {
+            return Err(Error::config(
+                "embeddings.max_workers must be greater than 0".to_string(),
+            ));
+        }
+        if self.embeddings.max_workers > 256 {
+            return Err(Error::config(format!(
+                "embeddings.max_workers too large (max 256, got {})",
+                self.embeddings.max_workers
+            )));
         }
 
         Ok(())

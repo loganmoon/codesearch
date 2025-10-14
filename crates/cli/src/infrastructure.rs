@@ -363,6 +363,9 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
 
     info!("Starting shared infrastructure...");
 
+    // Clean up any stopped containers before starting
+    docker::cleanup_stopped_infrastructure_containers()?;
+
     // Determine docker compose command
     let (cmd, mut args) = if Command::new("docker")
         .args(["compose", "version"])
@@ -397,7 +400,24 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("Failed to start infrastructure:\n{stderr}"));
+
+        // Provide helpful context based on error content
+        let help_msg = if stderr.contains("already in use") {
+            "\n\nHint: Some containers may still be running. Try:\n  \
+             docker ps -a --filter \"name=codesearch\"\n  \
+             docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm codesearch-outbox-processor"
+        } else if stderr.contains("Cannot connect to the Docker daemon") {
+            "\n\nHint: Docker daemon is not running. Start Docker Desktop or run: sudo systemctl start docker"
+        } else {
+            "\n\nCheck container logs:\n  \
+             docker logs codesearch-postgres\n  \
+             docker logs codesearch-qdrant\n  \
+             docker logs codesearch-vllm"
+        };
+
+        return Err(anyhow!(
+            "Failed to start infrastructure:\n{stderr}{help_msg}"
+        ));
     }
 
     info!("Infrastructure containers started");

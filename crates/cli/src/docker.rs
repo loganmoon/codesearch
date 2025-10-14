@@ -46,6 +46,112 @@ pub fn is_outbox_processor_running() -> Result<bool> {
     is_container_running("codesearch-outbox-processor")
 }
 
+/// Check if a container exists (running or stopped)
+fn container_exists(container_name: &str) -> Result<bool> {
+    let filter_arg = format!("name=^{container_name}$");
+
+    let output = Command::new("docker")
+        .args([
+            "ps",
+            "-a",
+            "--filter",
+            &filter_arg,
+            "--format",
+            "{{.Names}}",
+        ])
+        .output()
+        .context("Failed to check container existence")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("Docker ps command failed: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.trim() == container_name)
+}
+
+/// Check if a container is stopped (exists but not running)
+fn is_container_stopped(container_name: &str) -> Result<bool> {
+    let exists = container_exists(container_name)?;
+    let running = is_container_running(container_name)?;
+    Ok(exists && !running)
+}
+
+/// Get list of all stopped infrastructure containers
+pub fn get_stopped_infrastructure_containers() -> Result<Vec<String>> {
+    let container_names = vec![
+        "codesearch-postgres",
+        "codesearch-qdrant",
+        "codesearch-vllm",
+        "codesearch-outbox-processor",
+    ];
+
+    let mut stopped = Vec::new();
+    for name in container_names {
+        if is_container_stopped(name)? {
+            stopped.push(name.to_string());
+        }
+    }
+
+    Ok(stopped)
+}
+
+/// Remove a stopped container
+///
+/// Returns an error if the container is running (safety check) or if removal fails.
+fn remove_container(container_name: &str) -> Result<()> {
+    // Safety check: never remove running containers
+    if is_container_running(container_name)? {
+        return Err(anyhow!(
+            "Refusing to remove running container: {container_name}"
+        ));
+    }
+
+    info!("Removing stopped container: {container_name}");
+
+    let output = Command::new("docker")
+        .args(["rm", "-f", container_name])
+        .output()
+        .context(format!("Failed to remove container {container_name}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!(
+            "Failed to remove container {container_name}:\n{stderr}"
+        ));
+    }
+
+    Ok(())
+}
+
+/// Remove all stopped infrastructure containers
+///
+/// This is an atomic operation - if any removal fails, we stop and return an error.
+pub fn cleanup_stopped_infrastructure_containers() -> Result<()> {
+    let stopped = get_stopped_infrastructure_containers()
+        .context("Failed to check for stopped containers. Is Docker running?")?;
+
+    if stopped.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "Found {} stopped infrastructure container(s), cleaning up: {}",
+        stopped.len(),
+        stopped.join(", ")
+    );
+
+    for container_name in &stopped {
+        remove_container(container_name).context(format!(
+            "Failed to remove {container_name}. Try manually: docker rm -f {container_name}"
+        ))?;
+    }
+
+    info!("Successfully cleaned up {} container(s)", stopped.len());
+    Ok(())
+}
+
 /// Check Qdrant health status
 pub async fn check_qdrant_health(config: &StorageConfig) -> bool {
     // Qdrant doesn't have a /health endpoint, but the root endpoint returns version info

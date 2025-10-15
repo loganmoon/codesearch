@@ -260,6 +260,7 @@ async fn process_file_batch(
     let (batch_stats, entities_by_file) = entity_processor::process_entity_batch(
         batch_entities,
         repo_id,
+        collection_name.to_string(),
         git_commit.clone(),
         embedding_manager,
         postgres_client.as_ref(),

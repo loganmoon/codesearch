@@ -27,8 +27,28 @@ pub struct ConfigSources {
 }
 
 /// Indexer configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct IndexerConfig {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexerConfig {
+    /// Batch size for full repository indexing (number of files per batch)
+    #[serde(default = "default_index_batch_size")]
+    pub index_batch_size: usize,
+
+    /// Channel buffer size for pipeline stages
+    #[serde(default = "default_channel_buffer_size")]
+    pub channel_buffer_size: usize,
+
+    /// Maximum entities per batch for embedding generation
+    #[serde(default = "default_max_entity_batch_size")]
+    pub max_entity_batch_size: usize,
+
+    /// Concurrent file extractions in Stage 2
+    #[serde(default = "default_file_extraction_concurrency")]
+    pub file_extraction_concurrency: usize,
+
+    /// Concurrent snapshot updates in Stage 5
+    #[serde(default = "default_snapshot_update_concurrency")]
+    pub snapshot_update_concurrency: usize,
+}
 
 /// Main configuration structure for the codesearch system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +331,22 @@ fn default_server_port() -> u16 {
     3000
 }
 
+fn default_index_batch_size() -> usize {
+    50
+}
+
+fn default_channel_buffer_size() -> usize {
+    20
+}
+
+fn default_file_extraction_concurrency() -> usize {
+    32
+}
+
+fn default_snapshot_update_concurrency() -> usize {
+    16
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -347,6 +383,18 @@ impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled_languages(),
+        }
+    }
+}
+
+impl Default for IndexerConfig {
+    fn default() -> Self {
+        Self {
+            index_batch_size: default_index_batch_size(),
+            channel_buffer_size: default_channel_buffer_size(),
+            max_entity_batch_size: default_max_entity_batch_size(),
+            file_extraction_concurrency: default_file_extraction_concurrency(),
+            snapshot_update_concurrency: default_snapshot_update_concurrency(),
         }
     }
 }

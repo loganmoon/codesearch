@@ -33,6 +33,7 @@ struct EntityBatch {
     file_indices: Vec<(PathBuf, Vec<usize>)>,
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
+    collection_name: String,
     #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
     failed_files: usize,
 }
@@ -43,6 +44,7 @@ struct EmbeddedBatch {
     file_indices: Vec<(PathBuf, Vec<usize>)>,
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
+    collection_name: String,
     #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
     entities_skipped: usize,
 }
@@ -99,10 +101,6 @@ impl RepositoryIndexer {
 
 // Pipeline stage functions
 
-/// Maximum number of entities per EntityBatch
-/// Limits GPU memory usage during embedding generation
-const MAX_ENTITY_BATCH_SIZE: usize = 64;
-
 /// Stage 1: Discover all files in the repository and batch them
 async fn stage_file_discovery(
     file_tx: mpsc::Sender<FileBatch>,
@@ -132,6 +130,9 @@ async fn stage_extract_entities(
     entity_tx: mpsc::Sender<EntityBatch>,
     repo_id: Uuid,
     git_commit: Option<String>,
+    collection_name: String,
+    max_entity_batch_size: usize,
+    file_extraction_concurrency: usize,
 ) -> Result<(usize, usize)> {
     let mut total_extracted = 0;
     let mut total_failed = 0;
@@ -158,7 +159,7 @@ async fn stage_extract_entities(
                     }
                 }
             })
-            .buffer_unordered(8)
+            .buffer_unordered(file_extraction_concurrency)
             .collect::<Vec<_>>()
             .await;
 
@@ -168,7 +169,7 @@ async fn stage_extract_entities(
                 Ok((path, mut file_entities)) if !file_entities.is_empty() => {
                     // Process entities from this file, potentially across multiple batches
                     while !file_entities.is_empty() {
-                        let space_left = MAX_ENTITY_BATCH_SIZE.saturating_sub(entities.len());
+                        let space_left = max_entity_batch_size.saturating_sub(entities.len());
 
                         if space_left == 0 {
                             // Current batch is full, send it
@@ -191,6 +192,7 @@ async fn stage_extract_entities(
                                     file_indices: batch_file_indices,
                                     repo_id,
                                     git_commit: git_commit.clone(),
+                                    collection_name: collection_name.clone(),
                                     failed_files: batch_failed,
                                 })
                                 .await
@@ -246,6 +248,7 @@ async fn stage_extract_entities(
                 file_indices,
                 repo_id,
                 git_commit: git_commit.clone(),
+                collection_name: collection_name.clone(),
                 failed_files: batch_failed,
             })
             .await
@@ -379,6 +382,7 @@ async fn stage_generate_embeddings(
                 file_indices: updated_file_indices,
                 repo_id: batch.repo_id,
                 git_commit: batch.git_commit,
+                collection_name: batch.collection_name,
                 entities_skipped: skipped,
             })
             .await
@@ -405,17 +409,8 @@ async fn stage_store_entities(
             batch.file_indices.len()
         );
 
-        // Fetch collection name once
-        let collection_name = postgres_client
-            .get_collection_name(batch.repo_id)
-            .await
-            .storage_err("Failed to get collection name")?
-            .ok_or_else(|| {
-                Error::storage(format!(
-                    "Repository not found for repository_id = {}",
-                    batch.repo_id
-                ))
-            })?;
+        // Use cached collection_name from batch
+        let collection_name = &batch.collection_name;
 
         // Batch fetch existing metadata
         let entity_ids: Vec<String> = batch
@@ -457,7 +452,7 @@ async fn stage_store_entities(
 
         // Store in DB with outbox
         postgres_client
-            .store_entities_with_outbox_batch(batch.repo_id, &collection_name, &batch_refs)
+            .store_entities_with_outbox_batch(batch.repo_id, collection_name, &batch_refs)
             .await
             .storage_err("Failed to store entities")?;
 
@@ -498,7 +493,7 @@ async fn stage_store_entities(
             .send(StoredBatch {
                 file_entity_map,
                 repo_id: batch.repo_id,
-                collection_name,
+                collection_name: collection_name.to_string(),
                 git_commit: batch.git_commit,
             })
             .await
@@ -554,11 +549,13 @@ impl crate::Indexer for RepositoryIndexer {
         );
         let start_time = Instant::now();
 
-        // Create channels with appropriate buffer sizes
-        let (file_tx, file_rx) = mpsc::channel::<FileBatch>(2);
-        let (entity_tx, entity_rx) = mpsc::channel::<EntityBatch>(1);
-        let (embedded_tx, embedded_rx) = mpsc::channel::<EmbeddedBatch>(1);
-        let (stored_tx, stored_rx) = mpsc::channel::<StoredBatch>(1);
+        let config = IndexerConfig::default();
+
+        // Create channels with configurable buffer sizes
+        let (file_tx, file_rx) = mpsc::channel::<FileBatch>(config.channel_buffer_size);
+        let (entity_tx, entity_rx) = mpsc::channel::<EntityBatch>(config.channel_buffer_size);
+        let (embedded_tx, embedded_rx) = mpsc::channel::<EmbeddedBatch>(config.channel_buffer_size);
+        let (stored_tx, stored_rx) = mpsc::channel::<StoredBatch>(config.channel_buffer_size);
 
         // Clone shared state for each stage
         let repo_path = self.repository_path.clone();
@@ -569,7 +566,12 @@ impl crate::Indexer for RepositoryIndexer {
         let postgres_client = self.postgres_client.clone();
         let postgres_client_2 = self.postgres_client.clone();
 
-        let config = IndexerConfig::default();
+        // Fetch collection_name once for entire pipeline
+        let collection_name = postgres_client
+            .get_collection_name(repo_id)
+            .await
+            .map_err(|e| Error::Other(anyhow!("Failed to get collection name: {e}")))?
+            .ok_or_else(|| Error::Other(anyhow!("Repository not found for repo_id {repo_id}")))?;
 
         // Spawn all 5 stages concurrently
         let stage1 = tokio::spawn(stage_file_discovery(
@@ -583,6 +585,9 @@ impl crate::Indexer for RepositoryIndexer {
             entity_tx,
             repo_id,
             git_commit.clone(),
+            collection_name.clone(),
+            config.max_entity_batch_size,
+            config.file_extraction_concurrency,
         ));
 
         let stage3 = tokio::spawn(stage_generate_embeddings(

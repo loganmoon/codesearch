@@ -113,6 +113,7 @@ pub struct BatchProcessingStats {
 pub async fn process_entity_batch(
     entities: Vec<CodeEntity>,
     repo_id: Uuid,
+    collection_name: String,
     git_commit: Option<String>,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
@@ -149,12 +150,7 @@ pub async fn process_entity_batch(
         );
     }
 
-    // Fetch collection_name once for all chunks
-    let collection_name = postgres_client
-        .get_collection_name(repo_id)
-        .await
-        .storage_err("Failed to get collection name")?
-        .ok_or_else(|| Error::storage("Repository collection_name not found"))?;
+    // collection_name is now passed as parameter
 
     // Chunk entities if batch exceeds max size
     let chunks: Vec<Vec<CodeEntity>> = entities

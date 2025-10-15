@@ -43,7 +43,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start MCP server with semantic code search
-    Serve,
+    Serve {
+        /// Collection name to serve (overrides config file)
+        #[arg(long)]
+        collection: Option<String>,
+    },
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -63,9 +67,9 @@ async fn main() -> Result<()> {
 
     // Execute commands
     match cli.command {
-        Some(Commands::Serve) => {
+        Some(Commands::Serve { collection }) => {
             // Serve doesn't need to be run from a repository
-            serve(cli.config.as_deref()).await
+            serve(cli.config.as_deref(), collection.as_deref()).await
         }
         Some(Commands::Index { force }) => {
             // Find repository root
@@ -131,11 +135,11 @@ fn find_repository_root() -> Result<PathBuf> {
 }
 
 /// Start the MCP server
-async fn serve(config_path: Option<&Path>) -> Result<()> {
+async fn serve(config_path: Option<&Path>, collection_override: Option<&str>) -> Result<()> {
     info!("Preparing to start MCP server...");
 
-    // Load configuration (from global config by default)
-    let config = codesearch::init::load_config_for_serve(config_path).await?;
+    // Load configuration using layered approach
+    let config = codesearch::init::load_config_for_serve(config_path, collection_override).await?;
 
     // Connect to Postgres to look up repository info
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)

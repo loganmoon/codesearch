@@ -6,11 +6,24 @@ use std::path::{Path, PathBuf};
 /// Returns the path to the global configuration file
 ///
 /// The global config is stored at `~/.codesearch/config.toml` and contains
-/// the default collection name and settings for the codesearch server.
+/// user preferences that apply across all repositories.
 pub fn global_config_path() -> Result<PathBuf> {
     let home_dir = dirs::home_dir()
         .ok_or_else(|| Error::config("Unable to determine home directory".to_string()))?;
     Ok(home_dir.join(".codesearch").join("config.toml"))
+}
+
+/// Tracks which configuration sources were loaded
+#[derive(Debug, Clone, Default)]
+pub struct ConfigSources {
+    /// Whether global config was loaded
+    pub global_loaded: bool,
+    /// Whether repo-local config was loaded
+    pub local_loaded: bool,
+    /// Path to global config (if loaded)
+    pub global_path: Option<PathBuf>,
+    /// Path to local config (if loaded)
+    pub local_path: Option<PathBuf>,
 }
 
 /// Indexer configuration
@@ -525,6 +538,113 @@ impl Config {
     /// Creates a config from a TOML string (useful for testing)
     pub fn from_toml_str(content: &str) -> Result<Self> {
         toml::from_str(content).map_err(|e| Error::config(format!("Failed to parse TOML: {e}")))
+    }
+
+    /// Merge another config into this one, preferring values from the other config
+    ///
+    /// This is used for layered configuration where repo-local settings override global settings.
+    /// Only non-default values from `other` will override values in `self`.
+    pub fn merge_from(&mut self, other: Self) {
+        // For storage config, only merge collection_name if it's non-empty
+        if !other.storage.collection_name.is_empty() {
+            self.storage.collection_name = other.storage.collection_name;
+        }
+        // Always take other storage settings if they differ from defaults
+        self.storage.qdrant_host = other.storage.qdrant_host;
+        self.storage.qdrant_port = other.storage.qdrant_port;
+        self.storage.qdrant_rest_port = other.storage.qdrant_rest_port;
+        self.storage.auto_start_deps = other.storage.auto_start_deps;
+        self.storage.docker_compose_file = other.storage.docker_compose_file;
+        self.storage.postgres_host = other.storage.postgres_host;
+        self.storage.postgres_port = other.storage.postgres_port;
+        self.storage.postgres_database = other.storage.postgres_database;
+        self.storage.postgres_user = other.storage.postgres_user;
+        self.storage.postgres_password = other.storage.postgres_password;
+        self.storage.max_entity_batch_size = other.storage.max_entity_batch_size;
+
+        // Merge embeddings config
+        self.embeddings.provider = other.embeddings.provider;
+        self.embeddings.model = other.embeddings.model;
+        self.embeddings.batch_size = other.embeddings.batch_size;
+        self.embeddings.device = other.embeddings.device;
+        self.embeddings.api_base_url = other.embeddings.api_base_url;
+        self.embeddings.api_key = other.embeddings.api_key.or(self.embeddings.api_key.clone());
+        self.embeddings.embedding_dimension = other.embeddings.embedding_dimension;
+        self.embeddings.max_workers = other.embeddings.max_workers;
+
+        // Merge watcher config
+        self.watcher.debounce_ms = other.watcher.debounce_ms;
+        self.watcher.ignore_patterns = other.watcher.ignore_patterns;
+
+        // Merge server config
+        self.server.port = other.server.port;
+
+        // Merge languages config
+        self.languages = other.languages;
+    }
+
+    /// Load configuration with layered precedence (git-style)
+    ///
+    /// Precedence order (lowest to highest):
+    /// 1. Hardcoded defaults
+    /// 2. Global config (~/.codesearch/config.toml) - if exists
+    /// 3. Repo-local config (./codesearch.toml or specified path) - if exists
+    /// 4. Environment variables (CODESEARCH_*)
+    ///
+    /// Returns the merged config and metadata about which sources were loaded.
+    pub fn load_layered(repo_local_path: Option<&Path>) -> Result<(Self, ConfigSources)> {
+        let mut sources = ConfigSources::default();
+
+        // Start with defaults
+        let mut config = Config {
+            indexer: IndexerConfig::default(),
+            embeddings: EmbeddingsConfig::default(),
+            watcher: WatcherConfig::default(),
+            storage: StorageConfig {
+                qdrant_host: default_qdrant_host(),
+                qdrant_port: default_qdrant_port(),
+                qdrant_rest_port: default_qdrant_rest_port(),
+                collection_name: String::new(),
+                auto_start_deps: default_auto_start_deps(),
+                docker_compose_file: None,
+                postgres_host: default_postgres_host(),
+                postgres_port: default_postgres_port(),
+                postgres_database: default_postgres_database(),
+                postgres_user: default_postgres_user(),
+                postgres_password: default_postgres_password(),
+                max_entity_batch_size: default_max_entity_batch_size(),
+            },
+            server: ServerConfig::default(),
+            languages: LanguagesConfig::default(),
+        };
+
+        // Try to load global config
+        if let Ok(global_path) = global_config_path() {
+            if global_path.exists() {
+                if let Ok(global_config) = Self::from_file(&global_path) {
+                    config.merge_from(global_config);
+                    sources.global_loaded = true;
+                    sources.global_path = Some(global_path);
+                }
+            }
+        }
+
+        // Try to load repo-local config
+        let local_path = repo_local_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join("codesearch.toml")
+        });
+
+        if local_path.exists() {
+            if let Ok(local_config) = Self::from_file(&local_path) {
+                config.merge_from(local_config);
+                sources.local_loaded = true;
+                sources.local_path = Some(local_path);
+            }
+        }
+
+        Ok((config, sources))
     }
 
     /// Validates the configuration

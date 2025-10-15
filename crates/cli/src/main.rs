@@ -253,7 +253,11 @@ async fn index_repository(
             )
         })?;
 
-    info!("Repository ID: {}", repository_id);
+    info!(
+        repository_id = %repository_id,
+        collection_name = %config.storage.collection_name,
+        "Repository ID retrieved for indexing"
+    );
 
     // Create GitRepository if possible
     let git_repo = match codesearch_watcher::GitRepository::open(repo_root) {
@@ -268,6 +272,10 @@ async fn index_repository(
     };
 
     // Create and run indexer
+    tracing::debug!(
+        repository_id_string = %repository_id.to_string(),
+        "Creating RepositoryIndexer with repository_id"
+    );
     let mut indexer = RepositoryIndexer::new(
         repo_root.to_path_buf(),
         repository_id.to_string(),

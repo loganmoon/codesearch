@@ -30,6 +30,18 @@ pub fn handle_function(
     // Get the function node for location and content
     let function_node = require_capture_node(query_match, query, capture_names::FUNCTION)?;
 
+    // Skip functions inside impl blocks - those are handled by the impl extractor
+    if let Some(parent) = function_node.parent() {
+        if parent.kind() == "declaration_list" {
+            // Check if the declaration_list is inside an impl_item
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "impl_item" {
+                    return Ok(Vec::new());
+                }
+            }
+        }
+    }
+
     // Extract common components
     let components = extract_common_components(
         query_match,

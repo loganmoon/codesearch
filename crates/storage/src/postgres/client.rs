@@ -172,6 +172,11 @@ impl PostgresClient {
                 .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
 
         if let Some((repository_id,)) = existing {
+            tracing::debug!(
+                repository_id = %repository_id,
+                collection_name = %collection_name,
+                "Found existing repository"
+            );
             return Ok(repository_id);
         }
 
@@ -191,6 +196,13 @@ impl PostgresClient {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to insert repository: {e}")))?;
+
+        tracing::debug!(
+            repository_id = %repository_id,
+            collection_name = %collection_name,
+            repository_path = %repository_path.display(),
+            "Created new repository"
+        );
 
         Ok(repository_id)
     }

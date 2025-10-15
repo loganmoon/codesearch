@@ -18,7 +18,7 @@ impl Default for IndexerConfig {
         Self {
             watch_batch_size: 10,
             watch_timeout_ms: 1000,
-            index_batch_size: 100,
+            index_batch_size: 10,
         }
     }
 }
@@ -52,7 +52,7 @@ mod tests {
         let config = IndexerConfig::default();
         assert_eq!(config.watch_batch_size, 10);
         assert_eq!(config.watch_timeout_ms, 1000);
-        assert_eq!(config.index_batch_size, 100);
+        assert_eq!(config.index_batch_size, 10);
     }
 
     #[test]

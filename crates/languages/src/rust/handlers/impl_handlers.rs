@@ -34,6 +34,12 @@ pub fn handle_impl(
 ) -> Result<Vec<CodeEntity>> {
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL)?;
 
+    // Skip trait implementations - they will be handled by handle_impl_trait
+    // Check if this impl block has a "trait" field (indicating "impl Trait for Type")
+    if impl_node.child_by_field_name("trait").is_some() {
+        return Ok(Vec::new());
+    }
+
     // Extract the type this impl is for
     let for_type = find_capture_node(query_match, query, capture_names::TYPE)
         .and_then(|node| node_to_text(node, source).ok())
@@ -45,11 +51,17 @@ pub fn handle_impl(
         .unwrap_or_default();
 
     // Build qualified name for the impl block
+    // Use "impl <Type> at line <N>" to distinguish from the struct/type itself
+    // and to handle multiple impl blocks for the same type
+    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
     let parent_scope = build_qualified_name_from_ast(impl_node, source, "rust");
     let impl_qualified_name = if parent_scope.is_empty() {
-        for_type.clone()
+        format!("impl {for_type} at line {}", location.start_line)
     } else {
-        format!("{parent_scope}::{for_type}")
+        format!(
+            "{parent_scope}::impl {for_type} at line {}",
+            location.start_line
+        )
     };
 
     // Extract all methods from impl body
@@ -141,12 +153,19 @@ pub fn handle_impl_trait(
         .map(|node| extract_generics_from_node(node, source))
         .unwrap_or_default();
 
-    // Build qualified name: "Trait for Type" or parent::Trait for Type
+    // Build qualified name: "Trait for Type at line N" to handle multiple trait impls
+    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
     let parent_scope = build_qualified_name_from_ast(impl_node, source, "rust");
     let impl_qualified_name = if parent_scope.is_empty() {
-        format!("{trait_name} for {for_type}")
+        format!(
+            "{trait_name} for {for_type} at line {}",
+            location.start_line
+        )
     } else {
-        format!("{parent_scope}::{trait_name} for {for_type}")
+        format!(
+            "{parent_scope}::{trait_name} for {for_type} at line {}",
+            location.start_line
+        )
     };
 
     // Extract all methods from impl body

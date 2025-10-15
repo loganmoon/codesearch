@@ -41,7 +41,7 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 
 This is a workspace with these crates:
 - **core**: Foundation types, entities, configuration, error handling
-- **languages**: AST parsing and entity extraction for supported languages (Rust, Python, JS/TS, Go)
+- **languages**: AST parsing and entity extraction. Currently only Rust is fully implemented with complete AST parsing and entity extraction. Python, JavaScript/TypeScript, and Go have partial infrastructure (dependencies, type system, file filtering) but no actual parsing implementation.
 - **embeddings**: Vector embedding providers and local/remote embedding generation
 - **indexer**: Repository indexing logic with Git integration
 - **watcher**: Real-time file system monitoring with ignore patterns

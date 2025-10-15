@@ -198,41 +198,9 @@ pub struct ServerConfig {
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguagesConfig {
-    /// List of enabled languages
+    /// List of enabled languages (currently only "rust" is supported)
     #[serde(default = "default_enabled_languages")]
     pub enabled: Vec<String>,
-
-    /// Python-specific configuration
-    #[serde(default)]
-    pub python: PythonConfig,
-
-    /// JavaScript-specific configuration
-    #[serde(default)]
-    pub javascript: JavaScriptConfig,
-}
-
-/// Python language configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PythonConfig {
-    /// Whether to preserve docstrings with functions
-    #[serde(default = "default_true")]
-    pub preserve_docstrings: bool,
-
-    /// Whether to include type hints
-    #[serde(default = "default_true")]
-    pub include_type_hints: bool,
-}
-
-/// JavaScript/TypeScript language configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct JavaScriptConfig {
-    /// Whether to preserve JSX components intact
-    #[serde(default = "default_true")]
-    pub preserve_jsx: bool,
-
-    /// Whether to treat TypeScript files separately
-    #[serde(default = "default_true")]
-    pub typescript_enabled: bool,
 }
 
 // Default constants
@@ -282,10 +250,6 @@ fn default_embedding_dimension() -> usize {
 
 fn default_embedding_max_workers() -> usize {
     64
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_debounce_ms() -> u64 {
@@ -383,8 +347,6 @@ impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled_languages(),
-            python: PythonConfig::default(),
-            javascript: JavaScriptConfig::default(),
         }
     }
 }

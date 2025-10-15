@@ -58,7 +58,7 @@ struct SearchCodeRequest {
     /// Filter by entity type (e.g., function, method, class, struct)
     entity_type: Option<String>,
 
-    /// Filter by programming language (e.g., rust, python, javascript)
+    /// Filter by programming language (currently only "rust" is supported)
     language: Option<String>,
 
     /// Filter by file path pattern
@@ -290,7 +290,7 @@ impl ServerHandler for CodeSearchMcpServer {
                     "repository_root": self.repository_root.display().to_string(),
                     "collection_name": self.collection_name,
                     "repository_id": self.repository_id.to_string(),
-                    "languages_supported": ["rust", "python", "javascript", "typescript", "go"],
+                    "languages_supported": ["rust"],
                 });
 
                 let text = serde_json::to_string_pretty(&info).map_err(|e| {

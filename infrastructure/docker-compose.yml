@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   vllm-embeddings:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.11.0
     container_name: codesearch-vllm
     ports:
       - "127.0.0.1:8000:8000"  # OpenAI-compatible API - localhost only
@@ -57,6 +57,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:64
     deploy:
       resources:
         reservations:
@@ -72,8 +73,6 @@ services:
       - "bd67852057c5d7ddcc7b8234d9d6c410117ed851"
       - "--task"
       - "embed"
-      - "--gpu-memory-utilization"
-      - "0.8"
       - "--dtype"
       - "float32"
       - "--max-model-len"
@@ -81,7 +80,9 @@ services:
       - "--max-num-batched-tokens"
       - "32768"
       - "--max-num-seqs"
-      - "1024"
+      - "256"
+      - "--gpu_memory_utilization"
+      - "0.5"
       - "--trust-remote-code"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]

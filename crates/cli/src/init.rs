@@ -4,7 +4,7 @@
 //! configuration, Docker containers, database migrations, and repository registration.
 
 use anyhow::{Context, Result};
-use codesearch_core::config::{default_storage_max_entity_batch_size, Config, StorageConfig};
+use codesearch_core::config::{default_max_entities_per_db_operation, Config, StorageConfig};
 use std::env;
 use std::path::Path;
 use tracing::info;
@@ -25,7 +25,7 @@ pub fn create_default_storage_config(collection_name: String) -> StorageConfig {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: default_storage_max_entity_batch_size(),
+        max_entities_per_db_operation: default_max_entities_per_db_operation(),
     }
 }
 

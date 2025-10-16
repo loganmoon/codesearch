@@ -49,8 +49,8 @@ fn validate_database_name(name: &str) -> Result<()> {
 pub struct OutboxProcessorConfig {
     pub postgres: PostgresConfig,
     pub qdrant: QdrantConfig,
-    pub poll_interval_ms: u64,
-    pub batch_size: i64,
+    pub database_poll_interval_ms: u64,
+    pub entries_per_poll: i64,
     pub max_retries: i32,
     pub max_embedding_dim: usize,
 }
@@ -64,12 +64,12 @@ impl OutboxProcessorConfig {
     /// - `POSTGRES_DATABASE` (default: "codesearch") - PostgreSQL database name
     /// - `POSTGRES_USER` (default: "codesearch") - PostgreSQL username
     /// - `POSTGRES_PASSWORD` (default: "codesearch") - PostgreSQL password
-    /// - `MAX_ENTITY_BATCH_SIZE` (default: 1000) - Maximum entities per batch
+    /// - `MAX_ENTITIES_PER_DB_OPERATION` (default: 1000) - Maximum entities per database operation
     /// - `QDRANT_HOST` (default: "localhost") - Qdrant server hostname
     /// - `QDRANT_PORT` (default: 6334) - Qdrant gRPC port
     /// - `QDRANT_REST_PORT` (default: 6333) - Qdrant REST API port
-    /// - `POLL_INTERVAL_MS` (default: 1000) - Outbox polling interval in milliseconds
-    /// - `BATCH_SIZE` (default: 100) - Number of outbox entries to process per batch
+    /// - `DATABASE_POLL_INTERVAL_MS` (default: 1000) - Outbox polling interval in milliseconds
+    /// - `ENTRIES_PER_POLL` (default: 100) - Number of outbox entries to fetch per poll
     /// - `MAX_RETRIES` (default: 3) - Maximum retry attempts for failed operations
     /// - `MAX_EMBEDDING_DIM` (default: 100000) - Maximum embedding dimension size
     ///
@@ -103,7 +103,7 @@ impl OutboxProcessorConfig {
             user: std::env::var("POSTGRES_USER").unwrap_or_else(|_| "codesearch".to_string()),
             password: std::env::var("POSTGRES_PASSWORD")
                 .unwrap_or_else(|_| "codesearch".to_string()),
-            max_entity_batch_size: std::env::var("MAX_ENTITY_BATCH_SIZE")
+            max_entities_per_db_operation: std::env::var("MAX_ENTITIES_PER_DB_OPERATION")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1000),
@@ -124,11 +124,11 @@ impl OutboxProcessorConfig {
         Ok(Self {
             postgres,
             qdrant,
-            poll_interval_ms: std::env::var("POLL_INTERVAL_MS")
+            database_poll_interval_ms: std::env::var("DATABASE_POLL_INTERVAL_MS")
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(1000),
-            batch_size: std::env::var("BATCH_SIZE")
+            entries_per_poll: std::env::var("ENTRIES_PER_POLL")
                 .ok()
                 .and_then(|b| b.parse().ok())
                 .unwrap_or(100),

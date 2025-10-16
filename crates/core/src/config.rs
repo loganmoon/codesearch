@@ -29,25 +29,25 @@ pub struct ConfigSources {
 /// Indexer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexerConfig {
-    /// Batch size for full repository indexing (number of files per batch)
-    #[serde(default = "default_index_batch_size")]
-    pub index_batch_size: usize,
+    /// Number of files discovered together in Stage 1 of the indexing pipeline
+    #[serde(default = "default_files_per_discovery_batch")]
+    pub files_per_discovery_batch: usize,
 
-    /// Channel buffer size for pipeline stages
-    #[serde(default = "default_channel_buffer_size")]
-    pub channel_buffer_size: usize,
+    /// Channel buffer capacity for inter-stage communication in the pipeline
+    #[serde(default = "default_pipeline_channel_capacity")]
+    pub pipeline_channel_capacity: usize,
 
-    /// Maximum entities per batch for embedding generation
-    #[serde(default = "default_indexer_max_entity_batch_size")]
-    pub max_entity_batch_size: usize,
+    /// Maximum entities sent to the embedding API in a single batch
+    #[serde(default = "default_entities_per_embedding_batch")]
+    pub entities_per_embedding_batch: usize,
 
-    /// Concurrent file extractions in Stage 2
-    #[serde(default = "default_file_extraction_concurrency")]
-    pub file_extraction_concurrency: usize,
+    /// Maximum concurrent file parsing operations in Stage 2
+    #[serde(default = "default_max_concurrent_file_extractions")]
+    pub max_concurrent_file_extractions: usize,
 
-    /// Concurrent snapshot updates in Stage 5
-    #[serde(default = "default_snapshot_update_concurrency")]
-    pub snapshot_update_concurrency: usize,
+    /// Maximum concurrent database snapshot updates in Stage 5
+    #[serde(default = "default_max_concurrent_snapshot_updates")]
+    pub max_concurrent_snapshot_updates: usize,
 }
 
 /// Main configuration structure for the codesearch system
@@ -85,9 +85,9 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_model")]
     pub model: String,
 
-    /// Batch size for embedding generation
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
+    /// Number of text chunks sent in a single embedding API request
+    #[serde(default = "default_texts_per_api_request")]
+    pub texts_per_api_request: usize,
 
     /// Device to use: "cuda" or "cpu"
     #[serde(default = "default_device")]
@@ -104,9 +104,9 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_embedding_dimension")]
     pub embedding_dimension: usize,
 
-    /// Maximum number of concurrent embedding workers
-    #[serde(default = "default_embedding_max_workers")]
-    pub max_workers: usize,
+    /// Maximum concurrent embedding API requests
+    #[serde(default = "default_max_concurrent_api_requests")]
+    pub max_concurrent_api_requests: usize,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -114,12 +114,15 @@ impl std::fmt::Debug for EmbeddingsConfig {
         f.debug_struct("EmbeddingsConfig")
             .field("provider", &self.provider)
             .field("model", &self.model)
-            .field("batch_size", &self.batch_size)
+            .field("texts_per_api_request", &self.texts_per_api_request)
             .field("device", &self.device)
             .field("api_base_url", &self.api_base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
             .field("embedding_dimension", &self.embedding_dimension)
-            .field("max_workers", &self.max_workers)
+            .field(
+                "max_concurrent_api_requests",
+                &self.max_concurrent_api_requests,
+            )
             .finish()
     }
 }
@@ -183,9 +186,9 @@ pub struct StorageConfig {
     #[serde(default = "default_postgres_password")]
     pub postgres_password: String,
 
-    /// Maximum number of entities per batch operation
-    #[serde(default = "default_storage_max_entity_batch_size")]
-    pub max_entity_batch_size: usize,
+    /// Maximum entities allowed in a single Postgres batch operation (safety limit)
+    #[serde(default = "default_max_entities_per_db_operation")]
+    pub max_entities_per_db_operation: usize,
 }
 
 impl std::fmt::Debug for StorageConfig {
@@ -202,7 +205,10 @@ impl std::fmt::Debug for StorageConfig {
             .field("postgres_database", &self.postgres_database)
             .field("postgres_user", &self.postgres_user)
             .field("postgres_password", &"***REDACTED***")
-            .field("max_entity_batch_size", &self.max_entity_batch_size)
+            .field(
+                "max_entities_per_db_operation",
+                &self.max_entities_per_db_operation,
+            )
             .finish()
     }
 }
@@ -244,7 +250,7 @@ fn default_enabled_languages() -> Vec<String> {
     ]
 }
 
-fn default_batch_size() -> usize {
+fn default_texts_per_api_request() -> usize {
     128
 }
 
@@ -268,7 +274,7 @@ fn default_embedding_dimension() -> usize {
     1536
 }
 
-fn default_embedding_max_workers() -> usize {
+fn default_max_concurrent_api_requests() -> usize {
     64
 }
 
@@ -323,11 +329,11 @@ fn default_postgres_password() -> String {
     DEFAULT_POSTGRES_PASSWORD.to_string()
 }
 
-fn default_indexer_max_entity_batch_size() -> usize {
+fn default_entities_per_embedding_batch() -> usize {
     2000
 }
 
-pub fn default_storage_max_entity_batch_size() -> usize {
+pub fn default_max_entities_per_db_operation() -> usize {
     10000
 }
 
@@ -335,19 +341,19 @@ fn default_server_port() -> u16 {
     3000
 }
 
-fn default_index_batch_size() -> usize {
+fn default_files_per_discovery_batch() -> usize {
     50
 }
 
-fn default_channel_buffer_size() -> usize {
+fn default_pipeline_channel_capacity() -> usize {
     20
 }
 
-fn default_file_extraction_concurrency() -> usize {
+fn default_max_concurrent_file_extractions() -> usize {
     32
 }
 
-fn default_snapshot_update_concurrency() -> usize {
+fn default_max_concurrent_snapshot_updates() -> usize {
     16
 }
 
@@ -356,12 +362,12 @@ impl Default for EmbeddingsConfig {
         Self {
             provider: default_provider(),
             model: default_model(),
-            batch_size: default_batch_size(),
+            texts_per_api_request: default_texts_per_api_request(),
             device: default_device(),
             api_base_url: default_api_base_url(),
             api_key: None,
             embedding_dimension: default_embedding_dimension(),
-            max_workers: default_embedding_max_workers(),
+            max_concurrent_api_requests: default_max_concurrent_api_requests(),
         }
     }
 }
@@ -394,11 +400,11 @@ impl Default for LanguagesConfig {
 impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
-            index_batch_size: default_index_batch_size(),
-            channel_buffer_size: default_channel_buffer_size(),
-            max_entity_batch_size: default_indexer_max_entity_batch_size(),
-            file_extraction_concurrency: default_file_extraction_concurrency(),
-            snapshot_update_concurrency: default_snapshot_update_concurrency(),
+            files_per_discovery_batch: default_files_per_discovery_batch(),
+            pipeline_channel_capacity: default_pipeline_channel_capacity(),
+            entities_per_embedding_batch: default_entities_per_embedding_batch(),
+            max_concurrent_file_extractions: default_max_concurrent_file_extractions(),
+            max_concurrent_snapshot_updates: default_max_concurrent_snapshot_updates(),
         }
     }
 }
@@ -541,50 +547,61 @@ impl Config {
         }
 
         // Support indexer environment variables
-        if let Ok(batch_size) = std::env::var("CODESEARCH_INDEXER__INDEX_BATCH_SIZE") {
+        if let Ok(batch_size) = std::env::var("CODESEARCH_INDEXER__FILES_PER_DISCOVERY_BATCH") {
             if let Ok(size) = batch_size.parse::<i64>() {
                 builder = builder
-                    .set_override("indexer.index_batch_size", size)
-                    .map_err(|e| Error::config(format!("Failed to set index_batch_size: {e}")))?;
+                    .set_override("indexer.files_per_discovery_batch", size)
+                    .map_err(|e| {
+                        Error::config(format!("Failed to set files_per_discovery_batch: {e}"))
+                    })?;
             }
         }
 
-        if let Ok(buffer_size) = std::env::var("CODESEARCH_INDEXER__CHANNEL_BUFFER_SIZE") {
+        if let Ok(buffer_size) = std::env::var("CODESEARCH_INDEXER__PIPELINE_CHANNEL_CAPACITY") {
             if let Ok(size) = buffer_size.parse::<i64>() {
                 builder = builder
-                    .set_override("indexer.channel_buffer_size", size)
+                    .set_override("indexer.pipeline_channel_capacity", size)
                     .map_err(|e| {
-                        Error::config(format!("Failed to set channel_buffer_size: {e}"))
+                        Error::config(format!("Failed to set pipeline_channel_capacity: {e}"))
                     })?;
             }
         }
 
-        if let Ok(entity_batch) = std::env::var("CODESEARCH_INDEXER__MAX_ENTITY_BATCH_SIZE") {
+        if let Ok(entity_batch) = std::env::var("CODESEARCH_INDEXER__ENTITIES_PER_EMBEDDING_BATCH")
+        {
             if let Ok(size) = entity_batch.parse::<i64>() {
                 builder = builder
-                    .set_override("indexer.max_entity_batch_size", size)
+                    .set_override("indexer.entities_per_embedding_batch", size)
                     .map_err(|e| {
-                        Error::config(format!("Failed to set max_entity_batch_size: {e}"))
+                        Error::config(format!("Failed to set entities_per_embedding_batch: {e}"))
                     })?;
             }
         }
 
-        if let Ok(concurrency) = std::env::var("CODESEARCH_INDEXER__FILE_EXTRACTION_CONCURRENCY") {
+        if let Ok(concurrency) =
+            std::env::var("CODESEARCH_INDEXER__MAX_CONCURRENT_FILE_EXTRACTIONS")
+        {
             if let Ok(val) = concurrency.parse::<i64>() {
                 builder = builder
-                    .set_override("indexer.file_extraction_concurrency", val)
+                    .set_override("indexer.max_concurrent_file_extractions", val)
                     .map_err(|e| {
-                        Error::config(format!("Failed to set file_extraction_concurrency: {e}"))
+                        Error::config(format!(
+                            "Failed to set max_concurrent_file_extractions: {e}"
+                        ))
                     })?;
             }
         }
 
-        if let Ok(concurrency) = std::env::var("CODESEARCH_INDEXER__SNAPSHOT_UPDATE_CONCURRENCY") {
+        if let Ok(concurrency) =
+            std::env::var("CODESEARCH_INDEXER__MAX_CONCURRENT_SNAPSHOT_UPDATES")
+        {
             if let Ok(val) = concurrency.parse::<i64>() {
                 builder = builder
-                    .set_override("indexer.snapshot_update_concurrency", val)
+                    .set_override("indexer.max_concurrent_snapshot_updates", val)
                     .map_err(|e| {
-                        Error::config(format!("Failed to set snapshot_update_concurrency: {e}"))
+                        Error::config(format!(
+                            "Failed to set max_concurrent_snapshot_updates: {e}"
+                        ))
                     })?;
             }
         }
@@ -623,17 +640,17 @@ impl Config {
         self.storage.postgres_database = other.storage.postgres_database;
         self.storage.postgres_user = other.storage.postgres_user;
         self.storage.postgres_password = other.storage.postgres_password;
-        self.storage.max_entity_batch_size = other.storage.max_entity_batch_size;
+        self.storage.max_entities_per_db_operation = other.storage.max_entities_per_db_operation;
 
         // Merge embeddings config
         self.embeddings.provider = other.embeddings.provider;
         self.embeddings.model = other.embeddings.model;
-        self.embeddings.batch_size = other.embeddings.batch_size;
+        self.embeddings.texts_per_api_request = other.embeddings.texts_per_api_request;
         self.embeddings.device = other.embeddings.device;
         self.embeddings.api_base_url = other.embeddings.api_base_url;
         self.embeddings.api_key = other.embeddings.api_key.or(self.embeddings.api_key.clone());
         self.embeddings.embedding_dimension = other.embeddings.embedding_dimension;
-        self.embeddings.max_workers = other.embeddings.max_workers;
+        self.embeddings.max_concurrent_api_requests = other.embeddings.max_concurrent_api_requests;
 
         // Merge watcher config
         self.watcher.debounce_ms = other.watcher.debounce_ms;
@@ -675,7 +692,7 @@ impl Config {
                 postgres_database: default_postgres_database(),
                 postgres_user: default_postgres_user(),
                 postgres_password: default_postgres_password(),
-                max_entity_batch_size: default_storage_max_entity_batch_size(),
+                max_entities_per_db_operation: default_max_entities_per_db_operation(),
             },
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
@@ -737,77 +754,77 @@ impl Config {
             ));
         }
 
-        // Validate max_workers
-        if self.embeddings.max_workers == 0 {
+        // Validate max_concurrent_api_requests
+        if self.embeddings.max_concurrent_api_requests == 0 {
             return Err(Error::config(
-                "embeddings.max_workers must be greater than 0".to_string(),
+                "embeddings.max_concurrent_api_requests must be greater than 0".to_string(),
             ));
         }
-        if self.embeddings.max_workers > 256 {
+        if self.embeddings.max_concurrent_api_requests > 256 {
             return Err(Error::config(format!(
-                "embeddings.max_workers too large (max 256, got {})",
-                self.embeddings.max_workers
+                "embeddings.max_concurrent_api_requests too large (max 256, got {})",
+                self.embeddings.max_concurrent_api_requests
             )));
         }
 
         // Validate indexer configuration
-        if self.indexer.index_batch_size == 0 {
+        if self.indexer.files_per_discovery_batch == 0 {
             return Err(Error::config(
-                "indexer.index_batch_size must be greater than 0".to_string(),
+                "indexer.files_per_discovery_batch must be greater than 0".to_string(),
             ));
         }
-        if self.indexer.index_batch_size > 1000 {
+        if self.indexer.files_per_discovery_batch > 1000 {
             return Err(Error::config(format!(
-                "indexer.index_batch_size too large (max 1000, got {})",
-                self.indexer.index_batch_size
+                "indexer.files_per_discovery_batch too large (max 1000, got {})",
+                self.indexer.files_per_discovery_batch
             )));
         }
 
-        if self.indexer.channel_buffer_size == 0 {
+        if self.indexer.pipeline_channel_capacity == 0 {
             return Err(Error::config(
-                "indexer.channel_buffer_size must be greater than 0".to_string(),
+                "indexer.pipeline_channel_capacity must be greater than 0".to_string(),
             ));
         }
-        if self.indexer.channel_buffer_size > 100 {
+        if self.indexer.pipeline_channel_capacity > 100 {
             return Err(Error::config(format!(
-                "indexer.channel_buffer_size too large (max 100, got {})",
-                self.indexer.channel_buffer_size
+                "indexer.pipeline_channel_capacity too large (max 100, got {})",
+                self.indexer.pipeline_channel_capacity
             )));
         }
 
-        if self.indexer.max_entity_batch_size == 0 {
+        if self.indexer.entities_per_embedding_batch == 0 {
             return Err(Error::config(
-                "indexer.max_entity_batch_size must be greater than 0".to_string(),
+                "indexer.entities_per_embedding_batch must be greater than 0".to_string(),
             ));
         }
-        if self.indexer.max_entity_batch_size > 2000 {
+        if self.indexer.entities_per_embedding_batch > 2000 {
             return Err(Error::config(format!(
-                "indexer.max_entity_batch_size too large (max 2000, got {})",
-                self.indexer.max_entity_batch_size
+                "indexer.entities_per_embedding_batch too large (max 2000, got {})",
+                self.indexer.entities_per_embedding_batch
             )));
         }
 
-        if self.indexer.file_extraction_concurrency == 0 {
+        if self.indexer.max_concurrent_file_extractions == 0 {
             return Err(Error::config(
-                "indexer.file_extraction_concurrency must be greater than 0".to_string(),
+                "indexer.max_concurrent_file_extractions must be greater than 0".to_string(),
             ));
         }
-        if self.indexer.file_extraction_concurrency > 128 {
+        if self.indexer.max_concurrent_file_extractions > 128 {
             return Err(Error::config(format!(
-                "indexer.file_extraction_concurrency too large (max 128, got {})",
-                self.indexer.file_extraction_concurrency
+                "indexer.max_concurrent_file_extractions too large (max 128, got {})",
+                self.indexer.max_concurrent_file_extractions
             )));
         }
 
-        if self.indexer.snapshot_update_concurrency == 0 {
+        if self.indexer.max_concurrent_snapshot_updates == 0 {
             return Err(Error::config(
-                "indexer.snapshot_update_concurrency must be greater than 0".to_string(),
+                "indexer.max_concurrent_snapshot_updates must be greater than 0".to_string(),
             ));
         }
-        if self.indexer.snapshot_update_concurrency > 128 {
+        if self.indexer.max_concurrent_snapshot_updates > 128 {
             return Err(Error::config(format!(
-                "indexer.snapshot_update_concurrency too large (max 128, got {})",
-                self.indexer.snapshot_update_concurrency
+                "indexer.max_concurrent_snapshot_updates too large (max 128, got {})",
+                self.indexer.max_concurrent_snapshot_updates
             )));
         }
 

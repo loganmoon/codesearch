@@ -44,9 +44,9 @@ pub async fn create_embedding_manager_from_app_config(
     let mut config_builder = EmbeddingConfigBuilder::default()
         .provider(parse_provider_type(&embeddings_config.provider))
         .model(embeddings_config.model.clone())
-        .batch_size(embeddings_config.batch_size)
+        .texts_per_api_request(embeddings_config.texts_per_api_request)
         .embedding_dimension(embeddings_config.embedding_dimension)
-        .max_workers(embeddings_config.max_workers);
+        .max_concurrent_api_requests(embeddings_config.max_concurrent_api_requests);
 
     if let Some(ref api_base_url) = embeddings_config.api_base_url {
         config_builder = config_builder.api_base_url(api_base_url.clone());

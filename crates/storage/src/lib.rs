@@ -188,7 +188,7 @@ pub struct PostgresConfig {
     pub database: String,
     pub user: String,
     pub password: String,
-    pub max_entity_batch_size: usize,
+    pub max_entities_per_db_operation: usize,
 }
 
 /// Create a StorageClient for a specific collection using provided config
@@ -293,7 +293,7 @@ pub async fn create_postgres_client(
 
     Ok(Arc::new(postgres::PostgresClient::new(
         pool,
-        config.max_entity_batch_size,
+        config.max_entities_per_db_operation,
     )) as Arc<dyn postgres::PostgresClientTrait>)
 }
 
@@ -365,6 +365,6 @@ pub async fn create_postgres_client_from_config(
 
     Ok(Arc::new(postgres::PostgresClient::new(
         pool,
-        config.max_entity_batch_size,
+        config.max_entities_per_db_operation,
     )) as Arc<dyn postgres::PostgresClientTrait>)
 }

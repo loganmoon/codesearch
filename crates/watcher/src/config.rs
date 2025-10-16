@@ -20,11 +20,11 @@ pub struct WatcherConfig {
     /// Maximum recursion depth for directory watching (default: 50)
     pub recursive_depth: u32,
     /// Maximum number of events in queue (default: 100000)
-    pub max_queue_size: usize,
-    /// Batch size for processing events (default: 100)
-    pub batch_size: usize,
-    /// Batch timeout in milliseconds (default: 1000ms)
-    pub batch_timeout_ms: u64,
+    pub max_queued_events: usize,
+    /// Number of file system events batched before processing (default: 100)
+    pub events_per_batch: usize,
+    /// Maximum time to wait before processing a partial batch (default: 1000ms)
+    pub max_batch_wait_time_ms: u64,
     /// Enable performance monitoring (default: false)
     pub enable_metrics: bool,
 }
@@ -47,7 +47,7 @@ impl WatcherConfig {
 
     /// Get the batch timeout duration
     pub fn batch_timeout_duration(&self) -> Duration {
-        Duration::from_millis(self.batch_timeout_ms)
+        Duration::from_millis(self.max_batch_wait_time_ms)
     }
 
     /// Check if a file size exceeds the limit
@@ -114,9 +114,9 @@ impl Default for WatcherConfig {
             max_file_size: 10 * 1024 * 1024, // 10MB
             follow_symlinks: false,
             recursive_depth: 50,
-            max_queue_size: 100000, // Increased to handle burst activity from editors
-            batch_size: 100,
-            batch_timeout_ms: 1000,
+            max_queued_events: 100000, // Increased to handle burst activity from editors
+            events_per_batch: 100,
+            max_batch_wait_time_ms: 1000,
             enable_metrics: false,
         }
     }
@@ -166,20 +166,20 @@ impl WatcherConfigBuilder {
     }
 
     /// Set maximum queue size
-    pub fn max_queue_size(mut self, size: usize) -> Self {
-        self.config.max_queue_size = size;
+    pub fn max_queued_events(mut self, size: usize) -> Self {
+        self.config.max_queued_events = size;
         self
     }
 
-    /// Set batch size
-    pub fn batch_size(mut self, size: usize) -> Self {
-        self.config.batch_size = size;
+    /// Set events per batch
+    pub fn events_per_batch(mut self, size: usize) -> Self {
+        self.config.events_per_batch = size;
         self
     }
 
-    /// Set batch timeout in milliseconds
-    pub fn batch_timeout_ms(mut self, ms: u64) -> Self {
-        self.config.batch_timeout_ms = ms;
+    /// Set maximum batch wait time in milliseconds
+    pub fn max_batch_wait_time_ms(mut self, ms: u64) -> Self {
+        self.config.max_batch_wait_time_ms = ms;
         self
     }
 
@@ -409,7 +409,7 @@ mod tests {
     fn test_config_durations() {
         let config = WatcherConfig {
             debounce_ms: 500,
-            batch_timeout_ms: 1000,
+            max_batch_wait_time_ms: 1000,
             ..Default::default()
         };
 
@@ -459,10 +459,10 @@ mod tests {
     }
 
     #[test]
-    fn test_max_queue_size_increased() {
+    fn test_max_queued_events_increased() {
         let config = WatcherConfig::default();
         assert_eq!(
-            config.max_queue_size, 100000,
+            config.max_queued_events, 100000,
             "Channel size should be increased to 100000 to handle burst activity"
         );
     }

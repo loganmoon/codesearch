@@ -273,11 +273,11 @@ async fn index_repository(
 
     // Convert core config to indexer config
     let indexer_config = codesearch_indexer::IndexerConfig::new()
-        .with_index_batch_size(config.indexer.index_batch_size)
-        .with_channel_buffer_size(config.indexer.channel_buffer_size)
-        .with_max_entity_batch_size(config.indexer.max_entity_batch_size)
-        .with_file_extraction_concurrency(config.indexer.file_extraction_concurrency)
-        .with_snapshot_update_concurrency(config.indexer.snapshot_update_concurrency);
+        .with_index_batch_size(config.indexer.files_per_discovery_batch)
+        .with_channel_buffer_size(config.indexer.pipeline_channel_capacity)
+        .with_max_entity_batch_size(config.indexer.entities_per_embedding_batch)
+        .with_file_extraction_concurrency(config.indexer.max_concurrent_file_extractions)
+        .with_snapshot_update_concurrency(config.indexer.max_concurrent_snapshot_updates);
 
     // Create and run indexer
     tracing::debug!(

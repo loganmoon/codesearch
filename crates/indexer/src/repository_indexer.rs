@@ -418,8 +418,7 @@ async fn stage_store_entities(
 
         // Process in chunks to respect max_entity_batch_size
         for chunk_start in (0..batch.entity_embedding_pairs.len()).step_by(max_batch_size) {
-            let chunk_end =
-                (chunk_start + max_batch_size).min(batch.entity_embedding_pairs.len());
+            let chunk_end = (chunk_start + max_batch_size).min(batch.entity_embedding_pairs.len());
             let chunk = &batch.entity_embedding_pairs[chunk_start..chunk_end];
 
             // Batch fetch existing metadata for this chunk

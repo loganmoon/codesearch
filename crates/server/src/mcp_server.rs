@@ -414,7 +414,7 @@ async fn setup_file_watcher(
     let watcher_config = WatcherConfig::builder()
         .debounce_ms(DEFAULT_DEBOUNCE_MS)
         .max_file_size(MAX_FILE_SIZE_BYTES)
-        .batch_size(100)
+        .events_per_batch(100)
         .build();
 
     let mut watcher = FileWatcher::new(watcher_config).context("Failed to create file watcher")?;

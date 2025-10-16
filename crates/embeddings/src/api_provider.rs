@@ -64,9 +64,9 @@ impl OpenAiApiProvider {
             model: config.model,
             dimensions: config.embedding_dimension,
             max_context,
-            batch_size: config.batch_size,
-            max_workers: config.max_workers,
-            concurrency_limiter: Arc::new(Semaphore::new(config.max_workers)),
+            batch_size: config.texts_per_api_request,
+            max_workers: config.max_concurrent_api_requests,
+            concurrency_limiter: Arc::new(Semaphore::new(config.max_concurrent_api_requests)),
         })
     }
 

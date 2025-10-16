@@ -77,7 +77,7 @@ impl MockPostgresClient {
     pub fn new() -> Self {
         Self {
             data: Arc::new(Mutex::new(MockData::default())),
-            max_entity_batch_size: 1000, // Default for tests
+            max_entity_batch_size: 10000, // Default for tests
         }
     }
 

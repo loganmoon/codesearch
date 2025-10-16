@@ -134,6 +134,7 @@ impl IndexStats {
     }
 
     /// Merge another stats instance into this one (for internal use)
+    #[allow(dead_code)]
     pub(crate) fn merge(&mut self, other: IndexStats) {
         self.total_files += other.total_files;
         self.failed_files += other.failed_files;
@@ -197,6 +198,7 @@ pub fn create_indexer(
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
+    config: config::IndexerConfig,
 ) -> Result<Box<dyn Indexer>> {
     Ok(Box::new(repository_indexer::RepositoryIndexer::new(
         repository_path,
@@ -204,6 +206,7 @@ pub fn create_indexer(
         embedding_manager,
         postgres_client,
         git_repo,
+        config,
     )?))
 }
 

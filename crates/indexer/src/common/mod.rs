@@ -59,31 +59,15 @@ const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[
 ];
 
 /// Supported file extensions for indexing
+/// Note: Only Rust is fully implemented. Python, JS/TS, and Go have partial infrastructure.
 const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "rs",    // Rust
-    "py",    // Python
-    "js",    // JavaScript
-    "jsx",   // React JavaScript
-    "ts",    // TypeScript
-    "tsx",   // React TypeScript
-    "go",    // Go
-    "java",  // Java
-    "c",     // C
-    "cpp",   // C++
-    "cc",    // C++
-    "cxx",   // C++
-    "h",     // C/C++ headers
-    "hpp",   // C++ headers
-    "cs",    // C#
-    "rb",    // Ruby
-    "php",   // PHP
-    "swift", // Swift
-    "kt",    // Kotlin
-    "scala", // Scala
-    "r",     // R
-    "lua",   // Lua
-    "dart",  // Dart
-    "zig",   // Zig
+    "rs",  // Rust (fully implemented)
+    "py",  // Python (partial infrastructure, no parsing)
+    "js",  // JavaScript (partial infrastructure, no parsing)
+    "jsx", // React JavaScript (partial infrastructure, no parsing)
+    "ts",  // TypeScript (partial infrastructure, no parsing)
+    "tsx", // React TypeScript (partial infrastructure, no parsing)
+    "go",  // Go (partial infrastructure, no parsing)
 ];
 
 /// Find all files in a directory that should be indexed

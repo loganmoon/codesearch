@@ -21,8 +21,8 @@ pub struct EmbeddingConfig {
     /// Model name or path
     pub(crate) model: String,
 
-    /// Batch size for processing
-    pub(crate) batch_size: usize,
+    /// Number of text chunks sent in a single embedding API request
+    pub(crate) texts_per_api_request: usize,
 
     /// API base URL for LocalApi provider
     pub(crate) api_base_url: Option<String>,
@@ -33,24 +33,24 @@ pub struct EmbeddingConfig {
     /// Embedding dimension size
     pub(crate) embedding_dimension: usize,
 
-    /// Maximum number of concurrent workers
-    pub(crate) max_workers: usize,
+    /// Maximum concurrent embedding API requests
+    pub(crate) max_concurrent_api_requests: usize,
 }
 
 impl EmbeddingConfig {
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), String> {
-        if self.batch_size == 0 {
-            return Err("Batch size must be greater than 0".to_string());
+        if self.texts_per_api_request == 0 {
+            return Err("texts_per_api_request must be greater than 0".to_string());
         }
-        if self.batch_size > 1000 {
-            return Err("Batch size too large (max 1000)".to_string());
+        if self.texts_per_api_request > 2000 {
+            return Err("texts_per_api_request too large (max 2000)".to_string());
         }
-        if self.max_workers == 0 {
-            return Err("Max workers must be greater than 0".to_string());
+        if self.max_concurrent_api_requests == 0 {
+            return Err("max_concurrent_api_requests must be greater than 0".to_string());
         }
-        if self.max_workers > 32 {
-            return Err("Max workers too large (max 32)".to_string());
+        if self.max_concurrent_api_requests > 256 {
+            return Err("max_concurrent_api_requests too large (max 256)".to_string());
         }
         if self.model.is_empty() {
             return Err("Model name cannot be empty".to_string());
@@ -67,11 +67,11 @@ impl Default for EmbeddingConfig {
         Self {
             provider: EmbeddingProviderType::default(),
             model: "BAAI/bge-code-v1".to_string(),
-            batch_size: 32,
+            texts_per_api_request: 128,
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
             embedding_dimension: 1536,
-            max_workers: 4,
+            max_concurrent_api_requests: 64,
         }
     }
 }
@@ -80,11 +80,11 @@ impl Default for EmbeddingConfig {
 pub struct EmbeddingConfigBuilder {
     provider: Option<EmbeddingProviderType>,
     model: Option<String>,
-    batch_size: Option<usize>,
+    texts_per_api_request: Option<usize>,
     api_base_url: Option<Option<String>>,
     api_key: Option<Option<String>>,
     embedding_dimension: Option<usize>,
-    max_workers: Option<usize>,
+    max_concurrent_api_requests: Option<usize>,
 }
 
 impl EmbeddingConfigBuilder {
@@ -93,11 +93,11 @@ impl EmbeddingConfigBuilder {
         Self {
             provider: None,
             model: None,
-            batch_size: None,
+            texts_per_api_request: None,
             api_base_url: None,
             api_key: None,
             embedding_dimension: None,
-            max_workers: None,
+            max_concurrent_api_requests: None,
         }
     }
 
@@ -113,9 +113,9 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the batch size
-    pub fn batch_size(mut self, batch_size: usize) -> Self {
-        self.batch_size = Some(batch_size);
+    /// Set the number of texts per API request
+    pub fn texts_per_api_request(mut self, texts_per_api_request: usize) -> Self {
+        self.texts_per_api_request = Some(texts_per_api_request);
         self
     }
 
@@ -137,9 +137,9 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the maximum number of workers
-    pub fn max_workers(mut self, max_workers: usize) -> Self {
-        self.max_workers = Some(max_workers);
+    /// Set the maximum number of concurrent API requests
+    pub fn max_concurrent_api_requests(mut self, max_concurrent_api_requests: usize) -> Self {
+        self.max_concurrent_api_requests = Some(max_concurrent_api_requests);
         self
     }
 
@@ -150,13 +150,17 @@ impl EmbeddingConfigBuilder {
         EmbeddingConfig {
             provider: self.provider.unwrap_or(defaults.provider),
             model: self.model.unwrap_or(defaults.model),
-            batch_size: self.batch_size.unwrap_or(defaults.batch_size),
+            texts_per_api_request: self
+                .texts_per_api_request
+                .unwrap_or(defaults.texts_per_api_request),
             api_base_url: self.api_base_url.unwrap_or(defaults.api_base_url),
             api_key: self.api_key.unwrap_or(defaults.api_key),
             embedding_dimension: self
                 .embedding_dimension
                 .unwrap_or(defaults.embedding_dimension),
-            max_workers: self.max_workers.unwrap_or(defaults.max_workers),
+            max_concurrent_api_requests: self
+                .max_concurrent_api_requests
+                .unwrap_or(defaults.max_concurrent_api_requests),
         }
     }
 }

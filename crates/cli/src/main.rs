@@ -43,7 +43,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start MCP server with semantic code search
-    Serve,
+    Serve {
+        /// Collection name to serve (overrides config file)
+        #[arg(long)]
+        collection: Option<String>,
+    },
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -63,9 +67,9 @@ async fn main() -> Result<()> {
 
     // Execute commands
     match cli.command {
-        Some(Commands::Serve) => {
+        Some(Commands::Serve { collection }) => {
             // Serve doesn't need to be run from a repository
-            serve(cli.config.as_deref()).await
+            serve(cli.config.as_deref(), collection.as_deref()).await
         }
         Some(Commands::Index { force }) => {
             // Find repository root
@@ -131,11 +135,11 @@ fn find_repository_root() -> Result<PathBuf> {
 }
 
 /// Start the MCP server
-async fn serve(config_path: Option<&Path>) -> Result<()> {
+async fn serve(config_path: Option<&Path>, collection_override: Option<&str>) -> Result<()> {
     info!("Preparing to start MCP server...");
 
-    // Load configuration (from global config by default)
-    let config = codesearch::init::load_config_for_serve(config_path).await?;
+    // Load configuration using layered approach
+    let config = codesearch::init::load_config_for_serve(config_path, collection_override).await?;
 
     // Connect to Postgres to look up repository info
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
@@ -249,7 +253,11 @@ async fn index_repository(
             )
         })?;
 
-    info!("Repository ID: {}", repository_id);
+    info!(
+        repository_id = %repository_id,
+        collection_name = %config.storage.collection_name,
+        "Repository ID retrieved for indexing"
+    );
 
     // Create GitRepository if possible
     let git_repo = match codesearch_watcher::GitRepository::open(repo_root) {
@@ -263,13 +271,26 @@ async fn index_repository(
         }
     };
 
+    // Convert core config to indexer config
+    let indexer_config = codesearch_indexer::IndexerConfig::new()
+        .with_index_batch_size(config.indexer.files_per_discovery_batch)
+        .with_channel_buffer_size(config.indexer.pipeline_channel_capacity)
+        .with_max_entity_batch_size(config.indexer.entities_per_embedding_batch)
+        .with_file_extraction_concurrency(config.indexer.max_concurrent_file_extractions)
+        .with_snapshot_update_concurrency(config.indexer.max_concurrent_snapshot_updates);
+
     // Create and run indexer
+    tracing::debug!(
+        repository_id_string = %repository_id.to_string(),
+        "Creating RepositoryIndexer with repository_id"
+    );
     let mut indexer = RepositoryIndexer::new(
         repo_root.to_path_buf(),
         repository_id.to_string(),
         embedding_manager,
         postgres_client,
         git_repo,
+        indexer_config,
     )?;
 
     // Run indexing

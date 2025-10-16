@@ -57,8 +57,8 @@ async fn main() -> Result<()> {
     let processor = OutboxProcessor::new(
         postgres_client,
         config.qdrant.clone(),
-        Duration::from_millis(config.poll_interval_ms),
-        config.batch_size,
+        Duration::from_millis(config.database_poll_interval_ms),
+        config.entries_per_poll,
         config.max_retries,
         config.max_embedding_dim,
     );

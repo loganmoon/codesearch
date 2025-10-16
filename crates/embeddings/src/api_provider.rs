@@ -5,6 +5,7 @@ use async_openai::types::{CreateEmbeddingRequest, EmbeddingInput};
 use async_openai::{config::OpenAIConfig, Client};
 use async_trait::async_trait;
 use codesearch_core::error::Result;
+use futures::stream::{self, StreamExt};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -16,6 +17,7 @@ pub struct OpenAiApiProvider {
     dimensions: usize,
     max_context: usize,
     batch_size: usize,
+    max_workers: usize,
     concurrency_limiter: Arc<Semaphore>,
 }
 
@@ -62,8 +64,9 @@ impl OpenAiApiProvider {
             model: config.model,
             dimensions: config.embedding_dimension,
             max_context,
-            batch_size: config.batch_size,
-            concurrency_limiter: Arc::new(Semaphore::new(config.max_workers)),
+            batch_size: config.texts_per_api_request,
+            max_workers: config.max_concurrent_api_requests,
+            concurrency_limiter: Arc::new(Semaphore::new(config.max_concurrent_api_requests)),
         })
     }
 
@@ -86,55 +89,6 @@ impl OpenAiApiProvider {
             }
         }
     }
-
-    /// Generate embeddings by calling the API
-    async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        debug!("Sending embedding request for {} texts", texts.len());
-
-        // Create embedding request using async-openai types
-        let request = CreateEmbeddingRequest {
-            model: self.model.clone(),
-            input: EmbeddingInput::StringArray(texts),
-            encoding_format: None,
-            dimensions: None,
-            user: None,
-        };
-
-        // Call API using async-openai client
-        let response = self
-            .client
-            .embeddings()
-            .create(request)
-            .await
-            .map_err(|e| EmbeddingError::InferenceError(format!("API request failed: {e}")))?;
-
-        // Extract embeddings and sort by index
-        let mut embeddings: Vec<(usize, Vec<f32>)> = response
-            .data
-            .into_iter()
-            .map(|embedding_data| (embedding_data.index as usize, embedding_data.embedding))
-            .collect();
-        embeddings.sort_by_key(|(idx, _)| *idx);
-
-        // Validate dimensions
-        let results: Vec<Vec<f32>> = embeddings
-            .into_iter()
-            .map(|(_, embedding)| -> Result<Vec<f32>> {
-                if embedding.len() != self.dimensions {
-                    return Err(EmbeddingError::InferenceError(format!(
-                        "Dimension mismatch: expected {}, got {}",
-                        self.dimensions,
-                        embedding.len()
-                    ))
-                    .into());
-                }
-                Ok(embedding)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        debug!("Received {} embeddings", results.len());
-        Ok(results)
-    }
 }
 
 #[async_trait]
@@ -152,53 +106,96 @@ impl EmbeddingProvider for OpenAiApiProvider {
             .map(|chunk| chunk.to_vec())
             .collect();
 
-        for chunk in chunks {
-            // Pre-filter texts by length (simple char-based heuristic)
-            let mut texts_to_embed = Vec::new();
-            let mut indices_to_embed = Vec::new();
-            let mut chunk_results = vec![None; chunk.len()];
+        let results = stream::iter(chunks)
+            .map(|chunk| {
+                let limiter = self.concurrency_limiter.clone();
+                let client = self.client.clone();
+                let model = self.model.clone();
+                let max_context = self.max_context;
+                let dimensions = self.dimensions;
 
-            for (i, text) in chunk.iter().enumerate() {
-                if text.chars().count() <= self.max_context {
-                    texts_to_embed.push(text.clone());
-                    indices_to_embed.push(i);
-                } else {
-                    debug!(
-                        "Text at index {} exceeds max_context ({} > {}), skipping",
-                        i,
-                        text.len(),
-                        self.max_context
-                    );
-                }
-                // Texts exceeding limit remain as None
-            }
+                async move {
+                    // Pre-filter texts by length (simple char-based heuristic)
+                    let mut texts_to_embed = Vec::new();
+                    let mut indices_to_embed = Vec::new();
+                    let mut chunk_results = vec![None; chunk.len()];
 
-            if !texts_to_embed.is_empty() {
-                // Acquire semaphore permit for concurrency control
-                let permit = self
-                    .concurrency_limiter
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|e| {
+                    for (i, text) in chunk.iter().enumerate() {
+                        if text.chars().count() <= max_context {
+                            texts_to_embed.push(text.clone());
+                            indices_to_embed.push(i);
+                        } else {
+                            debug!(
+                                "Text at index {} exceeds max_context ({} > {}), skipping",
+                                i,
+                                text.len(),
+                                max_context
+                            );
+                        }
+                        // Texts exceeding limit remain as None
+                    }
+
+                    if texts_to_embed.is_empty() {
+                        return Ok::<_, EmbeddingError>(chunk_results);
+                    }
+
+                    // Acquire semaphore permit for concurrency control
+                    let _permit = limiter.acquire_owned().await.map_err(|e| {
                         EmbeddingError::InferenceError(format!(
                             "Failed to acquire concurrency permit: {e}"
                         ))
                     })?;
 
-                // Generate embeddings
-                let mut embeddings = {
-                    let _permit = permit; // Keep permit alive
-                    self.embed_batch(texts_to_embed).await?
-                };
+                    // Generate embeddings via API call
+                    let request = CreateEmbeddingRequest {
+                        model: model.clone(),
+                        input: EmbeddingInput::StringArray(texts_to_embed),
+                        encoding_format: None,
+                        dimensions: None,
+                        user: None,
+                    };
 
-                // Place embeddings at their original indices (consuming vector)
-                for orig_idx in indices_to_embed.into_iter() {
-                    chunk_results[orig_idx] = Some(embeddings.swap_remove(0));
+                    let response = client.embeddings().create(request).await.map_err(|e| {
+                        EmbeddingError::InferenceError(format!("API request failed: {e}"))
+                    })?;
+
+                    // Extract embeddings and sort by index
+                    let mut sorted_embeddings: Vec<(usize, Vec<f32>)> = response
+                        .data
+                        .into_iter()
+                        .map(|emb| (emb.index as usize, emb.embedding))
+                        .collect();
+                    sorted_embeddings.sort_by_key(|(idx, _)| *idx);
+
+                    // Validate dimensions
+                    for (_, embedding) in &sorted_embeddings {
+                        if embedding.len() != dimensions {
+                            return Err(EmbeddingError::InferenceError(format!(
+                                "Dimension mismatch: expected {}, got {}",
+                                dimensions,
+                                embedding.len()
+                            )));
+                        }
+                    }
+
+                    // Place embeddings at their original indices
+                    for (result_idx, orig_idx) in indices_to_embed.into_iter().enumerate() {
+                        chunk_results[orig_idx] = Some(sorted_embeddings[result_idx].1.clone());
+                    }
+
+                    Ok(chunk_results)
                 }
-            }
+            })
+            .buffer_unordered(self.max_workers)
+            .collect::<Vec<_>>()
+            .await;
 
-            all_embeddings.extend(chunk_results);
+        // Flatten results
+        for result in results {
+            all_embeddings.extend(
+                result
+                    .map_err(|e: EmbeddingError| -> codesearch_core::error::Error { e.into() })?,
+            );
         }
 
         Ok(all_embeddings)

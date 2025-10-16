@@ -58,7 +58,7 @@ struct SearchCodeRequest {
     /// Filter by entity type (e.g., function, method, class, struct)
     entity_type: Option<String>,
 
-    /// Filter by programming language (e.g., rust, python, javascript)
+    /// Filter by programming language (currently only "rust" is supported)
     language: Option<String>,
 
     /// Filter by file path pattern
@@ -290,7 +290,7 @@ impl ServerHandler for CodeSearchMcpServer {
                     "repository_root": self.repository_root.display().to_string(),
                     "collection_name": self.collection_name,
                     "repository_id": self.repository_id.to_string(),
-                    "languages_supported": ["rust", "python", "javascript", "typescript", "go"],
+                    "languages_supported": ["rust"],
                 });
 
                 let text = serde_json::to_string_pretty(&info).map_err(|e| {
@@ -414,7 +414,7 @@ async fn setup_file_watcher(
     let watcher_config = WatcherConfig::builder()
         .debounce_ms(DEFAULT_DEBOUNCE_MS)
         .max_file_size(MAX_FILE_SIZE_BYTES)
-        .batch_size(100)
+        .events_per_batch(100)
         .build();
 
     let mut watcher = FileWatcher::new(watcher_config).context("Failed to create file watcher")?;

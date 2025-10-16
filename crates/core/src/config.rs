@@ -6,16 +6,49 @@ use std::path::{Path, PathBuf};
 /// Returns the path to the global configuration file
 ///
 /// The global config is stored at `~/.codesearch/config.toml` and contains
-/// the default collection name and settings for the codesearch server.
+/// user preferences that apply across all repositories.
 pub fn global_config_path() -> Result<PathBuf> {
     let home_dir = dirs::home_dir()
         .ok_or_else(|| Error::config("Unable to determine home directory".to_string()))?;
     Ok(home_dir.join(".codesearch").join("config.toml"))
 }
 
+/// Tracks which configuration sources were loaded
+#[derive(Debug, Clone, Default)]
+pub struct ConfigSources {
+    /// Whether global config was loaded
+    pub global_loaded: bool,
+    /// Whether repo-local config was loaded
+    pub local_loaded: bool,
+    /// Path to global config (if loaded)
+    pub global_path: Option<PathBuf>,
+    /// Path to local config (if loaded)
+    pub local_path: Option<PathBuf>,
+}
+
 /// Indexer configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct IndexerConfig {}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexerConfig {
+    /// Number of files discovered together in Stage 1 of the indexing pipeline
+    #[serde(default = "default_files_per_discovery_batch")]
+    pub files_per_discovery_batch: usize,
+
+    /// Channel buffer capacity for inter-stage communication in the pipeline
+    #[serde(default = "default_pipeline_channel_capacity")]
+    pub pipeline_channel_capacity: usize,
+
+    /// Maximum entities sent to the embedding API in a single batch
+    #[serde(default = "default_entities_per_embedding_batch")]
+    pub entities_per_embedding_batch: usize,
+
+    /// Maximum concurrent file parsing operations in Stage 2
+    #[serde(default = "default_max_concurrent_file_extractions")]
+    pub max_concurrent_file_extractions: usize,
+
+    /// Maximum concurrent database snapshot updates in Stage 5
+    #[serde(default = "default_max_concurrent_snapshot_updates")]
+    pub max_concurrent_snapshot_updates: usize,
+}
 
 /// Main configuration structure for the codesearch system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,9 +85,9 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_model")]
     pub model: String,
 
-    /// Batch size for embedding generation
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
+    /// Number of text chunks sent in a single embedding API request
+    #[serde(default = "default_texts_per_api_request")]
+    pub texts_per_api_request: usize,
 
     /// Device to use: "cuda" or "cpu"
     #[serde(default = "default_device")]
@@ -70,6 +103,10 @@ pub struct EmbeddingsConfig {
     /// Embedding dimension size
     #[serde(default = "default_embedding_dimension")]
     pub embedding_dimension: usize,
+
+    /// Maximum concurrent embedding API requests
+    #[serde(default = "default_max_concurrent_api_requests")]
+    pub max_concurrent_api_requests: usize,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -77,11 +114,15 @@ impl std::fmt::Debug for EmbeddingsConfig {
         f.debug_struct("EmbeddingsConfig")
             .field("provider", &self.provider)
             .field("model", &self.model)
-            .field("batch_size", &self.batch_size)
+            .field("texts_per_api_request", &self.texts_per_api_request)
             .field("device", &self.device)
             .field("api_base_url", &self.api_base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
             .field("embedding_dimension", &self.embedding_dimension)
+            .field(
+                "max_concurrent_api_requests",
+                &self.max_concurrent_api_requests,
+            )
             .finish()
     }
 }
@@ -145,9 +186,9 @@ pub struct StorageConfig {
     #[serde(default = "default_postgres_password")]
     pub postgres_password: String,
 
-    /// Maximum number of entities per batch operation
-    #[serde(default = "default_max_entity_batch_size")]
-    pub max_entity_batch_size: usize,
+    /// Maximum entities allowed in a single Postgres batch operation (safety limit)
+    #[serde(default = "default_max_entities_per_db_operation")]
+    pub max_entities_per_db_operation: usize,
 }
 
 impl std::fmt::Debug for StorageConfig {
@@ -164,7 +205,10 @@ impl std::fmt::Debug for StorageConfig {
             .field("postgres_database", &self.postgres_database)
             .field("postgres_user", &self.postgres_user)
             .field("postgres_password", &"***REDACTED***")
-            .field("max_entity_batch_size", &self.max_entity_batch_size)
+            .field(
+                "max_entities_per_db_operation",
+                &self.max_entities_per_db_operation,
+            )
             .finish()
     }
 }
@@ -180,41 +224,9 @@ pub struct ServerConfig {
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguagesConfig {
-    /// List of enabled languages
+    /// List of enabled languages (currently only "rust" is supported)
     #[serde(default = "default_enabled_languages")]
     pub enabled: Vec<String>,
-
-    /// Python-specific configuration
-    #[serde(default)]
-    pub python: PythonConfig,
-
-    /// JavaScript-specific configuration
-    #[serde(default)]
-    pub javascript: JavaScriptConfig,
-}
-
-/// Python language configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PythonConfig {
-    /// Whether to preserve docstrings with functions
-    #[serde(default = "default_true")]
-    pub preserve_docstrings: bool,
-
-    /// Whether to include type hints
-    #[serde(default = "default_true")]
-    pub include_type_hints: bool,
-}
-
-/// JavaScript/TypeScript language configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct JavaScriptConfig {
-    /// Whether to preserve JSX components intact
-    #[serde(default = "default_true")]
-    pub preserve_jsx: bool,
-
-    /// Whether to treat TypeScript files separately
-    #[serde(default = "default_true")]
-    pub typescript_enabled: bool,
 }
 
 // Default constants
@@ -238,8 +250,8 @@ fn default_enabled_languages() -> Vec<String> {
     ]
 }
 
-fn default_batch_size() -> usize {
-    32
+fn default_texts_per_api_request() -> usize {
+    128
 }
 
 fn default_device() -> String {
@@ -262,8 +274,8 @@ fn default_embedding_dimension() -> usize {
     1536
 }
 
-fn default_true() -> bool {
-    true
+fn default_max_concurrent_api_requests() -> usize {
+    64
 }
 
 fn default_debounce_ms() -> u64 {
@@ -317,12 +329,32 @@ fn default_postgres_password() -> String {
     DEFAULT_POSTGRES_PASSWORD.to_string()
 }
 
-fn default_max_entity_batch_size() -> usize {
-    1000
+fn default_entities_per_embedding_batch() -> usize {
+    2000
+}
+
+pub fn default_max_entities_per_db_operation() -> usize {
+    10000
 }
 
 fn default_server_port() -> u16 {
     3000
+}
+
+fn default_files_per_discovery_batch() -> usize {
+    50
+}
+
+fn default_pipeline_channel_capacity() -> usize {
+    20
+}
+
+fn default_max_concurrent_file_extractions() -> usize {
+    32
+}
+
+fn default_max_concurrent_snapshot_updates() -> usize {
+    16
 }
 
 impl Default for EmbeddingsConfig {
@@ -330,11 +362,12 @@ impl Default for EmbeddingsConfig {
         Self {
             provider: default_provider(),
             model: default_model(),
-            batch_size: default_batch_size(),
+            texts_per_api_request: default_texts_per_api_request(),
             device: default_device(),
             api_base_url: default_api_base_url(),
             api_key: None,
             embedding_dimension: default_embedding_dimension(),
+            max_concurrent_api_requests: default_max_concurrent_api_requests(),
         }
     }
 }
@@ -360,8 +393,18 @@ impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled_languages(),
-            python: PythonConfig::default(),
-            javascript: JavaScriptConfig::default(),
+        }
+    }
+}
+
+impl Default for IndexerConfig {
+    fn default() -> Self {
+        Self {
+            files_per_discovery_batch: default_files_per_discovery_batch(),
+            pipeline_channel_capacity: default_pipeline_channel_capacity(),
+            entities_per_embedding_batch: default_entities_per_embedding_batch(),
+            max_concurrent_file_extractions: default_max_concurrent_file_extractions(),
+            max_concurrent_snapshot_updates: default_max_concurrent_snapshot_updates(),
         }
     }
 }
@@ -503,6 +546,66 @@ impl Config {
                 .map_err(|e| Error::config(format!("Failed to set POSTGRES_PASSWORD: {e}")))?;
         }
 
+        // Support indexer environment variables
+        if let Ok(batch_size) = std::env::var("CODESEARCH_INDEXER__FILES_PER_DISCOVERY_BATCH") {
+            if let Ok(size) = batch_size.parse::<i64>() {
+                builder = builder
+                    .set_override("indexer.files_per_discovery_batch", size)
+                    .map_err(|e| {
+                        Error::config(format!("Failed to set files_per_discovery_batch: {e}"))
+                    })?;
+            }
+        }
+
+        if let Ok(buffer_size) = std::env::var("CODESEARCH_INDEXER__PIPELINE_CHANNEL_CAPACITY") {
+            if let Ok(size) = buffer_size.parse::<i64>() {
+                builder = builder
+                    .set_override("indexer.pipeline_channel_capacity", size)
+                    .map_err(|e| {
+                        Error::config(format!("Failed to set pipeline_channel_capacity: {e}"))
+                    })?;
+            }
+        }
+
+        if let Ok(entity_batch) = std::env::var("CODESEARCH_INDEXER__ENTITIES_PER_EMBEDDING_BATCH")
+        {
+            if let Ok(size) = entity_batch.parse::<i64>() {
+                builder = builder
+                    .set_override("indexer.entities_per_embedding_batch", size)
+                    .map_err(|e| {
+                        Error::config(format!("Failed to set entities_per_embedding_batch: {e}"))
+                    })?;
+            }
+        }
+
+        if let Ok(concurrency) =
+            std::env::var("CODESEARCH_INDEXER__MAX_CONCURRENT_FILE_EXTRACTIONS")
+        {
+            if let Ok(val) = concurrency.parse::<i64>() {
+                builder = builder
+                    .set_override("indexer.max_concurrent_file_extractions", val)
+                    .map_err(|e| {
+                        Error::config(format!(
+                            "Failed to set max_concurrent_file_extractions: {e}"
+                        ))
+                    })?;
+            }
+        }
+
+        if let Ok(concurrency) =
+            std::env::var("CODESEARCH_INDEXER__MAX_CONCURRENT_SNAPSHOT_UPDATES")
+        {
+            if let Ok(val) = concurrency.parse::<i64>() {
+                builder = builder
+                    .set_override("indexer.max_concurrent_snapshot_updates", val)
+                    .map_err(|e| {
+                        Error::config(format!(
+                            "Failed to set max_concurrent_snapshot_updates: {e}"
+                        ))
+                    })?;
+            }
+        }
+
         let config = builder
             .build()
             .map_err(|e| Error::config(format!("Failed to build config: {e}")))?;
@@ -515,6 +618,113 @@ impl Config {
     /// Creates a config from a TOML string (useful for testing)
     pub fn from_toml_str(content: &str) -> Result<Self> {
         toml::from_str(content).map_err(|e| Error::config(format!("Failed to parse TOML: {e}")))
+    }
+
+    /// Merge another config into this one, preferring values from the other config
+    ///
+    /// This is used for layered configuration where repo-local settings override global settings.
+    /// Only non-default values from `other` will override values in `self`.
+    pub fn merge_from(&mut self, other: Self) {
+        // For storage config, only merge collection_name if it's non-empty
+        if !other.storage.collection_name.is_empty() {
+            self.storage.collection_name = other.storage.collection_name;
+        }
+        // Always take other storage settings if they differ from defaults
+        self.storage.qdrant_host = other.storage.qdrant_host;
+        self.storage.qdrant_port = other.storage.qdrant_port;
+        self.storage.qdrant_rest_port = other.storage.qdrant_rest_port;
+        self.storage.auto_start_deps = other.storage.auto_start_deps;
+        self.storage.docker_compose_file = other.storage.docker_compose_file;
+        self.storage.postgres_host = other.storage.postgres_host;
+        self.storage.postgres_port = other.storage.postgres_port;
+        self.storage.postgres_database = other.storage.postgres_database;
+        self.storage.postgres_user = other.storage.postgres_user;
+        self.storage.postgres_password = other.storage.postgres_password;
+        self.storage.max_entities_per_db_operation = other.storage.max_entities_per_db_operation;
+
+        // Merge embeddings config
+        self.embeddings.provider = other.embeddings.provider;
+        self.embeddings.model = other.embeddings.model;
+        self.embeddings.texts_per_api_request = other.embeddings.texts_per_api_request;
+        self.embeddings.device = other.embeddings.device;
+        self.embeddings.api_base_url = other.embeddings.api_base_url;
+        self.embeddings.api_key = other.embeddings.api_key.or(self.embeddings.api_key.clone());
+        self.embeddings.embedding_dimension = other.embeddings.embedding_dimension;
+        self.embeddings.max_concurrent_api_requests = other.embeddings.max_concurrent_api_requests;
+
+        // Merge watcher config
+        self.watcher.debounce_ms = other.watcher.debounce_ms;
+        self.watcher.ignore_patterns = other.watcher.ignore_patterns;
+
+        // Merge server config
+        self.server.port = other.server.port;
+
+        // Merge languages config
+        self.languages = other.languages;
+    }
+
+    /// Load configuration with layered precedence (git-style)
+    ///
+    /// Precedence order (lowest to highest):
+    /// 1. Hardcoded defaults
+    /// 2. Global config (~/.codesearch/config.toml) - if exists
+    /// 3. Repo-local config (./codesearch.toml or specified path) - if exists
+    /// 4. Environment variables (CODESEARCH_*)
+    ///
+    /// Returns the merged config and metadata about which sources were loaded.
+    pub fn load_layered(repo_local_path: Option<&Path>) -> Result<(Self, ConfigSources)> {
+        let mut sources = ConfigSources::default();
+
+        // Start with defaults
+        let mut config = Config {
+            indexer: IndexerConfig::default(),
+            embeddings: EmbeddingsConfig::default(),
+            watcher: WatcherConfig::default(),
+            storage: StorageConfig {
+                qdrant_host: default_qdrant_host(),
+                qdrant_port: default_qdrant_port(),
+                qdrant_rest_port: default_qdrant_rest_port(),
+                collection_name: String::new(),
+                auto_start_deps: default_auto_start_deps(),
+                docker_compose_file: None,
+                postgres_host: default_postgres_host(),
+                postgres_port: default_postgres_port(),
+                postgres_database: default_postgres_database(),
+                postgres_user: default_postgres_user(),
+                postgres_password: default_postgres_password(),
+                max_entities_per_db_operation: default_max_entities_per_db_operation(),
+            },
+            server: ServerConfig::default(),
+            languages: LanguagesConfig::default(),
+        };
+
+        // Try to load global config
+        if let Ok(global_path) = global_config_path() {
+            if global_path.exists() {
+                if let Ok(global_config) = Self::from_file(&global_path) {
+                    config.merge_from(global_config);
+                    sources.global_loaded = true;
+                    sources.global_path = Some(global_path);
+                }
+            }
+        }
+
+        // Try to load repo-local config
+        let local_path = repo_local_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join("codesearch.toml")
+        });
+
+        if local_path.exists() {
+            if let Ok(local_config) = Self::from_file(&local_path) {
+                config.merge_from(local_config);
+                sources.local_loaded = true;
+                sources.local_path = Some(local_path);
+            }
+        }
+
+        Ok((config, sources))
     }
 
     /// Validates the configuration
@@ -542,6 +752,80 @@ impl Config {
             return Err(Error::config(
                 "embedding_dimension must be greater than 0".to_string(),
             ));
+        }
+
+        // Validate max_concurrent_api_requests
+        if self.embeddings.max_concurrent_api_requests == 0 {
+            return Err(Error::config(
+                "embeddings.max_concurrent_api_requests must be greater than 0".to_string(),
+            ));
+        }
+        if self.embeddings.max_concurrent_api_requests > 256 {
+            return Err(Error::config(format!(
+                "embeddings.max_concurrent_api_requests too large (max 256, got {})",
+                self.embeddings.max_concurrent_api_requests
+            )));
+        }
+
+        // Validate indexer configuration
+        if self.indexer.files_per_discovery_batch == 0 {
+            return Err(Error::config(
+                "indexer.files_per_discovery_batch must be greater than 0".to_string(),
+            ));
+        }
+        if self.indexer.files_per_discovery_batch > 1000 {
+            return Err(Error::config(format!(
+                "indexer.files_per_discovery_batch too large (max 1000, got {})",
+                self.indexer.files_per_discovery_batch
+            )));
+        }
+
+        if self.indexer.pipeline_channel_capacity == 0 {
+            return Err(Error::config(
+                "indexer.pipeline_channel_capacity must be greater than 0".to_string(),
+            ));
+        }
+        if self.indexer.pipeline_channel_capacity > 100 {
+            return Err(Error::config(format!(
+                "indexer.pipeline_channel_capacity too large (max 100, got {})",
+                self.indexer.pipeline_channel_capacity
+            )));
+        }
+
+        if self.indexer.entities_per_embedding_batch == 0 {
+            return Err(Error::config(
+                "indexer.entities_per_embedding_batch must be greater than 0".to_string(),
+            ));
+        }
+        if self.indexer.entities_per_embedding_batch > 2000 {
+            return Err(Error::config(format!(
+                "indexer.entities_per_embedding_batch too large (max 2000, got {})",
+                self.indexer.entities_per_embedding_batch
+            )));
+        }
+
+        if self.indexer.max_concurrent_file_extractions == 0 {
+            return Err(Error::config(
+                "indexer.max_concurrent_file_extractions must be greater than 0".to_string(),
+            ));
+        }
+        if self.indexer.max_concurrent_file_extractions > 128 {
+            return Err(Error::config(format!(
+                "indexer.max_concurrent_file_extractions too large (max 128, got {})",
+                self.indexer.max_concurrent_file_extractions
+            )));
+        }
+
+        if self.indexer.max_concurrent_snapshot_updates == 0 {
+            return Err(Error::config(
+                "indexer.max_concurrent_snapshot_updates must be greater than 0".to_string(),
+            ));
+        }
+        if self.indexer.max_concurrent_snapshot_updates > 128 {
+            return Err(Error::config(format!(
+                "indexer.max_concurrent_snapshot_updates too large (max 128, got {})",
+                self.indexer.max_concurrent_snapshot_updates
+            )));
         }
 
         Ok(())

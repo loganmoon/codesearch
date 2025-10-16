@@ -325,7 +325,7 @@ async fn test_concurrent_modifications() {
 
     let config = WatcherConfig::builder()
         .debounce_ms(100)
-        .batch_size(5)
+        .events_per_batch(5)
         .build();
 
     let mut watcher = FileWatcher::new(config).unwrap();

@@ -1,17 +1,61 @@
 //! Repository indexer implementation
 //!
-//! Provides the main three-stage indexing pipeline for processing repositories.
+//! Provides the main pipelined indexing pipeline for processing repositories.
 
-use crate::common::{find_files, get_current_commit, path_to_str};
+use crate::common::{find_files, get_current_commit, path_to_str, ResultExt};
 use crate::config::IndexerConfig;
 use crate::entity_processor;
-use crate::{IndexError, IndexResult, IndexStats};
+use crate::{IndexResult, IndexStats};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
+use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
+use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
+use futures::stream::{self, StreamExt};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
+use uuid::Uuid;
+
+// Pipeline data structures for multi-stage indexing
+struct FileBatch {
+    paths: Vec<PathBuf>,
+}
+
+struct EntityBatch {
+    entities: Vec<CodeEntity>,
+    // Track which files produced which entities for snapshot updates
+    // (file_path, entity_indices_in_batch)
+    file_indices: Vec<(PathBuf, Vec<usize>)>,
+    repo_id: uuid::Uuid,
+    git_commit: Option<String>,
+    collection_name: String,
+    #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
+    failed_files: usize,
+}
+
+struct EmbeddedBatch {
+    // Entities paired with embeddings (skipped entities filtered out)
+    entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)>,
+    file_indices: Vec<(PathBuf, Vec<usize>)>,
+    repo_id: uuid::Uuid,
+    git_commit: Option<String>,
+    collection_name: String,
+    #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
+    entities_skipped: usize,
+}
+
+struct StoredBatch {
+    // Metadata for snapshot updates (entities already stored)
+    file_entity_map: std::collections::HashMap<PathBuf, Vec<String>>,
+    repo_id: uuid::Uuid,
+    collection_name: String,
+    git_commit: Option<String>,
+}
 
 /// Main repository indexer
 pub struct RepositoryIndexer {
@@ -20,6 +64,7 @@ pub struct RepositoryIndexer {
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
+    config: IndexerConfig,
 }
 
 impl RepositoryIndexer {
@@ -30,9 +75,16 @@ impl RepositoryIndexer {
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
+        config: IndexerConfig,
     ) -> Result<Self> {
+        debug!(
+            "RepositoryIndexer::new called with repository_id string = {}",
+            repository_id
+        );
         let repository_id = uuid::Uuid::parse_str(&repository_id)
             .map_err(|e| Error::Storage(format!("Invalid repository ID: {e}")))?;
+
+        debug!("RepositoryIndexer::new parsed UUID = {}", repository_id);
 
         Ok(Self {
             repository_path,
@@ -40,6 +92,7 @@ impl RepositoryIndexer {
             embedding_manager,
             postgres_client,
             git_repo,
+            config,
         })
     }
 
@@ -47,164 +100,624 @@ impl RepositoryIndexer {
     pub fn repository_path(&self) -> &Path {
         &self.repository_path
     }
+}
 
-    /// Process a batch of files for better performance
-    async fn process_batch(&mut self, file_paths: &[PathBuf]) -> Result<IndexStats> {
-        debug!(batch_size = file_paths.len(), "Processing batch of files");
+// Pipeline stage functions
 
-        // Process statistics
-        let mut stats = IndexStats::default();
+/// Stage 1: Discover all files in the repository and batch them
+async fn stage_file_discovery(
+    file_tx: mpsc::Sender<FileBatch>,
+    repo_path: PathBuf,
+    batch_size: usize,
+) -> Result<usize> {
+    let files = find_files(&repo_path)?;
+    let total = files.len();
+    info!("Discovered {total} files to index");
 
-        // Collect all entities from the batch
-        let mut batch_entities = Vec::new();
+    for chunk in files.chunks(batch_size) {
+        file_tx
+            .send(FileBatch {
+                paths: chunk.to_vec(),
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow::anyhow!("File channel closed")))?;
+    }
 
-        // Track indices of successfully processed files (to avoid cloning paths)
-        let mut processed_indices = Vec::new();
+    drop(file_tx);
+    Ok(total)
+}
 
-        // Extract entities from all files
-        let repo_id_str = self.repository_id.to_string();
-        for (idx, file_path) in file_paths.iter().enumerate() {
-            match entity_processor::extract_entities_from_file(file_path, &repo_id_str).await {
-                Ok(entities) => {
-                    let entity_count = entities.len();
-                    batch_entities.extend(entities);
-                    stats.set_entities_extracted(stats.entities_extracted() + entity_count);
-                    processed_indices.push(idx);
+/// Stage 2: Extract entities from files in parallel
+async fn stage_extract_entities(
+    mut file_rx: mpsc::Receiver<FileBatch>,
+    entity_tx: mpsc::Sender<EntityBatch>,
+    repo_id: Uuid,
+    git_commit: Option<String>,
+    collection_name: String,
+    max_entity_batch_size: usize,
+    file_extraction_concurrency: usize,
+) -> Result<(usize, usize)> {
+    let mut total_extracted = 0;
+    let mut total_failed = 0;
+
+    // Accumulator for building entity batches
+    let mut entities = Vec::new();
+    let mut file_indices = Vec::new();
+    let mut batch_failed = 0;
+
+    while let Some(FileBatch { paths }) = file_rx.recv().await {
+        debug!("Extracting entities from {} files", paths.len());
+
+        // Process files in parallel (8 concurrent extractions), collect results
+        let results = stream::iter(paths.into_iter())
+            .map(|path| {
+                let repo_id_str = repo_id.to_string();
+                async move {
+                    match entity_processor::extract_entities_from_file(&path, &repo_id_str).await {
+                        Ok(entities) => Ok((path, entities)),
+                        Err(e) => {
+                            error!("Failed to extract from {}: {e}", path.display());
+                            Err(())
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!(
-                        file_path = %file_path.display(),
-                        error = %e,
-                        "Failed to extract entities"
-                    );
-                    stats.increment_failed_files();
+            })
+            .buffer_unordered(file_extraction_concurrency)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Process results and batch by entity count
+        for result in results {
+            match result {
+                Ok((path, mut file_entities)) if !file_entities.is_empty() => {
+                    // Process entities from this file, potentially across multiple batches
+                    while !file_entities.is_empty() {
+                        let space_left = max_entity_batch_size.saturating_sub(entities.len());
+
+                        if space_left == 0 {
+                            // Current batch is full, send it
+                            let batch_entities = std::mem::take(&mut entities);
+                            let batch_file_indices = std::mem::take(&mut file_indices);
+
+                            total_extracted += batch_entities.len();
+                            total_failed += batch_failed;
+
+                            info!(
+                                "Stage 2: Sending batch with {} entities from {} files ({} failed)",
+                                batch_entities.len(),
+                                batch_file_indices.len(),
+                                batch_failed
+                            );
+
+                            entity_tx
+                                .send(EntityBatch {
+                                    entities: batch_entities,
+                                    file_indices: batch_file_indices,
+                                    repo_id,
+                                    git_commit: git_commit.clone(),
+                                    collection_name: collection_name.clone(),
+                                    failed_files: batch_failed,
+                                })
+                                .await
+                                .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
+
+                            batch_failed = 0;
+                            continue;
+                        }
+
+                        // Add as many entities as fit in current batch
+                        let to_take = space_left.min(file_entities.len());
+                        let start_idx = entities.len();
+                        let chunk: Vec<_> = file_entities.drain(..to_take).collect();
+                        entities.extend(chunk);
+                        let end_idx = entities.len();
+
+                        // Track file indices for this chunk
+                        if let Some((last_path, last_indices)) = file_indices.last_mut() {
+                            if last_path == &path {
+                                // Extend existing file entry
+                                last_indices.extend(start_idx..end_idx);
+                            } else {
+                                // New file entry
+                                file_indices.push((path.clone(), (start_idx..end_idx).collect()));
+                            }
+                        } else {
+                            // First file entry
+                            file_indices.push((path.clone(), (start_idx..end_idx).collect()));
+                        }
+                    }
                 }
+                Err(()) => batch_failed += 1,
+                _ => {} // Empty file, skip
+            }
+        }
+    }
+
+    // Send any remaining entities
+    if !entities.is_empty() {
+        total_extracted += entities.len();
+        total_failed += batch_failed;
+
+        info!(
+            "Stage 2: Sending batch with {} entities from {} files ({} failed)",
+            entities.len(),
+            file_indices.len(),
+            batch_failed
+        );
+
+        entity_tx
+            .send(EntityBatch {
+                entities,
+                file_indices,
+                repo_id,
+                git_commit: git_commit.clone(),
+                collection_name: collection_name.clone(),
+                failed_files: batch_failed,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
+    } else if batch_failed > 0 {
+        // Track failures even if no entities remain
+        total_failed += batch_failed;
+    }
+
+    drop(entity_tx);
+    info!("Extracted {total_extracted} entities, {total_failed} files failed");
+    Ok((total_extracted, total_failed))
+}
+
+/// Stage 3: Generate embeddings for entities in parallel
+async fn stage_generate_embeddings(
+    mut entity_rx: mpsc::Receiver<EntityBatch>,
+    embedded_tx: mpsc::Sender<EmbeddedBatch>,
+    embedding_manager: Arc<EmbeddingManager>,
+) -> Result<usize> {
+    let mut total_embedded = 0;
+    let mut total_skipped = 0;
+
+    while let Some(batch) = entity_rx.recv().await {
+        info!(
+            "Stage 3: Received batch with {} entities from {} files",
+            batch.entities.len(),
+            batch.file_indices.len()
+        );
+
+        // Extract embedding content
+        let texts: Vec<String> = batch
+            .entities
+            .iter()
+            .map(entity_processor::extract_embedding_content)
+            .collect();
+
+        // Log text statistics
+        let text_lengths: Vec<usize> = texts.iter().map(|t| t.len()).collect();
+        let min_len = text_lengths.iter().copied().min().unwrap_or(0);
+        let max_len = text_lengths.iter().copied().max().unwrap_or(0);
+        let avg_len = if text_lengths.is_empty() {
+            0
+        } else {
+            text_lengths.iter().sum::<usize>() / text_lengths.len()
+        };
+
+        info!(
+            "Stage 3: Extracted {} texts for embedding (lengths: min={}, max={}, avg={})",
+            texts.len(),
+            min_len,
+            max_len,
+            avg_len
+        );
+
+        // Log first few entity names for debugging
+        let sample_entities: Vec<&String> = batch
+            .entities
+            .iter()
+            .take(3)
+            .map(|e| &e.qualified_name)
+            .collect();
+        debug!("Stage 3: Sample entities: {:?}", sample_entities);
+
+        // Generate embeddings (internally parallel via Phase 1)
+        let embeddings = embedding_manager
+            .embed(texts.clone())
+            .await
+            .map_err(|e| {
+                error!(
+                    "Stage 3: Embedding failed for batch with {} texts (min_len={}, max_len={}, avg_len={}), error: {}",
+                    texts.len(),
+                    min_len,
+                    max_len,
+                    avg_len,
+                    e
+                );
+                e
+            })
+            .storage_err("Failed to generate embeddings")?;
+
+        let successful_embeddings = embeddings.iter().filter(|e| e.is_some()).count();
+        info!(
+            "Stage 3: Successfully generated {} embeddings ({} skipped)",
+            successful_embeddings,
+            texts.len() - successful_embeddings
+        );
+
+        // Pair entities with embeddings, tracking which indices survived
+        let mut pairs = Vec::new();
+        let mut old_to_new_idx: HashMap<usize, usize> = HashMap::new();
+
+        for (old_idx, (entity, emb_opt)) in batch
+            .entities
+            .into_iter()
+            .zip(embeddings.into_iter())
+            .enumerate()
+        {
+            if let Some(emb) = emb_opt {
+                let new_idx = pairs.len();
+                old_to_new_idx.insert(old_idx, new_idx);
+                pairs.push((entity, emb));
             }
         }
 
-        // Get git_commit for all files
-        let git_commit = get_current_commit(self.git_repo.as_ref(), &self.repository_path);
+        let skipped = texts.len() - pairs.len();
+        total_embedded += pairs.len();
+        total_skipped += skipped;
 
-        // Process entities with embeddings using shared logic
-        let (batch_stats, entities_by_file) = entity_processor::process_entity_batch(
-            batch_entities,
-            self.repository_id,
-            git_commit.clone(),
-            &self.embedding_manager,
-            self.postgres_client.as_ref(),
-            self.postgres_client.max_entity_batch_size(),
-        )
-        .await?;
+        // Update file_indices to use new indices (after filtering)
+        let updated_file_indices: Vec<(PathBuf, Vec<usize>)> = batch
+            .file_indices
+            .into_iter()
+            .filter_map(|(path, old_indices)| {
+                let new_indices: Vec<usize> = old_indices
+                    .into_iter()
+                    .filter_map(|old_idx| old_to_new_idx.get(&old_idx).copied())
+                    .collect();
 
-        stats.entities_skipped_size = batch_stats.entities_skipped_size;
+                if new_indices.is_empty() {
+                    None // File had no successful embeddings
+                } else {
+                    Some((path, new_indices))
+                }
+            })
+            .collect();
 
-        // Fetch collection_name once for all files in this batch
-        let collection_name = self
-            .postgres_client
-            .get_collection_name(self.repository_id)
-            .await?
-            .ok_or_else(|| Error::Storage("Repository collection_name not found".to_string()))?;
+        embedded_tx
+            .send(EmbeddedBatch {
+                entity_embedding_pairs: pairs,
+                file_indices: updated_file_indices,
+                repo_id: batch.repo_id,
+                git_commit: batch.git_commit,
+                collection_name: batch.collection_name,
+                entities_skipped: skipped,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("Embedded channel closed")))?;
+    }
 
-        // Detect and handle stale entities for ALL processed files (even empty ones)
-        for &idx in &processed_indices {
-            let file_path = &file_paths[idx];
-            let file_path_str = path_to_str(file_path)?;
-            let entity_ids = entities_by_file
-                .get(file_path_str)
-                .cloned()
-                .unwrap_or_default();
+    drop(embedded_tx);
+    info!("Embedded {total_embedded} entities, skipped {total_skipped}");
+    Ok(total_embedded)
+}
 
-            entity_processor::update_file_snapshot_and_mark_stale(
-                self.repository_id,
-                &collection_name,
-                file_path_str,
-                entity_ids,
-                git_commit.clone(),
-                self.postgres_client.as_ref(),
-            )
-            .await?;
+/// Stage 4: Store entities and embeddings in database
+async fn stage_store_entities(
+    mut embedded_rx: mpsc::Receiver<EmbeddedBatch>,
+    stored_tx: mpsc::Sender<StoredBatch>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
+) -> Result<usize> {
+    let mut total_stored = 0;
+    let max_batch_size = postgres_client.max_entity_batch_size();
+
+    while let Some(batch) = embedded_rx.recv().await {
+        info!(
+            "Stage 4: Received {} entity-embedding pairs from {} files",
+            batch.entity_embedding_pairs.len(),
+            batch.file_indices.len()
+        );
+
+        // Use cached collection_name from batch
+        let collection_name = &batch.collection_name;
+
+        // Process in chunks to respect max_entity_batch_size
+        for chunk_start in (0..batch.entity_embedding_pairs.len()).step_by(max_batch_size) {
+            let chunk_end = (chunk_start + max_batch_size).min(batch.entity_embedding_pairs.len());
+            let chunk = &batch.entity_embedding_pairs[chunk_start..chunk_end];
+
+            // Batch fetch existing metadata for this chunk
+            let entity_ids: Vec<String> = chunk.iter().map(|(e, _)| e.entity_id.clone()).collect();
+
+            let metadata_map = postgres_client
+                .get_entities_metadata_batch(batch.repo_id, &entity_ids)
+                .await
+                .storage_err("Failed to fetch metadata")?;
+
+            // Prepare batch refs (no cloning - use references)
+            let mut batch_refs = Vec::with_capacity(chunk.len());
+
+            for (entity, embedding) in chunk {
+                let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
+                    metadata_map.get(&entity.entity_id)
+                {
+                    if deleted_at.is_some() {
+                        (Uuid::new_v4(), OutboxOperation::Insert)
+                    } else {
+                        (*existing_point_id, OutboxOperation::Update)
+                    }
+                } else {
+                    (Uuid::new_v4(), OutboxOperation::Insert)
+                };
+
+                batch_refs.push((
+                    entity,
+                    embedding.as_slice(),
+                    operation,
+                    point_id,
+                    TargetStore::Qdrant,
+                    batch.git_commit.clone(),
+                ));
+            }
+
+            // Store in DB with outbox
+            postgres_client
+                .store_entities_with_outbox_batch(batch.repo_id, collection_name, &batch_refs)
+                .await
+                .storage_err("Failed to store entities")?;
+
+            total_stored += batch_refs.len();
+            info!(
+                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
+                batch_refs.len(),
+                chunk_end,
+                batch.entity_embedding_pairs.len()
+            );
         }
 
-        Ok(stats)
+        info!(
+            "Stage 4: Completed storing {} entities from this batch",
+            batch.entity_embedding_pairs.len()
+        );
+
+        // Build file→entity_id map for snapshots
+        let mut file_entity_map = HashMap::new();
+
+        for (path, entity_indices) in batch.file_indices {
+            let entity_ids: Vec<String> = entity_indices
+                .iter()
+                .filter_map(|&idx| {
+                    if idx < batch.entity_embedding_pairs.len() {
+                        Some(batch.entity_embedding_pairs[idx].0.entity_id.clone())
+                    } else {
+                        error!(
+                            "Stage 4: Index {} out of bounds (len: {})",
+                            idx,
+                            batch.entity_embedding_pairs.len()
+                        );
+                        None
+                    }
+                })
+                .collect();
+
+            if !entity_ids.is_empty() {
+                file_entity_map.insert(path.clone(), entity_ids.clone());
+            }
+        }
+
+        info!(
+            "Stage 4: Built file_entity_map with {} files",
+            file_entity_map.len()
+        );
+
+        stored_tx
+            .send(StoredBatch {
+                file_entity_map,
+                repo_id: batch.repo_id,
+                collection_name: collection_name.to_string(),
+                git_commit: batch.git_commit,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("Stored channel closed")))?;
     }
+
+    drop(stored_tx);
+    info!("Stored {total_stored} entities");
+    Ok(total_stored)
+}
+
+/// Stage 5: Update file snapshots and mark stale entities
+async fn stage_update_snapshots(
+    mut stored_rx: mpsc::Receiver<StoredBatch>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
+    snapshot_update_concurrency: usize,
+) -> Result<usize> {
+    let mut total_snapshots = 0;
+
+    while let Some(batch) = stored_rx.recv().await {
+        info!(
+            "Stage 5: Updating {} file snapshots",
+            batch.file_entity_map.len()
+        );
+
+        let file_count = batch.file_entity_map.len();
+        let repo_id = batch.repo_id;
+        let collection_name = batch.collection_name.clone();
+        let git_commit = batch.git_commit.clone();
+        let pg_client = postgres_client.clone();
+
+        let results: Vec<Result<()>> = stream::iter(batch.file_entity_map)
+            .map(|(file_path, entity_ids)| {
+                let collection_name = collection_name.clone();
+                let git_commit = git_commit.clone();
+                let pg_client = pg_client.clone();
+
+                async move {
+                    let file_path_str = path_to_str(&file_path)?;
+
+                    entity_processor::update_file_snapshot_and_mark_stale(
+                        repo_id,
+                        &collection_name,
+                        file_path_str,
+                        entity_ids,
+                        git_commit,
+                        pg_client.as_ref(),
+                    )
+                    .await?;
+
+                    Ok(())
+                }
+            })
+            .buffer_unordered(snapshot_update_concurrency)
+            .collect()
+            .await;
+
+        // Check for errors
+        for result in results {
+            result?;
+        }
+
+        total_snapshots += file_count;
+    }
+
+    info!("Updated {total_snapshots} file snapshots");
+    Ok(total_snapshots)
 }
 
 #[async_trait]
 impl crate::Indexer for RepositoryIndexer {
-    /// Index the entire repository
+    /// Index the entire repository using a pipelined architecture
     async fn index_repository(&mut self) -> Result<IndexResult> {
+        let start_time = Instant::now();
+        let config = &self.config;
+
         info!(
             repository_path = %self.repository_path.display(),
-            "Starting repository indexing"
+            "Starting pipelined repository indexing with config: \
+             index_batch_size={}, max_entity_batch_size={}, channel_buffer_size={}, \
+             file_extraction_concurrency={}, snapshot_update_concurrency={}",
+            config.index_batch_size,
+            config.max_entity_batch_size,
+            config.channel_buffer_size,
+            config.file_extraction_concurrency,
+            config.snapshot_update_concurrency
         );
-        let start_time = Instant::now();
 
-        // Find all files to process
-        let files = find_files(&self.repository_path)?;
-        info!(file_count = files.len(), "Found files to process");
+        // Create channels with configurable buffer sizes
+        let (file_tx, file_rx) = mpsc::channel::<FileBatch>(config.channel_buffer_size);
+        let (entity_tx, entity_rx) = mpsc::channel::<EntityBatch>(config.channel_buffer_size);
+        let (embedded_tx, embedded_rx) = mpsc::channel::<EmbeddedBatch>(config.channel_buffer_size);
+        let (stored_tx, stored_rx) = mpsc::channel::<StoredBatch>(config.channel_buffer_size);
 
-        // Process statistics and errors
+        // Clone shared state for each stage
+        let repo_path = self.repository_path.clone();
+        let repo_id = self.repository_id;
+        let git_repo = self.git_repo.clone();
+        let git_commit = get_current_commit(git_repo.as_ref(), &repo_path);
+        let embedding_manager = self.embedding_manager.clone();
+        let postgres_client = self.postgres_client.clone();
+        let postgres_client_2 = self.postgres_client.clone();
+
+        // Fetch collection_name once for entire pipeline
+        let collection_name = postgres_client
+            .get_collection_name(repo_id)
+            .await
+            .map_err(|e| Error::Other(anyhow!("Failed to get collection name: {e}")))?
+            .ok_or_else(|| Error::Other(anyhow!("Repository not found for repo_id {repo_id}")))?;
+
+        // Spawn all 5 stages concurrently
+        let stage1 = tokio::spawn(stage_file_discovery(
+            file_tx,
+            repo_path,
+            config.index_batch_size,
+        ));
+
+        let stage2 = tokio::spawn(stage_extract_entities(
+            file_rx,
+            entity_tx,
+            repo_id,
+            git_commit.clone(),
+            collection_name.clone(),
+            config.max_entity_batch_size,
+            config.file_extraction_concurrency,
+        ));
+
+        let stage3 = tokio::spawn(stage_generate_embeddings(
+            entity_rx,
+            embedded_tx,
+            embedding_manager,
+        ));
+
+        let stage4 = tokio::spawn(stage_store_entities(
+            embedded_rx,
+            stored_tx,
+            postgres_client,
+        ));
+
+        let stage5 = tokio::spawn(stage_update_snapshots(
+            stored_rx,
+            postgres_client_2,
+            config.snapshot_update_concurrency,
+        ));
+
+        // Await all stages and handle errors
+        let stage1_result = stage1
+            .await
+            .map_err(|e| Error::Other(anyhow!("Stage 1 panicked: {e}")))?;
+        let stage2_result = stage2
+            .await
+            .map_err(|e| Error::Other(anyhow!("Stage 2 panicked: {e}")))?;
+        let stage3_result = stage3
+            .await
+            .map_err(|e| Error::Other(anyhow!("Stage 3 panicked: {e}")))?;
+        let stage4_result = stage4
+            .await
+            .map_err(|e| Error::Other(anyhow!("Stage 4 panicked: {e}")))?;
+        let stage5_result = stage5
+            .await
+            .map_err(|e| Error::Other(anyhow!("Stage 5 panicked: {e}")))?;
+
+        // Aggregate results
+        let total_files = stage1_result?;
+        let (entities_extracted, failed_files) = stage2_result?;
+        let _entities_embedded = stage3_result?;
+        let _entities_stored = stage4_result?;
+        let _snapshots_updated = stage5_result?;
+
+        // Build final statistics
         let mut stats = IndexStats::new();
-        let mut errors = Vec::new();
-
-        // Process files in batches for better performance
-        let config = IndexerConfig::default();
-
-        for chunk in files.chunks(config.index_batch_size) {
-            match self.process_batch(chunk).await {
-                Ok(batch_stats) => {
-                    stats.merge(batch_stats);
-                }
-                Err(e) => {
-                    error!(
-                        error = %e,
-                        batch_size = chunk.len(),
-                        "Failed to process batch, falling back to individual file processing"
-                    );
-                    // Process failed batch files individually as fallback (batch size of 1)
-                    for file_path in chunk {
-                        match self.process_batch(std::slice::from_ref(file_path)).await {
-                            Ok(file_stats) => {
-                                stats.merge(file_stats);
-                            }
-                            Err(e) => {
-                                let file_path_str = file_path.display().to_string();
-                                error!(
-                                    file_path = %file_path_str,
-                                    error = %e,
-                                    "Failed to process individual file"
-                                );
-                                errors.push(IndexError::new(file_path_str, e.to_string()));
-                                stats.increment_failed_files();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Calculate final statistics
-        stats.set_total_files(files.len());
+        stats.set_total_files(total_files);
+        stats.set_entities_extracted(entities_extracted);
         stats.set_processing_time_ms(start_time.elapsed().as_millis() as u64);
 
-        // Set last indexed commit to track that indexing has completed
-        let commit_hash = get_current_commit(self.git_repo.as_ref(), &self.repository_path)
-            .unwrap_or_else(|| "indexed".to_string());
+        // Track failed files from extraction stage
+        for _ in 0..failed_files {
+            stats.increment_failed_files();
+        }
+
+        // Note: entities_skipped_size is tracked internally by embedding stage
+        // but not aggregated to final stats in pipelined version (logged instead)
+
+        // Set last indexed commit
+        let commit_hash = git_commit.unwrap_or_else(|| "indexed".to_string());
         self.postgres_client
             .set_last_indexed_commit(self.repository_id, &commit_hash)
             .await?;
         info!(commit = %commit_hash, "Updated last indexed commit");
+
+        let total_time = start_time.elapsed();
+        let throughput = if total_time.as_secs_f64() > 0.0 {
+            entities_extracted as f64 / total_time.as_secs_f64()
+        } else {
+            0.0
+        };
 
         info!(
             total_files = stats.total_files(),
             entities_extracted = stats.entities_extracted(),
             processing_time_s = stats.processing_time_ms() as f64 / 1000.0,
             failed_files = stats.failed_files(),
-            error_count = errors.len(),
-            "Indexing complete"
+            throughput_entities_per_sec = format!("{throughput:.1}"),
+            "Pipeline completed"
         );
 
-        Ok(IndexResult::new(stats, errors))
+        // No granular errors tracked in pipelined version (all logged during processing)
+        Ok(IndexResult::new(stats, Vec::new()))
     }
 }
 

@@ -114,7 +114,7 @@ async fn test_generates_collection_name_when_empty() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: 10000,
     })
     .build();
 
@@ -165,7 +165,7 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: 10000,
     })
     .build();
 
@@ -212,7 +212,7 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: 10000,
     })
     .build();
 

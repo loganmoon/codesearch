@@ -96,8 +96,8 @@ impl FileWatcher {
         }
 
         // Create channels
-        let (notify_tx, notify_rx) = mpsc::channel(self.config.max_queue_size);
-        let (debounced_tx, debounced_rx) = mpsc::channel(self.config.max_queue_size);
+        let (notify_tx, notify_rx) = mpsc::channel(self.config.max_queued_events);
+        let (debounced_tx, debounced_rx) = mpsc::channel(self.config.max_queued_events);
 
         // Create debouncer
         let debouncer = EventDebouncer::new(self.config.debounce_duration(), debounced_tx);

@@ -14,8 +14,8 @@ async fn test_vllm_api_provider_basic() {
         .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
         .embedding_dimension(384)
-        .batch_size(32)
-        .max_workers(4)
+        .texts_per_api_request(32)
+        .max_concurrent_api_requests(4)
         .build();
 
     let provider = create_api_provider(config)
@@ -59,8 +59,8 @@ async fn test_api_provider_batch_processing() {
         .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
         .embedding_dimension(384)
-        .batch_size(2) // Small batch for testing
-        .max_workers(2)
+        .texts_per_api_request(2) // Small batch for testing
+        .max_concurrent_api_requests(2)
         .build();
 
     let provider = create_api_provider(config).await.unwrap();
@@ -95,7 +95,7 @@ async fn test_api_provider_long_text() {
         .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
         .embedding_dimension(384)
-        .batch_size(32)
+        .texts_per_api_request(32)
         .build();
 
     let provider = create_api_provider(config).await.unwrap();
@@ -118,7 +118,7 @@ async fn test_api_provider_consistency() {
         .model("BAAI/bge-small-en-v1.5")
         .api_base_url("http://localhost:8000/v1")
         .embedding_dimension(384)
-        .batch_size(32)
+        .texts_per_api_request(32)
         .build();
 
     let provider = create_api_provider(config).await.unwrap();

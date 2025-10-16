@@ -252,7 +252,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: 10000,
     };
 
     let storage_client = create_storage_client(&storage_config, &collection_name).await?;
@@ -608,7 +608,7 @@ fn broken( {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: 10000,
     };
     let collection_manager = create_collection_manager(&storage_config).await?;
     assert!(

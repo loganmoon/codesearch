@@ -4,7 +4,7 @@
 //! configuration, Docker containers, database migrations, and repository registration.
 
 use anyhow::{Context, Result};
-use codesearch_core::config::{Config, StorageConfig};
+use codesearch_core::config::{default_max_entities_per_db_operation, Config, StorageConfig};
 use std::env;
 use std::path::Path;
 use tracing::info;
@@ -25,7 +25,7 @@ pub fn create_default_storage_config(collection_name: String) -> StorageConfig {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
-        max_entity_batch_size: 1000,
+        max_entities_per_db_operation: default_max_entities_per_db_operation(),
     }
 }
 
@@ -55,26 +55,28 @@ pub fn get_api_base_url_if_local_api(config: &Config) -> Option<&str> {
 /// Ensure storage is initialized, creating config and collection if needed
 ///
 /// This function orchestrates the complete initialization flow:
-/// 1. Creates config file if missing
-/// 2. Generates collection name if empty
-/// 3. Starts Docker dependencies if auto_start_deps enabled
-/// 4. Creates embedding manager
-/// 5. Initializes Qdrant collection
-/// 6. Runs database migrations
-/// 7. Registers repository in Postgres
+/// 1. Loads config using layered approach (global + local)
+/// 2. Creates local config file if missing
+/// 3. Generates collection name if empty
+/// 4. Starts Docker dependencies if auto_start_deps enabled
+/// 5. Creates embedding manager
+/// 6. Initializes Qdrant collection
+/// 7. Runs database migrations
+/// 8. Registers repository in Postgres
 pub async fn ensure_storage_initialized(
     repo_root: &Path,
     config_path: Option<&Path>,
 ) -> Result<Config> {
     let current_dir = env::current_dir()?;
 
-    // Create default configuration if it doesn't exist
+    // Determine local config file path
     let config_file = if let Some(path) = config_path {
         path.to_path_buf()
     } else {
         current_dir.join("codesearch.toml")
     };
 
+    // If local config doesn't exist, create it with minimal settings
     if !config_file.exists() {
         // Generate collection name from repository path
         let collection_name = StorageConfig::generate_collection_name(repo_root)?;
@@ -86,17 +88,31 @@ pub async fn ensure_storage_initialized(
         config
             .save(&config_file)
             .with_context(|| format!("Failed to save config to {config_file:?}"))?;
-        info!("Created default configuration at {:?}", config_file);
+        info!("Created local configuration at {:?}", config_file);
     }
 
-    // Load configuration
-    let config = Config::from_file(&config_file)?;
+    // Load configuration using layered approach
+    let (mut config, sources) = Config::load_layered(Some(&config_file))?;
+
+    // Log which configs were loaded
+    if sources.global_loaded {
+        if let Some(ref path) = sources.global_path {
+            info!("Loaded global config: {}", path.display());
+        }
+    }
+    if sources.local_loaded {
+        if let Some(ref path) = sources.local_path {
+            info!("Loaded local config: {}", path.display());
+        }
+    }
 
     // Ensure collection name is set
     let needs_save = config.storage.collection_name.is_empty();
-    let config = ensure_collection_name(config, repo_root)?;
+    config = ensure_collection_name(config, repo_root)?;
     if needs_save {
+        // Only save to local config, not global
         config.save(&config_file)?;
+        info!("Updated local config with collection name");
     }
 
     config.validate()?;
@@ -160,65 +176,56 @@ pub async fn ensure_storage_initialized(
     info!("  Collection: {}", config.storage.collection_name);
     info!("  Dimensions: {}", dimensions);
 
-    // Update global config with this collection as the default
-    update_global_config(&config).await?;
-
     Ok(config)
-}
-
-/// Update the global config with the current collection as the default
-async fn update_global_config(config: &Config) -> Result<()> {
-    use codesearch_core::config::global_config_path;
-
-    let global_config_path = global_config_path()?;
-
-    // Create the .codesearch directory if it doesn't exist
-    if let Some(parent) = global_config_path.parent() {
-        std::fs::create_dir_all(parent).context("Failed to create .codesearch directory")?;
-    }
-
-    // Save the config to the global location
-    config
-        .save(&global_config_path)
-        .context("Failed to save global config")?;
-
-    info!("Updated global config at {}", global_config_path.display());
-
-    Ok(())
 }
 
 /// Load configuration for the serve command
 ///
-/// This function loads the configuration file (from the global location if no path is provided)
-/// and ensures infrastructure dependencies are running if auto-start is enabled.
+/// This function uses layered configuration loading (global + local + env vars) and supports
+/// overriding the collection name via CLI flag.
 ///
 /// **Note:** If `auto_start_deps` is enabled in the config, this function will start Docker
 /// containers (Postgres, Qdrant, vLLM, outbox-processor) via `docker compose`. It does not
 /// create or modify configuration files or databases, but it can create/start Docker containers.
 ///
 /// It expects that `codesearch index` has already been run to set up the initial configuration.
-pub async fn load_config_for_serve(config_path: Option<&Path>) -> Result<Config> {
-    use codesearch_core::config::global_config_path;
+pub async fn load_config_for_serve(
+    config_path: Option<&Path>,
+    collection_override: Option<&str>,
+) -> Result<Config> {
+    // Load configuration using layered approach
+    let (mut config, sources) = Config::load_layered(config_path)?;
 
-    // Determine which config file to use
-    let config_file = if let Some(path) = config_path {
-        path.to_path_buf()
-    } else {
-        global_config_path().context("Failed to determine global config path")?
-    };
-
-    // Config must exist - we don't create it for serve
-    if !config_file.exists() {
-        anyhow::bail!(
-            "Configuration file not found at {}.\n\
-            Run 'codesearch index' from a git repository to create an initial configuration.",
-            config_file.display()
-        );
+    // Log which configs were loaded
+    if sources.global_loaded {
+        if let Some(ref path) = sources.global_path {
+            info!("Loaded global config: {}", path.display());
+        }
+    }
+    if sources.local_loaded {
+        if let Some(ref path) = sources.local_path {
+            info!("Loaded local config: {}", path.display());
+        }
     }
 
-    // Load the configuration
-    let config = Config::from_file(&config_file)
-        .with_context(|| format!("Failed to load config from {}", config_file.display()))?;
+    // Apply collection override if provided
+    if let Some(collection) = collection_override {
+        info!("Using collection from --collection flag: {}", collection);
+        config.storage.collection_name = collection.to_string();
+    }
+
+    // Ensure collection name is set
+    if config.storage.collection_name.is_empty() {
+        anyhow::bail!(
+            "No collection name specified.\n\
+            Either:\n\
+            1. Run 'codesearch serve --collection <name>' to specify a collection\n\
+            2. Run 'codesearch serve' from a repository directory with codesearch.toml\n\
+            3. Create ~/.codesearch/config.toml with a collection_name\n\
+            \n\
+            Run 'codesearch index' from a git repository to create a collection."
+        );
+    }
 
     // Validate the config
     config.validate()?;

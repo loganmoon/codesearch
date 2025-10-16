@@ -28,6 +28,18 @@ pub fn handle_constant(
     // Get the constant node
     let constant_node = require_capture_node(query_match, query, "constant")?;
 
+    // Skip constants inside impl blocks - those are handled by the impl extractor
+    if let Some(parent) = constant_node.parent() {
+        if parent.kind() == "declaration_list" {
+            // Check if the declaration_list is inside an impl_item
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "impl_item" {
+                    return Ok(Vec::new());
+                }
+            }
+        }
+    }
+
     // Extract common components
     let components = extract_common_components(
         query_match,

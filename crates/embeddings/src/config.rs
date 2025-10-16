@@ -43,8 +43,8 @@ impl EmbeddingConfig {
         if self.batch_size == 0 {
             return Err("Batch size must be greater than 0".to_string());
         }
-        if self.batch_size > 1000 {
-            return Err("Batch size too large (max 1000)".to_string());
+        if self.batch_size > 2000 {
+            return Err("Batch size too large (max 2000)".to_string());
         }
         if self.max_workers == 0 {
             return Err("Max workers must be greater than 0".to_string());

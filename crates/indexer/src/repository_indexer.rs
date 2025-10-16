@@ -64,6 +64,7 @@ pub struct RepositoryIndexer {
     embedding_manager: std::sync::Arc<EmbeddingManager>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
+    config: IndexerConfig,
 }
 
 impl RepositoryIndexer {
@@ -74,6 +75,7 @@ impl RepositoryIndexer {
         embedding_manager: std::sync::Arc<EmbeddingManager>,
         postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
+        config: IndexerConfig,
     ) -> Result<Self> {
         debug!(
             "RepositoryIndexer::new called with repository_id string = {}",
@@ -90,6 +92,7 @@ impl RepositoryIndexer {
             embedding_manager,
             postgres_client,
             git_repo,
+            config,
         })
     }
 
@@ -401,6 +404,7 @@ async fn stage_store_entities(
     postgres_client: Arc<dyn PostgresClientTrait>,
 ) -> Result<usize> {
     let mut total_stored = 0;
+    let max_batch_size = postgres_client.max_entity_batch_size();
 
     while let Some(batch) = embedded_rx.recv().await {
         info!(
@@ -412,52 +416,65 @@ async fn stage_store_entities(
         // Use cached collection_name from batch
         let collection_name = &batch.collection_name;
 
-        // Batch fetch existing metadata
-        let entity_ids: Vec<String> = batch
-            .entity_embedding_pairs
-            .iter()
-            .map(|(e, _)| e.entity_id.clone())
-            .collect();
+        // Process in chunks to respect max_entity_batch_size
+        for chunk_start in (0..batch.entity_embedding_pairs.len()).step_by(max_batch_size) {
+            let chunk_end =
+                (chunk_start + max_batch_size).min(batch.entity_embedding_pairs.len());
+            let chunk = &batch.entity_embedding_pairs[chunk_start..chunk_end];
 
-        let metadata_map = postgres_client
-            .get_entities_metadata_batch(batch.repo_id, &entity_ids)
-            .await
-            .storage_err("Failed to fetch metadata")?;
+            // Batch fetch existing metadata for this chunk
+            let entity_ids: Vec<String> = chunk.iter().map(|(e, _)| e.entity_id.clone()).collect();
 
-        // Prepare batch refs (no cloning - use references)
-        let mut batch_refs = Vec::with_capacity(batch.entity_embedding_pairs.len());
+            let metadata_map = postgres_client
+                .get_entities_metadata_batch(batch.repo_id, &entity_ids)
+                .await
+                .storage_err("Failed to fetch metadata")?;
 
-        for (entity, embedding) in &batch.entity_embedding_pairs {
-            let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
-                metadata_map.get(&entity.entity_id)
-            {
-                if deleted_at.is_some() {
-                    (Uuid::new_v4(), OutboxOperation::Insert)
+            // Prepare batch refs (no cloning - use references)
+            let mut batch_refs = Vec::with_capacity(chunk.len());
+
+            for (entity, embedding) in chunk {
+                let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
+                    metadata_map.get(&entity.entity_id)
+                {
+                    if deleted_at.is_some() {
+                        (Uuid::new_v4(), OutboxOperation::Insert)
+                    } else {
+                        (*existing_point_id, OutboxOperation::Update)
+                    }
                 } else {
-                    (*existing_point_id, OutboxOperation::Update)
-                }
-            } else {
-                (Uuid::new_v4(), OutboxOperation::Insert)
-            };
+                    (Uuid::new_v4(), OutboxOperation::Insert)
+                };
 
-            batch_refs.push((
-                entity,
-                embedding.as_slice(),
-                operation,
-                point_id,
-                TargetStore::Qdrant,
-                batch.git_commit.clone(),
-            ));
+                batch_refs.push((
+                    entity,
+                    embedding.as_slice(),
+                    operation,
+                    point_id,
+                    TargetStore::Qdrant,
+                    batch.git_commit.clone(),
+                ));
+            }
+
+            // Store in DB with outbox
+            postgres_client
+                .store_entities_with_outbox_batch(batch.repo_id, collection_name, &batch_refs)
+                .await
+                .storage_err("Failed to store entities")?;
+
+            total_stored += batch_refs.len();
+            info!(
+                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
+                batch_refs.len(),
+                chunk_end,
+                batch.entity_embedding_pairs.len()
+            );
         }
 
-        // Store in DB with outbox
-        postgres_client
-            .store_entities_with_outbox_batch(batch.repo_id, collection_name, &batch_refs)
-            .await
-            .storage_err("Failed to store entities")?;
-
-        total_stored += batch_refs.len();
-        info!("Stage 4: Successfully stored {} entities", batch_refs.len());
+        info!(
+            "Stage 4: Completed storing {} entities from this batch",
+            batch.entity_embedding_pairs.len()
+        );
 
         // Build file→entity_id map for snapshots
         let mut file_entity_map = HashMap::new();
@@ -509,6 +526,7 @@ async fn stage_store_entities(
 async fn stage_update_snapshots(
     mut stored_rx: mpsc::Receiver<StoredBatch>,
     postgres_client: Arc<dyn PostgresClientTrait>,
+    snapshot_update_concurrency: usize,
 ) -> Result<usize> {
     let mut total_snapshots = 0;
 
@@ -518,21 +536,44 @@ async fn stage_update_snapshots(
             batch.file_entity_map.len()
         );
 
-        for (file_path, entity_ids) in batch.file_entity_map {
-            let file_path_str = path_to_str(&file_path)?;
+        let file_count = batch.file_entity_map.len();
+        let repo_id = batch.repo_id;
+        let collection_name = batch.collection_name.clone();
+        let git_commit = batch.git_commit.clone();
+        let pg_client = postgres_client.clone();
 
-            entity_processor::update_file_snapshot_and_mark_stale(
-                batch.repo_id,
-                &batch.collection_name,
-                file_path_str,
-                entity_ids,
-                batch.git_commit.clone(),
-                postgres_client.as_ref(),
-            )
-            .await?;
+        let results: Vec<Result<()>> = stream::iter(batch.file_entity_map)
+            .map(|(file_path, entity_ids)| {
+                let collection_name = collection_name.clone();
+                let git_commit = git_commit.clone();
+                let pg_client = pg_client.clone();
 
-            total_snapshots += 1;
+                async move {
+                    let file_path_str = path_to_str(&file_path)?;
+
+                    entity_processor::update_file_snapshot_and_mark_stale(
+                        repo_id,
+                        &collection_name,
+                        file_path_str,
+                        entity_ids,
+                        git_commit,
+                        pg_client.as_ref(),
+                    )
+                    .await?;
+
+                    Ok(())
+                }
+            })
+            .buffer_unordered(snapshot_update_concurrency)
+            .collect()
+            .await;
+
+        // Check for errors
+        for result in results {
+            result?;
         }
+
+        total_snapshots += file_count;
     }
 
     info!("Updated {total_snapshots} file snapshots");
@@ -543,13 +584,20 @@ async fn stage_update_snapshots(
 impl crate::Indexer for RepositoryIndexer {
     /// Index the entire repository using a pipelined architecture
     async fn index_repository(&mut self) -> Result<IndexResult> {
+        let start_time = Instant::now();
+        let config = &self.config;
+
         info!(
             repository_path = %self.repository_path.display(),
-            "Starting pipelined repository indexing"
+            "Starting pipelined repository indexing with config: \
+             index_batch_size={}, max_entity_batch_size={}, channel_buffer_size={}, \
+             file_extraction_concurrency={}, snapshot_update_concurrency={}",
+            config.index_batch_size,
+            config.max_entity_batch_size,
+            config.channel_buffer_size,
+            config.file_extraction_concurrency,
+            config.snapshot_update_concurrency
         );
-        let start_time = Instant::now();
-
-        let config = IndexerConfig::default();
 
         // Create channels with configurable buffer sizes
         let (file_tx, file_rx) = mpsc::channel::<FileBatch>(config.channel_buffer_size);
@@ -602,7 +650,11 @@ impl crate::Indexer for RepositoryIndexer {
             postgres_client,
         ));
 
-        let stage5 = tokio::spawn(stage_update_snapshots(stored_rx, postgres_client_2));
+        let stage5 = tokio::spawn(stage_update_snapshots(
+            stored_rx,
+            postgres_client_2,
+            config.snapshot_update_concurrency,
+        ));
 
         // Await all stages and handle errors
         let stage1_result = stage1
@@ -649,12 +701,20 @@ impl crate::Indexer for RepositoryIndexer {
             .await?;
         info!(commit = %commit_hash, "Updated last indexed commit");
 
+        let total_time = start_time.elapsed();
+        let throughput = if total_time.as_secs_f64() > 0.0 {
+            entities_extracted as f64 / total_time.as_secs_f64()
+        } else {
+            0.0
+        };
+
         info!(
             total_files = stats.total_files(),
             entities_extracted = stats.entities_extracted(),
             processing_time_s = stats.processing_time_ms() as f64 / 1000.0,
             failed_files = stats.failed_files(),
-            "Pipelined indexing complete"
+            throughput_entities_per_sec = format!("{throughput:.1}"),
+            "Pipeline completed"
         );
 
         // No granular errors tracked in pipelined version (all logged during processing)

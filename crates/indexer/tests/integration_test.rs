@@ -3,7 +3,7 @@
 //! These tests verify the complete three-stage indexing pipeline with mocked dependencies.
 
 use codesearch_embeddings::{EmbeddingManager, MockEmbeddingProvider};
-use codesearch_indexer::create_indexer;
+use codesearch_indexer::{create_indexer, IndexerConfig};
 use codesearch_storage::{MockPostgresClient, PostgresClientTrait};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -200,6 +200,7 @@ async fn test_full_indexing_pipeline() {
         embedding_manager,
         postgres_client,
         None,
+        IndexerConfig::default(),
     )
     .unwrap();
 
@@ -275,6 +276,7 @@ fn large_function() {{
         embedding_manager,
         postgres_client,
         None,
+        IndexerConfig::default(),
     )
     .unwrap();
     let result = indexer.index_repository().await.unwrap();
@@ -306,6 +308,7 @@ async fn test_indexer_with_empty_repository() {
         embedding_manager,
         postgres_client,
         None,
+        IndexerConfig::default(),
     )
     .unwrap();
 

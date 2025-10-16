@@ -271,6 +271,14 @@ async fn index_repository(
         }
     };
 
+    // Convert core config to indexer config
+    let indexer_config = codesearch_indexer::IndexerConfig::new()
+        .with_index_batch_size(config.indexer.index_batch_size)
+        .with_channel_buffer_size(config.indexer.channel_buffer_size)
+        .with_max_entity_batch_size(config.indexer.max_entity_batch_size)
+        .with_file_extraction_concurrency(config.indexer.file_extraction_concurrency)
+        .with_snapshot_update_concurrency(config.indexer.snapshot_update_concurrency);
+
     // Create and run indexer
     tracing::debug!(
         repository_id_string = %repository_id.to_string(),
@@ -282,6 +290,7 @@ async fn index_repository(
         embedding_manager,
         postgres_client,
         git_repo,
+        indexer_config,
     )?;
 
     // Run indexing

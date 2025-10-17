@@ -29,7 +29,6 @@ async fn setup_postgres() -> Result<(
         6334, // Qdrant not needed for Postgres tests
         6333,
         postgres.port(),
-        "test_collection",
         &db_name,
     );
 
@@ -95,7 +94,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
 #[tokio::test]
 async fn test_store_entity_during_connection_loss() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
-        let config = create_storage_config(6334, 6333, 9999, "test", "codesearch");
+        let config = create_storage_config(6334, 6333, 9999, "codesearch");
         let result = create_postgres_client(&config).await;
 
         assert!(

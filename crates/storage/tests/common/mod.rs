@@ -62,7 +62,6 @@ pub fn create_storage_config(
     qdrant_port: u16,
     qdrant_rest_port: u16,
     postgres_port: u16,
-    _collection_name: &str,
     postgres_database: &str,
 ) -> StorageConfig {
     StorageConfig {

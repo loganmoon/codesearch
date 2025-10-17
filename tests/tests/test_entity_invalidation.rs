@@ -5,11 +5,10 @@
 //! 2. DELETE operations are written to the outbox
 //! 3. Deleted entities are eventually removed from Qdrant
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use codesearch_core::config::StorageConfig;
 use codesearch_e2e_tests::common::*;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 /// Create a test config file
@@ -55,15 +54,7 @@ enabled = ["rust"]
     Ok(config_path)
 }
 
-/// Run the codesearch CLI
-fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new(codesearch_binary())
-        .current_dir(repo_path)
-        .args(args)
-        .env("RUST_LOG", "info")
-        .output()
-        .context("Failed to run codesearch CLI")
-}
+// Note: Using run_cli_with_test_infra from common module to ensure testcontainer isolation
 
 #[tokio::test]
 #[ignore]
@@ -93,7 +84,7 @@ pub fn function_two() -> i32 {
     let collection_name = StorageConfig::generate_collection_name(repo.path())?;
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Initial index failed");
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
@@ -109,7 +100,7 @@ pub fn function_one() -> i32 {
 "#,
     )?;
 
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Re-index failed");
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
@@ -146,7 +137,7 @@ pub fn old_name() -> i32 {
     let collection_name = StorageConfig::generate_collection_name(repo.path())?;
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
 
@@ -163,7 +154,7 @@ pub fn new_name() -> i32 {
 "#,
     )?;
 
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
@@ -204,7 +195,7 @@ pub fn func3() {}
     let collection_name = StorageConfig::generate_collection_name(repo.path())?;
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Initial index failed");
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
@@ -213,7 +204,7 @@ pub fn func3() {}
 
     std::fs::write(repo.path().join("src/lib.rs"), "// Empty file\n")?;
 
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Re-index failed");
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
@@ -252,7 +243,7 @@ pub fn calculate() -> i32 {
     let collection_name = StorageConfig::generate_collection_name(repo.path())?;
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
 
@@ -270,7 +261,7 @@ pub fn calculate() -> i32 {
 "#,
     )?;
 
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 

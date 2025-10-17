@@ -23,7 +23,7 @@ use codesearch_e2e_tests::common::*;
 use codesearch_embeddings::{EmbeddingProvider, MockEmbeddingProvider};
 use codesearch_storage::{create_collection_manager, create_storage_client};
 use std::path::Path;
-use std::process::Command;
+use std::process::Command; // Only used for failure test case
 use std::sync::Arc;
 
 /// Create a test config file for the given repository and test instances
@@ -69,15 +69,7 @@ enabled = ["rust"]
     Ok(config_path)
 }
 
-/// Run the codesearch CLI with the given arguments
-fn run_cli(repo_path: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new(codesearch_binary())
-        .current_dir(repo_path)
-        .args(args)
-        .env("RUST_LOG", "info")
-        .output()
-        .context("Failed to run codesearch CLI")
-}
+// Note: Using run_cli_with_test_infra from common module to ensure testcontainer isolation
 
 #[tokio::test]
 #[ignore]
@@ -98,7 +90,7 @@ async fn test_index_creates_collection_in_qdrant() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index command - it will automatically initialize storage
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -132,7 +124,8 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let index_output = run_cli(repo.path(), &["index"])?;
+    let index_output =
+        run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let stdout = String::from_utf8_lossy(&index_output.stdout);
     let stderr = String::from_utf8_lossy(&index_output.stderr);
@@ -173,7 +166,7 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     assert!(output.status.success(), "Index with mock embeddings failed");
 
@@ -206,7 +199,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Index the repository - it will automatically initialize storage if needed
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let processor =
         start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
@@ -316,7 +309,8 @@ enabled = ["rust"]
     std::fs::write(&config_path, config_content)?;
 
     // Run index - it will automatically initialize storage if needed
-    let index_output = run_cli(repo.path(), &["index"])?;
+    let index_output =
+        run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     let stdout = String::from_utf8_lossy(&index_output.stdout);
     let stderr = String::from_utf8_lossy(&index_output.stderr);
 
@@ -356,7 +350,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    run_cli(repo.path(), &["index"])?;
+    run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let processor =
         start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
@@ -395,11 +389,11 @@ async fn test_index_command_handles_existing_collection() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index first time - will automatically initialize storage
-    let output1 = run_cli(repo.path(), &["index"])?;
+    let output1 = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output1.status.success(), "First index failed");
 
     // Run index again - should handle gracefully (storage already initialized)
-    let output2 = run_cli(repo.path(), &["index"])?;
+    let output2 = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let stdout = String::from_utf8_lossy(&output2.stdout);
     let stderr = String::from_utf8_lossy(&output2.stderr);
@@ -435,7 +429,7 @@ async fn test_index_auto_initializes_when_collection_missing() -> Result<()> {
     create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - should auto-initialize storage
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -484,7 +478,14 @@ enabled = ["rust"]
     let config_path = repo.path().join("codesearch.toml");
     std::fs::write(&config_path, config_content)?;
 
-    let output = run_cli(repo.path(), &["index"])?;
+    // This test intentionally uses unreachable infrastructure,
+    // so we don't use the helper function (no testcontainers needed)
+    let output = Command::new(codesearch_binary())
+        .current_dir(repo.path())
+        .args(["index"])
+        .env("RUST_LOG", "info")
+        .output()
+        .context("Failed to run codesearch CLI")?;
 
     assert!(
         !output.status.success(),
@@ -530,7 +531,7 @@ fn broken( {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     assert!(
         output.status.success(),
@@ -589,7 +590,8 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let index_output = run_cli(repo.path(), &["index"])?;
+    let index_output =
+        run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     assert!(
         index_output.status.success(),
@@ -634,7 +636,7 @@ fn large_function() {{
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     assert!(
         output.status.success(),
@@ -691,7 +693,7 @@ pub fn duplicate_name() -> i32 {
     let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
-    let output = run_cli(repo.path(), &["index"])?;
+    let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
     assert!(
         output.status.success(),

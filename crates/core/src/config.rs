@@ -432,14 +432,21 @@ impl StorageConfig {
                 .join(repo_path)
         };
 
+        // Canonicalize the path to resolve symlinks and normalize (e.g., remove .. and .)
+        // This prevents the same repository from being registered multiple times with
+        // different path representations (e.g., /home/user/repo vs /home/user/../user/repo)
+        // If the path doesn't exist, fall back to the absolute path
+        let normalized_path =
+            std::fs::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
+
         // Extract repository name (last component of path)
-        let repo_name = absolute_path
+        let repo_name = normalized_path
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
                 Error::config(format!(
                     "Path {} has no valid filename component",
-                    absolute_path.display()
+                    normalized_path.display()
                 ))
             })?;
 
@@ -456,8 +463,8 @@ impl StorageConfig {
             })
             .collect();
 
-        // Hash the full absolute path
-        let path_str = absolute_path.to_string_lossy();
+        // Hash the full normalized path to ensure uniqueness
+        let path_str = normalized_path.to_string_lossy();
         let hash = XxHash3_128::oneshot(path_str.as_bytes());
 
         // Format: <repo_name>_<hash>

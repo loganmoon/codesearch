@@ -159,27 +159,46 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
     }
 
     info!("Found {} indexed repositories:", all_repos.len());
-    for (repo_id, collection_name, path) in &all_repos {
-        info!(
-            "  - {} ({}) at {}",
-            collection_name,
-            repo_id,
-            path.display()
-        );
 
-        // Verify repository path still exists
-        if !path.exists() {
-            warn!(
-                "Repository path {} no longer exists (may have been moved or deleted)",
-                path.display()
-            );
-        }
+    // Filter out repositories with non-existent paths
+    let valid_repos: Vec<_> = all_repos
+        .into_iter()
+        .filter(|(repo_id, collection_name, path)| {
+            if path.exists() {
+                info!(
+                    "  - {} ({}) at {}",
+                    collection_name,
+                    repo_id,
+                    path.display()
+                );
+                true
+            } else {
+                warn!(
+                    "Skipping repository '{}' ({}) - path {} no longer exists (may have been moved or deleted)",
+                    collection_name,
+                    repo_id,
+                    path.display()
+                );
+                false
+            }
+        })
+        .collect();
+
+    if valid_repos.is_empty() {
+        anyhow::bail!(
+            "No valid repositories found to serve.\n\
+            All indexed repositories have non-existent paths.\n\
+            Run 'codesearch index' from a valid repository directory to re-index."
+        );
     }
 
-    info!("Starting multi-repository MCP server...");
+    info!(
+        "Starting multi-repository MCP server with {} valid repositories",
+        valid_repos.len()
+    );
 
     // Delegate to multi-repository server
-    codesearch_server::run_multi_repo_server(config, all_repos, postgres_client)
+    codesearch_server::run_multi_repo_server(config, valid_repos, postgres_client)
         .await
         .map_err(|e| anyhow!("MCP server error: {e}"))
 }

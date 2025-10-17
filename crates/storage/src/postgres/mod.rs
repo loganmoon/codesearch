@@ -26,7 +26,20 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Run database migrations
     async fn run_migrations(&self) -> Result<()>;
 
-    /// Ensure repository exists, return repository_id
+    /// Ensure repository exists in the database, creating it if necessary
+    ///
+    /// This method inserts a new repository record or returns the existing repository_id
+    /// if a repository with the given path and collection_name already exists.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_path` - Absolute filesystem path to the repository
+    /// * `collection_name` - Unique Qdrant collection name for this repository
+    /// * `repository_name` - Optional human-readable name (defaults to last path component)
+    ///
+    /// # Returns
+    ///
+    /// The UUID of the repository (newly created or existing)
     async fn ensure_repository(
         &self,
         repository_path: &std::path::Path,
@@ -42,7 +55,16 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Get repository information by collection name
     ///
-    /// Returns (repository_id, repository_path, repository_name) if found
+    /// Looks up a repository by its Qdrant collection name and returns full metadata.
+    ///
+    /// # Parameters
+    ///
+    /// * `collection_name` - The Qdrant collection name to search for
+    ///
+    /// # Returns
+    ///
+    /// * `Some((repository_id, repository_path, repository_name))` if found
+    /// * `None` if no repository with this collection name exists
     async fn get_repository_by_collection(
         &self,
         collection_name: &str,
@@ -50,7 +72,17 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Get repository information by filesystem path
     ///
-    /// Returns (repository_id, collection_name) if found
+    /// Looks up a repository by its absolute filesystem path.
+    /// Path comparison is exact (no canonicalization performed).
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_path` - The absolute filesystem path to search for
+    ///
+    /// # Returns
+    ///
+    /// * `Some((repository_id, collection_name))` if found
+    /// * `None` if no repository with this path exists
     async fn get_repository_by_path(
         &self,
         repository_path: &std::path::Path,
@@ -58,7 +90,12 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// List all repositories in the database
     ///
-    /// Returns a vector of (repository_id, collection_name, repository_path) tuples
+    /// Returns metadata for all indexed repositories, sorted by creation time (oldest first).
+    /// This is used by the multi-repository serve command to load all available repositories.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `(repository_id, collection_name, repository_path)` tuples
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>>;
 
     /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id

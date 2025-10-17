@@ -193,27 +193,44 @@ impl CodeSearchMcpServer {
             file_path: request.file_path.as_ref().map(PathBuf::from),
         };
 
-        // Search each target repository
-        let mut all_results = Vec::new();
-        for (repo_id, repo_info) in &target_repos {
-            let results = repo_info
-                .storage_client
-                .search_similar(query_embedding.clone(), limit, Some(filters.clone()))
-                .await
-                .map_err(|e| {
-                    McpError::new(
-                        ErrorCode::INTERNAL_ERROR,
-                        format!(
-                            "Search failed in repository {}: {e}",
-                            repo_info.collection_name
-                        ),
-                        None,
-                    )
-                })?;
+        // Search all target repositories in parallel
+        let search_futures = target_repos.iter().map(|(repo_id, repo_info)| {
+            let storage_client = repo_info.storage_client.clone();
+            let query_emb = query_embedding.clone();
+            let filters_clone = filters.clone();
+            let collection_name = repo_info.collection_name.clone();
+            let repo_id = *repo_id;
 
-            // Add repository context to results
-            for (entity_id, _repo_id_from_qdrant, score) in results {
-                all_results.push((*repo_id, entity_id, score));
+            async move {
+                storage_client
+                    .search_similar(query_emb, limit, Some(filters_clone))
+                    .await
+                    .map(|results| {
+                        results
+                            .into_iter()
+                            .map(|(entity_id, _repo_id_from_qdrant, score)| {
+                                (repo_id, entity_id, score)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .map_err(|e| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            format!("Search failed in repository {collection_name}: {e}"),
+                            None,
+                        )
+                    })
+            }
+        });
+
+        let search_results = futures::future::join_all(search_futures).await;
+
+        // Collect all results, failing if any search failed
+        let mut all_results = Vec::new();
+        for result in search_results {
+            match result {
+                Ok(repo_results) => all_results.extend(repo_results),
+                Err(e) => return Err(e),
             }
         }
 
@@ -249,8 +266,8 @@ impl CodeSearchMcpServer {
         let formatted_results: Vec<_> = all_results
             .into_iter()
             .filter_map(|(repo_id, entity_id, score)| {
-                entities_map.get(&entity_id).and_then(|entity| {
-                    repos.get(&repo_id).map(|repo| {
+                match entities_map.get(&entity_id) {
+                    Some(entity) => repos.get(&repo_id).map(|repo| {
                         serde_json::json!({
                             "repository_id": repo_id.to_string(),
                             "repository_path": repo.repository_root.display().to_string(),
@@ -271,8 +288,15 @@ impl CodeSearchMcpServer {
                             "signature": entity.signature.as_ref().map(|s| format!("{s:?}")),
                             "visibility": format!("{:?}", entity.visibility),
                         })
-                    })
-                })
+                    }),
+                    None => {
+                        tracing::warn!(
+                            "Entity '{}' from Qdrant not found in Postgres (data consistency issue)",
+                            entity_id
+                        );
+                        None
+                    }
+                }
             })
             .collect();
 
@@ -629,48 +653,56 @@ pub(crate) async fn run_multi_repo_server(
 
     let embedding_manager = crate::storage_init::create_embedding_manager(&config).await?;
 
+    // Parallelize repository loading (including collection existence checks)
+    let repo_load_futures =
+        all_repos
+            .into_iter()
+            .map(|(repository_id, collection_name, repo_path)| {
+                let storage_config = config.storage.clone();
+                let postgres_client = postgres_client.clone();
+                async move {
+                    let storage_client = create_storage_client(&storage_config, &collection_name)
+                        .await
+                        .context("Failed to create storage client")?;
+
+                    let last_indexed_commit = postgres_client
+                        .get_last_indexed_commit(repository_id)
+                        .await
+                        .context("Failed to get last indexed commit")?;
+
+                    info!(
+                        "Loaded repository: {} ({}) at {}",
+                        collection_name,
+                        repository_id,
+                        repo_path.display()
+                    );
+
+                    Ok::<_, codesearch_core::Error>((
+                        repository_id,
+                        RepositoryInfo {
+                            repository_id,
+                            repository_root: repo_path,
+                            collection_name,
+                            storage_client,
+                            last_indexed_commit,
+                        },
+                    ))
+                }
+            });
+
+    let loaded_repos = futures::future::join_all(repo_load_futures).await;
+
+    // Collect successfully loaded repositories
     let mut repositories = HashMap::new();
-    let collection_manager = create_collection_manager(&config.storage).await?;
-
-    for (repository_id, collection_name, repo_path) in all_repos {
-        if !collection_manager
-            .collection_exists(&collection_name)
-            .await?
-        {
-            tracing::warn!(
-                "Collection '{}' for repository {} does not exist in Qdrant, skipping",
-                collection_name,
-                repo_path.display()
-            );
-            continue;
+    for result in loaded_repos {
+        match result {
+            Ok((repo_id, repo_info)) => {
+                repositories.insert(repo_id, repo_info);
+            }
+            Err(e) => {
+                tracing::error!("Failed to load repository: {e}");
+            }
         }
-
-        let storage_client = create_storage_client(&config.storage, &collection_name)
-            .await
-            .context("Failed to create storage client")?;
-
-        let last_indexed_commit = postgres_client
-            .get_last_indexed_commit(repository_id)
-            .await
-            .context("Failed to get last indexed commit")?;
-
-        repositories.insert(
-            repository_id,
-            RepositoryInfo {
-                repository_id,
-                repository_root: repo_path.clone(),
-                collection_name: collection_name.clone(),
-                storage_client,
-                last_indexed_commit,
-            },
-        );
-
-        info!(
-            "Loaded repository: {} ({}) at {}",
-            collection_name,
-            repository_id,
-            repo_path.display()
-        );
     }
 
     if repositories.is_empty() {
@@ -710,78 +742,98 @@ async fn start_all_watchers(
     postgres_client: Arc<dyn PostgresClientTrait>,
 ) -> std::result::Result<Arc<RwLock<HashMap<Uuid, FileWatcher>>>, codesearch_core::Error> {
     let repos = repositories.read().await;
-    let mut watchers = HashMap::new();
 
-    for (repo_id, repo_info) in repos.iter() {
-        info!(
-            "Setting up watcher for {}",
-            repo_info.repository_root.display()
-        );
+    // Parallelize watcher initialization
+    let watcher_futures = repos.iter().map(|(repo_id, repo_info)| {
+        let repo_id = *repo_id;
+        let repo_root = repo_info.repository_root.clone();
+        let embedding_manager = embedding_manager.clone();
+        let postgres_client = postgres_client.clone();
 
-        if let Ok(git_repo) = codesearch_watcher::GitRepository::open(&repo_info.repository_root) {
-            info!(
-                "Running catch-up indexing for {}",
-                repo_info.repository_root.display()
-            );
-            codesearch_indexer::catch_up_from_git(
-                &repo_info.repository_root,
-                *repo_id,
-                &postgres_client,
-                &embedding_manager,
-                &git_repo,
-            )
-            .await
-            .context(format!(
-                "Catch-up indexing failed for {}",
-                repo_info.repository_root.display()
-            ))?;
-        }
+        async move {
+            info!("Setting up watcher for {}", repo_root.display());
 
-        let watcher_config = WatcherConfig::builder()
-            .debounce_ms(DEFAULT_DEBOUNCE_MS)
-            .max_file_size(MAX_FILE_SIZE_BYTES)
-            .events_per_batch(100)
-            .build();
-
-        let mut watcher =
-            FileWatcher::new(watcher_config).context("Failed to create file watcher")?;
-
-        let event_rx = watcher
-            .watch(&repo_info.repository_root)
-            .await
-            .context(format!(
-                "Failed to watch repository at {}",
-                repo_info.repository_root.display()
-            ))?;
-
-        let repo_id_clone = *repo_id;
-        let repo_root_clone = repo_info.repository_root.clone();
-        let embedding_manager_clone = embedding_manager.clone();
-        let postgres_client_clone = postgres_client.clone();
-
-        tokio::spawn(async move {
-            let result = codesearch_indexer::start_watching(
-                event_rx,
-                repo_id_clone,
-                repo_root_clone.clone(),
-                embedding_manager_clone,
-                postgres_client_clone,
-            )
-            .await;
-
-            if let Err(e) = result {
-                tracing::error!(
-                    "Watcher task failed for repository at {}: {e}",
-                    repo_root_clone.display()
-                );
+            // Run catch-up indexing if git repository exists
+            if let Ok(git_repo) = codesearch_watcher::GitRepository::open(&repo_root) {
+                info!("Running catch-up indexing for {}", repo_root.display());
+                codesearch_indexer::catch_up_from_git(
+                    &repo_root,
+                    repo_id,
+                    &postgres_client,
+                    &embedding_manager,
+                    &git_repo,
+                )
+                .await
+                .context(format!(
+                    "Catch-up indexing failed for {}",
+                    repo_root.display()
+                ))?;
             }
-        });
 
-        watchers.insert(*repo_id, watcher);
-        info!(
-            "Watcher started for {}",
-            repo_info.repository_root.display()
-        );
+            let watcher_config = WatcherConfig::builder()
+                .debounce_ms(DEFAULT_DEBOUNCE_MS)
+                .max_file_size(MAX_FILE_SIZE_BYTES)
+                .events_per_batch(100)
+                .build();
+
+            let mut watcher =
+                FileWatcher::new(watcher_config).context("Failed to create file watcher")?;
+
+            let event_rx = watcher.watch(&repo_root).await.context(format!(
+                "Failed to watch repository at {}",
+                repo_root.display()
+            ))?;
+
+            // Spawn watcher task
+            let repo_id_clone = repo_id;
+            let repo_root_clone = repo_root.clone();
+            let embedding_manager_clone = embedding_manager.clone();
+            let postgres_client_clone = postgres_client.clone();
+
+            tokio::spawn(async move {
+                let result = codesearch_indexer::start_watching(
+                    event_rx,
+                    repo_id_clone,
+                    repo_root_clone.clone(),
+                    embedding_manager_clone,
+                    postgres_client_clone,
+                )
+                .await;
+
+                if let Err(e) = result {
+                    tracing::error!(
+                        "Watcher task failed for repository at {}: {e}",
+                        repo_root_clone.display()
+                    );
+                }
+            });
+
+            info!("Watcher started for {}", repo_root.display());
+
+            Ok::<_, codesearch_core::Error>((repo_id, watcher))
+        }
+    });
+
+    let watcher_results = futures::future::join_all(watcher_futures).await;
+
+    // Collect successfully initialized watchers
+    let mut watchers = HashMap::new();
+    for result in watcher_results {
+        match result {
+            Ok((repo_id, watcher)) => {
+                watchers.insert(repo_id, watcher);
+            }
+            Err(e) => {
+                tracing::error!("Failed to initialize watcher: {e}");
+                // Continue with other watchers instead of failing completely
+            }
+        }
+    }
+
+    if watchers.is_empty() {
+        return Err(Error::config(
+            "Failed to initialize any watchers".to_string(),
+        ));
     }
 
     Ok(Arc::new(RwLock::new(watchers)))

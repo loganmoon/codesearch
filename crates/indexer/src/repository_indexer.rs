@@ -169,72 +169,77 @@ async fn stage_extract_entities(
         // Process results and batch by entity count
         for result in results {
             match result {
-                Ok((path, mut file_entities)) if !file_entities.is_empty() => {
-                    // Process entities from this file, potentially across multiple batches
-                    while !file_entities.is_empty() {
-                        let space_left = max_entity_batch_size.saturating_sub(entities.len());
+                Ok((path, mut file_entities)) => {
+                    if file_entities.is_empty() {
+                        // File has 0 entities - track it so snapshot gets updated
+                        file_indices.push((path, Vec::new()));
+                    } else {
+                        // Process entities from this file, potentially across multiple batches
+                        while !file_entities.is_empty() {
+                            let space_left = max_entity_batch_size.saturating_sub(entities.len());
 
-                        if space_left == 0 {
-                            // Current batch is full, send it
-                            let batch_entities = std::mem::take(&mut entities);
-                            let batch_file_indices = std::mem::take(&mut file_indices);
+                            if space_left == 0 {
+                                // Current batch is full, send it
+                                let batch_entities = std::mem::take(&mut entities);
+                                let batch_file_indices = std::mem::take(&mut file_indices);
 
-                            total_extracted += batch_entities.len();
-                            total_failed += batch_failed;
+                                total_extracted += batch_entities.len();
+                                total_failed += batch_failed;
 
-                            info!(
-                                "Stage 2: Sending batch with {} entities from {} files ({} failed)",
-                                batch_entities.len(),
-                                batch_file_indices.len(),
-                                batch_failed
-                            );
+                                info!(
+                                    "Stage 2: Sending batch with {} entities from {} files ({} failed)",
+                                    batch_entities.len(),
+                                    batch_file_indices.len(),
+                                    batch_failed
+                                );
 
-                            entity_tx
-                                .send(EntityBatch {
-                                    entities: batch_entities,
-                                    file_indices: batch_file_indices,
-                                    repo_id,
-                                    git_commit: git_commit.clone(),
-                                    collection_name: collection_name.clone(),
-                                    failed_files: batch_failed,
-                                })
-                                .await
-                                .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
+                                entity_tx
+                                    .send(EntityBatch {
+                                        entities: batch_entities,
+                                        file_indices: batch_file_indices,
+                                        repo_id,
+                                        git_commit: git_commit.clone(),
+                                        collection_name: collection_name.clone(),
+                                        failed_files: batch_failed,
+                                    })
+                                    .await
+                                    .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
 
-                            batch_failed = 0;
-                            continue;
-                        }
+                                batch_failed = 0;
+                                continue;
+                            }
 
-                        // Add as many entities as fit in current batch
-                        let to_take = space_left.min(file_entities.len());
-                        let start_idx = entities.len();
-                        let chunk: Vec<_> = file_entities.drain(..to_take).collect();
-                        entities.extend(chunk);
-                        let end_idx = entities.len();
+                            // Add as many entities as fit in current batch
+                            let to_take = space_left.min(file_entities.len());
+                            let start_idx = entities.len();
+                            let chunk: Vec<_> = file_entities.drain(..to_take).collect();
+                            entities.extend(chunk);
+                            let end_idx = entities.len();
 
-                        // Track file indices for this chunk
-                        if let Some((last_path, last_indices)) = file_indices.last_mut() {
-                            if last_path == &path {
-                                // Extend existing file entry
-                                last_indices.extend(start_idx..end_idx);
+                            // Track file indices for this chunk
+                            if let Some((last_path, last_indices)) = file_indices.last_mut() {
+                                if last_path == &path {
+                                    // Extend existing file entry
+                                    last_indices.extend(start_idx..end_idx);
+                                } else {
+                                    // New file entry
+                                    file_indices
+                                        .push((path.clone(), (start_idx..end_idx).collect()));
+                                }
                             } else {
-                                // New file entry
+                                // First file entry
                                 file_indices.push((path.clone(), (start_idx..end_idx).collect()));
                             }
-                        } else {
-                            // First file entry
-                            file_indices.push((path.clone(), (start_idx..end_idx).collect()));
                         }
                     }
                 }
                 Err(()) => batch_failed += 1,
-                _ => {} // Empty file, skip
             }
         }
     }
 
-    // Send any remaining entities
-    if !entities.is_empty() {
+    // Send any remaining entities or files with 0 entities
+    if !entities.is_empty() || !file_indices.is_empty() {
         total_extracted += entities.len();
         total_failed += batch_failed;
 
@@ -362,20 +367,17 @@ async fn stage_generate_embeddings(
         total_skipped += skipped;
 
         // Update file_indices to use new indices (after filtering)
+        // Keep files with 0 entities so their snapshots get updated
         let updated_file_indices: Vec<(PathBuf, Vec<usize>)> = batch
             .file_indices
             .into_iter()
-            .filter_map(|(path, old_indices)| {
+            .map(|(path, old_indices)| {
                 let new_indices: Vec<usize> = old_indices
                     .into_iter()
                     .filter_map(|old_idx| old_to_new_idx.get(&old_idx).copied())
                     .collect();
 
-                if new_indices.is_empty() {
-                    None // File had no successful embeddings
-                } else {
-                    Some((path, new_indices))
-                }
+                (path, new_indices)
             })
             .collect();
 
@@ -495,9 +497,9 @@ async fn stage_store_entities(
                 })
                 .collect();
 
-            if !entity_ids.is_empty() {
-                file_entity_map.insert(path.clone(), entity_ids.clone());
-            }
+            // Always insert files into map, even if they have 0 entities
+            // This ensures file snapshots are updated and old entities are deleted
+            file_entity_map.insert(path.clone(), entity_ids.clone());
         }
 
         info!(

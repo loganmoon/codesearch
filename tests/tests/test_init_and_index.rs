@@ -25,7 +25,6 @@ use codesearch_storage::{create_collection_manager, create_storage_client};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Create a test config file for the given repository and test instances
 fn create_test_config(
@@ -33,7 +32,6 @@ fn create_test_config(
     qdrant: &TestQdrant,
     postgres: &TestPostgres,
     db_name: &str,
-    collection_name: Option<&str>,
 ) -> Result<std::path::PathBuf> {
     let config_content = format!(
         r#"
@@ -43,7 +41,6 @@ fn create_test_config(
 qdrant_host = "localhost"
 qdrant_port = {}
 qdrant_rest_port = {}
-collection_name = "{}"
 auto_start_deps = false
 postgres_host = "localhost"
 postgres_port = {}
@@ -63,7 +60,6 @@ enabled = ["rust"]
 "#,
         qdrant.port(),
         qdrant.rest_port(),
-        collection_name.unwrap_or(""),
         postgres.port(),
         db_name
     );
@@ -95,16 +91,11 @@ async fn test_index_creates_collection_in_qdrant() -> Result<()> {
 
     let repo = simple_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
+    // Collection name is now generated from repo path deterministically
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
 
-    // Create config pointing to test instances
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    // Create config pointing to test instances (no collection_name)
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index command - it will automatically initialize storage
     let output = run_cli(repo.path(), &["index"])?;
@@ -137,14 +128,8 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
 
     let repo = multi_file_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let index_output = run_cli(repo.path(), &["index"])?;
@@ -184,14 +169,8 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
 
     let repo = simple_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
@@ -223,14 +202,8 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
 
     let repo = multi_file_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Index the repository - it will automatically initialize storage if needed
     run_cli(repo.path(), &["index"])?;
@@ -244,7 +217,6 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         qdrant_host: "localhost".to_string(),
         qdrant_port: qdrant.port(),
         qdrant_rest_port: qdrant.rest_port(),
-        collection_name: collection_name.clone(),
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -304,7 +276,7 @@ async fn test_complete_pipeline_with_real_embeddings() -> Result<()> {
 
     let repo = complex_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
 
     // Create config with LocalApi provider using manual vLLM service
     let config_content = format!(
@@ -315,7 +287,6 @@ async fn test_complete_pipeline_with_real_embeddings() -> Result<()> {
 qdrant_host = "localhost"
 qdrant_port = {}
 qdrant_rest_port = {}
-collection_name = "{}"
 auto_start_deps = false
 postgres_host = "localhost"
 postgres_port = {}
@@ -337,7 +308,6 @@ enabled = ["rust"]
 "#,
         qdrant.port(),
         qdrant.rest_port(),
-        collection_name,
         postgres.port(),
         db_name
     );
@@ -382,14 +352,8 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
 
     let repo = multi_file_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     run_cli(repo.path(), &["index"])?;
@@ -427,14 +391,8 @@ async fn test_index_command_handles_existing_collection() -> Result<()> {
 
     let repo = simple_rust_repo().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index first time - will automatically initialize storage
     let output1 = run_cli(repo.path(), &["index"])?;
@@ -473,14 +431,8 @@ async fn test_index_auto_initializes_when_collection_missing() -> Result<()> {
     let repo = simple_rust_repo().await?;
 
     // Create config - collection doesn't exist yet
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - should auto-initialize storage
     let output = run_cli(repo.path(), &["index"])?;
@@ -516,7 +468,6 @@ async fn test_index_with_unreachable_qdrant_fails() -> Result<()> {
 qdrant_host = "localhost"
 qdrant_port = 19999
 qdrant_rest_port = 19998
-collection_name = "test_collection"
 auto_start_deps = false
 
 [embeddings]
@@ -575,14 +526,8 @@ fn broken( {
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
@@ -600,7 +545,6 @@ fn broken( {
         qdrant_host: "localhost".to_string(),
         qdrant_port: qdrant.port(),
         qdrant_rest_port: qdrant.rest_port(),
-        collection_name: collection_name.clone(),
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -641,14 +585,8 @@ async fn test_empty_repository_indexes_successfully() -> Result<()> {
 
     let repo = TestRepositoryBuilder::new().build().await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let index_output = run_cli(repo.path(), &["index"])?;
@@ -692,14 +630,8 @@ fn large_function() {{
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;
@@ -755,14 +687,8 @@ pub fn duplicate_name() -> i32 {
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let _config_path = create_test_config(
-        repo.path(),
-        &qdrant,
-        &postgres,
-        &db_name,
-        Some(&collection_name),
-    )?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
     // Run index - it will automatically initialize storage if needed
     let output = run_cli(repo.path(), &["index"])?;

@@ -54,7 +54,6 @@ async fn create_qdrant_collection(
         qdrant_host: "localhost".to_string(),
         qdrant_port: qdrant.port(),
         qdrant_rest_port: qdrant.rest_port(),
-        collection_name: collection_name.to_string(),
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -126,7 +125,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            Some(collection_name.clone()),
+            None, // git_commit
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)
@@ -225,7 +224,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            Some(collection_name.clone()),
+            None, // git_commit
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)

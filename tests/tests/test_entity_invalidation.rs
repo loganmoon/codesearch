@@ -6,11 +6,11 @@
 //! 3. Deleted entities are eventually removed from Qdrant
 
 use anyhow::{Context, Result};
+use codesearch_core::config::StorageConfig;
 use codesearch_e2e_tests::common::*;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Create a test config file
 fn create_test_config(
@@ -18,7 +18,6 @@ fn create_test_config(
     qdrant: &TestQdrant,
     postgres: &TestPostgres,
     db_name: &str,
-    collection_name: &str,
 ) -> Result<std::path::PathBuf> {
     let config_content = format!(
         r#"
@@ -28,7 +27,6 @@ fn create_test_config(
 qdrant_host = "localhost"
 qdrant_port = {}
 qdrant_rest_port = {}
-collection_name = "{}"
 auto_start_deps = false
 postgres_host = "localhost"
 postgres_port = {}
@@ -48,7 +46,6 @@ enabled = ["rust"]
 "#,
         qdrant.port(),
         qdrant.rest_port(),
-        collection_name,
         postgres.port(),
         db_name
     );
@@ -93,14 +90,9 @@ pub fn function_two() -> i32 {
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path =
-        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
     let output = run_cli(repo.path(), &["index"])?;
     assert!(output.status.success(), "Initial index failed");
 
@@ -151,14 +143,9 @@ pub fn old_name() -> i32 {
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path =
-        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
     run_cli(repo.path(), &["index"])?;
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
@@ -214,25 +201,20 @@ pub fn func3() {}
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path =
-        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
-    run_cli(repo.path(), &["index"])?;
+    let output = run_cli(repo.path(), &["index"])?;
+    assert!(output.status.success(), "Initial index failed");
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
-
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
-
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
     std::fs::write(repo.path().join("src/lib.rs"), "// Empty file\n")?;
 
-    run_cli(repo.path(), &["index"])?;
+    let output = run_cli(repo.path(), &["index"])?;
+    assert!(output.status.success(), "Re-index failed");
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
@@ -267,14 +249,9 @@ pub fn calculate() -> i32 {
         .build()
         .await?;
 
-    let collection_name = format!("test_collection_{}", Uuid::new_v4());
-    let config_path =
-        create_test_config(repo.path(), &qdrant, &postgres, &db_name, &collection_name)?;
+    let collection_name = StorageConfig::generate_collection_name(repo.path())?;
+    let _config_path = create_test_config(repo.path(), &qdrant, &postgres, &db_name)?;
 
-    run_cli(
-        repo.path(),
-        &["init", "--config", config_path.to_str().unwrap()],
-    )?;
     run_cli(repo.path(), &["index"])?;
 
     let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;

@@ -7,9 +7,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 // Use the library modules
-use codesearch::init::{
-    create_default_storage_config, ensure_storage_initialized, get_api_base_url_if_local_api,
-};
+use codesearch::init::{ensure_storage_initialized, get_api_base_url_if_local_api};
 use codesearch::{docker, infrastructure};
 
 use anyhow::{anyhow, Context, Result};
@@ -43,11 +41,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start MCP server with semantic code search
-    Serve {
-        /// Collection name to serve (overrides config file)
-        #[arg(long)]
-        collection: Option<String>,
-    },
+    Serve,
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -67,10 +61,7 @@ async fn main() -> Result<()> {
 
     // Execute commands
     match cli.command {
-        Some(Commands::Serve { collection }) => {
-            // Serve doesn't need to be run from a repository
-            serve(cli.config.as_deref(), collection.as_deref()).await
-        }
+        Some(Commands::Serve) => serve(cli.config.as_deref()).await,
         Some(Commands::Index { force }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
@@ -134,90 +125,61 @@ fn find_repository_root() -> Result<PathBuf> {
     }
 }
 
-/// Start the MCP server
-async fn serve(config_path: Option<&Path>, collection_override: Option<&str>) -> Result<()> {
-    info!("Preparing to start MCP server...");
+/// Start the MCP server (multi-repository mode)
+async fn serve(config_path: Option<&Path>) -> Result<()> {
+    info!("Preparing to start multi-repository MCP server...");
 
-    // Load configuration using layered approach
-    let config = codesearch::init::load_config_for_serve(config_path, collection_override).await?;
+    // Load configuration (no collection_name needed)
+    let (config, _sources) = Config::load_layered(config_path)?;
+    config.validate()?;
 
-    // Connect to Postgres to look up repository info
+    // Ensure infrastructure is running
+    if config.storage.auto_start_deps {
+        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+        let api_base_url = get_api_base_url_if_local_api(&config);
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
+    }
+
+    // Connect to PostgreSQL
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
         .await
         .context("Failed to connect to Postgres")?;
 
-    // Get repository information by collection name
-    let repo_info = postgres_client
-        .get_repository_by_collection(&config.storage.collection_name)
+    // Load ALL indexed repositories from database
+    let all_repos = postgres_client
+        .list_all_repositories()
         .await
-        .context("Failed to query repository")?;
+        .context("Failed to list repositories")?;
 
-    let (repository_id, repo_path, repo_name) = match repo_info {
-        Some(info) => info,
-        None => {
-            // List available repositories to help the user
-            let all_repos = postgres_client
-                .list_all_repositories()
-                .await
-                .context("Failed to list repositories")?;
+    if all_repos.is_empty() {
+        anyhow::bail!(
+            "No indexed repositories found.\n\
+            Run 'codesearch index' from a git repository to create an index."
+        );
+    }
 
-            if all_repos.is_empty() {
-                anyhow::bail!(
-                    "No indexed repositories found.\n\
-                    Run 'codesearch index' from a git repository to create an index."
-                );
-            } else {
-                let available: Vec<String> = all_repos
-                    .iter()
-                    .map(|(_, collection, path)| format!("  - {} ({})", collection, path.display()))
-                    .collect();
+    info!("Found {} indexed repositories:", all_repos.len());
+    for (repo_id, collection_name, path) in &all_repos {
+        info!(
+            "  - {} ({}) at {}",
+            collection_name,
+            repo_id,
+            path.display()
+        );
 
-                anyhow::bail!(
-                    "Repository with collection '{}' not found.\n\
-                    Available repositories:\n{}\n\n\
-                    Update your configuration or run 'codesearch index' to index a new repository.",
-                    config.storage.collection_name,
-                    available.join("\n")
-                );
-            }
+        // Verify repository path still exists
+        if !path.exists() {
+            warn!(
+                "Repository path {} no longer exists (may have been moved or deleted)",
+                path.display()
+            );
         }
-    };
-
-    // Verify the repository path still exists
-    if !repo_path.exists() {
-        anyhow::bail!(
-            "Repository path {} no longer exists.\n\
-            The repository may have been moved or deleted.\n\
-            Run 'codesearch index' from the new location to re-index.",
-            repo_path.display()
-        );
     }
 
-    info!("Found repository: {} at {}", repo_name, repo_path.display());
+    info!("Starting multi-repository MCP server...");
 
-    // Check if repository has been indexed
-    let last_indexed_commit = postgres_client
-        .get_last_indexed_commit(repository_id)
-        .await
-        .context("Failed to check indexing status")?;
-
-    if last_indexed_commit.is_none() {
-        anyhow::bail!(
-            "Repository at {} has not been indexed yet.\n\
-            Run 'codesearch index' from that directory to index it.",
-            repo_path.display()
-        );
-    }
-
-    info!(
-        "Repository indexed (last commit: {})",
-        last_indexed_commit.as_deref().unwrap_or("unknown")
-    );
-
-    info!("Starting MCP server...");
-
-    // Delegate to server crate with repository path and ID
-    codesearch_server::run_server(config, repo_path, repository_id)
+    // Delegate to multi-repository server
+    codesearch_server::run_multi_repo_server(config, all_repos, postgres_client)
         .await
         .map_err(|e| anyhow!("MCP server error: {e}"))
 }
@@ -231,7 +193,7 @@ async fn index_repository(
     info!("Starting repository indexing");
 
     // Ensure storage is initialized (creates config, collection, runs migrations if needed)
-    let config = ensure_storage_initialized(repo_root, config_path).await?;
+    let (config, collection_name) = ensure_storage_initialized(repo_root, config_path).await?;
 
     // Create embedding manager
     let embedding_manager = create_embedding_manager(&config).await?;
@@ -243,19 +205,18 @@ async fn index_repository(
 
     // Get repository_id from database
     let repository_id = postgres_client
-        .get_repository_id(&config.storage.collection_name)
+        .get_repository_id(&collection_name)
         .await
         .context("Failed to query repository")?
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "Repository not found for collection '{}'. This is unexpected after initialization.",
-                config.storage.collection_name
+                "Repository not found for collection '{collection_name}'. This is unexpected after initialization."
             )
         })?;
 
     info!(
         repository_id = %repository_id,
-        collection_name = %config.storage.collection_name,
+        collection_name = %collection_name,
         "Repository ID retrieved for indexing"
     );
 
@@ -329,101 +290,64 @@ async fn index_repository(
 async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to drop all indexed data");
 
-    // Load configuration or use defaults
-    let current_dir = env::current_dir()?;
-    let config_file = if let Some(path) = config_path {
-        path.to_path_buf()
-    } else {
-        current_dir.join("codesearch.toml")
-    };
+    // Load configuration (doesn't need collection_name anymore)
+    let (config, _sources) = Config::load_layered(config_path)?;
+    config.validate()?;
 
-    let config = if config_file.exists() {
-        // Try to load config, but handle missing collection_name gracefully
-        match Config::from_file(&config_file) {
-            Ok(mut config) => {
-                if config.storage.collection_name.is_empty() {
-                    config.storage.collection_name =
-                        StorageConfig::generate_collection_name(repo_root)?;
-                }
-                config
-            }
-            Err(_) => {
-                // Config file exists but is invalid or missing required fields
-                // Generate collection name and create default config
-                let collection_name = StorageConfig::generate_collection_name(repo_root)?;
-                let storage_config = create_default_storage_config(collection_name);
-                Config::builder(storage_config).build()
-            }
-        }
-    } else {
-        // Generate collection name and create default config
-        let collection_name = StorageConfig::generate_collection_name(repo_root)?;
-        let storage_config = create_default_storage_config(collection_name);
-        Config::builder(storage_config).build()
-    };
+    // Generate collection name from repository path
+    let collection_name = StorageConfig::generate_collection_name(repo_root)?;
 
     // Display warning
     println!("\nWARNING: This will permanently delete all indexed data from:");
-    println!("  - Qdrant collection: {}", config.storage.collection_name);
-    println!(
-        "  - PostgreSQL database: {}",
-        config.storage.postgres_database
-    );
+    println!("  - Qdrant collection: {collection_name}");
+    let postgres_db = &config.storage.postgres_database;
+    println!("  - PostgreSQL database: {postgres_db}");
     println!("\nThis action cannot be undone.");
     print!("\nType 'yes' to confirm: ");
 
-    // Flush stdout to ensure prompt is displayed
+    // Flush stdout and read confirmation
     use std::io::{self, Write};
     io::stdout().flush()?;
-
-    // Read user confirmation
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    let confirmation = input.trim();
 
-    if confirmation != "yes" {
+    if input.trim() != "yes" {
         println!("Operation cancelled.");
         return Ok(());
     }
 
     info!("User confirmed drop operation, proceeding...");
 
-    // Ensure dependencies are running if auto-start is enabled
+    // Ensure dependencies are running
     if config.storage.auto_start_deps {
-        // First, ensure shared infrastructure is running (or start it if needed)
         infrastructure::ensure_shared_infrastructure(&config.storage).await?;
-
-        // Then ensure all services are healthy
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
 
-    // Create collection manager
+    // Create collection manager and delete collection if it exists
     let collection_manager = codesearch_storage::create_collection_manager(&config.storage)
         .await
         .context("Failed to create collection manager")?;
 
-    // Check if collection exists before trying to delete
-    let collection_exists = collection_manager
-        .collection_exists(&config.storage.collection_name)
-        .await
-        .context("Failed to check if collection exists")?;
-
-    if collection_exists {
+    if collection_manager
+        .collection_exists(&collection_name)
+        .await?
+    {
         info!("Deleting Qdrant collection...");
         collection_manager
-            .delete_collection(&config.storage.collection_name)
+            .delete_collection(&collection_name)
             .await
             .context("Failed to delete Qdrant collection")?;
         info!("Qdrant collection deleted successfully");
     } else {
         info!(
             "Qdrant collection '{}' does not exist, skipping",
-            config.storage.collection_name
+            collection_name
         );
     }
 
-    // Create PostgreSQL client
+    // Drop PostgreSQL data
     let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
         .await
         .context("Failed to create PostgreSQL client")?;

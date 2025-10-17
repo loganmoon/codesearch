@@ -48,6 +48,14 @@ pub trait PostgresClientTrait: Send + Sync {
         collection_name: &str,
     ) -> Result<Option<(Uuid, std::path::PathBuf, String)>>;
 
+    /// Get repository information by filesystem path
+    ///
+    /// Returns (repository_id, collection_name) if found
+    async fn get_repository_by_path(
+        &self,
+        repository_path: &std::path::Path,
+    ) -> Result<Option<(Uuid, String)>>;
+
     /// List all repositories in the database
     ///
     /// Returns a vector of (repository_id, collection_name, repository_path) tuples

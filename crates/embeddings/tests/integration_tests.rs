@@ -11,9 +11,9 @@ use codesearch_embeddings::{create_api_provider, EmbeddingConfigBuilder, Embeddi
 async fn test_vllm_api_provider_basic() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-small-en-v1.5")
+        .model("BAAI/bge-code-v1")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(384)
+        .embedding_dimension(1536)
         .texts_per_api_request(32)
         .max_concurrent_api_requests(4)
         .build();
@@ -31,7 +31,7 @@ async fn test_vllm_api_provider_basic() {
     let results = provider.embed(code_samples).await.unwrap();
 
     assert_eq!(results.len(), 2);
-    assert_eq!(provider.embedding_dimension(), 384);
+    assert_eq!(provider.embedding_dimension(), 1536);
 
     // Check embeddings are valid
     let embed1 = results[0].as_ref().expect("First embedding should succeed");
@@ -39,8 +39,8 @@ async fn test_vllm_api_provider_basic() {
         .as_ref()
         .expect("Second embedding should succeed");
 
-    assert_eq!(embed1.len(), 384);
-    assert_eq!(embed2.len(), 384);
+    assert_eq!(embed1.len(), 1536);
+    assert_eq!(embed2.len(), 1536);
 
     // Check embeddings are different
     let similarity = cosine_similarity(embed1, embed2);
@@ -56,9 +56,9 @@ async fn test_vllm_api_provider_basic() {
 async fn test_api_provider_batch_processing() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-small-en-v1.5")
+        .model("BAAI/bge-code-v1")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(384)
+        .embedding_dimension(1536)
         .texts_per_api_request(2) // Small batch for testing
         .max_concurrent_api_requests(2)
         .build();
@@ -81,7 +81,7 @@ async fn test_api_provider_batch_processing() {
         assert!(result.is_some(), "Embedding {i} should succeed");
         assert_eq!(
             result.as_ref().unwrap().len(),
-            384,
+            1536,
             "Embedding {i} should have correct dimension"
         );
     }
@@ -92,9 +92,9 @@ async fn test_api_provider_batch_processing() {
 async fn test_api_provider_long_text() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-small-en-v1.5")
+        .model("BAAI/bge-code-v1")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(384)
+        .embedding_dimension(1536)
         .texts_per_api_request(32)
         .build();
 
@@ -103,11 +103,15 @@ async fn test_api_provider_long_text() {
     // Create a very long code sample (exceeds context window)
     let long_code = "x = 1\n".repeat(10000);
 
-    let results = provider.embed(vec![long_code]).await.unwrap();
+    let result = provider.embed(vec![long_code]).await;
 
-    assert_eq!(results.len(), 1);
-    // Should return None for text exceeding context window
-    assert!(results[0].is_none(), "Long text should return None");
+    // vLLM returns 400 error for text exceeding context window
+    assert!(result.is_err(), "Long text should return an error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("400") || err_msg.contains("API request failed"),
+        "Error should indicate API failure, got: {err_msg}"
+    );
 }
 
 #[tokio::test]
@@ -115,9 +119,9 @@ async fn test_api_provider_long_text() {
 async fn test_api_provider_consistency() {
     let config = EmbeddingConfigBuilder::new()
         .provider(EmbeddingProviderType::LocalApi)
-        .model("BAAI/bge-small-en-v1.5")
+        .model("BAAI/bge-code-v1")
         .api_base_url("http://localhost:8000/v1")
-        .embedding_dimension(384)
+        .embedding_dimension(1536)
         .texts_per_api_request(32)
         .build();
 

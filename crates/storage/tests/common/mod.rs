@@ -55,18 +55,19 @@ pub fn mock_embedding(dimension: usize) -> Vec<f32> {
 /// Create a StorageConfig from test container instances
 ///
 /// Helper to build config with test container ports
+/// Note: collection_name parameter is kept for API compatibility but not used
+/// since collection_name was removed from StorageConfig. Tests should manage
+/// collection names separately.
 pub fn create_storage_config(
     qdrant_port: u16,
     qdrant_rest_port: u16,
     postgres_port: u16,
-    collection_name: &str,
     postgres_database: &str,
 ) -> StorageConfig {
     StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port,
         qdrant_rest_port,
-        collection_name: collection_name.to_string(),
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),

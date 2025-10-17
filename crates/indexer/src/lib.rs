@@ -176,18 +176,21 @@ impl IndexStats {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use codesearch_indexer::create_indexer;
+/// ```no_run
+/// use codesearch_indexer::{create_indexer, IndexerConfig};
 /// use std::sync::Arc;
 /// use std::path::PathBuf;
 ///
 /// # async fn example() -> codesearch_indexer::Result<()> {
+/// # let embedding_manager = panic!("example code");
+/// # let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = panic!("example code");
 /// let indexer = create_indexer(
 ///     PathBuf::from("/path/to/repo"),
 ///     "550e8400-e29b-41d4-a716-446655440000".to_string(),
 ///     embedding_manager,
 ///     postgres_client,
-///     None
+///     None,
+///     IndexerConfig::default(),
 /// )?;
 /// # Ok(())
 /// # }
@@ -229,13 +232,18 @@ pub fn create_indexer(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```no_run
 /// use codesearch_indexer::start_watching;
 /// use tokio::sync::mpsc;
 /// use std::sync::Arc;
 /// use std::path::PathBuf;
+/// use uuid::Uuid;
 ///
 /// # async fn example() -> codesearch_indexer::Result<()> {
+/// # let repo_id = Uuid::new_v4();
+/// # let repo_root = PathBuf::from("/path/to/repo");
+/// # let embedding_manager = panic!("example code");
+/// # let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = panic!("example code");
 /// let (tx, rx) = mpsc::channel(100);
 ///
 /// let task = start_watching(

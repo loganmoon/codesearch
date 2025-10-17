@@ -23,7 +23,6 @@ async fn setup_qdrant() -> Result<(TestQdrant, Arc<dyn StorageClient>, String)> 
         qdrant.port(),
         qdrant.rest_port(),
         5432, // Postgres not needed for Qdrant tests
-        &collection_name,
         "codesearch",
     );
 
@@ -340,7 +339,6 @@ async fn test_connection_error() -> Result<()> {
             9999, // Invalid port
             9998,
             5432,
-            "test_collection",
             "codesearch",
         );
 
@@ -396,13 +394,7 @@ async fn test_search_invalid_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (qdrant, _original_client, _collection) = setup_qdrant().await?;
 
-        let config = create_storage_config(
-            qdrant.port(),
-            qdrant.rest_port(),
-            5432,
-            "nonexistent_collection",
-            "codesearch",
-        );
+        let config = create_storage_config(qdrant.port(), qdrant.rest_port(), 5432, "codesearch");
 
         let client = create_storage_client(&config, "nonexistent_collection").await?;
 

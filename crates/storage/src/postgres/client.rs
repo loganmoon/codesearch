@@ -247,6 +247,26 @@ impl PostgresClient {
         Ok(record.map(|(id, path, name)| (id, std::path::PathBuf::from(path), name)))
     }
 
+    /// Get repository information by filesystem path
+    pub async fn get_repository_by_path(
+        &self,
+        repository_path: &std::path::Path,
+    ) -> Result<Option<(Uuid, String)>> {
+        let repo_path_str = repository_path
+            .to_str()
+            .ok_or_else(|| Error::storage("Invalid repository path"))?;
+
+        let record: Option<(Uuid, String)> = sqlx::query_as(
+            "SELECT repository_id, collection_name FROM repositories WHERE repository_path = $1",
+        )
+        .bind(repo_path_str)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to query repository by path: {e}")))?;
+
+        Ok(record)
+    }
+
     /// List all repositories in the database
     pub async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
         let rows = sqlx::query_as::<_, (Uuid, String, String)>(
@@ -986,6 +1006,13 @@ impl super::PostgresClientTrait for PostgresClient {
         collection_name: &str,
     ) -> Result<Option<(Uuid, std::path::PathBuf, String)>> {
         self.get_repository_by_collection(collection_name).await
+    }
+
+    async fn get_repository_by_path(
+        &self,
+        repository_path: &std::path::Path,
+    ) -> Result<Option<(Uuid, String)>> {
+        self.get_repository_by_path(repository_path).await
     }
 
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {

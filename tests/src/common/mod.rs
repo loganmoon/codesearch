@@ -13,6 +13,9 @@ pub mod logging;
 
 use anyhow::{Context, Result};
 use std::future::Future;
+use std::path::Path;
+use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
 // Re-export key types and utilities
@@ -77,4 +80,41 @@ pub fn workspace_manifest() -> std::path::PathBuf {
         .parent()
         .expect("tests directory should have a parent")
         .join("Cargo.toml")
+}
+
+/// Run the codesearch CLI with environment variables pointing to test infrastructure
+///
+/// This ensures tests use testcontainer ports instead of the user's shell environment
+/// or global config, providing complete isolation.
+///
+/// # Arguments
+/// * `repo_path` - Repository directory to use as current directory
+/// * `args` - CLI arguments (e.g., `&["index"]`)
+/// * `qdrant` - Testcontainer Qdrant instance
+/// * `postgres` - Testcontainer Postgres instance
+/// * `db_name` - Isolated test database name
+pub fn run_cli_with_test_infra(
+    repo_path: &Path,
+    args: &[&str],
+    qdrant: &Arc<TestQdrant>,
+    postgres: &Arc<TestPostgres>,
+    db_name: &str,
+) -> Result<std::process::Output> {
+    Command::new(codesearch_binary())
+        .current_dir(repo_path)
+        .args(args)
+        .env("RUST_LOG", "info")
+        // Override environment variables to use testcontainer ports
+        // This ensures tests use isolated infrastructure regardless of user's
+        // shell environment or global config
+        .env("QDRANT_HOST", "localhost")
+        .env("QDRANT_PORT", qdrant.port().to_string())
+        .env("QDRANT_REST_PORT", qdrant.rest_port().to_string())
+        .env("POSTGRES_HOST", "localhost")
+        .env("POSTGRES_PORT", postgres.port().to_string())
+        .env("POSTGRES_DATABASE", db_name)
+        .env("POSTGRES_USER", "codesearch")
+        .env("POSTGRES_PASSWORD", "codesearch")
+        .output()
+        .context("Failed to run codesearch CLI")
 }

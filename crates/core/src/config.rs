@@ -154,10 +154,6 @@ pub struct StorageConfig {
     #[serde(default = "default_qdrant_rest_port")]
     pub qdrant_rest_port: u16,
 
-    /// Collection name for storing entities
-    #[serde(default)]
-    pub collection_name: String,
-
     /// Automatically start containerized dependencies
     #[serde(default = "default_auto_start_deps")]
     pub auto_start_deps: bool,
@@ -197,7 +193,6 @@ impl std::fmt::Debug for StorageConfig {
             .field("qdrant_host", &self.qdrant_host)
             .field("qdrant_port", &self.qdrant_port)
             .field("qdrant_rest_port", &self.qdrant_rest_port)
-            .field("collection_name", &self.collection_name)
             .field("auto_start_deps", &self.auto_start_deps)
             .field("docker_compose_file", &self.docker_compose_file)
             .field("postgres_host", &self.postgres_host)
@@ -437,14 +432,21 @@ impl StorageConfig {
                 .join(repo_path)
         };
 
+        // Canonicalize the path to resolve symlinks and normalize (e.g., remove .. and .)
+        // This prevents the same repository from being registered multiple times with
+        // different path representations (e.g., /home/user/repo vs /home/user/../user/repo)
+        // If the path doesn't exist, fall back to the absolute path
+        let normalized_path =
+            std::fs::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
+
         // Extract repository name (last component of path)
-        let repo_name = absolute_path
+        let repo_name = normalized_path
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
                 Error::config(format!(
                     "Path {} has no valid filename component",
-                    absolute_path.display()
+                    normalized_path.display()
                 ))
             })?;
 
@@ -461,8 +463,8 @@ impl StorageConfig {
             })
             .collect();
 
-        // Hash the full absolute path
-        let path_str = absolute_path.to_string_lossy();
+        // Hash the full normalized path to ensure uniqueness
+        let path_str = normalized_path.to_string_lossy();
         let hash = XxHash3_128::oneshot(path_str.as_bytes());
 
         // Format: <repo_name>_<hash>
@@ -510,11 +512,6 @@ impl Config {
                     .set_override("storage.qdrant_rest_port", port_num)
                     .map_err(|e| Error::config(format!("Failed to set QDRANT_REST_PORT: {e}")))?;
             }
-        }
-        if let Ok(collection) = std::env::var("QDRANT_COLLECTION") {
-            builder = builder
-                .set_override("storage.collection_name", collection)
-                .map_err(|e| Error::config(format!("Failed to set QDRANT_COLLECTION: {e}")))?;
         }
 
         // Support Postgres environment variables
@@ -625,10 +622,6 @@ impl Config {
     /// This is used for layered configuration where repo-local settings override global settings.
     /// Only non-default values from `other` will override values in `self`.
     pub fn merge_from(&mut self, other: Self) {
-        // For storage config, only merge collection_name if it's non-empty
-        if !other.storage.collection_name.is_empty() {
-            self.storage.collection_name = other.storage.collection_name;
-        }
         // Always take other storage settings if they differ from defaults
         self.storage.qdrant_host = other.storage.qdrant_host;
         self.storage.qdrant_port = other.storage.qdrant_port;
@@ -684,7 +677,6 @@ impl Config {
                 qdrant_host: default_qdrant_host(),
                 qdrant_port: default_qdrant_port(),
                 qdrant_rest_port: default_qdrant_rest_port(),
-                collection_name: String::new(),
                 auto_start_deps: default_auto_start_deps(),
                 docker_compose_file: None,
                 postgres_host: default_postgres_host(),
@@ -890,7 +882,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test_collection"
             qdrant_host = "localhost"
             qdrant_port = 6334
         "#;
@@ -898,7 +889,6 @@ mod tests {
         let config = Config::from_toml_str(toml).expect("Failed to parse valid TOML");
         assert_eq!(config.embeddings.provider, "localapi");
         assert_eq!(config.embeddings.embedding_dimension, 768);
-        assert_eq!(config.storage.collection_name, "test_collection");
     }
 
     #[test]
@@ -911,14 +901,12 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "minimal_test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse minimal TOML");
         // Check defaults are applied
         assert_eq!(config.embeddings.provider, "localapi");
         assert_eq!(config.embeddings.device, "cpu");
-        assert_eq!(config.storage.collection_name, "minimal_test");
     }
 
     #[test]
@@ -949,7 +937,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
@@ -967,7 +954,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
@@ -988,7 +974,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
@@ -1010,7 +995,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
@@ -1036,7 +1020,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "roundtrip_test"
             qdrant_host = "testhost"
             qdrant_port = 7777
         "#;
@@ -1063,10 +1046,6 @@ mod tests {
             config.embeddings.embedding_dimension,
             loaded_config.embeddings.embedding_dimension
         );
-        assert_eq!(
-            config.storage.collection_name,
-            loaded_config.storage.collection_name
-        );
 
         Ok(())
     }
@@ -1082,14 +1061,12 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
 
         let config = Config::from_file(temp_file.path()).expect("Failed to load config from file");
         assert_eq!(config.embeddings.provider, "mock");
-        assert_eq!(config.storage.collection_name, "test");
     }
 
     #[test]
@@ -1102,7 +1079,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
@@ -1127,7 +1103,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "test"
         "#;
 
         let temp_file = create_temp_config_file(toml).expect("Failed to create temp file");
@@ -1154,7 +1129,6 @@ mod tests {
             [watcher]
 
             [storage]
-            collection_name = "save_test"
         "#;
 
         let config = Config::from_toml_str(toml).expect("Failed to parse TOML");

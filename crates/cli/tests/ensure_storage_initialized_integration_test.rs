@@ -4,10 +4,13 @@
 //! Docker startup, migrations, and repository registration.
 //!
 //! Tests marked with #[ignore] require Docker infrastructure and are slow.
+//!
+//! NOTE: After Phase 3 changes, ensure_storage_initialized now returns (Config, String)
+//! where String is the collection_name. collection_name is no longer in StorageConfig.
 
 use anyhow::Result;
 use codesearch::init::ensure_storage_initialized;
-use codesearch_core::config::Config;
+use codesearch_core::config::{Config, StorageConfig};
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::fs;
@@ -82,31 +85,31 @@ async fn test_creates_config_file_if_missing() -> Result<()> {
     );
 
     // Verify config file was created
-    let config = verify_config_file(&config_path).await?;
+    let _config = verify_config_file(&config_path).await?;
 
-    // Verify collection name was generated
+    // Verify collection name was returned
+    let (_config, collection_name) = result.unwrap();
     assert!(
-        !config.storage.collection_name.is_empty(),
+        !collection_name.is_empty(),
         "Collection name should be generated"
     );
 
     Ok(())
 }
 
-/// Test that collection name is auto-generated and saved when empty
+/// Test that collection name is auto-generated when function is called
 #[tokio::test]
 #[ignore] // Requires Docker infrastructure
-async fn test_generates_collection_name_when_empty() -> Result<()> {
+async fn test_generates_collection_name() -> Result<()> {
     let repo_dir = create_test_repo().await?;
     let config_dir = create_config_dir().await?;
     let config_path = config_dir.path().join("codesearch.toml");
 
-    // Create config with empty collection name
-    let config = Config::builder(codesearch_core::config::StorageConfig {
+    // Create config without collection name (it's no longer in StorageConfig)
+    let config = Config::builder(StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port: 6334,
         qdrant_rest_port: 6333,
-        collection_name: String::new(), // Empty collection name
         auto_start_deps: true,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -120,14 +123,7 @@ async fn test_generates_collection_name_when_empty() -> Result<()> {
 
     config.save(&config_path)?;
 
-    // Verify collection name is empty
-    let loaded_config = Config::from_file(&config_path)?;
-    assert!(
-        loaded_config.storage.collection_name.is_empty(),
-        "Collection name should be empty initially"
-    );
-
-    // Call ensure_storage_initialized
+    // Call ensure_storage_initialized - should generate collection_name
     let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
     assert!(
         result.is_ok(),
@@ -135,11 +131,11 @@ async fn test_generates_collection_name_when_empty() -> Result<()> {
         result.err()
     );
 
-    // Verify collection name was generated and saved to file
-    let updated_config = Config::from_file(&config_path)?;
+    // Verify collection name was generated and returned
+    let (_config, collection_name) = result.unwrap();
     assert!(
-        !updated_config.storage.collection_name.is_empty(),
-        "Collection name should be generated and saved"
+        !collection_name.is_empty(),
+        "Collection name should be generated"
     );
 
     Ok(())
@@ -153,11 +149,10 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
     let config_path = config_dir.path().join("codesearch.toml");
 
     // Create config with invalid Qdrant port
-    let config = Config::builder(codesearch_core::config::StorageConfig {
+    let config = Config::builder(StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port: 9999, // Invalid port - nothing listening here
         qdrant_rest_port: 9998,
-        collection_name: "test_collection".to_string(),
         auto_start_deps: false, // Don't auto-start to test connection failure
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -200,11 +195,10 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
 
     // Create config with invalid Postgres port
     // Note: Qdrant must be running for this test to reach the Postgres stage
-    let config = Config::builder(codesearch_core::config::StorageConfig {
+    let config = Config::builder(StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port: 6334,
         qdrant_rest_port: 6333,
-        collection_name: "test_collection".to_string(),
         auto_start_deps: true, // Auto-start so Qdrant is available
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -233,50 +227,6 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
             || err_msg.to_lowercase().contains("migration"),
         "Error should mention Postgres/database/migration, got: {err_msg}"
     );
-
-    Ok(())
-}
-
-/// Test handling of migration failures
-#[tokio::test]
-#[ignore] // Requires Docker infrastructure and complex setup
-async fn test_handles_migration_failures() -> Result<()> {
-    // This test would require:
-    // 1. Starting Postgres with testcontainers
-    // 2. Pre-populating with conflicting schema
-    // 3. Running ensure_storage_initialized
-    // 4. Verifying it fails with migration error
-
-    // TODO: Implement when testcontainers infrastructure is set up
-
-    Ok(())
-}
-
-/// Test handling of dependency startup failures
-#[tokio::test]
-#[ignore] // Requires Docker and is complex to simulate
-async fn test_handles_dependency_startup_failure() -> Result<()> {
-    // This test would require simulating Docker failures:
-    // 1. Port conflicts
-    // 2. Missing GPU for vLLM
-    // 3. Insufficient permissions
-    // 4. Docker daemon not running
-
-    // TODO: Implement with controlled failure injection
-
-    Ok(())
-}
-
-/// Test handling of health check timeouts
-#[tokio::test]
-#[ignore] // Requires Docker and controlled timing
-async fn test_handles_health_check_timeout() -> Result<()> {
-    // This test would require:
-    // 1. Starting containers that respond slowly to health checks
-    // 2. Setting very short timeouts
-    // 3. Verifying proper timeout error messages
-
-    // TODO: Implement with mock containers or timeout injection
 
     Ok(())
 }
@@ -312,18 +262,11 @@ async fn test_repository_registration_success() -> Result<()> {
     // Verify config was created
     assert!(config_path.exists(), "Config file should be created");
 
-    // Verify config contains generated collection name
-    let config = Config::from_file(&config_path)?;
+    // Verify the returned collection_name
+    let (_returned_config, collection_name) = result.unwrap();
     assert!(
-        !config.storage.collection_name.is_empty(),
-        "Collection name should be set"
-    );
-
-    // Verify the returned config matches what was saved
-    let returned_config = result.unwrap();
-    assert_eq!(
-        returned_config.storage.collection_name, config.storage.collection_name,
-        "Returned config should match saved config"
+        !collection_name.is_empty(),
+        "Collection name should be generated"
     );
 
     // Note: Verifying repository registration in Postgres would require

@@ -245,6 +245,25 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(None)
     }
 
+    async fn get_repository_by_path(
+        &self,
+        repository_path: &std::path::Path,
+    ) -> Result<Option<(Uuid, String)>> {
+        let data = self.data.lock().unwrap();
+
+        let path_str = repository_path
+            .to_str()
+            .ok_or_else(|| codesearch_core::error::Error::storage("Invalid path"))?;
+
+        for (repo_id, (stored_path, _, collection_name)) in data.repositories.iter() {
+            if stored_path == path_str {
+                return Ok(Some((*repo_id, collection_name.clone())));
+            }
+        }
+
+        Ok(None)
+    }
+
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
         let data = self.data.lock().unwrap();
 

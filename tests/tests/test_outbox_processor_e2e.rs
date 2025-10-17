@@ -54,7 +54,6 @@ async fn create_qdrant_collection(
         qdrant_host: "localhost".to_string(),
         qdrant_port: qdrant.port(),
         qdrant_rest_port: qdrant.rest_port(),
-        collection_name: collection_name.to_string(),
         auto_start_deps: false,
         docker_compose_file: None,
         postgres_host: "localhost".to_string(),
@@ -126,7 +125,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            Some(collection_name.clone()),
+            None, // git_commit
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)
@@ -134,9 +133,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     }
 
     // Run outbox processor to sync INSERTs
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
     drop(processor);
 
     // Verify 3 points exist in Qdrant
@@ -163,9 +160,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     .await?;
 
     // Run processor again to sync DELETEs
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
     drop(processor);
 
     // Verify only 1 point remains in Qdrant
@@ -225,7 +220,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            Some(collection_name.clone()),
+            None, // git_commit
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)
@@ -233,9 +228,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
     }
 
     // Process INSERTs
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
     drop(processor);
 
     assert_min_point_count(&qdrant, &collection_name, 5).await?;
@@ -281,9 +274,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
     .await?;
 
     // Process mixed batch
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
     drop(processor);
 
     // Should have 4 points now (5 - 1 deleted)
@@ -494,9 +485,7 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
     .await?;
 
     // Start processor - entry should be marked as processed immediately
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
     drop(processor);
 
     // Verify entry was marked as processed

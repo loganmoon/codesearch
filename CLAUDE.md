@@ -126,6 +126,33 @@ docker container prune -f
 
 **Note**: The CLI automatically detects and cleans up stopped infrastructure containers before starting new ones, so manual cleanup is rarely needed.
 
+**Multi-Repository Support:**
+
+The `codesearch serve` command serves ALL indexed repositories simultaneously:
+
+```bash
+# Index multiple repositories
+cd /path/to/repo1 && codesearch index
+cd /path/to/repo2 && codesearch index
+cd /path/to/repo3 && codesearch index
+
+# Serve all indexed repositories
+codesearch serve
+
+# The MCP server will list all available repositories on startup
+```
+
+**Important Notes:**
+- Collection names are automatically generated from repository paths using deterministic hashing
+- Collection names are stored in the PostgreSQL database, not in config files
+- If a repository is moved to a new path, you must drop the old data and re-index:
+
+```bash
+cd /new/path/to/repo
+codesearch drop
+codesearch index
+```
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.

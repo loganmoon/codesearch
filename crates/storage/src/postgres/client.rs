@@ -966,6 +966,183 @@ impl PostgresClient {
 
         Ok(())
     }
+
+    /// Get cached embeddings by content hashes (batch operation)
+    pub async fn get_embeddings_from_cache(
+        &self,
+        content_hashes: &[String],
+        model_version: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        if content_hashes.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Validate batch size
+        if content_hashes.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Cache lookup batch size {} exceeds maximum {}",
+                content_hashes.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        // Build query with IN clause
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT content_hash, embedding FROM embedding_cache WHERE model_version = ",
+        );
+        query_builder.push_bind(model_version);
+        query_builder.push(" AND content_hash IN (");
+
+        let mut separated = query_builder.separated(", ");
+        for hash in content_hashes {
+            separated.push_bind(hash);
+        }
+        separated.push_unseparated(")");
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch embeddings from cache: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let content_hash: String = row
+                .try_get("content_hash")
+                .map_err(|e| Error::storage(format!("Failed to extract content_hash: {e}")))?;
+            let embedding: Vec<f32> = row
+                .try_get("embedding")
+                .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
+
+            result.insert(content_hash, embedding);
+        }
+
+        Ok(result)
+    }
+
+    /// Store embeddings in cache (batch operation with UPSERT)
+    pub async fn store_embeddings_in_cache(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        model_version: &str,
+        dimension: usize,
+    ) -> Result<()> {
+        if cache_entries.is_empty() {
+            return Ok(());
+        }
+
+        // Validate batch size
+        if cache_entries.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Cache store batch size {} exceeds maximum {}",
+                cache_entries.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // Build bulk INSERT with ON CONFLICT DO NOTHING (avoid updating existing entries)
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO embedding_cache (content_hash, embedding, model_version, dimension, created_at) "
+        );
+
+        query_builder.push_values(cache_entries, |mut b, (content_hash, embedding)| {
+            b.push_bind(content_hash)
+                .push_bind(embedding)
+                .push_bind(model_version)
+                .push_bind(dimension as i32)
+                .push("NOW()");
+        });
+
+        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING");
+
+        query_builder
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to insert cache entries: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit cache transaction: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Get cache statistics
+    pub async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
+        let row = sqlx::query(
+            "SELECT
+                COUNT(*) as total_entries,
+                SUM(array_length(embedding, 1) * 4) as total_size_bytes,
+                MIN(created_at) as oldest_entry,
+                MAX(created_at) as newest_entry
+            FROM embedding_cache",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get cache stats: {e}")))?;
+
+        let total_entries: i64 = row
+            .try_get("total_entries")
+            .map_err(|e| Error::storage(format!("Failed to extract total_entries: {e}")))?;
+        let total_size_bytes: Option<i64> = row.try_get("total_size_bytes").ok();
+        let oldest_entry = row.try_get("oldest_entry").ok();
+        let newest_entry = row.try_get("newest_entry").ok();
+
+        // Get counts by model version
+        let model_rows = sqlx::query(
+            "SELECT model_version, COUNT(*) as count FROM embedding_cache GROUP BY model_version",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get model version stats: {e}")))?;
+
+        let mut entries_by_model = std::collections::HashMap::new();
+        for row in model_rows {
+            let model: String = row
+                .try_get("model_version")
+                .map_err(|e| Error::storage(format!("Failed to extract model_version: {e}")))?;
+            let count: i64 = row
+                .try_get("count")
+                .map_err(|e| Error::storage(format!("Failed to extract count: {e}")))?;
+            entries_by_model.insert(model, count);
+        }
+
+        Ok(crate::CacheStats {
+            total_entries,
+            total_size_bytes: total_size_bytes.unwrap_or(0),
+            entries_by_model,
+            oldest_entry,
+            newest_entry,
+        })
+    }
+
+    /// Clear cache entries (optionally filter by model version)
+    pub async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
+        let result = if let Some(version) = model_version {
+            sqlx::query("DELETE FROM embedding_cache WHERE model_version = $1")
+                .bind(version)
+                .execute(&self.pool)
+                .await
+        } else {
+            sqlx::query("DELETE FROM embedding_cache")
+                .execute(&self.pool)
+                .await
+        };
+
+        let rows_affected = result
+            .map_err(|e| Error::storage(format!("Failed to clear cache: {e}")))?
+            .rows_affected();
+
+        tracing::info!("Cleared {} cache entries", rows_affected);
+        Ok(rows_affected)
+    }
 }
 
 // Trait implementation delegates to inherent methods for testability and flexibility
@@ -1116,5 +1293,32 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn drop_all_data(&self) -> Result<()> {
         self.drop_all_data().await
+    }
+
+    async fn get_embeddings_from_cache(
+        &self,
+        content_hashes: &[String],
+        model_version: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        self.get_embeddings_from_cache(content_hashes, model_version)
+            .await
+    }
+
+    async fn store_embeddings_in_cache(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        model_version: &str,
+        dimension: usize,
+    ) -> Result<()> {
+        self.store_embeddings_in_cache(cache_entries, model_version, dimension)
+            .await
+    }
+
+    async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
+        self.get_cache_stats().await
+    }
+
+    async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
+        self.clear_cache(model_version).await
     }
 }

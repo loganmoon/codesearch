@@ -102,6 +102,11 @@ impl EmbeddingManager {
         self.provider.as_ref()
     }
 
+    /// Get the model version string for cache keying
+    pub fn model_version(&self) -> &str {
+        "BAAI/bge-code-v1"
+    }
+
     /// Generate embeddings for texts
     pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
         self.provider.embed(texts).await

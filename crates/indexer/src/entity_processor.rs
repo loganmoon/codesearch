@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
+use twox_hash::XxHash3_128;
 use uuid::Uuid;
 
 const DELIM: &str = " ";
@@ -220,18 +221,109 @@ async fn process_entity_chunk(
 
     info!("Generating embeddings for {} entities", entities.len());
 
-    // Generate embeddings
-    let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
+    // Phase 1: Compute content hashes for all entities
+    let entity_contents_and_hashes: Vec<(String, String)> = entities
+        .iter()
+        .map(|entity| {
+            let content = extract_embedding_content(entity);
+            let content_hash = format!("{:032x}", XxHash3_128::oneshot(content.as_bytes()));
+            (content, content_hash)
+        })
+        .collect();
 
-    let option_embeddings = embedding_manager
-        .embed(embedding_texts)
+    // Phase 2: Batch lookup cached embeddings
+    let content_hashes: Vec<String> = entity_contents_and_hashes
+        .iter()
+        .map(|(_, hash)| hash.clone())
+        .collect();
+
+    let model_version = embedding_manager.model_version();
+    let cached_embeddings = postgres_client
+        .get_embeddings_from_cache(&content_hashes, model_version)
         .await
-        .storage_err("Failed to generate embeddings")?;
+        .storage_err("Failed to query embedding cache")?;
+
+    // Phase 3: Separate cache hits from misses
+    let mut cache_hits = Vec::new();
+    let mut cache_misses = Vec::new();
+    let mut cache_miss_texts = Vec::new();
+
+    for (idx, (content, content_hash)) in entity_contents_and_hashes.iter().enumerate() {
+        if let Some(cached_embedding) = cached_embeddings.get(content_hash) {
+            cache_hits.push((idx, cached_embedding.clone()));
+        } else {
+            cache_misses.push((idx, content_hash.clone()));
+            cache_miss_texts.push(content.clone());
+        }
+    }
+
+    info!(
+        "Embedding cache: {} hits, {} misses ({:.1}% hit rate)",
+        cache_hits.len(),
+        cache_misses.len(),
+        if !entities.is_empty() {
+            (cache_hits.len() as f64 / entities.len() as f64) * 100.0
+        } else {
+            0.0
+        }
+    );
+
+    // Phase 4: Generate embeddings only for cache misses
+    let mut all_embeddings = vec![None; entities.len()];
+
+    // Fill in cache hits
+    for (idx, embedding) in cache_hits {
+        all_embeddings[idx] = Some(embedding);
+    }
+
+    // Generate embeddings for cache misses only
+    if !cache_miss_texts.is_empty() {
+        info!(
+            "Generating {} new embeddings via API",
+            cache_miss_texts.len()
+        );
+
+        let new_embeddings = embedding_manager
+            .embed(cache_miss_texts)
+            .await
+            .storage_err("Failed to generate embeddings")?;
+
+        // Fill in newly generated embeddings
+        let mut new_embeddings_iter = new_embeddings.into_iter();
+        for (idx, _content_hash) in &cache_misses {
+            if let Some(Some(embedding)) = new_embeddings_iter.next() {
+                all_embeddings[*idx] = Some(embedding);
+            }
+        }
+
+        // Phase 5: Store newly generated embeddings in cache (batch)
+        let cache_entries_to_store: Vec<(String, Vec<f32>)> = cache_misses
+            .iter()
+            .filter_map(|(idx, content_hash)| {
+                all_embeddings[*idx]
+                    .as_ref()
+                    .map(|emb| (content_hash.clone(), emb.clone()))
+            })
+            .collect();
+
+        if !cache_entries_to_store.is_empty() {
+            let dimension = cache_entries_to_store[0].1.len();
+            postgres_client
+                .store_embeddings_in_cache(&cache_entries_to_store, model_version, dimension)
+                .await
+                .storage_err("Failed to store embeddings in cache")?;
+
+            info!(
+                "Stored {} new embeddings in cache",
+                cache_entries_to_store.len()
+            );
+        }
+    }
 
     // Filter entities with valid embeddings
     let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> =
         Vec::with_capacity(entities.len());
-    for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
+    for (entity, opt_embedding) in entities.into_iter().zip(all_embeddings.into_iter()) {
         if let Some(embedding) = opt_embedding {
             // Validate embedding is not all zeros
             let is_all_zeros = embedding.iter().all(|&v| v == 0.0);

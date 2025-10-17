@@ -87,7 +87,7 @@ pub fn function_two() -> i32 {
     let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Initial index failed");
 
-    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name)?;
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
     assert_min_point_count(&qdrant, &collection_name, 2).await?;
 
@@ -139,7 +139,7 @@ pub fn old_name() -> i32 {
 
     run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
-    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name)?;
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 
@@ -198,7 +198,7 @@ pub fn func3() {}
     let output = run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
     assert!(output.status.success(), "Initial index failed");
 
-    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name)?;
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
@@ -245,7 +245,7 @@ pub fn calculate() -> i32 {
 
     run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
-    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name, &collection_name)?;
+    let _processor = TestOutboxProcessor::start(&postgres, &qdrant, &db_name)?;
 
     wait_for_outbox_empty(&postgres, &db_name, Duration::from_secs(5)).await?;
 

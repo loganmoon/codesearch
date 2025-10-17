@@ -506,11 +506,6 @@ impl Config {
                     .map_err(|e| Error::config(format!("Failed to set QDRANT_REST_PORT: {e}")))?;
             }
         }
-        if let Ok(collection) = std::env::var("QDRANT_COLLECTION") {
-            builder = builder
-                .set_override("storage.collection_name", collection)
-                .map_err(|e| Error::config(format!("Failed to set QDRANT_COLLECTION: {e}")))?;
-        }
 
         // Support Postgres environment variables
         if let Ok(host) = std::env::var("POSTGRES_HOST") {

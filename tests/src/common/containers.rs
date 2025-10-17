@@ -269,11 +269,11 @@ impl TestOutboxProcessor {
     /// Connects to the provided Postgres and Qdrant instances.
     ///
     /// This uses a Docker container built from Dockerfile.outbox-processor
+    /// Collection names are read from the database (entity_outbox.collection_name column)
     pub fn start(
         postgres: &Arc<TestPostgres>,
         qdrant: &Arc<TestQdrant>,
         db_name: &str,
-        collection_name: &str,
     ) -> Result<Self> {
         // Ensure the Docker image is built (thread-safe, happens only once)
         ensure_outbox_image_built()?;
@@ -310,8 +310,6 @@ impl TestOutboxProcessor {
             .arg(format!("QDRANT_PORT={}", qdrant.port()))
             .arg("-e")
             .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()))
-            .arg("-e")
-            .arg(format!("QDRANT_COLLECTION={collection_name}"))
             .arg("-e")
             .arg("RUST_LOG=debug")
             .arg("codesearch-outbox:test");
@@ -458,10 +456,9 @@ async fn wait_for_outbox_empty_with_processor(
 pub async fn start_and_wait_for_outbox_sync(
     postgres: &Arc<TestPostgres>,
     qdrant: &Arc<TestQdrant>,
-    collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
     // Use default database name for backward compatibility
-    start_and_wait_for_outbox_sync_with_db(postgres, qdrant, "codesearch", collection_name).await
+    start_and_wait_for_outbox_sync_with_db(postgres, qdrant, "codesearch").await
 }
 
 /// Start an outbox processor and wait for it to sync all pending entries (with custom database)
@@ -472,9 +469,8 @@ pub async fn start_and_wait_for_outbox_sync_with_db(
     postgres: &Arc<TestPostgres>,
     qdrant: &Arc<TestQdrant>,
     db_name: &str,
-    collection_name: &str,
 ) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, db_name, collection_name)?;
+    let processor = TestOutboxProcessor::start(postgres, qdrant, db_name)?;
 
     // Wait for outbox to be empty (5 second timeout optimized for tests)
     // with processor logs on failure

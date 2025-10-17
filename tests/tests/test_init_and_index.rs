@@ -135,9 +135,7 @@ async fn test_index_stores_entities_in_qdrant() -> Result<()> {
         "Index command failed: stdout={stdout}, stderr={stderr}"
     );
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
 
@@ -170,9 +168,7 @@ async fn test_index_with_mock_embeddings() -> Result<()> {
 
     assert!(output.status.success(), "Index with mock embeddings failed");
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
 
@@ -201,9 +197,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
     // Index the repository - it will automatically initialize storage if needed
     run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     // Create storage client for programmatic search
     let storage_config = StorageConfig {
@@ -319,9 +313,7 @@ enabled = ["rust"]
         "Index failed with real embeddings: stdout={stdout}, stderr={stderr}"
     );
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     assert_min_point_count(&qdrant, &collection_name, 15).await?;
 
@@ -352,9 +344,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
     // Run index - it will automatically initialize storage if needed
     run_cli_with_test_infra(repo.path(), &["index"], &qdrant, &postgres, &db_name)?;
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     // Just check that we have a reasonable number of entities - at least 10
     assert_min_point_count(&qdrant, &collection_name, 10).await?;
@@ -538,9 +528,7 @@ fn broken( {
         "Index should succeed with partial failures"
     );
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     let storage_config = StorageConfig {
         qdrant_host: "localhost".to_string(),
@@ -643,9 +631,7 @@ fn large_function() {{
         "Index should succeed even with oversized entities"
     );
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     // Large entity should be skipped
     // (Collection may be empty or have other entities if any were extracted)
@@ -700,9 +686,7 @@ pub fn duplicate_name() -> i32 {
         "Index should handle duplicate entity names"
     );
 
-    let processor =
-        start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name, &collection_name)
-            .await?;
+    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
 
     assert_min_point_count(&qdrant, &collection_name, 2).await?;
 

@@ -72,16 +72,22 @@ pub async fn create_embedding_manager_from_app_config(
 /// Manager for handling embedding generation with immutable configuration
 pub struct EmbeddingManager {
     provider: Arc<dyn EmbeddingProvider>,
+    model_version: String,
 }
 
 impl EmbeddingManager {
-    /// Creates a new embedding manager with the specified provider
-    pub fn new(provider: Arc<dyn EmbeddingProvider>) -> Self {
-        Self { provider }
+    /// Creates a new embedding manager with the specified provider and model version
+    pub fn new(provider: Arc<dyn EmbeddingProvider>, model_version: String) -> Self {
+        Self {
+            provider,
+            model_version,
+        }
     }
 
     /// Initialize manager from configuration
     pub async fn from_config(config: EmbeddingConfig) -> Result<Self> {
+        let model_version = config.model.clone();
+
         let provider = match config.provider {
             EmbeddingProviderType::LocalApi => {
                 let provider = create_api_provider(config).await?;
@@ -94,7 +100,10 @@ impl EmbeddingManager {
             }
         };
 
-        Ok(Self { provider })
+        Ok(Self {
+            provider,
+            model_version,
+        })
     }
 
     /// Get reference to the embedding provider
@@ -104,7 +113,7 @@ impl EmbeddingManager {
 
     /// Get the model version string for cache keying
     pub fn model_version(&self) -> &str {
-        "BAAI/bge-code-v1"
+        &self.model_version
     }
 
     /// Generate embeddings for texts

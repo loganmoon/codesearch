@@ -30,8 +30,9 @@ CREATE TABLE embedding_cache (
     CONSTRAINT check_embedding_dimension CHECK (array_length(embedding, 1) = dimension)
 );
 
--- Index on model_version for cache invalidation queries
-CREATE INDEX idx_embedding_cache_model ON embedding_cache(model_version);
+-- Composite index for cache lookup queries (model_version, content_hash)
+-- Enables efficient lookups for the common access pattern: WHERE model_version = ? AND content_hash IN (...)
+CREATE INDEX idx_embedding_cache_lookup ON embedding_cache(model_version, content_hash);
 
 -- Index on created_at for TTL-based cleanup (90 day retention)
 CREATE INDEX idx_embedding_cache_created ON embedding_cache(created_at);

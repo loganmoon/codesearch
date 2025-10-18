@@ -241,7 +241,10 @@ async fn process_entity_chunk(
     let cached_embeddings = postgres_client
         .get_embeddings_from_cache(&content_hashes, model_version)
         .await
-        .storage_err("Failed to query embedding cache")?;
+        .unwrap_or_else(|e| {
+            tracing::warn!("Cache lookup failed, will generate all embeddings: {}", e);
+            HashMap::new()
+        });
 
     // Phase 3: Separate cache hits from misses
     let mut cache_hits = Vec::new();
@@ -298,11 +301,9 @@ async fn process_entity_chunk(
 
         // Phase 5: Store newly generated embeddings in cache (batch)
         let cache_entries_to_store: Vec<(String, Vec<f32>)> = cache_misses
-            .iter()
+            .into_iter()
             .filter_map(|(idx, content_hash)| {
-                all_embeddings[*idx]
-                    .as_ref()
-                    .map(|emb| (content_hash.clone(), emb.clone()))
+                all_embeddings[idx].take().map(|emb| (content_hash, emb))
             })
             .collect();
 

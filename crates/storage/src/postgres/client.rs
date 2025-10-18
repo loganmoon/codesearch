@@ -958,6 +958,11 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to truncate repositories: {e}")))?;
 
+        sqlx::query("TRUNCATE TABLE embedding_cache CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to truncate embedding_cache: {e}")))?;
+
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;

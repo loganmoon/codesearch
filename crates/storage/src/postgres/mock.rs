@@ -64,6 +64,7 @@ struct MockData {
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
+    embedding_cache: HashMap<String, Vec<f32>>, // content_hash -> embedding
 }
 
 /// Mock PostgreSQL client for testing
@@ -155,6 +156,7 @@ impl MockPostgresClient {
         data.entities.clear();
         data.snapshots.clear();
         data.outbox.clear();
+        data.embedding_cache.clear();
     }
 }
 
@@ -564,7 +566,58 @@ impl PostgresClientTrait for MockPostgresClient {
         data.entities.clear();
         data.snapshots.clear();
         data.outbox.clear();
+        data.embedding_cache.clear();
         Ok(())
+    }
+
+    async fn get_embeddings_from_cache(
+        &self,
+        content_hashes: &[String],
+        _model_version: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        let data = self.data.lock().unwrap();
+        let mut result = std::collections::HashMap::new();
+
+        for hash in content_hashes {
+            if let Some(embedding) = data.embedding_cache.get(hash) {
+                result.insert(hash.clone(), embedding.clone());
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn store_embeddings_in_cache(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        _model_version: &str,
+        _dimension: usize,
+    ) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+
+        for (hash, embedding) in cache_entries {
+            data.embedding_cache.insert(hash.clone(), embedding.clone());
+        }
+
+        Ok(())
+    }
+
+    async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
+        let data = self.data.lock().unwrap();
+        Ok(crate::CacheStats {
+            total_entries: data.embedding_cache.len() as i64,
+            total_size_bytes: 0, // Not tracked in mock
+            entries_by_model: std::collections::HashMap::new(),
+            oldest_entry: None,
+            newest_entry: None,
+        })
+    }
+
+    async fn clear_cache(&self, _model_version: Option<&str>) -> Result<u64> {
+        let mut data = self.data.lock().unwrap();
+        let count = data.embedding_cache.len() as u64;
+        data.embedding_cache.clear();
+        Ok(count)
     }
 }
 

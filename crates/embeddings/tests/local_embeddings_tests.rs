@@ -36,7 +36,7 @@ async fn test_batch_size_validation() {
     }
 
     let provider = TestProvider { max_batch: 2 };
-    let manager = EmbeddingManager::new(std::sync::Arc::new(provider));
+    let manager = EmbeddingManager::new(std::sync::Arc::new(provider), "test-model-v1".to_string());
 
     // Should succeed with small batch
     let small_batch = vec!["text1".to_string(), "text2".to_string()];
@@ -85,7 +85,7 @@ async fn test_embedding_size_limits() {
     }
 
     let provider = SizeLimitProvider { max_context: 100 };
-    let manager = EmbeddingManager::new(std::sync::Arc::new(provider));
+    let manager = EmbeddingManager::new(std::sync::Arc::new(provider), "test-model-v1".to_string());
 
     // Test text under limit returns Some
     let small_text = vec!["Small text".to_string()];

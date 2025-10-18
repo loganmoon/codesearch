@@ -199,4 +199,25 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Truncates all tables in the database, removing all data while preserving the schema.
     /// This is a destructive operation that cannot be undone.
     async fn drop_all_data(&self) -> Result<()>;
+
+    /// Get embeddings from cache by content hashes
+    async fn get_embeddings_from_cache(
+        &self,
+        content_hashes: &[String],
+        model_version: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>>;
+
+    /// Store embeddings in cache
+    async fn store_embeddings_in_cache(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        model_version: &str,
+        dimension: usize,
+    ) -> Result<()>;
+
+    /// Get cache statistics (hits, misses, total entries, size)
+    async fn get_cache_stats(&self) -> Result<crate::CacheStats>;
+
+    /// Clear all cache entries (optional: filter by model_version)
+    async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64>;
 }

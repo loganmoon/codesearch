@@ -50,6 +50,21 @@ enum Commands {
     },
     /// Drop all indexed data from storage (requires confirmation)
     Drop,
+    /// Manage embedding cache
+    #[command(subcommand)]
+    Cache(CacheCommands),
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Show cache statistics
+    Stats,
+    /// Clear cache entries
+    Clear {
+        /// Only clear entries for a specific model version
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -71,6 +86,9 @@ async fn main() -> Result<()> {
             // Find repository root
             let repo_root = find_repository_root()?;
             drop_data(&repo_root, cli.config.as_deref()).await
+        }
+        Some(Commands::Cache(cache_cmd)) => {
+            handle_cache_command(cache_cmd, cli.config.as_deref()).await
         }
         None => {
             // Default behavior - show help
@@ -380,6 +398,94 @@ async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
 
     println!("\nAll indexed data has been successfully removed.");
     println!("You can re-index the repository using 'codesearch index'.");
+
+    Ok(())
+}
+
+/// Handle cache subcommands
+async fn handle_cache_command(command: CacheCommands, config_path: Option<&Path>) -> Result<()> {
+    // Load configuration
+    let (config, _sources) = Config::load_layered(config_path)?;
+    config.validate()?;
+
+    // Ensure dependencies are running
+    if config.storage.auto_start_deps {
+        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+        let api_base_url = get_api_base_url_if_local_api(&config);
+        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
+    }
+
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to connect to Postgres")?;
+
+    match command {
+        CacheCommands::Stats => {
+            show_cache_stats(&postgres_client).await?;
+        }
+        CacheCommands::Clear { model } => {
+            clear_cache(&postgres_client, model.as_deref()).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Display cache statistics in human-readable format
+async fn show_cache_stats(
+    postgres_client: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+) -> Result<()> {
+    let stats = postgres_client.get_cache_stats().await?;
+
+    println!("\nEmbedding Cache Statistics");
+    println!("==========================");
+    println!("Total entries:     {}", stats.total_entries);
+    println!(
+        "Total size:        {:.2} MB",
+        stats.total_size_bytes as f64 / 1_048_576.0
+    );
+
+    if let Some(oldest) = stats.oldest_entry {
+        println!("Oldest entry:      {}", oldest.format("%Y-%m-%d %H:%M:%S"));
+    }
+
+    if let Some(newest) = stats.newest_entry {
+        println!("Newest entry:      {}", newest.format("%Y-%m-%d %H:%M:%S"));
+    }
+
+    if !stats.entries_by_model.is_empty() {
+        println!("\nEntries by model:");
+        for (model, count) in &stats.entries_by_model {
+            println!("  {model}: {count}");
+        }
+    }
+
+    // Calculate estimated API call savings
+    let avg_api_latency_ms = 200.0; // Typical API call latency
+    let saved_time_seconds = (stats.total_entries as f64 * avg_api_latency_ms) / 1000.0;
+    println!(
+        "\nEstimated API time saved: {:.1} seconds ({:.1} minutes)",
+        saved_time_seconds,
+        saved_time_seconds / 60.0
+    );
+
+    Ok(())
+}
+
+/// Clear cache entries
+async fn clear_cache(
+    postgres_client: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    model_version: Option<&str>,
+) -> Result<()> {
+    if let Some(model) = model_version {
+        print!("Clearing cache entries for model '{model}'... ");
+    } else {
+        print!("Clearing all cache entries... ");
+    }
+
+    let rows_deleted = postgres_client.clear_cache(model_version).await?;
+
+    println!("Done! Removed {rows_deleted} entries.");
 
     Ok(())
 }

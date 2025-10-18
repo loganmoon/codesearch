@@ -19,6 +19,7 @@ use codesearch_core::{
     CodeEntity,
 };
 use sqlx::postgres::PgConnectOptions;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -36,6 +37,16 @@ pub use postgres::PostgresClient;
 pub use postgres::mock::MockPostgresClient;
 
 pub use uuid::Uuid;
+
+/// Cache statistics for embedding cache
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    pub total_entries: i64,
+    pub total_size_bytes: i64,
+    pub entries_by_model: HashMap<String, i64>,
+    pub oldest_entry: Option<chrono::DateTime<chrono::Utc>>,
+    pub newest_entry: Option<chrono::DateTime<chrono::Utc>>,
+}
 
 /// Validate a database name for PostgreSQL
 ///

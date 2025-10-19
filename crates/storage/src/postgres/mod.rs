@@ -200,24 +200,33 @@ pub trait PostgresClientTrait: Send + Sync {
     /// This is a destructive operation that cannot be undone.
     async fn drop_all_data(&self) -> Result<()>;
 
-    /// Get embeddings from cache by content hashes
-    async fn get_embeddings_from_cache(
+    /// Get embeddings by content hashes, returning both embedding_id and embedding vector
+    ///
+    /// Returns a HashMap mapping content_hash to (embedding_id, embedding_vector).
+    /// This is used during indexing to check if embeddings already exist.
+    async fn get_embeddings_by_content_hash(
         &self,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, Vec<f32>>>;
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>>;
 
-    /// Store embeddings in cache
-    async fn store_embeddings_in_cache(
+    /// Store embeddings in entity_embeddings table, returning their IDs
+    ///
+    /// Inserts embeddings with content-based deduplication (ON CONFLICT DO NOTHING on content_hash).
+    /// Returns the embedding_id for each entry (either newly inserted or existing).
+    async fn store_embeddings(
         &self,
         cache_entries: &[(String, Vec<f32>)],
         model_version: &str,
         dimension: usize,
-    ) -> Result<()>;
+    ) -> Result<Vec<i64>>;
 
-    /// Get cache statistics (hits, misses, total entries, size)
+    /// Get an embedding by its ID (used by outbox processor)
+    async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>>;
+
+    /// Get entity embeddings statistics (total entries, size, etc.)
     async fn get_cache_stats(&self) -> Result<crate::CacheStats>;
 
-    /// Clear all cache entries (optional: filter by model_version)
+    /// Clear entity embeddings entries (optional: filter by model_version)
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64>;
 }

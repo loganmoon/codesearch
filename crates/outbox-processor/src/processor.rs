@@ -156,7 +156,7 @@ impl OutboxProcessor {
             "WITH batch AS (
                  SELECT outbox_id, repository_id, entity_id, operation, target_store,
                         payload, created_at, processed_at, retry_count, last_error,
-                        collection_name
+                        collection_name, embedding_id
                  FROM entity_outbox
                  WHERE target_store = $1
                    AND processed_at IS NULL
@@ -315,9 +315,12 @@ impl OutboxProcessor {
         Ok(())
     }
 
-    /// Prepare an embedded entity from an outbox entry (validation only, no I/O)
-    pub(crate) fn prepare_embedded_entity(&self, entry: &OutboxEntry) -> Result<EmbeddedEntity> {
-        // Extract both entity and embedding from payload
+    /// Prepare an embedded entity from an outbox entry (fetches embedding by ID)
+    pub(crate) async fn prepare_embedded_entity(
+        &self,
+        entry: &OutboxEntry,
+    ) -> Result<EmbeddedEntity> {
+        // Extract entity from payload
         let entity: codesearch_core::entities::CodeEntity = serde_json::from_value(
             entry
                 .payload
@@ -327,14 +330,20 @@ impl OutboxProcessor {
         )
         .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
 
-        let embedding: Vec<f32> = serde_json::from_value(
-            entry
-                .payload
-                .get("embedding")
-                .ok_or_else(|| Error::storage("Missing embedding in payload"))?
-                .clone(),
-        )
-        .map_err(|e| Error::storage(format!("Failed to deserialize embedding: {e}")))?;
+        // Fetch embedding by ID from entity_embeddings table
+        let embedding_id = entry
+            .embedding_id
+            .ok_or_else(|| Error::storage("Missing embedding_id in outbox entry"))?;
+
+        let embedding = self
+            .postgres_client
+            .get_embedding_by_id(embedding_id)
+            .await?
+            .ok_or_else(|| {
+                Error::storage(format!(
+                    "Embedding ID {embedding_id} not found in entity_embeddings table"
+                ))
+            })?;
 
         let qdrant_point_id: String = serde_json::from_value(
             entry
@@ -463,9 +472,9 @@ impl OutboxProcessor {
     ) -> Result<()> {
         let mut embedded_entities = Vec::with_capacity(entries.len());
 
-        // Prepare entities without cloning embeddings
+        // Prepare entities (fetches embeddings from database)
         for entry in entries {
-            match self.prepare_embedded_entity(entry) {
+            match self.prepare_embedded_entity(entry).await {
                 Ok(embedded) => {
                     embedded_entities.push(embedded);
                 }

@@ -37,6 +37,7 @@ struct MockOutboxEntry {
     processed_at: Option<chrono::DateTime<chrono::Utc>>,
     retry_count: i32,
     last_error: Option<String>,
+    embedding_id: Option<i64>,
 }
 
 impl From<MockOutboxEntry> for OutboxEntry {
@@ -53,6 +54,7 @@ impl From<MockOutboxEntry> for OutboxEntry {
             retry_count: entry.retry_count,
             last_error: entry.last_error,
             collection_name: "mock_collection".to_string(), // Mock uses a placeholder
+            embedding_id: entry.embedding_id,
         }
     }
 }
@@ -64,7 +66,9 @@ struct MockData {
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
-    embedding_cache: HashMap<String, Vec<f32>>, // content_hash -> embedding
+    embedding_cache: HashMap<String, (i64, Vec<f32>)>, // content_hash -> (embedding_id, embedding)
+    embedding_by_id: HashMap<i64, Vec<f32>>,           // embedding_id -> embedding
+    embedding_id_counter: i64,                         // Auto-increment counter for embedding IDs
 }
 
 /// Mock PostgreSQL client for testing
@@ -157,6 +161,8 @@ impl MockPostgresClient {
         data.snapshots.clear();
         data.outbox.clear();
         data.embedding_cache.clear();
+        data.embedding_by_id.clear();
+        data.embedding_id_counter = 0;
     }
 }
 
@@ -435,6 +441,7 @@ impl PostgresClientTrait for MockPostgresClient {
                 processed_at: None,
                 retry_count: 0,
                 last_error: None,
+                embedding_id: None,
             });
         }
 
@@ -463,7 +470,7 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut outbox_ids = Vec::with_capacity(entities.len());
         let now = chrono::Utc::now();
 
-        for (entity, embedding, operation, point_id, target_store, git_commit_hash) in entities {
+        for (entity, embedding_id, operation, point_id, target_store, git_commit_hash) in entities {
             // Store entity metadata
             data.entities.insert(
                 (repository_id, entity.entity_id.clone()),
@@ -479,7 +486,6 @@ impl PostgresClientTrait for MockPostgresClient {
             let outbox_id = Uuid::new_v4();
             let payload = serde_json::json!({
                 "entity": entity,
-                "embedding": embedding,
                 "qdrant_point_id": point_id.to_string()
             });
 
@@ -494,6 +500,7 @@ impl PostgresClientTrait for MockPostgresClient {
                 processed_at: None,
                 retry_count: 0,
                 last_error: None,
+                embedding_id: Some(*embedding_id),
             });
 
             outbox_ids.push(outbox_id);
@@ -567,39 +574,63 @@ impl PostgresClientTrait for MockPostgresClient {
         data.snapshots.clear();
         data.outbox.clear();
         data.embedding_cache.clear();
+        data.embedding_by_id.clear();
+        data.embedding_id_counter = 0;
         Ok(())
     }
 
-    async fn get_embeddings_from_cache(
+    async fn get_embeddings_by_content_hash(
         &self,
         content_hashes: &[String],
         _model_version: &str,
-    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
         let data = self.data.lock().unwrap();
         let mut result = std::collections::HashMap::new();
 
         for hash in content_hashes {
-            if let Some(embedding) = data.embedding_cache.get(hash) {
-                result.insert(hash.clone(), embedding.clone());
+            if let Some((embedding_id, embedding)) = data.embedding_cache.get(hash) {
+                result.insert(hash.clone(), (*embedding_id, embedding.clone()));
             }
         }
 
         Ok(result)
     }
 
-    async fn store_embeddings_in_cache(
+    async fn store_embeddings(
         &self,
         cache_entries: &[(String, Vec<f32>)],
         _model_version: &str,
         _dimension: usize,
-    ) -> Result<()> {
+    ) -> Result<Vec<i64>> {
         let mut data = self.data.lock().unwrap();
+        let mut embedding_ids = Vec::with_capacity(cache_entries.len());
 
         for (hash, embedding) in cache_entries {
-            data.embedding_cache.insert(hash.clone(), embedding.clone());
+            // Check if this content_hash already exists (deduplication)
+            let embedding_id = if let Some((existing_id, _)) = data.embedding_cache.get(hash) {
+                *existing_id
+            } else {
+                // Generate new auto-increment ID
+                data.embedding_id_counter += 1;
+                let new_id = data.embedding_id_counter;
+
+                // Store in both maps
+                data.embedding_cache
+                    .insert(hash.clone(), (new_id, embedding.clone()));
+                data.embedding_by_id.insert(new_id, embedding.clone());
+
+                new_id
+            };
+
+            embedding_ids.push(embedding_id);
         }
 
-        Ok(())
+        Ok(embedding_ids)
+    }
+
+    async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        let data = self.data.lock().unwrap();
+        Ok(data.embedding_by_id.get(&embedding_id).cloned())
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
@@ -617,6 +648,8 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut data = self.data.lock().unwrap();
         let count = data.embedding_cache.len() as u64;
         data.embedding_cache.clear();
+        data.embedding_by_id.clear();
+        data.embedding_id_counter = 0;
         Ok(count)
     }
 }
@@ -686,6 +719,7 @@ impl MockPostgresClient {
             processed_at: None,
             retry_count: 0,
             last_error: None,
+            embedding_id: None,
         });
 
         Ok(outbox_id)

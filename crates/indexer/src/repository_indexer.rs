@@ -39,8 +39,8 @@ struct EntityBatch {
 }
 
 struct EmbeddedBatch {
-    // Entities paired with embeddings (skipped entities filtered out)
-    entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)>,
+    // Entities paired with embedding IDs (skipped entities filtered out)
+    entity_embedding_id_pairs: Vec<(CodeEntity, i64)>,
     file_indices: Vec<(PathBuf, Vec<usize>)>,
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
@@ -276,6 +276,7 @@ async fn stage_generate_embeddings(
     mut entity_rx: mpsc::Receiver<EntityBatch>,
     embedded_tx: mpsc::Sender<EmbeddedBatch>,
     embedding_manager: Arc<EmbeddingManager>,
+    postgres_client: Arc<dyn PostgresClientTrait>,
 ) -> Result<usize> {
     let mut total_embedded = 0;
     let mut total_skipped = 0;
@@ -287,7 +288,7 @@ async fn stage_generate_embeddings(
             batch.file_indices.len()
         );
 
-        // Extract embedding content
+        // Extract embedding content and compute hashes
         let texts: Vec<String> = batch
             .entities
             .iter()
@@ -321,6 +322,13 @@ async fn stage_generate_embeddings(
             .collect();
         debug!("Stage 3: Sample entities: {:?}", sample_entities);
 
+        //  Compute content hashes
+        use twox_hash::XxHash3_128;
+        let content_hashes: Vec<String> = texts
+            .iter()
+            .map(|text| format!("{:032x}", XxHash3_128::oneshot(text.as_bytes())))
+            .collect();
+
         // Generate embeddings (internally parallel via Phase 1)
         let embeddings = embedding_manager
             .embed(texts.clone())
@@ -345,9 +353,37 @@ async fn stage_generate_embeddings(
             texts.len() - successful_embeddings
         );
 
-        // Pair entities with embeddings, tracking which indices survived
+        // Store embeddings in cache and get their IDs
+        let embeddings_with_hashes: Vec<(String, Vec<f32>)> = content_hashes
+            .iter()
+            .zip(embeddings.iter())
+            .filter_map(|(hash, emb_opt)| emb_opt.as_ref().map(|emb| (hash.clone(), emb.clone())))
+            .collect();
+
+        let model_version = embedding_manager.model_version();
+        let dimension = embeddings_with_hashes
+            .first()
+            .map(|(_, emb)| emb.len())
+            .unwrap_or(1536);
+
+        let embedding_ids = if !embeddings_with_hashes.is_empty() {
+            postgres_client
+                .store_embeddings(&embeddings_with_hashes, model_version, dimension)
+                .await
+                .storage_err("Failed to store embeddings")?
+        } else {
+            Vec::new()
+        };
+
+        info!(
+            "Stage 3: Stored {} embeddings and got their IDs",
+            embedding_ids.len()
+        );
+
+        // Pair entities with embedding IDs, tracking which indices survived
         let mut pairs = Vec::new();
         let mut old_to_new_idx: HashMap<usize, usize> = HashMap::new();
+        let mut embedding_id_iter = embedding_ids.into_iter();
 
         for (old_idx, (entity, emb_opt)) in batch
             .entities
@@ -355,10 +391,12 @@ async fn stage_generate_embeddings(
             .zip(embeddings.into_iter())
             .enumerate()
         {
-            if let Some(emb) = emb_opt {
-                let new_idx = pairs.len();
-                old_to_new_idx.insert(old_idx, new_idx);
-                pairs.push((entity, emb));
+            if emb_opt.is_some() {
+                if let Some(embedding_id) = embedding_id_iter.next() {
+                    let new_idx = pairs.len();
+                    old_to_new_idx.insert(old_idx, new_idx);
+                    pairs.push((entity, embedding_id));
+                }
             }
         }
 
@@ -383,7 +421,7 @@ async fn stage_generate_embeddings(
 
         embedded_tx
             .send(EmbeddedBatch {
-                entity_embedding_pairs: pairs,
+                entity_embedding_id_pairs: pairs,
                 file_indices: updated_file_indices,
                 repo_id: batch.repo_id,
                 git_commit: batch.git_commit,
@@ -410,8 +448,8 @@ async fn stage_store_entities(
 
     while let Some(batch) = embedded_rx.recv().await {
         info!(
-            "Stage 4: Received {} entity-embedding pairs from {} files",
-            batch.entity_embedding_pairs.len(),
+            "Stage 4: Received {} entity-embedding_id pairs from {} files",
+            batch.entity_embedding_id_pairs.len(),
             batch.file_indices.len()
         );
 
@@ -419,9 +457,10 @@ async fn stage_store_entities(
         let collection_name = &batch.collection_name;
 
         // Process in chunks to respect max_entity_batch_size
-        for chunk_start in (0..batch.entity_embedding_pairs.len()).step_by(max_batch_size) {
-            let chunk_end = (chunk_start + max_batch_size).min(batch.entity_embedding_pairs.len());
-            let chunk = &batch.entity_embedding_pairs[chunk_start..chunk_end];
+        for chunk_start in (0..batch.entity_embedding_id_pairs.len()).step_by(max_batch_size) {
+            let chunk_end =
+                (chunk_start + max_batch_size).min(batch.entity_embedding_id_pairs.len());
+            let chunk = &batch.entity_embedding_id_pairs[chunk_start..chunk_end];
 
             // Batch fetch existing metadata for this chunk
             let entity_ids: Vec<String> = chunk.iter().map(|(e, _)| e.entity_id.clone()).collect();
@@ -434,7 +473,7 @@ async fn stage_store_entities(
             // Prepare batch refs (no cloning - use references)
             let mut batch_refs = Vec::with_capacity(chunk.len());
 
-            for (entity, embedding) in chunk {
+            for (entity, embedding_id) in chunk {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
                     metadata_map.get(&entity.entity_id)
                 {
@@ -449,7 +488,7 @@ async fn stage_store_entities(
 
                 batch_refs.push((
                     entity,
-                    embedding.as_slice(),
+                    *embedding_id,
                     operation,
                     point_id,
                     TargetStore::Qdrant,
@@ -468,13 +507,13 @@ async fn stage_store_entities(
                 "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
                 batch_refs.len(),
                 chunk_end,
-                batch.entity_embedding_pairs.len()
+                batch.entity_embedding_id_pairs.len()
             );
         }
 
         info!(
             "Stage 4: Completed storing {} entities from this batch",
-            batch.entity_embedding_pairs.len()
+            batch.entity_embedding_id_pairs.len()
         );
 
         // Build file→entity_id map for snapshots
@@ -484,13 +523,13 @@ async fn stage_store_entities(
             let entity_ids: Vec<String> = entity_indices
                 .iter()
                 .filter_map(|&idx| {
-                    if idx < batch.entity_embedding_pairs.len() {
-                        Some(batch.entity_embedding_pairs[idx].0.entity_id.clone())
+                    if idx < batch.entity_embedding_id_pairs.len() {
+                        Some(batch.entity_embedding_id_pairs[idx].0.entity_id.clone())
                     } else {
                         error!(
                             "Stage 4: Index {} out of bounds (len: {})",
                             idx,
-                            batch.entity_embedding_pairs.len()
+                            batch.entity_embedding_id_pairs.len()
                         );
                         None
                     }
@@ -639,10 +678,12 @@ impl crate::Indexer for RepositoryIndexer {
             config.file_extraction_concurrency,
         ));
 
+        let postgres_client_3 = self.postgres_client.clone();
         let stage3 = tokio::spawn(stage_generate_embeddings(
             entity_rx,
             embedded_tx,
             embedding_manager,
+            postgres_client_3,
         ));
 
         let stage4 = tokio::spawn(stage_store_entities(

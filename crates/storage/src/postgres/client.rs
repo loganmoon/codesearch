@@ -110,12 +110,13 @@ pub struct OutboxEntry {
     pub retry_count: i32,
     pub last_error: Option<String>,
     pub collection_name: String,
+    pub embedding_id: Option<i64>,
 }
 
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    &'a [f32],
+    i64, // embedding_id instead of &[f32]
     OutboxOperation,
     Uuid,
     TargetStore,
@@ -657,7 +658,7 @@ impl PostgresClient {
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
                 entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id
+                entity_data, git_commit_hash, qdrant_point_id, embedding_id
             ) ",
         );
 
@@ -666,7 +667,7 @@ impl PostgresClient {
             |mut b,
              (
                 entity,
-                _embedding,
+                embedding_id,
                 _op,
                 point_id,
                 _target,
@@ -685,7 +686,8 @@ impl PostgresClient {
                     .push_bind(entity.visibility.to_string())
                     .push_bind(entity_json)
                     .push_bind(git_commit)
-                    .push_bind(point_id);
+                    .push_bind(point_id)
+                    .push_bind(embedding_id);
             },
         );
 
@@ -702,6 +704,7 @@ impl PostgresClient {
                 entity_data = EXCLUDED.entity_data,
                 git_commit_hash = EXCLUDED.git_commit_hash,
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
+                embedding_id = EXCLUDED.embedding_id,
                 updated_at = NOW(),
                 deleted_at = NULL",
         );
@@ -735,7 +738,7 @@ impl PostgresClient {
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
-                repository_id, entity_id, operation, target_store, payload, collection_name
+                repository_id, entity_id, operation, target_store, payload, collection_name, embedding_id
             ) ",
         );
 
@@ -744,7 +747,7 @@ impl PostgresClient {
             |mut b,
              (
                 entity,
-                embedding,
+                embedding_id,
                 op,
                 point_id,
                 target,
@@ -754,7 +757,6 @@ impl PostgresClient {
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
-                    "embedding": embedding,
                     "qdrant_point_id": point_id.to_string()
                 });
 
@@ -763,7 +765,8 @@ impl PostgresClient {
                     .push_bind(op.to_string())
                     .push_bind(target.to_string())
                     .push_bind(payload)
-                    .push_bind(collection_name);
+                    .push_bind(collection_name)
+                    .push_bind(embedding_id);
             },
         );
 
@@ -790,7 +793,7 @@ impl PostgresClient {
     ) -> Result<Vec<OutboxEntry>> {
         let entries = sqlx::query_as::<_, OutboxEntry>(
             "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
-                    created_at, processed_at, retry_count, last_error, collection_name
+                    created_at, processed_at, retry_count, last_error, collection_name, embedding_id
              FROM entity_outbox
              WHERE target_store = $1 AND processed_at IS NULL
              ORDER BY created_at ASC
@@ -958,10 +961,10 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to truncate repositories: {e}")))?;
 
-        sqlx::query("TRUNCATE TABLE embedding_cache CASCADE")
+        sqlx::query("TRUNCATE TABLE entity_embeddings CASCADE")
             .execute(&mut *tx)
             .await
-            .map_err(|e| Error::storage(format!("Failed to truncate embedding_cache: {e}")))?;
+            .map_err(|e| Error::storage(format!("Failed to truncate entity_embeddings: {e}")))?;
 
         tx.commit()
             .await
@@ -972,12 +975,12 @@ impl PostgresClient {
         Ok(())
     }
 
-    /// Get cached embeddings by content hashes (batch operation)
-    pub async fn get_embeddings_from_cache(
+    /// Get embeddings by content hashes, returning (embedding_id, embedding) tuples
+    pub async fn get_embeddings_by_content_hash(
         &self,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
         if content_hashes.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
@@ -993,7 +996,7 @@ impl PostgresClient {
 
         // Build query with IN clause
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "SELECT content_hash, embedding FROM embedding_cache WHERE model_version = ",
+            "SELECT id, content_hash, embedding FROM entity_embeddings WHERE model_version = ",
         );
         query_builder.push_bind(model_version);
         query_builder.push(" AND content_hash IN (");
@@ -1008,10 +1011,15 @@ impl PostgresClient {
             .build()
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::storage(format!("Failed to fetch embeddings from cache: {e}")))?;
+            .map_err(|e| {
+                Error::storage(format!("Failed to fetch embeddings by content hash: {e}"))
+            })?;
 
         let mut result = std::collections::HashMap::new();
         for row in rows {
+            let id: i64 = row
+                .try_get("id")
+                .map_err(|e| Error::storage(format!("Failed to extract id: {e}")))?;
             let content_hash: String = row
                 .try_get("content_hash")
                 .map_err(|e| Error::storage(format!("Failed to extract content_hash: {e}")))?;
@@ -1019,27 +1027,27 @@ impl PostgresClient {
                 .try_get("embedding")
                 .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
 
-            result.insert(content_hash, embedding);
+            result.insert(content_hash, (id, embedding));
         }
 
         Ok(result)
     }
 
-    /// Store embeddings in cache (batch operation with UPSERT)
-    pub async fn store_embeddings_in_cache(
+    /// Store embeddings in entity_embeddings table, returning their IDs
+    pub async fn store_embeddings(
         &self,
         cache_entries: &[(String, Vec<f32>)],
         model_version: &str,
         dimension: usize,
-    ) -> Result<()> {
+    ) -> Result<Vec<i64>> {
         if cache_entries.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         // Validate batch size
         if cache_entries.len() > self.max_entity_batch_size {
             return Err(Error::storage(format!(
-                "Cache store batch size {} exceeds maximum {}",
+                "Embedding store batch size {} exceeds maximum {}",
                 cache_entries.len(),
                 self.max_entity_batch_size
             )));
@@ -1051,9 +1059,9 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
-        // Build bulk INSERT with ON CONFLICT DO NOTHING (avoid updating existing entries)
+        // Build bulk INSERT with ON CONFLICT DO NOTHING
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO embedding_cache (content_hash, embedding, model_version, dimension, created_at) "
+            "INSERT INTO entity_embeddings (content_hash, embedding, model_version, dimension, created_at) "
         );
 
         query_builder.push_values(cache_entries, |mut b, (content_hash, embedding)| {
@@ -1064,19 +1072,61 @@ impl PostgresClient {
                 .push("NOW()");
         });
 
-        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING");
+        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING RETURNING id");
 
-        query_builder
-            .build()
-            .execute(&mut *tx)
+        // Execute and get IDs for newly inserted rows
+        let inserted_ids: Vec<i64> = query_builder
+            .build_query_scalar()
+            .fetch_all(&mut *tx)
             .await
-            .map_err(|e| Error::storage(format!("Failed to insert cache entries: {e}")))?;
+            .map_err(|e| Error::storage(format!("Failed to insert embeddings: {e}")))?;
+
+        // For entries that conflicted, fetch their existing IDs
+        let mut all_ids = inserted_ids;
+
+        if all_ids.len() < cache_entries.len() {
+            // Some entries already existed, fetch their IDs
+            let content_hashes: Vec<&String> = cache_entries.iter().map(|(hash, _)| hash).collect();
+
+            let mut fetch_query: QueryBuilder<Postgres> =
+                QueryBuilder::new("SELECT id FROM entity_embeddings WHERE model_version = ");
+            fetch_query.push_bind(model_version);
+            fetch_query.push(" AND content_hash IN (");
+
+            let mut separated = fetch_query.separated(", ");
+            for hash in content_hashes {
+                separated.push_bind(hash);
+            }
+            separated.push_unseparated(")");
+
+            let existing_ids: Vec<i64> = fetch_query
+                .build_query_scalar()
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| {
+                    Error::storage(format!("Failed to fetch existing embedding IDs: {e}"))
+                })?;
+
+            all_ids = existing_ids;
+        }
 
         tx.commit()
             .await
-            .map_err(|e| Error::storage(format!("Failed to commit cache transaction: {e}")))?;
+            .map_err(|e| Error::storage(format!("Failed to commit embedding transaction: {e}")))?;
 
-        Ok(())
+        Ok(all_ids)
+    }
+
+    /// Get an embedding by its ID (used by outbox processor)
+    pub async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        let record: Option<(Vec<f32>,)> =
+            sqlx::query_as("SELECT embedding FROM entity_embeddings WHERE id = $1")
+                .bind(embedding_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to get embedding by ID: {e}")))?;
+
+        Ok(record.map(|(embedding,)| embedding))
     }
 
     /// Get cache statistics
@@ -1087,7 +1137,7 @@ impl PostgresClient {
                 SUM(array_length(embedding, 1) * 4) as total_size_bytes,
                 MIN(created_at) as oldest_entry,
                 MAX(created_at) as newest_entry
-            FROM embedding_cache",
+            FROM entity_embeddings",
         )
         .fetch_one(&self.pool)
         .await
@@ -1102,7 +1152,7 @@ impl PostgresClient {
 
         // Get counts by model version
         let model_rows = sqlx::query(
-            "SELECT model_version, COUNT(*) as count FROM embedding_cache GROUP BY model_version",
+            "SELECT model_version, COUNT(*) as count FROM entity_embeddings GROUP BY model_version",
         )
         .fetch_all(&self.pool)
         .await
@@ -1131,12 +1181,12 @@ impl PostgresClient {
     /// Clear cache entries (optionally filter by model version)
     pub async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
         let result = if let Some(version) = model_version {
-            sqlx::query("DELETE FROM embedding_cache WHERE model_version = $1")
+            sqlx::query("DELETE FROM entity_embeddings WHERE model_version = $1")
                 .bind(version)
                 .execute(&self.pool)
                 .await
         } else {
-            sqlx::query("DELETE FROM embedding_cache")
+            sqlx::query("DELETE FROM entity_embeddings")
                 .execute(&self.pool)
                 .await
         };
@@ -1300,23 +1350,27 @@ impl super::PostgresClientTrait for PostgresClient {
         self.drop_all_data().await
     }
 
-    async fn get_embeddings_from_cache(
+    async fn get_embeddings_by_content_hash(
         &self,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
-        self.get_embeddings_from_cache(content_hashes, model_version)
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+        self.get_embeddings_by_content_hash(content_hashes, model_version)
             .await
     }
 
-    async fn store_embeddings_in_cache(
+    async fn store_embeddings(
         &self,
         cache_entries: &[(String, Vec<f32>)],
         model_version: &str,
         dimension: usize,
-    ) -> Result<()> {
-        self.store_embeddings_in_cache(cache_entries, model_version, dimension)
+    ) -> Result<Vec<i64>> {
+        self.store_embeddings(cache_entries, model_version, dimension)
             .await
+    }
+
+    async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        self.get_embedding_by_id(embedding_id).await
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {

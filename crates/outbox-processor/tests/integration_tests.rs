@@ -120,10 +120,18 @@ async fn test_outbox_entries_can_be_created_and_queried() {
     let embedding = vec![0.1; 1536];
     let point_id = Uuid::new_v4();
 
+    // Store embedding in cache to get its ID
+    let content_hash = format!("{:032x}", 123456u128); // Dummy hash for test
+    let embedding_ids = postgres_client
+        .store_embeddings(&[(content_hash, embedding)], "test-model", 1536)
+        .await
+        .expect("Failed to store embedding");
+    let embedding_id = embedding_ids[0];
+
     // Store entity with outbox entry
     let batch_entry = vec![(
         &entity,
-        embedding.as_slice(),
+        embedding_id,
         OutboxOperation::Insert,
         point_id,
         TargetStore::Qdrant,

@@ -65,9 +65,16 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
                 );
                 let embedding = vec![0.1; 384];
                 let point_id = Uuid::new_v4();
+                // Store embedding to get its ID
+                let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+                let embedding_ids = client_clone
+                    .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+                    .await?;
+                let embedding_id = embedding_ids[0];
+
                 let batch = vec![(
                     &entity,
-                    embedding.as_slice(),
+                    embedding_id,
                     OutboxOperation::Insert,
                     point_id,
                     TargetStore::Qdrant,
@@ -144,9 +151,16 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         let task1 = tokio::spawn(async move {
             let embedding = vec![0.1; 384];
             let point_id = Uuid::new_v4();
+            // Store embedding to get its ID
+            let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+            let embedding_ids = client1
+                .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+                .await?;
+            let embedding_id = embedding_ids[0];
+
             let batch = vec![(
                 &entity1,
-                embedding.as_slice(),
+                embedding_id,
                 OutboxOperation::Insert,
                 point_id,
                 TargetStore::Qdrant,
@@ -160,9 +174,16 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         let task2 = tokio::spawn(async move {
             let embedding = vec![0.1; 384];
             let point_id = Uuid::new_v4();
+            // Store embedding to get its ID
+            let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+            let embedding_ids = client2
+                .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+                .await?;
+            let embedding_id = embedding_ids[0];
+
             let batch = vec![(
                 &entity2,
-                embedding.as_slice(),
+                embedding_id,
                 OutboxOperation::Insert,
                 point_id,
                 TargetStore::Qdrant,
@@ -303,9 +324,16 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
         for entity in &entities {
             let embedding = vec![0.1; 384];
             let point_id = Uuid::new_v4();
+            // Store embedding to get its ID
+            let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+            let embedding_ids = client
+                .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+                .await?;
+            let embedding_id = embedding_ids[0];
+
             let batch = vec![(
                 entity,
-                embedding.as_slice(),
+                embedding_id,
                 OutboxOperation::Insert,
                 point_id,
                 TargetStore::Qdrant,
@@ -363,10 +391,16 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
                     &repository_id.to_string(),
                 );
                 let embedding = vec![0.1_f32; 384];
+                // Store embedding to get its ID
+                let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+                let embedding_ids = client_clone
+                    .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+                    .await?;
+                let embedding_id = embedding_ids[0];
 
                 let batch = vec![(
                     &entity,
-                    embedding.as_slice(),
+                    embedding_id,
                     OutboxOperation::Insert,
                     Uuid::new_v4(),
                     TargetStore::Qdrant,
@@ -417,10 +451,16 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
         let entity =
             create_test_entity("entity1", EntityType::Function, &repository_id.to_string());
         let embedding = vec![0.1_f32; 384];
+        // Store embedding to get its ID
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = client
+            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .await?;
+        let embedding_id = embedding_ids[0];
 
         let batch = vec![(
             &entity,
-            embedding.as_slice(),
+            embedding_id,
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,

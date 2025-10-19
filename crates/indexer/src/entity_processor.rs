@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info};
+use twox_hash::XxHash3_128;
 use uuid::Uuid;
 
 const DELIM: &str = " ";
@@ -220,19 +221,134 @@ async fn process_entity_chunk(
 
     info!("Generating embeddings for {} entities", entities.len());
 
-    // Generate embeddings
-    let embedding_texts: Vec<String> = entities.iter().map(extract_embedding_content).collect();
+    // Phase 1: Compute content hashes for all entities
+    let entity_contents_and_hashes: Vec<(String, String)> = entities
+        .iter()
+        .map(|entity| {
+            let content = extract_embedding_content(entity);
+            let content_hash = format!("{:032x}", XxHash3_128::oneshot(content.as_bytes()));
+            (content, content_hash)
+        })
+        .collect();
 
-    let option_embeddings = embedding_manager
-        .embed(embedding_texts)
+    // Phase 2: Batch lookup cached embeddings
+    let content_hashes: Vec<String> = entity_contents_and_hashes
+        .iter()
+        .map(|(_, hash)| hash.clone())
+        .collect();
+
+    let model_version = embedding_manager.model_version();
+    let cached_embeddings = postgres_client
+        .get_embeddings_by_content_hash(&content_hashes, model_version)
         .await
-        .storage_err("Failed to generate embeddings")?;
+        .unwrap_or_else(|e| {
+            tracing::warn!("Cache lookup failed, will generate all embeddings: {}", e);
+            HashMap::new()
+        });
 
-    // Filter entities with valid embeddings
-    let mut entity_embedding_pairs: Vec<(CodeEntity, Vec<f32>)> =
-        Vec::with_capacity(entities.len());
-    for (entity, opt_embedding) in entities.into_iter().zip(option_embeddings.into_iter()) {
-        if let Some(embedding) = opt_embedding {
+    // Phase 3: Separate cache hits from misses
+    let mut cache_hits = Vec::new();
+    let mut cache_misses = Vec::new();
+    let mut cache_miss_texts = Vec::new();
+
+    for (idx, (content, content_hash)) in entity_contents_and_hashes.iter().enumerate() {
+        if let Some((embedding_id, cached_embedding)) = cached_embeddings.get(content_hash) {
+            cache_hits.push((idx, *embedding_id, cached_embedding.clone()));
+        } else {
+            cache_misses.push((idx, content_hash.clone()));
+            cache_miss_texts.push(content.clone());
+        }
+    }
+
+    info!(
+        "Embedding cache: {} hits, {} misses ({:.1}% hit rate)",
+        cache_hits.len(),
+        cache_misses.len(),
+        if !entities.is_empty() {
+            (cache_hits.len() as f64 / entities.len() as f64) * 100.0
+        } else {
+            0.0
+        }
+    );
+
+    // Phase 4: Generate embeddings only for cache misses
+    let mut all_embeddings = vec![None; entities.len()];
+    let mut all_embedding_ids = vec![None; entities.len()];
+
+    // Fill in cache hits
+    for (idx, embedding_id, embedding) in cache_hits {
+        all_embeddings[idx] = Some(embedding);
+        all_embedding_ids[idx] = Some(embedding_id);
+    }
+
+    // Generate embeddings for cache misses only
+    if !cache_miss_texts.is_empty() {
+        info!(
+            "Generating {} new embeddings via API",
+            cache_miss_texts.len()
+        );
+
+        let new_embeddings = embedding_manager
+            .embed(cache_miss_texts)
+            .await
+            .storage_err("Failed to generate embeddings")?;
+
+        // Fill in newly generated embeddings
+        let mut new_embeddings_iter = new_embeddings.into_iter();
+        for (idx, _content_hash) in &cache_misses {
+            if let Some(Some(embedding)) = new_embeddings_iter.next() {
+                all_embeddings[*idx] = Some(embedding);
+            }
+        }
+
+        // Phase 5: Store newly generated embeddings in cache and capture their IDs
+        let cache_entries_to_store: Vec<((usize, String), Vec<f32>)> = cache_misses
+            .iter()
+            .filter_map(|(idx, content_hash)| {
+                all_embeddings[*idx]
+                    .clone()
+                    .map(|emb| ((*idx, content_hash.clone()), emb))
+            })
+            .collect();
+
+        if !cache_entries_to_store.is_empty() {
+            let dimension = cache_entries_to_store[0].1.len();
+
+            // Extract just the (content_hash, embedding) pairs for storage
+            let entries_for_storage: Vec<(String, Vec<f32>)> = cache_entries_to_store
+                .iter()
+                .map(|((_, content_hash), embedding)| (content_hash.clone(), embedding.clone()))
+                .collect();
+
+            let new_embedding_ids = postgres_client
+                .store_embeddings(&entries_for_storage, model_version, dimension)
+                .await
+                .storage_err("Failed to store embeddings in cache")?;
+
+            // Map returned IDs back to entity indices
+            for (entry, embedding_id) in cache_entries_to_store
+                .iter()
+                .zip(new_embedding_ids.into_iter())
+            {
+                let (idx, _content_hash) = &entry.0;
+                all_embedding_ids[*idx] = Some(embedding_id);
+            }
+
+            info!(
+                "Stored {} new embeddings in cache",
+                cache_entries_to_store.len()
+            );
+        }
+    }
+
+    // Filter entities with valid embedding IDs
+    let mut entity_embedding_id_pairs: Vec<(CodeEntity, i64)> = Vec::with_capacity(entities.len());
+    for ((entity, opt_embedding), opt_embedding_id) in entities
+        .into_iter()
+        .zip(all_embeddings.into_iter())
+        .zip(all_embedding_ids.into_iter())
+    {
+        if let (Some(embedding), Some(embedding_id)) = (opt_embedding, opt_embedding_id) {
             // Validate embedding is not all zeros
             let is_all_zeros = embedding.iter().all(|&v| v == 0.0);
             if is_all_zeros {
@@ -242,28 +358,28 @@ async fn process_entity_chunk(
                     entity.file_path.display()
                 );
             }
-            entity_embedding_pairs.push((entity, embedding));
+            entity_embedding_id_pairs.push((entity, embedding_id));
         } else {
             stats.entities_skipped_size += 1;
             debug!(
-                "Skipped entity due to size: {} in {}",
+                "Skipped entity due to size or missing embedding ID: {} in {}",
                 entity.qualified_name,
                 entity.file_path.display()
             );
         }
     }
 
-    if entity_embedding_pairs.is_empty() {
+    if entity_embedding_id_pairs.is_empty() {
         return Ok((stats, entities_by_file));
     }
 
     info!(
         "Storing {} entities with embeddings",
-        entity_embedding_pairs.len()
+        entity_embedding_id_pairs.len()
     );
 
     // Batch fetch all entity metadata in a single query
-    let entity_ids: Vec<String> = entity_embedding_pairs
+    let entity_ids: Vec<String> = entity_embedding_id_pairs
         .iter()
         .map(|(entity, _)| entity.entity_id.clone())
         .collect();
@@ -274,9 +390,9 @@ async fn process_entity_chunk(
         .storage_err("Failed to fetch entity metadata")?;
 
     // Prepare batch data directly as references (no intermediate cloning)
-    let mut batch_refs = Vec::with_capacity(entity_embedding_pairs.len());
+    let mut batch_refs = Vec::with_capacity(entity_embedding_id_pairs.len());
 
-    for (entity, embedding) in &entity_embedding_pairs {
+    for (entity, embedding_id) in &entity_embedding_id_pairs {
         let existing_metadata = metadata_map.get(&entity.entity_id);
 
         let (point_id, operation) = if let Some((existing_point_id, deleted_at)) = existing_metadata
@@ -302,7 +418,7 @@ async fn process_entity_chunk(
 
         batch_refs.push((
             entity,
-            embedding.as_slice(),
+            *embedding_id,
             operation,
             point_id,
             TargetStore::Qdrant,
@@ -318,7 +434,7 @@ async fn process_entity_chunk(
 
     debug!(
         "Successfully stored {} entities",
-        entity_embedding_pairs.len()
+        entity_embedding_id_pairs.len()
     );
 
     Ok((stats, entities_by_file))

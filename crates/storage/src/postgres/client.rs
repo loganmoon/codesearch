@@ -110,12 +110,13 @@ pub struct OutboxEntry {
     pub retry_count: i32,
     pub last_error: Option<String>,
     pub collection_name: String,
+    pub embedding_id: Option<i64>,
 }
 
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    &'a [f32],
+    i64, // embedding_id instead of &[f32]
     OutboxOperation,
     Uuid,
     TargetStore,
@@ -282,25 +283,6 @@ impl PostgresClient {
             .collect())
     }
 
-    /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
-    pub async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
-        let record: Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
-            "SELECT qdrant_point_id, deleted_at FROM entity_metadata
-             WHERE repository_id = $1 AND entity_id = $2",
-        )
-        .bind(repository_id)
-        .bind(entity_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to get entity metadata: {e}")))?;
-
-        Ok(record)
-    }
-
     /// Batch fetch entity metadata for multiple entities
     pub async fn get_entities_metadata_batch(
         &self,
@@ -416,6 +398,116 @@ impl PostgresClient {
         Ok(())
     }
 
+    /// Batch fetch file snapshots for multiple files
+    pub async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>> {
+        if file_refs.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Validate batch size
+        if file_refs.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                file_refs.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        // Build query using QueryBuilder
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT repository_id, file_path, entity_ids FROM file_entity_snapshots WHERE (repository_id, file_path) IN "
+        );
+
+        query_builder.push_tuples(file_refs, |mut b, (repo_id, file_path)| {
+            b.push_bind(repo_id).push_bind(file_path);
+        });
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch file snapshots batch: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let repository_id: Uuid = row
+                .try_get("repository_id")
+                .map_err(|e| Error::storage(format!("Failed to extract repository_id: {e}")))?;
+            let file_path: String = row
+                .try_get("file_path")
+                .map_err(|e| Error::storage(format!("Failed to extract file_path: {e}")))?;
+            let entity_ids: Vec<String> = row
+                .try_get("entity_ids")
+                .map_err(|e| Error::storage(format!("Failed to extract entity_ids: {e}")))?;
+
+            result.insert((repository_id, file_path), entity_ids);
+        }
+
+        Ok(result)
+    }
+
+    /// Batch update file snapshots in a single transaction
+    pub async fn update_file_snapshots_batch(
+        &self,
+        repository_id: Uuid,
+        updates: &[(String, Vec<String>, Option<String>)],
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Validate batch size
+        if updates.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                updates.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // Build bulk upsert
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO file_entity_snapshots (repository_id, file_path, entity_ids, git_commit_hash, indexed_at) "
+        );
+
+        query_builder.push_values(updates, |mut b, (file_path, entity_ids, git_commit)| {
+            b.push_bind(repository_id)
+                .push_bind(file_path)
+                .push_bind(entity_ids)
+                .push_bind(git_commit)
+                .push("NOW()");
+        });
+
+        query_builder.push(
+            " ON CONFLICT (repository_id, file_path)
+            DO UPDATE SET
+                entity_ids = EXCLUDED.entity_ids,
+                git_commit_hash = EXCLUDED.git_commit_hash,
+                indexed_at = NOW()",
+        );
+
+        query_builder
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to batch update file snapshots: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        Ok(())
+    }
+
     /// Batch fetch entities by (repository_id, entity_id) pairs
     pub async fn get_entities_by_ids(
         &self,
@@ -460,60 +552,6 @@ impl PostgresClient {
         }
 
         Ok(entities)
-    }
-
-    /// Mark entities as deleted (soft delete) (transactional)
-    pub async fn mark_entities_deleted(
-        &self,
-        repository_id: Uuid,
-        entity_ids: &[String],
-    ) -> Result<()> {
-        if entity_ids.is_empty() {
-            return Ok(());
-        }
-
-        // Validate batch size to prevent resource exhaustion
-        if entity_ids.len() > self.max_entity_batch_size {
-            return Err(Error::storage(format!(
-                "Batch size {} exceeds maximum allowed size of {}",
-                entity_ids.len(),
-                self.max_entity_batch_size
-            )));
-        }
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
-
-        // Build query using QueryBuilder for type safety
-        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW() WHERE repository_id = "
-        );
-
-        query_builder.push_bind(repository_id);
-        query_builder.push(" AND entity_id IN (");
-
-        let mut separated = query_builder.separated(", ");
-        for entity_id in entity_ids {
-            separated.push_bind(entity_id);
-        }
-        separated.push_unseparated(")");
-
-        let result = query_builder
-            .build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-
-        tracing::info!("Marked {} entities as deleted", result.rows_affected());
-
-        Ok(())
     }
 
     /// Mark entities as deleted and create outbox entries in a single transaction
@@ -562,30 +600,56 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
 
-        // 2. Create outbox entries for all deletes
-        let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
-        );
+        // 2. Create outbox entries only for entities that were actually deleted
+        // If no entities were updated (all non-existent), skip outbox creation
+        if update_result.rows_affected() > 0 {
+            // Get the list of entities that were actually updated (exist in DB)
+            let mut check_query: QueryBuilder<Postgres> =
+                QueryBuilder::new("SELECT entity_id FROM entity_metadata WHERE repository_id = ");
+            check_query.push_bind(repository_id);
+            check_query.push(" AND entity_id IN (");
 
-        outbox_query.push_values(entity_ids, |mut b, entity_id| {
-            let payload = serde_json::json!({
-                "entity_ids": [entity_id],
-                "reason": "file_change"
-            });
-            b.push_bind(repository_id)
-                .push_bind(entity_id)
-                .push_bind(OutboxOperation::Delete.to_string())
-                .push_bind(TargetStore::Qdrant.to_string())
-                .push_bind(payload)
-                .push_bind(collection_name)
-                .push("NOW()");
-        });
+            let mut separated = check_query.separated(", ");
+            for entity_id in entity_ids {
+                separated.push_bind(entity_id);
+            }
+            separated.push_unseparated(") AND deleted_at IS NOT NULL");
 
-        outbox_query
-            .build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+            let existing_entity_ids: Vec<String> = check_query
+                .build_query_as()
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query deleted entities: {e}")))?
+                .into_iter()
+                .map(|(id,): (String,)| id)
+                .collect();
+
+            if !existing_entity_ids.is_empty() {
+                let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                    "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
+                );
+
+                outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    let payload = serde_json::json!({
+                        "entity_ids": [entity_id],
+                        "reason": "file_change"
+                    });
+                    b.push_bind(repository_id)
+                        .push_bind(entity_id)
+                        .push_bind(OutboxOperation::Delete.to_string())
+                        .push_bind(TargetStore::Qdrant.to_string())
+                        .push_bind(payload)
+                        .push_bind(collection_name)
+                        .push("NOW()");
+                });
+
+                outbox_query
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+            }
+        }
 
         tx.commit()
             .await
@@ -657,7 +721,7 @@ impl PostgresClient {
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
                 entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id
+                entity_data, git_commit_hash, qdrant_point_id, embedding_id
             ) ",
         );
 
@@ -666,7 +730,7 @@ impl PostgresClient {
             |mut b,
              (
                 entity,
-                _embedding,
+                embedding_id,
                 _op,
                 point_id,
                 _target,
@@ -685,7 +749,8 @@ impl PostgresClient {
                     .push_bind(entity.visibility.to_string())
                     .push_bind(entity_json)
                     .push_bind(git_commit)
-                    .push_bind(point_id);
+                    .push_bind(point_id)
+                    .push_bind(embedding_id);
             },
         );
 
@@ -702,6 +767,7 @@ impl PostgresClient {
                 entity_data = EXCLUDED.entity_data,
                 git_commit_hash = EXCLUDED.git_commit_hash,
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
+                embedding_id = EXCLUDED.embedding_id,
                 updated_at = NOW(),
                 deleted_at = NULL",
         );
@@ -735,7 +801,7 @@ impl PostgresClient {
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
-                repository_id, entity_id, operation, target_store, payload, collection_name
+                repository_id, entity_id, operation, target_store, payload, collection_name, embedding_id
             ) ",
         );
 
@@ -744,7 +810,7 @@ impl PostgresClient {
             |mut b,
              (
                 entity,
-                embedding,
+                embedding_id,
                 op,
                 point_id,
                 target,
@@ -754,7 +820,6 @@ impl PostgresClient {
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
-                    "embedding": embedding,
                     "qdrant_point_id": point_id.to_string()
                 });
 
@@ -763,7 +828,8 @@ impl PostgresClient {
                     .push_bind(op.to_string())
                     .push_bind(target.to_string())
                     .push_bind(payload)
-                    .push_bind(collection_name);
+                    .push_bind(collection_name)
+                    .push_bind(embedding_id);
             },
         );
 
@@ -790,7 +856,7 @@ impl PostgresClient {
     ) -> Result<Vec<OutboxEntry>> {
         let entries = sqlx::query_as::<_, OutboxEntry>(
             "SELECT outbox_id, repository_id, entity_id, operation, target_store, payload,
-                    created_at, processed_at, retry_count, last_error, collection_name
+                    created_at, processed_at, retry_count, last_error, collection_name, embedding_id
              FROM entity_outbox
              WHERE target_store = $1 AND processed_at IS NULL
              ORDER BY created_at ASC
@@ -958,6 +1024,11 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to truncate repositories: {e}")))?;
 
+        sqlx::query("TRUNCATE TABLE entity_embeddings CASCADE")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to truncate entity_embeddings: {e}")))?;
+
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
@@ -965,6 +1036,249 @@ impl PostgresClient {
         tracing::info!("Dropped all data from PostgreSQL tables");
 
         Ok(())
+    }
+
+    /// Get embeddings by content hashes, returning (embedding_id, embedding) tuples
+    pub async fn get_embeddings_by_content_hash(
+        &self,
+        content_hashes: &[String],
+        model_version: &str,
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+        if content_hashes.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Validate batch size
+        if content_hashes.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Cache lookup batch size {} exceeds maximum {}",
+                content_hashes.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        // Build query with IN clause
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT id, content_hash, embedding FROM entity_embeddings WHERE model_version = ",
+        );
+        query_builder.push_bind(model_version);
+        query_builder.push(" AND content_hash IN (");
+
+        let mut separated = query_builder.separated(", ");
+        for hash in content_hashes {
+            separated.push_bind(hash);
+        }
+        separated.push_unseparated(")");
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                Error::storage(format!("Failed to fetch embeddings by content hash: {e}"))
+            })?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let id: i64 = row
+                .try_get("id")
+                .map_err(|e| Error::storage(format!("Failed to extract id: {e}")))?;
+            let content_hash: String = row
+                .try_get("content_hash")
+                .map_err(|e| Error::storage(format!("Failed to extract content_hash: {e}")))?;
+            let embedding: Vec<f32> = row
+                .try_get("embedding")
+                .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
+
+            result.insert(content_hash, (id, embedding));
+        }
+
+        Ok(result)
+    }
+
+    /// Store embeddings in entity_embeddings table, returning their IDs
+    pub async fn store_embeddings(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        model_version: &str,
+        dimension: usize,
+    ) -> Result<Vec<i64>> {
+        if cache_entries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Validate batch size
+        if cache_entries.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Embedding store batch size {} exceeds maximum {}",
+                cache_entries.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // Build bulk INSERT with ON CONFLICT DO NOTHING
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO entity_embeddings (content_hash, embedding, model_version, dimension, created_at) "
+        );
+
+        query_builder.push_values(cache_entries, |mut b, (content_hash, embedding)| {
+            b.push_bind(content_hash)
+                .push_bind(embedding)
+                .push_bind(model_version)
+                .push_bind(dimension as i32)
+                .push("NOW()");
+        });
+
+        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING RETURNING id");
+
+        // Execute and get IDs for newly inserted rows
+        let inserted_ids: Vec<i64> = query_builder
+            .build_query_scalar()
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to insert embeddings: {e}")))?;
+
+        // Build result in the correct order matching input cache_entries
+        let all_ids = if inserted_ids.len() == cache_entries.len() {
+            // All entries were new, IDs are in correct order
+            inserted_ids
+        } else {
+            // Some entries already existed, need to fetch and order correctly
+            let mut fetch_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                "SELECT content_hash, id FROM entity_embeddings WHERE model_version = ",
+            );
+            fetch_query.push_bind(model_version);
+            fetch_query.push(" AND content_hash IN (");
+
+            let mut separated = fetch_query.separated(", ");
+            for (hash, _) in cache_entries {
+                separated.push_bind(hash);
+            }
+            separated.push_unseparated(")");
+
+            let rows = fetch_query.build().fetch_all(&mut *tx).await.map_err(|e| {
+                Error::storage(format!("Failed to fetch existing embedding IDs: {e}"))
+            })?;
+
+            // Build HashMap for O(1) lookup
+            let mut hash_to_id = std::collections::HashMap::new();
+            for row in rows {
+                let content_hash: String = row
+                    .try_get("content_hash")
+                    .map_err(|e| Error::storage(format!("Failed to extract content_hash: {e}")))?;
+                let id: i64 = row
+                    .try_get("id")
+                    .map_err(|e| Error::storage(format!("Failed to extract id: {e}")))?;
+                hash_to_id.insert(content_hash, id);
+            }
+
+            // Return IDs in the same order as input cache_entries
+            let mut ordered_ids = Vec::with_capacity(cache_entries.len());
+            for (hash, _) in cache_entries {
+                let id = hash_to_id.get(hash).ok_or_else(|| {
+                    Error::storage(format!(
+                        "Embedding ID not found for content_hash: {hash} (this should not happen)"
+                    ))
+                })?;
+                ordered_ids.push(*id);
+            }
+
+            ordered_ids
+        };
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit embedding transaction: {e}")))?;
+
+        Ok(all_ids)
+    }
+
+    /// Get an embedding by its ID (used by outbox processor)
+    pub async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        let record: Option<(Vec<f32>,)> =
+            sqlx::query_as("SELECT embedding FROM entity_embeddings WHERE id = $1")
+                .bind(embedding_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to get embedding by ID: {e}")))?;
+
+        Ok(record.map(|(embedding,)| embedding))
+    }
+
+    /// Get cache statistics
+    pub async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
+        let row = sqlx::query(
+            "SELECT
+                COUNT(*) as total_entries,
+                SUM(array_length(embedding, 1) * 4) as total_size_bytes,
+                MIN(created_at) as oldest_entry,
+                MAX(created_at) as newest_entry
+            FROM entity_embeddings",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get cache stats: {e}")))?;
+
+        let total_entries: i64 = row
+            .try_get("total_entries")
+            .map_err(|e| Error::storage(format!("Failed to extract total_entries: {e}")))?;
+        let total_size_bytes: Option<i64> = row.try_get("total_size_bytes").ok();
+        let oldest_entry = row.try_get("oldest_entry").ok();
+        let newest_entry = row.try_get("newest_entry").ok();
+
+        // Get counts by model version
+        let model_rows = sqlx::query(
+            "SELECT model_version, COUNT(*) as count FROM entity_embeddings GROUP BY model_version",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get model version stats: {e}")))?;
+
+        let mut entries_by_model = std::collections::HashMap::new();
+        for row in model_rows {
+            let model: String = row
+                .try_get("model_version")
+                .map_err(|e| Error::storage(format!("Failed to extract model_version: {e}")))?;
+            let count: i64 = row
+                .try_get("count")
+                .map_err(|e| Error::storage(format!("Failed to extract count: {e}")))?;
+            entries_by_model.insert(model, count);
+        }
+
+        Ok(crate::CacheStats {
+            total_entries,
+            total_size_bytes: total_size_bytes.unwrap_or(0),
+            entries_by_model,
+            oldest_entry,
+            newest_entry,
+        })
+    }
+
+    /// Clear cache entries (optionally filter by model version)
+    pub async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
+        let result = if let Some(version) = model_version {
+            sqlx::query("DELETE FROM entity_embeddings WHERE model_version = $1")
+                .bind(version)
+                .execute(&self.pool)
+                .await
+        } else {
+            sqlx::query("DELETE FROM entity_embeddings")
+                .execute(&self.pool)
+                .await
+        };
+
+        let rows_affected = result
+            .map_err(|e| Error::storage(format!("Failed to clear cache: {e}")))?
+            .rows_affected();
+
+        tracing::info!("Cleared {} cache entries", rows_affected);
+        Ok(rows_affected)
     }
 }
 
@@ -1019,14 +1333,6 @@ impl super::PostgresClientTrait for PostgresClient {
         self.list_all_repositories().await
     }
 
-    async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
-        self.get_entity_metadata(repository_id, entity_id).await
-    }
-
     async fn get_entities_metadata_batch(
         &self,
         repository_id: Uuid,
@@ -1056,16 +1362,24 @@ impl super::PostgresClientTrait for PostgresClient {
             .await
     }
 
-    async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
-        self.get_entities_by_ids(entity_refs).await
+    async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>> {
+        self.get_file_snapshots_batch(file_refs).await
     }
 
-    async fn mark_entities_deleted(
+    async fn update_file_snapshots_batch(
         &self,
         repository_id: Uuid,
-        entity_ids: &[String],
+        updates: &[(String, Vec<String>, Option<String>)],
     ) -> Result<()> {
-        self.mark_entities_deleted(repository_id, entity_ids).await
+        self.update_file_snapshots_batch(repository_id, updates)
+            .await
+    }
+
+    async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
+        self.get_entities_by_ids(entity_refs).await
     }
 
     async fn mark_entities_deleted_with_outbox(
@@ -1116,5 +1430,36 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn drop_all_data(&self) -> Result<()> {
         self.drop_all_data().await
+    }
+
+    async fn get_embeddings_by_content_hash(
+        &self,
+        content_hashes: &[String],
+        model_version: &str,
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+        self.get_embeddings_by_content_hash(content_hashes, model_version)
+            .await
+    }
+
+    async fn store_embeddings(
+        &self,
+        cache_entries: &[(String, Vec<f32>)],
+        model_version: &str,
+        dimension: usize,
+    ) -> Result<Vec<i64>> {
+        self.store_embeddings(cache_entries, model_version, dimension)
+            .await
+    }
+
+    async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        self.get_embedding_by_id(embedding_id).await
+    }
+
+    async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
+        self.get_cache_stats().await
+    }
+
+    async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
+        self.clear_cache(model_version).await
     }
 }

@@ -10,9 +10,10 @@ use tempfile::TempDir;
 use tokio::fs;
 
 fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
-    Arc::new(EmbeddingManager::new(Arc::new(MockEmbeddingProvider::new(
-        384,
-    ))))
+    Arc::new(EmbeddingManager::new(
+        Arc::new(MockEmbeddingProvider::new(384)),
+        "test-model-v1".to_string(),
+    ))
 }
 
 /// Helper to create a test repository with sample Rust files

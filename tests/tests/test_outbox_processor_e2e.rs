@@ -119,9 +119,16 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     // Store entities with outbox
     for entity in &entities {
         let embedding = vec![0.1; 384];
+        // Store embedding to get its ID
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = postgres_client
+            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .await?;
+        let embedding_id = embedding_ids[0];
+
         let batch = vec![(
             entity,
-            embedding.as_slice(),
+            embedding_id,
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
@@ -214,9 +221,16 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
             &repo_id.to_string(),
         );
         let embedding = vec![0.1; 384];
+        // Store embedding to get its ID
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = postgres_client
+            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .await?;
+        let embedding_id = embedding_ids[0];
+
         let batch = vec![(
             &entity,
-            embedding.as_slice(),
+            embedding_id,
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,

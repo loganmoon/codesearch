@@ -484,20 +484,33 @@ async fn test_mark_entities_deleted() -> Result<()> {
 
         let to_delete = vec![entities[0].entity_id.clone(), entities[1].entity_id.clone()];
         client
-            .mark_entities_deleted(repository_id, &to_delete)
+            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &to_delete)
+            .await?;
+
+        // Use batch method to get metadata
+        let metadata_map = client
+            .get_entities_metadata_batch(repository_id, &to_delete)
             .await?;
 
         for entity_id in &to_delete {
-            let metadata = client.get_entity_metadata(repository_id, entity_id).await?;
+            let metadata = metadata_map.get(entity_id);
             assert!(metadata.is_some(), "Entity metadata should exist");
             let (_, deleted_at) = metadata.unwrap();
             assert!(deleted_at.is_some(), "deleted_at should be set");
         }
 
+        let not_deleted: Vec<String> = entities
+            .iter()
+            .skip(2)
+            .take(3)
+            .map(|e| e.entity_id.clone())
+            .collect();
+        let metadata_map = client
+            .get_entities_metadata_batch(repository_id, &not_deleted)
+            .await?;
+
         for entity in entities.iter().skip(2).take(3) {
-            let metadata = client
-                .get_entity_metadata(repository_id, &entity.entity_id)
-                .await?;
+            let metadata = metadata_map.get(&entity.entity_id);
             assert!(metadata.is_some(), "Entity metadata should exist");
             let (_, deleted_at) = metadata.unwrap();
             assert!(
@@ -526,7 +539,7 @@ async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
         let entity_ids: Vec<String> = (0..1001).map(|i| format!("entity_{i}")).collect();
 
         let result = client
-            .mark_entities_deleted(repository_id, &entity_ids)
+            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &entity_ids)
             .await;
 
         assert!(result.is_err(), "Should return error for batch size > 1000");

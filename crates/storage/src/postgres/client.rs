@@ -283,25 +283,6 @@ impl PostgresClient {
             .collect())
     }
 
-    /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
-    pub async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
-        let record: Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
-            "SELECT qdrant_point_id, deleted_at FROM entity_metadata
-             WHERE repository_id = $1 AND entity_id = $2",
-        )
-        .bind(repository_id)
-        .bind(entity_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to get entity metadata: {e}")))?;
-
-        Ok(record)
-    }
-
     /// Batch fetch entity metadata for multiple entities
     pub async fn get_entities_metadata_batch(
         &self,
@@ -417,6 +398,116 @@ impl PostgresClient {
         Ok(())
     }
 
+    /// Batch fetch file snapshots for multiple files
+    pub async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>> {
+        if file_refs.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // Validate batch size
+        if file_refs.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                file_refs.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        // Build query using QueryBuilder
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT repository_id, file_path, entity_ids FROM file_entity_snapshots WHERE (repository_id, file_path) IN "
+        );
+
+        query_builder.push_tuples(file_refs, |mut b, (repo_id, file_path)| {
+            b.push_bind(repo_id).push_bind(file_path);
+        });
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to fetch file snapshots batch: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for row in rows {
+            let repository_id: Uuid = row
+                .try_get("repository_id")
+                .map_err(|e| Error::storage(format!("Failed to extract repository_id: {e}")))?;
+            let file_path: String = row
+                .try_get("file_path")
+                .map_err(|e| Error::storage(format!("Failed to extract file_path: {e}")))?;
+            let entity_ids: Vec<String> = row
+                .try_get("entity_ids")
+                .map_err(|e| Error::storage(format!("Failed to extract entity_ids: {e}")))?;
+
+            result.insert((repository_id, file_path), entity_ids);
+        }
+
+        Ok(result)
+    }
+
+    /// Batch update file snapshots in a single transaction
+    pub async fn update_file_snapshots_batch(
+        &self,
+        repository_id: Uuid,
+        updates: &[(String, Vec<String>, Option<String>)],
+    ) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        // Validate batch size
+        if updates.len() > self.max_entity_batch_size {
+            return Err(Error::storage(format!(
+                "Batch size {} exceeds maximum allowed size of {}",
+                updates.len(),
+                self.max_entity_batch_size
+            )));
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+
+        // Build bulk upsert
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO file_entity_snapshots (repository_id, file_path, entity_ids, git_commit_hash, indexed_at) "
+        );
+
+        query_builder.push_values(updates, |mut b, (file_path, entity_ids, git_commit)| {
+            b.push_bind(repository_id)
+                .push_bind(file_path)
+                .push_bind(entity_ids)
+                .push_bind(git_commit)
+                .push("NOW()");
+        });
+
+        query_builder.push(
+            " ON CONFLICT (repository_id, file_path)
+            DO UPDATE SET
+                entity_ids = EXCLUDED.entity_ids,
+                git_commit_hash = EXCLUDED.git_commit_hash,
+                indexed_at = NOW()",
+        );
+
+        query_builder
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to batch update file snapshots: {e}")))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+
+        Ok(())
+    }
+
     /// Batch fetch entities by (repository_id, entity_id) pairs
     pub async fn get_entities_by_ids(
         &self,
@@ -461,60 +552,6 @@ impl PostgresClient {
         }
 
         Ok(entities)
-    }
-
-    /// Mark entities as deleted (soft delete) (transactional)
-    pub async fn mark_entities_deleted(
-        &self,
-        repository_id: Uuid,
-        entity_ids: &[String],
-    ) -> Result<()> {
-        if entity_ids.is_empty() {
-            return Ok(());
-        }
-
-        // Validate batch size to prevent resource exhaustion
-        if entity_ids.len() > self.max_entity_batch_size {
-            return Err(Error::storage(format!(
-                "Batch size {} exceeds maximum allowed size of {}",
-                entity_ids.len(),
-                self.max_entity_batch_size
-            )));
-        }
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
-
-        // Build query using QueryBuilder for type safety
-        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "UPDATE entity_metadata SET deleted_at = NOW(), updated_at = NOW() WHERE repository_id = "
-        );
-
-        query_builder.push_bind(repository_id);
-        query_builder.push(" AND entity_id IN (");
-
-        let mut separated = query_builder.separated(", ");
-        for entity_id in entity_ids {
-            separated.push_bind(entity_id);
-        }
-        separated.push_unseparated(")");
-
-        let result = query_builder
-            .build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-
-        tracing::info!("Marked {} entities as deleted", result.rows_affected());
-
-        Ok(())
     }
 
     /// Mark entities as deleted and create outbox entries in a single transaction
@@ -563,30 +600,56 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to mark entities as deleted: {e}")))?;
 
-        // 2. Create outbox entries for all deletes
-        let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
-        );
+        // 2. Create outbox entries only for entities that were actually deleted
+        // If no entities were updated (all non-existent), skip outbox creation
+        if update_result.rows_affected() > 0 {
+            // Get the list of entities that were actually updated (exist in DB)
+            let mut check_query: QueryBuilder<Postgres> =
+                QueryBuilder::new("SELECT entity_id FROM entity_metadata WHERE repository_id = ");
+            check_query.push_bind(repository_id);
+            check_query.push(" AND entity_id IN (");
 
-        outbox_query.push_values(entity_ids, |mut b, entity_id| {
-            let payload = serde_json::json!({
-                "entity_ids": [entity_id],
-                "reason": "file_change"
-            });
-            b.push_bind(repository_id)
-                .push_bind(entity_id)
-                .push_bind(OutboxOperation::Delete.to_string())
-                .push_bind(TargetStore::Qdrant.to_string())
-                .push_bind(payload)
-                .push_bind(collection_name)
-                .push("NOW()");
-        });
+            let mut separated = check_query.separated(", ");
+            for entity_id in entity_ids {
+                separated.push_bind(entity_id);
+            }
+            separated.push_unseparated(") AND deleted_at IS NOT NULL");
 
-        outbox_query
-            .build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+            let existing_entity_ids: Vec<String> = check_query
+                .build_query_as()
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to query deleted entities: {e}")))?
+                .into_iter()
+                .map(|(id,): (String,)| id)
+                .collect();
+
+            if !existing_entity_ids.is_empty() {
+                let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                    "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
+                );
+
+                outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    let payload = serde_json::json!({
+                        "entity_ids": [entity_id],
+                        "reason": "file_change"
+                    });
+                    b.push_bind(repository_id)
+                        .push_bind(entity_id)
+                        .push_bind(OutboxOperation::Delete.to_string())
+                        .push_bind(TargetStore::Qdrant.to_string())
+                        .push_bind(payload)
+                        .push_bind(collection_name)
+                        .push("NOW()");
+                });
+
+                outbox_query
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+            }
+        }
 
         tx.commit()
             .await
@@ -1270,14 +1333,6 @@ impl super::PostgresClientTrait for PostgresClient {
         self.list_all_repositories().await
     }
 
-    async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
-        self.get_entity_metadata(repository_id, entity_id).await
-    }
-
     async fn get_entities_metadata_batch(
         &self,
         repository_id: Uuid,
@@ -1307,16 +1362,24 @@ impl super::PostgresClientTrait for PostgresClient {
             .await
     }
 
-    async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
-        self.get_entities_by_ids(entity_refs).await
+    async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>> {
+        self.get_file_snapshots_batch(file_refs).await
     }
 
-    async fn mark_entities_deleted(
+    async fn update_file_snapshots_batch(
         &self,
         repository_id: Uuid,
-        entity_ids: &[String],
+        updates: &[(String, Vec<String>, Option<String>)],
     ) -> Result<()> {
-        self.mark_entities_deleted(repository_id, entity_ids).await
+        self.update_file_snapshots_batch(repository_id, updates)
+            .await
+    }
+
+    async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
+        self.get_entities_by_ids(entity_refs).await
     }
 
     async fn mark_entities_deleted_with_outbox(

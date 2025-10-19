@@ -285,7 +285,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
         ];
 
         let result = client
-            .mark_entities_deleted(repository_id, &non_existent_ids)
+            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &non_existent_ids)
             .await;
 
         // Should succeed with 0 rows affected (no error)

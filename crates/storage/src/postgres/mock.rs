@@ -288,19 +288,6 @@ impl PostgresClientTrait for MockPostgresClient {
             .collect())
     }
 
-    async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>> {
-        let data = self.data.lock().unwrap();
-
-        Ok(data
-            .entities
-            .get(&(repository_id, entity_id.to_string()))
-            .map(|metadata| (metadata.qdrant_point_id, metadata.deleted_at)))
-    }
-
     async fn get_entities_metadata_batch(
         &self,
         repository_id: Uuid,
@@ -352,6 +339,39 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(())
     }
 
+    async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>> {
+        let data = self.data.lock().unwrap();
+
+        let mut result = std::collections::HashMap::new();
+        for (repo_id, file_path) in file_refs {
+            if let Some((entity_ids, _)) = data.snapshots.get(&(*repo_id, file_path.clone())) {
+                result.insert((*repo_id, file_path.clone()), entity_ids.clone());
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn update_file_snapshots_batch(
+        &self,
+        repository_id: Uuid,
+        updates: &[(String, Vec<String>, Option<String>)],
+    ) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+
+        for (file_path, entity_ids, git_commit) in updates {
+            data.snapshots.insert(
+                (repository_id, file_path.clone()),
+                (entity_ids.clone(), git_commit.clone()),
+            );
+        }
+
+        Ok(())
+    }
+
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
         let data = self.data.lock().unwrap();
 
@@ -366,35 +386,6 @@ impl PostgresClientTrait for MockPostgresClient {
             .collect();
 
         Ok(entities)
-    }
-
-    async fn mark_entities_deleted(
-        &self,
-        repository_id: Uuid,
-        entity_ids: &[String],
-    ) -> Result<()> {
-        if entity_ids.is_empty() {
-            return Ok(());
-        }
-
-        if entity_ids.len() > self.max_entity_batch_size {
-            return Err(codesearch_core::error::Error::storage(format!(
-                "Batch size {} exceeds maximum allowed size of {}",
-                entity_ids.len(),
-                self.max_entity_batch_size
-            )));
-        }
-
-        let mut data = self.data.lock().unwrap();
-        let now = chrono::Utc::now();
-
-        for entity_id in entity_ids {
-            if let Some(metadata) = data.entities.get_mut(&(repository_id, entity_id.clone())) {
-                metadata.deleted_at = Some(now);
-            }
-        }
-
-        Ok(())
     }
 
     async fn mark_entities_deleted_with_outbox(
@@ -418,22 +409,26 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut data = self.data.lock().unwrap();
         let now = chrono::Utc::now();
 
-        // Mark entities as deleted
+        // Mark entities as deleted and track which ones actually existed
+        let mut deleted_entity_ids = Vec::new();
         for entity_id in entity_ids {
             if let Some(metadata) = data.entities.get_mut(&(repository_id, entity_id.clone())) {
                 metadata.deleted_at = Some(now);
+                deleted_entity_ids.push(entity_id.clone());
             }
+        }
 
-            // Create outbox entry for delete
+        // Create outbox entries only for entities that actually existed and were deleted
+        for entity_id in deleted_entity_ids {
             let payload = serde_json::json!({
-                "entity_ids": [entity_id],
+                "entity_ids": [&entity_id],
                 "reason": "file_change"
             });
 
             data.outbox.push(MockOutboxEntry {
                 outbox_id: Uuid::new_v4(),
                 repository_id,
-                entity_id: entity_id.clone(),
+                entity_id,
                 operation: OutboxOperation::Delete,
                 target_store: TargetStore::Qdrant,
                 payload,
@@ -825,9 +820,13 @@ mod tests {
 
         assert!(!client.is_entity_deleted(repo_id, &entity.entity_id));
 
-        // Mark as deleted
+        // Mark as deleted (using batch method with single item)
         client
-            .mark_entities_deleted(repo_id, &[entity.entity_id.clone()])
+            .mark_entities_deleted_with_outbox(
+                repo_id,
+                "test_collection",
+                &[entity.entity_id.clone()],
+            )
             .await
             .unwrap();
 
@@ -886,9 +885,13 @@ mod tests {
         assert_eq!(client.entity_count(), 1);
         assert_eq!(client.active_entity_count(), 1);
 
-        // Mark as deleted
+        // Mark as deleted (using batch method with single item)
         client
-            .mark_entities_deleted(repo_id, &[entity.entity_id.clone()])
+            .mark_entities_deleted_with_outbox(
+                repo_id,
+                "test_collection",
+                &[entity.entity_id.clone()],
+            )
             .await
             .unwrap();
 

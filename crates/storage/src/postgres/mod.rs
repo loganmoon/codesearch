@@ -98,13 +98,6 @@ pub trait PostgresClientTrait: Send + Sync {
     /// A vector of `(repository_id, collection_name, repository_path)` tuples
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>>;
 
-    /// Get entity metadata (qdrant_point_id and deleted_at) by entity_id
-    async fn get_entity_metadata(
-        &self,
-        repository_id: Uuid,
-        entity_id: &str,
-    ) -> Result<Option<(Uuid, Option<chrono::DateTime<chrono::Utc>>)>>;
-
     /// Batch fetch entity metadata (qdrant_point_id and deleted_at) for multiple entities
     ///
     /// Returns a HashMap mapping entity_id to (qdrant_point_id, deleted_at).
@@ -144,16 +137,29 @@ pub trait PostgresClientTrait: Send + Sync {
         git_commit_hash: Option<String>,
     ) -> Result<()>;
 
+    /// Batch fetch file snapshots for multiple files
+    ///
+    /// Returns a HashMap mapping (repository_id, file_path) to entity_ids.
+    /// Files not found in the database will not be present in the map.
+    async fn get_file_snapshots_batch(
+        &self,
+        file_refs: &[(Uuid, String)],
+    ) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>>;
+
+    /// Batch update file snapshots in a single transaction
+    ///
+    /// Updates snapshots for multiple files atomically.
+    /// Maximum batch size is 1000 files.
+    async fn update_file_snapshots_batch(
+        &self,
+        repository_id: Uuid,
+        updates: &[(String, Vec<String>, Option<String>)], // (file_path, entity_ids, git_commit)
+    ) -> Result<()>;
+
     /// Batch fetch entities by (repository_id, entity_id) pairs
     ///
     /// Maximum batch size is 1000 entity references.
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>>;
-
-    /// Mark entities as deleted (soft delete)
-    ///
-    /// Maximum batch size is 1000 entity IDs.
-    async fn mark_entities_deleted(&self, repository_id: Uuid, entity_ids: &[String])
-        -> Result<()>;
 
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///

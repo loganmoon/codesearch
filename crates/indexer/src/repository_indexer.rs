@@ -329,74 +329,142 @@ async fn stage_generate_embeddings(
             .map(|text| format!("{:032x}", XxHash3_128::oneshot(text.as_bytes())))
             .collect();
 
-        // Generate embeddings (internally parallel via Phase 1)
-        let embeddings = embedding_manager
-            .embed(texts.clone())
+        // Batch lookup cached embeddings
+        let model_version = embedding_manager.model_version();
+        let cached_embeddings = postgres_client
+            .get_embeddings_by_content_hash(&content_hashes, model_version)
             .await
-            .map_err(|e| {
-                error!(
-                    "Stage 3: Embedding failed for batch with {} texts (min_len={}, max_len={}, avg_len={}), error: {}",
-                    texts.len(),
-                    min_len,
-                    max_len,
-                    avg_len,
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Stage 3: Cache lookup failed, will generate all embeddings: {}",
                     e
                 );
-                e
-            })
-            .storage_err("Failed to generate embeddings")?;
+                HashMap::new()
+            });
 
-        let successful_embeddings = embeddings.iter().filter(|e| e.is_some()).count();
+        // Separate cache hits from misses
+        let mut cache_hits: Vec<(usize, i64, Vec<f32>)> = Vec::new();
+        let mut cache_miss_indices: Vec<usize> = Vec::new();
+        let mut cache_miss_texts: Vec<String> = Vec::new();
+
+        for (idx, (text, content_hash)) in texts.iter().zip(content_hashes.iter()).enumerate() {
+            if let Some((embedding_id, cached_embedding)) = cached_embeddings.get(content_hash) {
+                cache_hits.push((idx, *embedding_id, cached_embedding.clone()));
+            } else {
+                cache_miss_indices.push(idx);
+                cache_miss_texts.push(text.clone());
+            }
+        }
+
         info!(
-            "Stage 3: Successfully generated {} embeddings ({} skipped)",
-            successful_embeddings,
-            texts.len() - successful_embeddings
+            "Stage 3: Embedding cache: {} hits, {} misses ({:.1}% hit rate)",
+            cache_hits.len(),
+            cache_miss_texts.len(),
+            if !texts.is_empty() {
+                (cache_hits.len() as f64 / texts.len() as f64) * 100.0
+            } else {
+                0.0
+            }
         );
 
-        // Store embeddings in cache and get their IDs
-        let embeddings_with_hashes: Vec<(String, Vec<f32>)> = content_hashes
-            .iter()
-            .zip(embeddings.iter())
-            .filter_map(|(hash, emb_opt)| emb_opt.as_ref().map(|emb| (hash.clone(), emb.clone())))
-            .collect();
+        // Initialize result vectors
+        let mut all_embeddings: Vec<Option<Vec<f32>>> = vec![None; texts.len()];
+        let mut all_embedding_ids: Vec<Option<i64>> = vec![None; texts.len()];
 
-        let model_version = embedding_manager.model_version();
-        let dimension = embeddings_with_hashes
-            .first()
-            .map(|(_, emb)| emb.len())
-            .unwrap_or(1536);
+        // Fill in cache hits
+        for (idx, embedding_id, embedding) in cache_hits {
+            all_embeddings[idx] = Some(embedding);
+            all_embedding_ids[idx] = Some(embedding_id);
+        }
 
-        let embedding_ids = if !embeddings_with_hashes.is_empty() {
-            postgres_client
-                .store_embeddings(&embeddings_with_hashes, model_version, dimension)
+        // Generate embeddings only for cache misses
+        if !cache_miss_texts.is_empty() {
+            info!(
+                "Stage 3: Generating {} new embeddings via API",
+                cache_miss_texts.len()
+            );
+
+            let new_embeddings = embedding_manager
+                .embed(cache_miss_texts.clone())
                 .await
-                .storage_err("Failed to store embeddings")?
-        } else {
-            Vec::new()
-        };
+                .map_err(|e| {
+                    error!(
+                        "Stage 3: Embedding failed for {} texts, error: {}",
+                        cache_miss_texts.len(),
+                        e
+                    );
+                    e
+                })
+                .storage_err("Failed to generate embeddings")?;
 
+            // Fill in newly generated embeddings
+            for (miss_idx, emb_opt) in cache_miss_indices.iter().zip(new_embeddings.iter()) {
+                if let Some(embedding) = emb_opt {
+                    all_embeddings[*miss_idx] = Some(embedding.clone());
+                }
+            }
+
+            // Store newly generated embeddings in cache
+            let embeddings_to_store: Vec<(String, Vec<f32>)> = cache_miss_indices
+                .iter()
+                .zip(new_embeddings.iter())
+                .filter_map(|(idx, emb_opt)| {
+                    emb_opt
+                        .as_ref()
+                        .map(|emb| (content_hashes[*idx].clone(), emb.clone()))
+                })
+                .collect();
+
+            if !embeddings_to_store.is_empty() {
+                let dimension = embeddings_to_store[0].1.len();
+
+                let new_embedding_ids = postgres_client
+                    .store_embeddings(&embeddings_to_store, model_version, dimension)
+                    .await
+                    .storage_err("Failed to store embeddings")?;
+
+                // Map returned IDs back to entity indices
+                let mut new_id_iter = new_embedding_ids.into_iter();
+                for (idx, emb_opt) in cache_miss_indices.iter().zip(new_embeddings.iter()) {
+                    if emb_opt.is_some() {
+                        if let Some(embedding_id) = new_id_iter.next() {
+                            all_embedding_ids[*idx] = Some(embedding_id);
+                        }
+                    }
+                }
+
+                info!(
+                    "Stage 3: Stored {} new embeddings in cache",
+                    embeddings_to_store.len()
+                );
+            }
+        }
+
+        let successful_embeddings = all_embeddings.iter().filter(|e| e.is_some()).count();
         info!(
-            "Stage 3: Stored {} embeddings and got their IDs",
-            embedding_ids.len()
+            "Stage 3: Successfully obtained {} embeddings ({} skipped)",
+            successful_embeddings,
+            texts.len() - successful_embeddings
         );
 
         // Pair entities with embedding IDs, tracking which indices survived
         let mut pairs = Vec::new();
         let mut old_to_new_idx: HashMap<usize, usize> = HashMap::new();
-        let mut embedding_id_iter = embedding_ids.into_iter();
 
-        for (old_idx, (entity, emb_opt)) in batch
+        for (old_idx, (entity, (emb_opt, id_opt))) in batch
             .entities
             .into_iter()
-            .zip(embeddings.into_iter())
+            .zip(
+                all_embeddings
+                    .into_iter()
+                    .zip(all_embedding_ids.into_iter()),
+            )
             .enumerate()
         {
-            if emb_opt.is_some() {
-                if let Some(embedding_id) = embedding_id_iter.next() {
-                    let new_idx = pairs.len();
-                    old_to_new_idx.insert(old_idx, new_idx);
-                    pairs.push((entity, embedding_id));
-                }
+            if let (Some(_embedding), Some(embedding_id)) = (emb_opt, id_opt) {
+                let new_idx = pairs.len();
+                old_to_new_idx.insert(old_idx, new_idx);
+                pairs.push((entity, embedding_id));
             }
         }
 

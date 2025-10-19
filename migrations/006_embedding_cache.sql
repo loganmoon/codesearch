@@ -11,9 +11,9 @@ CREATE TABLE entity_embeddings (
     content_hash CHAR(32) NOT NULL UNIQUE,
 
     -- Embedding vector as float array (1536 dimensions for BAAI/bge-code-v1)
-    -- Note: Using FLOAT[] instead of pgvector VECTOR type for simplicity
-    -- Can migrate to pgvector later if needed for performance
-    embedding FLOAT[] NOT NULL,
+    -- Note: Using REAL[] (float4) instead of pgvector VECTOR type for simplicity
+    -- REAL[] matches Rust f32, FLOAT[] would be f64
+    embedding REAL[] NOT NULL,
 
     -- Model version identifier (e.g., "BAAI/bge-code-v1")
     -- Enables cache invalidation when model changes

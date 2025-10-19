@@ -1081,34 +1081,53 @@ impl PostgresClient {
             .await
             .map_err(|e| Error::storage(format!("Failed to insert embeddings: {e}")))?;
 
-        // For entries that conflicted, fetch their existing IDs
-        let mut all_ids = inserted_ids;
-
-        if all_ids.len() < cache_entries.len() {
-            // Some entries already existed, fetch their IDs
-            let content_hashes: Vec<&String> = cache_entries.iter().map(|(hash, _)| hash).collect();
-
-            let mut fetch_query: QueryBuilder<Postgres> =
-                QueryBuilder::new("SELECT id FROM entity_embeddings WHERE model_version = ");
+        // Build result in the correct order matching input cache_entries
+        let all_ids = if inserted_ids.len() == cache_entries.len() {
+            // All entries were new, IDs are in correct order
+            inserted_ids
+        } else {
+            // Some entries already existed, need to fetch and order correctly
+            let mut fetch_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                "SELECT content_hash, id FROM entity_embeddings WHERE model_version = ",
+            );
             fetch_query.push_bind(model_version);
             fetch_query.push(" AND content_hash IN (");
 
             let mut separated = fetch_query.separated(", ");
-            for hash in content_hashes {
+            for (hash, _) in cache_entries {
                 separated.push_bind(hash);
             }
             separated.push_unseparated(")");
 
-            let existing_ids: Vec<i64> = fetch_query
-                .build_query_scalar()
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|e| {
-                    Error::storage(format!("Failed to fetch existing embedding IDs: {e}"))
-                })?;
+            let rows = fetch_query.build().fetch_all(&mut *tx).await.map_err(|e| {
+                Error::storage(format!("Failed to fetch existing embedding IDs: {e}"))
+            })?;
 
-            all_ids = existing_ids;
-        }
+            // Build HashMap for O(1) lookup
+            let mut hash_to_id = std::collections::HashMap::new();
+            for row in rows {
+                let content_hash: String = row
+                    .try_get("content_hash")
+                    .map_err(|e| Error::storage(format!("Failed to extract content_hash: {e}")))?;
+                let id: i64 = row
+                    .try_get("id")
+                    .map_err(|e| Error::storage(format!("Failed to extract id: {e}")))?;
+                hash_to_id.insert(content_hash, id);
+            }
+
+            // Return IDs in the same order as input cache_entries
+            let mut ordered_ids = Vec::with_capacity(cache_entries.len());
+            for (hash, _) in cache_entries {
+                let id = hash_to_id.get(hash).ok_or_else(|| {
+                    Error::storage(format!(
+                        "Embedding ID not found for content_hash: {hash} (this should not happen)"
+                    ))
+                })?;
+                ordered_ids.push(*id);
+            }
+
+            ordered_ids
+        };
 
         tx.commit()
             .await

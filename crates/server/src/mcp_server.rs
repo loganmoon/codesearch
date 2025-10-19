@@ -50,6 +50,7 @@ struct CodeSearchMcpServer {
     #[allow(dead_code)]
     watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
     tool_router: ToolRouter<Self>,
+    default_bge_instruction: String,
 }
 
 /// Request parameters for search_code tool
@@ -58,6 +59,15 @@ struct SearchCodeRequest {
     /// Semantic search query. Works best with code-like patterns (e.g., function signatures,
     /// type names, code snippets) rather than abstract descriptions.
     query: String,
+
+    /// Custom instructions for the embedding model. If not provided, uses the default
+    /// configured in embeddings.default_bge_instruction (or the hardcoded default if not set).
+    /// This allows per-query customization of how the embedding model interprets the search.
+    #[serde(default)]
+    #[schemars(
+        description = "Custom instructions for the embedding model. Defaults to code search instructions optimized for BGE models."
+    )]
+    embedding_instructions: Option<String>,
 
     /// Maximum number of results (1-100)
     #[serde(default = "default_limit")]
@@ -152,10 +162,11 @@ impl CodeSearchMcpServer {
         // Extract query
         let query_text = request.query;
 
-        // Format query with BGE instruction
-        let bge_instruction = "Represent this code search query for retrieving semantically \
-                               similar code snippets, function implementations, type definitions, \
-                               and code patterns";
+        // Use client-provided instruction if present, otherwise use configured default
+        let bge_instruction = request
+            .embedding_instructions
+            .unwrap_or_else(|| self.default_bge_instruction.clone());
+
         let formatted_query = format!("<instruct>{bge_instruction}\n<query>{query_text}");
 
         // Generate query embedding
@@ -358,6 +369,7 @@ impl CodeSearchMcpServer {
         embedding_manager: Arc<EmbeddingManager>,
         postgres_client: Arc<dyn PostgresClientTrait>,
         watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
+        default_bge_instruction: String,
     ) -> Self {
         Self {
             repositories,
@@ -365,6 +377,7 @@ impl CodeSearchMcpServer {
             postgres_client,
             watchers,
             tool_router: Self::tool_router(),
+            default_bge_instruction,
         }
     }
 }
@@ -562,6 +575,7 @@ pub(crate) async fn run_multi_repo_server(
         embedding_manager,
         postgres_client,
         watchers.clone(),
+        config.embeddings.default_bge_instruction.clone(),
     );
 
     run_mcp_server_with_shutdown_multi(mcp_server, watchers, config.server.port).await

@@ -107,6 +107,10 @@ pub struct EmbeddingsConfig {
     /// Maximum concurrent embedding API requests
     #[serde(default = "default_max_concurrent_api_requests")]
     pub max_concurrent_api_requests: usize,
+
+    /// Default instruction for BGE embedding models
+    #[serde(default = "default_bge_instruction")]
+    pub default_bge_instruction: String,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -123,6 +127,7 @@ impl std::fmt::Debug for EmbeddingsConfig {
                 "max_concurrent_api_requests",
                 &self.max_concurrent_api_requests,
             )
+            .field("default_bge_instruction", &self.default_bge_instruction)
             .finish()
     }
 }
@@ -229,6 +234,7 @@ const DEFAULT_DEVICE: &str = "cpu";
 const DEFAULT_PROVIDER: &str = "localapi";
 const DEFAULT_MODEL: &str = "BAAI/bge-code-v1";
 const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
+const DEFAULT_BGE_INSTRUCTION: &str = "Represent this code search query for retrieving semantically similar code snippets, function implementations, type definitions, and code patterns";
 const DEFAULT_QDRANT_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_DATABASE: &str = "codesearch";
@@ -271,6 +277,10 @@ fn default_embedding_dimension() -> usize {
 
 fn default_max_concurrent_api_requests() -> usize {
     64
+}
+
+fn default_bge_instruction() -> String {
+    DEFAULT_BGE_INSTRUCTION.to_string()
 }
 
 fn default_debounce_ms() -> u64 {
@@ -363,6 +373,7 @@ impl Default for EmbeddingsConfig {
             api_key: None,
             embedding_dimension: default_embedding_dimension(),
             max_concurrent_api_requests: default_max_concurrent_api_requests(),
+            default_bge_instruction: default_bge_instruction(),
         }
     }
 }
@@ -644,6 +655,7 @@ impl Config {
         self.embeddings.api_key = other.embeddings.api_key.or(self.embeddings.api_key.clone());
         self.embeddings.embedding_dimension = other.embeddings.embedding_dimension;
         self.embeddings.max_concurrent_api_requests = other.embeddings.max_concurrent_api_requests;
+        self.embeddings.default_bge_instruction = other.embeddings.default_bge_instruction;
 
         // Merge watcher config
         self.watcher.debounce_ms = other.watcher.debounce_ms;

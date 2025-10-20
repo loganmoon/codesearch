@@ -119,13 +119,16 @@ services:
               capabilities: [gpu]
     ipc: host
     command:
-      - "vllm"
-      - "serve"
+      - "--model"
       - "BAAI/bge-reranker-v2-m3"
       - "--revision"
-      - "refs/pr/9"
+      - "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+      - "--task"
+      - "embed"
       - "--max-model-len"
       - "8192"
+      - "--gpu_memory_utilization"
+      - "0.3"
       - "--trust-remote-code"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]

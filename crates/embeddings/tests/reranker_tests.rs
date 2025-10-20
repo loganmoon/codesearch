@@ -13,7 +13,7 @@ use std::path::PathBuf;
 async fn test_reranker_handles_empty_documents() {
     let provider = create_reranker_provider(
         "BAAI/bge-reranker-v2-m3".to_string(),
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -35,7 +35,7 @@ async fn test_reranker_handles_empty_documents() {
 async fn test_reranker_respects_top_k() {
     let provider = create_reranker_provider(
         "BAAI/bge-reranker-v2-m3".to_string(),
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -72,7 +72,7 @@ async fn test_reranker_respects_top_k() {
 async fn test_reranker_basic_functionality() {
     let provider = create_reranker_provider(
         "BAAI/bge-reranker-v2-m3".to_string(),
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -250,7 +250,7 @@ async fn test_reranker_http_error() {
     // For now, we test by sending an invalid request to a valid endpoint
     let provider = create_reranker_provider(
         "invalid-model-name".to_string(), // Invalid model
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -269,7 +269,7 @@ async fn test_reranker_http_error() {
 async fn test_reranker_empty_query() {
     let provider = create_reranker_provider(
         "BAAI/bge-reranker-v2-m3".to_string(),
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -294,7 +294,7 @@ async fn test_reranker_empty_query() {
 async fn test_reranker_large_top_k() {
     let provider = create_reranker_provider(
         "BAAI/bge-reranker-v2-m3".to_string(),
-        "http://localhost:8001/v1".to_string(),
+        "http://localhost:8001".to_string(),
         30,
     )
     .await
@@ -315,4 +315,37 @@ async fn test_reranker_large_top_k() {
             "Should not return more results than input documents"
         );
     }
+}
+
+/// Test that very large documents are handled gracefully with truncation
+///
+/// This test requires a running vLLM reranker instance and is ignored by default.
+#[tokio::test]
+#[ignore]
+async fn test_reranker_handles_large_documents() {
+    let provider = create_reranker_provider(
+        "BAAI/bge-reranker-v2-m3".to_string(),
+        "http://localhost:8001".to_string(),
+        30,
+    )
+    .await
+    .expect("Failed to create reranker provider");
+
+    // Create documents with very large content (> 4800 chars each)
+    let large_content = "a".repeat(10_000);
+    let documents = vec![
+        ("doc1".to_string(), large_content.as_str()),
+        ("doc2".to_string(), large_content.as_str()),
+        ("doc3".to_string(), large_content.as_str()),
+    ];
+
+    // This should succeed because documents are truncated internally
+    let result = provider.rerank("test query", &documents, 2).await;
+
+    assert!(
+        result.is_ok(),
+        "Reranker should handle large documents with truncation"
+    );
+    let scores = result.unwrap();
+    assert_eq!(scores.len(), 2, "Should return top 2 results");
 }

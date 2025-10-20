@@ -1371,7 +1371,7 @@ mod tests {
             model = "custom-model"
             candidates = 100
             top_k = 20
-            api_base_url = "http://localhost:8001/v1"
+            api_base_url = "http://localhost:8001"
         "#;
 
         let config =
@@ -1383,7 +1383,7 @@ mod tests {
         assert_eq!(config.reranking.top_k, 20);
         assert_eq!(
             config.reranking.api_base_url,
-            Some("http://localhost:8001/v1".to_string())
+            Some("http://localhost:8001".to_string())
         );
     }
 

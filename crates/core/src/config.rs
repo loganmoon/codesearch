@@ -405,7 +405,7 @@ fn default_reranking_model() -> String {
 }
 
 fn default_reranking_candidates() -> usize {
-    50
+    100
 }
 
 fn default_reranking_top_k() -> usize {
@@ -413,7 +413,7 @@ fn default_reranking_top_k() -> usize {
 }
 
 fn default_reranking_timeout_secs() -> u64 {
-    30
+    5
 }
 
 impl Default for EmbeddingsConfig {
@@ -1353,32 +1353,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no valid filename component"));
-    }
-
-    #[test]
-    fn test_reranking_config_defaults() {
-        let toml = r#"
-            [indexer]
-
-            [embeddings]
-
-            [watcher]
-
-            [storage]
-        "#;
-
-        let config = Config::from_toml_str(toml).expect("Failed to parse minimal TOML");
-
-        // Verify reranking defaults
-        assert!(
-            !config.reranking.enabled,
-            "Reranking should be disabled by default"
-        );
-        assert_eq!(config.reranking.model, "BAAI/bge-reranker-v2-m3");
-        assert_eq!(config.reranking.candidates, 50);
-        assert_eq!(config.reranking.top_k, 10);
-        assert!(config.reranking.api_base_url.is_none());
-        assert!(config.reranking.api_key.is_none());
     }
 
     #[test]

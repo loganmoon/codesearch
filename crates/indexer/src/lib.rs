@@ -14,12 +14,12 @@ use std::path::PathBuf;
 // Private implementation modules
 mod common;
 mod config;
-mod entity_processor;
 mod event_batcher;
 mod repository_indexer;
 
 // Public modules for file change processing
 pub mod catch_up_indexer;
+pub mod entity_processor;
 pub mod file_change_processor;
 
 use event_batcher::EventBatcher;

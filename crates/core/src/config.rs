@@ -257,6 +257,10 @@ pub struct RerankingConfig {
 
     /// API key for reranker service (uses VLLM_API_KEY env if not set)
     pub api_key: Option<String>,
+
+    /// Request timeout in seconds for reranking API calls (default: 30)
+    #[serde(default = "default_reranking_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 // Default constants
@@ -408,6 +412,10 @@ fn default_reranking_top_k() -> usize {
     10
 }
 
+fn default_reranking_timeout_secs() -> u64 {
+    30
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -458,6 +466,7 @@ impl Default for RerankingConfig {
             top_k: default_reranking_top_k(),
             api_base_url: None,
             api_key: None,
+            timeout_secs: default_reranking_timeout_secs(),
         }
     }
 }

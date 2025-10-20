@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use codesearch_core::error::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// Trait for reranker providers
@@ -25,7 +26,7 @@ pub trait RerankerProvider: Send + Sync {
     async fn rerank(
         &self,
         query: &str,
-        documents: &[(String, String)],
+        documents: &[(String, &str)],
         top_k: usize,
     ) -> Result<Vec<(String, f32)>>;
 }
@@ -64,13 +65,15 @@ impl VllmRerankerProvider {
     /// # Arguments
     /// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
     /// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001/v1")
-    pub fn new(model: String, api_base_url: String) -> Result<Self> {
+    /// * `timeout_secs` - Request timeout in seconds
+    pub fn new(model: String, api_base_url: String, timeout_secs: u64) -> Result<Self> {
         info!("Initializing vLLM reranker provider");
         info!("  Model: {model}");
         info!("  API Base URL: {api_base_url}");
+        info!("  Timeout: {timeout_secs}s");
 
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| {
                 EmbeddingError::ConfigError(format!("Failed to create HTTP client: {e}"))
@@ -115,7 +118,7 @@ impl RerankerProvider for VllmRerankerProvider {
     async fn rerank(
         &self,
         query: &str,
-        documents: &[(String, String)],
+        documents: &[(String, &str)],
         top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
         if documents.is_empty() {
@@ -125,7 +128,7 @@ impl RerankerProvider for VllmRerankerProvider {
         // Build request payload
         let doc_texts: Vec<String> = documents
             .iter()
-            .map(|(_, content)| content.clone())
+            .map(|(_, content)| content.to_string())
             .collect();
 
         let request = RerankRequest {
@@ -193,14 +196,16 @@ impl RerankerProvider for VllmRerankerProvider {
 /// # Arguments
 /// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
 /// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001/v1")
+/// * `timeout_secs` - Request timeout in seconds
 pub async fn create_reranker_provider(
     model: String,
     api_base_url: String,
-) -> Result<Box<dyn RerankerProvider>> {
-    let provider = VllmRerankerProvider::new(model, api_base_url)?;
+    timeout_secs: u64,
+) -> Result<Arc<dyn RerankerProvider>> {
+    let provider = VllmRerankerProvider::new(model, api_base_url, timeout_secs)?;
 
     // Perform health check (non-blocking)
     provider.check_health().await;
 
-    Ok(Box::new(provider))
+    Ok(Arc::new(provider))
 }

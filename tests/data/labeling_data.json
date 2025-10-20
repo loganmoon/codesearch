@@ -1,0 +1,5302 @@
+[
+  {
+    "query": "is_qdrant_running",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-58c5fbad05f8ba6545819b7720b56351",
+        "entity_name": "is_qdrant_running",
+        "score": 0.7095721
+      },
+      {
+        "entity_id": "entity-c3c21d4949b9ec4a89a0edc0bce1cce8",
+        "entity_name": "is_shared_infrastructure_running",
+        "score": 0.52334726
+      },
+      {
+        "entity_id": "entity-a555a17283f393913789100dbaf2c246",
+        "entity_name": "wait_for_qdrant",
+        "score": 0.47621495
+      },
+      {
+        "entity_id": "entity-24e272b16a47a0719c88c2c6791e8bf7",
+        "entity_name": "check_qdrant_health",
+        "score": 0.47433215
+      },
+      {
+        "entity_id": "entity-d9de517998f513e74501c17c03818b21",
+        "entity_name": "LanguageConfiguration",
+        "score": 0.4597214
+      },
+      {
+        "entity_id": "entity-d3241d8aee54e8bf9d38ea0306ef05f3",
+        "entity_name": "fixtures",
+        "score": 0.45959958
+      },
+      {
+        "entity_id": "entity-48619cf41bd9088696d3acee0b13b963",
+        "entity_name": "default_qdrant_host",
+        "score": 0.45805305
+      },
+      {
+        "entity_id": "entity-ce37a211ecad763c2984a55aac7e8b9b",
+        "entity_name": "ensure_dependencies_running",
+        "score": 0.4564784
+      },
+      {
+        "entity_id": "entity-bb89494c1832a4657373c258a862dd96",
+        "entity_name": "is_vllm_running",
+        "score": 0.44109413
+      },
+      {
+        "entity_id": "entity-e77cfb3648ba790cfa907c49b237a37b",
+        "entity_name": "event_batcher",
+        "score": 0.431034
+      },
+      {
+        "entity_id": "entity-792c3163592e5b45353b20bd7c0ea9cc",
+        "entity_name": "is_postgres_running",
+        "score": 0.42962876
+      },
+      {
+        "entity_id": "entity-4cb827bca4b74918bb388676eb01a76c",
+        "entity_name": "default_qdrant_port",
+        "score": 0.42896286
+      },
+      {
+        "entity_id": "entity-730dd4fa2d4cb38784f6738cf7760dcd",
+        "entity_name": "test_handles_qdrant_connection_failure",
+        "score": 0.42502025
+      },
+      {
+        "entity_id": "entity-05b7666ae6e240075cca2b0dfed8325a",
+        "entity_name": "stage_file_discovery",
+        "score": 0.42383227
+      },
+      {
+        "entity_id": "entity-61f31c9c0fe0a176c05efe55c5031833",
+        "entity_name": "total_files",
+        "score": 0.41841137
+      },
+      {
+        "entity_id": "entity-1d7d62eb92dbdd7e75b52bca1339f9dc",
+        "entity_name": "node_kinds",
+        "score": 0.4183178
+      },
+      {
+        "entity_id": "entity-1a9e38feb85959507cbb1d09270881b0",
+        "entity_name": "test_handle_file_change_detects_stale_entities",
+        "score": 0.41689712
+      },
+      {
+        "entity_id": "entity-cd9f836c4174a78f7a5214f4a0de91f4",
+        "entity_name": "DEFAULT_QDRANT_HOST",
+        "score": 0.41565531
+      },
+      {
+        "entity_id": "entity-85c5cb1e15a265e987e6c9bbecc7ab65",
+        "entity_name": "test_index_stats_merge",
+        "score": 0.41470823
+      },
+      {
+        "entity_id": "entity-148e7f5ce20ce3d93689cccb57e69fda",
+        "entity_name": "clear_cache",
+        "score": 0.412982
+      }
+    ]
+  },
+  {
+    "query": "calculate_outbox_source_hash",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-0e1bb24846105e10477ac40f87a0a709",
+        "entity_name": "calculate_outbox_source_hash",
+        "score": 0.591225
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.5068264
+      },
+      {
+        "entity_id": "entity-2d9abf3a79f4eb5c359cbb0a254f2c31",
+        "entity_name": "build_outbox_processor_image",
+        "score": 0.46438769
+      },
+      {
+        "entity_id": "entity-bc58dc28fc967b44b47e2ee18210c85b",
+        "entity_name": "get_image_source_hash",
+        "score": 0.41317803
+      },
+      {
+        "entity_id": "entity-4b38cf2450718ba4671f3a70c655689b",
+        "entity_name": "FileBatch",
+        "score": 0.368981
+      },
+      {
+        "entity_id": "entity-790516eddb7a16fc0819b261a7a73dc5",
+        "entity_name": "run_multi_repo_server",
+        "score": 0.3388551
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.3318044
+      },
+      {
+        "entity_id": "entity-ff7ba5f054afc736c8349dc1cceb8be8",
+        "entity_name": "cleanup",
+        "score": 0.3253336
+      },
+      {
+        "entity_id": "entity-912c5c1223e52573854d40425719ded9",
+        "entity_name": "test_complete_pipeline_with_real_embeddings",
+        "score": 0.32195133
+      },
+      {
+        "entity_id": "entity-5eec5f52d7e58d58c5509487c11fb2b4",
+        "entity_name": "search_code",
+        "score": 0.31715393
+      },
+      {
+        "entity_id": "entity-cf9da8417c7b81b6b5dfef9dabb7a43d",
+        "entity_name": "test_retry_count_exceeded_marked_processed",
+        "score": 0.31244513
+      },
+      {
+        "entity_id": "entity-908e89e1466aa8be2d33a52d73884101",
+        "entity_name": "start",
+        "score": 0.30967727
+      },
+      {
+        "entity_id": "entity-7b9768177458ce220bdfae1c66846982",
+        "entity_name": "TestQdrant",
+        "score": 0.30630073
+      },
+      {
+        "entity_id": "entity-eefcf02ebd66fcb42c583923fde44b15",
+        "entity_name": "DEFAULT_DEBOUNCE_MS",
+        "score": 0.30563203
+      },
+      {
+        "entity_id": "entity-286681e9404aa3ed97702b6caabe7c82",
+        "entity_name": "rest_url",
+        "score": 0.3036309
+      },
+      {
+        "entity_id": "entity-f0239c7941d7890af13c3cbb07cd207f",
+        "entity_name": "test_global_ordering_across_collections",
+        "score": 0.30257642
+      },
+      {
+        "entity_id": "entity-f607dbf4b6b29f63970306e3c117af12",
+        "entity_name": "EntityBatch",
+        "score": 0.29949585
+      },
+      {
+        "entity_id": "entity-62c9a33ee578ab5ea30ecf1b4a7bb972",
+        "entity_name": "test_handle_file_change_no_previous_snapshot",
+        "score": 0.29849806
+      },
+      {
+        "entity_id": "entity-e45d03aed4c8d6c59f3e99d76c8d51dd",
+        "entity_name": "prepare_embedded_entity",
+        "score": 0.2963605
+      },
+      {
+        "entity_id": "entity-20464a234d5d499abfa3cf280c35d439",
+        "entity_name": "get_logs",
+        "score": 0.29390383
+      }
+    ]
+  },
+  {
+    "query": "docker",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.5589565
+      },
+      {
+        "entity_id": "entity-9b80e767c69357ef9199ebda43d946c7",
+        "entity_name": "require_capture_node",
+        "score": 0.42769954
+      },
+      {
+        "entity_id": "entity-c72d00cbfdbc869b2a75dff26f3b86b7",
+        "entity_name": "set_total_files",
+        "score": 0.4233868
+      },
+      {
+        "entity_id": "entity-51c13f581a0ca4c93b985f827141b57d",
+        "entity_name": "container_exists",
+        "score": 0.40178245
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.3908142
+      },
+      {
+        "entity_id": "entity-015f5f8ce41d71af3c36477474c67156",
+        "entity_name": "is_container_running",
+        "score": 0.38957763
+      },
+      {
+        "entity_id": "entity-d3241d8aee54e8bf9d38ea0306ef05f3",
+        "entity_name": "fixtures",
+        "score": 0.3802999
+      },
+      {
+        "entity_id": "entity-bc58dc28fc967b44b47e2ee18210c85b",
+        "entity_name": "get_image_source_hash",
+        "score": 0.38003358
+      },
+      {
+        "entity_id": "entity-4b38cf2450718ba4671f3a70c655689b",
+        "entity_name": "FileBatch",
+        "score": 0.37994722
+      },
+      {
+        "entity_id": "entity-f3c2b374281bd0960256b1ed55aa69d8",
+        "entity_name": "collection_manager",
+        "score": 0.37805897
+      },
+      {
+        "entity_id": "entity-fe9f43524497a763177e179b16f391d2",
+        "entity_name": "with_max_entity_batch_size",
+        "score": 0.37801895
+      },
+      {
+        "entity_id": "entity-c3c21d4949b9ec4a89a0edc0bce1cce8",
+        "entity_name": "is_shared_infrastructure_running",
+        "score": 0.37322044
+      },
+      {
+        "entity_id": "entity-57db6680dd6fb65187680541d6146e37",
+        "entity_name": "containers",
+        "score": 0.3660751
+      },
+      {
+        "entity_id": "entity-2d9abf3a79f4eb5c359cbb0a254f2c31",
+        "entity_name": "build_outbox_processor_image",
+        "score": 0.36540043
+      },
+      {
+        "entity_id": "entity-2375a58fab1d46ab1db38616fa1ed187",
+        "entity_name": "INFRASTRUCTURE_COMPOSE",
+        "score": 0.36518183
+      },
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.36472404
+      },
+      {
+        "entity_id": "entity-eb0a94d4af240bd96e6e9c0f158dd48e",
+        "entity_name": "debounce_duration",
+        "score": 0.36383456
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.36351752
+      },
+      {
+        "entity_id": "entity-ca93ef24007db3b86240e1a5ca83c9f2",
+        "entity_name": "api_provider",
+        "score": 0.36083907
+      },
+      {
+        "entity_id": "entity-62a20cce80559e197100162cb69cfed7",
+        "entity_name": "infrastructure",
+        "score": 0.3596372
+      }
+    ]
+  },
+  {
+    "query": "ensure_storage_initialized",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-ba6d1d454f10a84018b6885fdeeec821",
+        "entity_name": "ensure_storage_initialized",
+        "score": 0.48407936
+      },
+      {
+        "entity_id": "entity-712a4dcc31b54305524675a9941b6516",
+        "entity_name": "new",
+        "score": 0.42832047
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.4259466
+      },
+      {
+        "entity_id": "entity-b391334566d4e9e6d81ea830c09846e1",
+        "entity_name": "test_creates_config_file_if_missing",
+        "score": 0.42501622
+      },
+      {
+        "entity_id": "entity-c497cc53885343eecd509d69c054073c",
+        "entity_name": "test_repository_registration_success",
+        "score": 0.3957286
+      },
+      {
+        "entity_id": "entity-45bac84fd4ad0db57042947bfcb6ac35",
+        "entity_name": "test_generates_collection_name",
+        "score": 0.38503146
+      },
+      {
+        "entity_id": "entity-276ec2cd19541566c0e171ee686f1e43",
+        "entity_name": "storage_init",
+        "score": 0.37459278
+      },
+      {
+        "entity_id": "entity-730dd4fa2d4cb38784f6738cf7760dcd",
+        "entity_name": "test_handles_qdrant_connection_failure",
+        "score": 0.35907143
+      },
+      {
+        "entity_id": "entity-0ac7d5ce518ec58959ae6fddee8b8b77",
+        "entity_name": "storage_init_tests",
+        "score": 0.352741
+      },
+      {
+        "entity_id": "entity-a0e576bac4b7dd79f2d3167896aa3479",
+        "entity_name": "verify_storage_health",
+        "score": 0.34328783
+      },
+      {
+        "entity_id": "entity-ce37a211ecad763c2984a55aac7e8b9b",
+        "entity_name": "ensure_dependencies_running",
+        "score": 0.34183022
+      },
+      {
+        "entity_id": "entity-3a94d54ab8afcc3e7edecafaf1c5366b",
+        "entity_name": "initialize_collection",
+        "score": 0.3417153
+      },
+      {
+        "entity_id": "entity-8ba2954241b8526949621d03d75ba957",
+        "entity_name": "storage",
+        "score": 0.33749908
+      },
+      {
+        "entity_id": "entity-9a5437ce670628b20daa17a19406b882",
+        "entity_name": "MAX_RETRIES",
+        "score": 0.31693584
+      },
+      {
+        "entity_id": "entity-6d47a84895fd6f95c38510e9b665233b",
+        "entity_name": "test_handles_postgres_connection_failure",
+        "score": 0.31233093
+      },
+      {
+        "entity_id": "entity-61b326a346fdbf6cc791cb9f4a348c12",
+        "entity_name": "assertions",
+        "score": 0.31100786
+      },
+      {
+        "entity_id": "entity-65d179dc0bee22c61e677cf5341c1f2a",
+        "entity_name": "extract_rust_scope_name",
+        "score": 0.3085547
+      },
+      {
+        "entity_id": "entity-3eebed42b09a1fffb2394e344af24b43",
+        "entity_name": "test_collection_name_with_special_chars",
+        "score": 0.30326825
+      },
+      {
+        "entity_id": "entity-83de6c0264153ccdbcae9d50d5b370ba",
+        "entity_name": "with_timeout",
+        "score": 0.30078724
+      },
+      {
+        "entity_id": "entity-5892494f428695a5dbe05d4c44df83da",
+        "entity_name": "create_test_config",
+        "score": 0.29817677
+      }
+    ]
+  },
+  {
+    "query": "build_outbox_processor_image",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-4b38cf2450718ba4671f3a70c655689b",
+        "entity_name": "FileBatch",
+        "score": 0.6572087
+      },
+      {
+        "entity_id": "entity-2d9abf3a79f4eb5c359cbb0a254f2c31",
+        "entity_name": "build_outbox_processor_image",
+        "score": 0.58154494
+      },
+      {
+        "entity_id": "entity-f607dbf4b6b29f63970306e3c117af12",
+        "entity_name": "EntityBatch",
+        "score": 0.5497627
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.5164518
+      },
+      {
+        "entity_id": "entity-79b147d8d8bcd7f5e3c9762cf520ffc0",
+        "entity_name": "test_handle_file_change_writes_delete_to_outbox",
+        "score": 0.47534072
+      },
+      {
+        "entity_id": "entity-54960733c1ab955372255bca95f552c8",
+        "entity_name": "test_handle_file_change_no_changes",
+        "score": 0.46966624
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.4451971
+      },
+      {
+        "entity_id": "entity-62c9a33ee578ab5ea30ecf1b4a7bb972",
+        "entity_name": "test_handle_file_change_no_previous_snapshot",
+        "score": 0.42300242
+      },
+      {
+        "entity_id": "entity-0e1bb24846105e10477ac40f87a0a709",
+        "entity_name": "calculate_outbox_source_hash",
+        "score": 0.40663302
+      },
+      {
+        "entity_id": "entity-286681e9404aa3ed97702b6caabe7c82",
+        "entity_name": "rest_url",
+        "score": 0.39992964
+      },
+      {
+        "entity_id": "entity-abd134466e952b79e8172a6a27f25bbb",
+        "entity_name": "create_test_embedding_manager",
+        "score": 0.39296556
+      },
+      {
+        "entity_id": "entity-6efeb4988a451918aa956e85eda283a7",
+        "entity_name": "test_full_indexing_pipeline",
+        "score": 0.39106905
+      },
+      {
+        "entity_id": "entity-7b9768177458ce220bdfae1c66846982",
+        "entity_name": "TestQdrant",
+        "score": 0.38705096
+      },
+      {
+        "entity_id": "entity-908e89e1466aa8be2d33a52d73884101",
+        "entity_name": "start",
+        "score": 0.38137075
+      },
+      {
+        "entity_id": "entity-ff7ba5f054afc736c8349dc1cceb8be8",
+        "entity_name": "cleanup",
+        "score": 0.36682618
+      },
+      {
+        "entity_id": "entity-20464a234d5d499abfa3cf280c35d439",
+        "entity_name": "get_logs",
+        "score": 0.36051947
+      },
+      {
+        "entity_id": "entity-32b01d82ee01c6b03addc499ec0882e2",
+        "entity_name": "create_test_repository",
+        "score": 0.35349628
+      },
+      {
+        "entity_id": "entity-88160d78004636237465f868438b7b78",
+        "entity_name": "start_test_containers",
+        "score": 0.3515467
+      },
+      {
+        "entity_id": "entity-f8353ebaaeb6c5f8d1914972e4ea0892",
+        "entity_name": "test_indexer_skips_large_entities",
+        "score": 0.35136074
+      },
+      {
+        "entity_id": "entity-acffd8c2da03504ab7a9b0714c668e5d",
+        "entity_name": "TestQdrant",
+        "score": 0.3475514
+      }
+    ]
+  },
+  {
+    "query": "is_empty",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-076e2447d52f8e938c73ebac7ebb3ca1",
+        "entity_name": "test_bulk_load_entities",
+        "score": 0.4739048
+      },
+      {
+        "entity_id": "entity-31ba184e32f64d60435eac6cbeaa2c8f",
+        "entity_name": "MODULE_QUERY",
+        "score": 0.3535729
+      },
+      {
+        "entity_id": "entity-5e4382e6a5c308b91a76dc8664679c8b",
+        "entity_name": "test_should_include_file",
+        "score": 0.3528257
+      },
+      {
+        "entity_id": "entity-d258c45fe4385f697f301377623ed84a",
+        "entity_name": "default_auto_start_deps",
+        "score": 0.34753257
+      },
+      {
+        "entity_id": "entity-608448f09d8a52c2fc75954e754da6c7",
+        "entity_name": "tests",
+        "score": 0.34171724
+      },
+      {
+        "entity_id": "entity-bb89494c1832a4657373c258a862dd96",
+        "entity_name": "is_vllm_running",
+        "score": 0.33646834
+      },
+      {
+        "entity_id": "entity-7bf83242095c469f40ae3d53e9455bef",
+        "entity_name": "visibility_keywords",
+        "score": 0.3348952
+      },
+      {
+        "entity_id": "entity-ff1796675918bc35531eaed7f3aac28d",
+        "entity_name": "handle_module",
+        "score": 0.3286612
+      },
+      {
+        "entity_id": "entity-17a2c562f0bdb1a9c993def0026e6866",
+        "entity_name": "test_macro_generated_code",
+        "score": 0.32741308
+      },
+      {
+        "entity_id": "entity-ee4d89078997133083979ed2ff757dda",
+        "entity_name": "checkout_branch",
+        "score": 0.32388267
+      },
+      {
+        "entity_id": "entity-4f848a9201974dfd2a3b50fcbb5e9ea4",
+        "entity_name": "test_trait_with_associated_types",
+        "score": 0.32282627
+      },
+      {
+        "entity_id": "entity-0b7a359db7fa8464d37190d9c2f1d9a1",
+        "entity_name": "CONST",
+        "score": 0.3228071
+      },
+      {
+        "entity_id": "entity-58c5fbad05f8ba6545819b7720b56351",
+        "entity_name": "is_qdrant_running",
+        "score": 0.31956804
+      },
+      {
+        "entity_id": "entity-effb08906b8b72e062a7fda39a7b815e",
+        "entity_name": "is_container_stopped",
+        "score": 0.31805438
+      },
+      {
+        "entity_id": "entity-792c3163592e5b45353b20bd7c0ea9cc",
+        "entity_name": "is_postgres_running",
+        "score": 0.31496704
+      },
+      {
+        "entity_id": "entity-307e9fb5b7c71dace1133d5e0b96849d",
+        "entity_name": "test_simple_const",
+        "score": 0.31408507
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.30980885
+      },
+      {
+        "entity_id": "entity-30ca519b72545eb928b592608a4e4a2b",
+        "entity_name": "function_tests",
+        "score": 0.307147
+      },
+      {
+        "entity_id": "entity-4ae656b4cf4bd61033ad700d051aa105",
+        "entity_name": "EntityMetadata",
+        "score": 0.30383116
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.3007223
+      }
+    ]
+  },
+  {
+    "query": "LockGuard",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-e2b63f4cb3eab2ce6568bfb8fde0d6dd",
+        "entity_name": "LockGuard",
+        "score": 0.64191574
+      },
+      {
+        "entity_id": "entity-3c72e3bc4fb24a7297402e31f4c3dd4f",
+        "entity_name": "LockGuard",
+        "score": 0.60069877
+      },
+      {
+        "entity_id": "entity-c4090f6af5f841a9403114fe9c2508bf",
+        "entity_name": "LockGuard",
+        "score": 0.50633323
+      },
+      {
+        "entity_id": "entity-0960b1ec99b5d50907ed427997afa496",
+        "entity_name": "LockGuard",
+        "score": 0.49604642
+      },
+      {
+        "entity_id": "entity-73472aef2051e63538a0116d482436e8",
+        "entity_name": "test_lock_guard_auto_releases",
+        "score": 0.44665924
+      },
+      {
+        "entity_id": "entity-f48c867e3149ceafd1a88c66f1f307fa",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.423658
+      },
+      {
+        "entity_id": "entity-f38e787c16919d0168b6526a7f7913a0",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.41334933
+      },
+      {
+        "entity_id": "entity-7745e71d5ce26a4680f78480368963bf",
+        "entity_name": "test_lock_file_prevents_concurrent_access",
+        "score": 0.40588126
+      },
+      {
+        "entity_id": "entity-7492217d60003e21baaa0153b27c4b4d",
+        "entity_name": "test_concurrent_lock_attempts_from_multiple_threads",
+        "score": 0.38712096
+      },
+      {
+        "entity_id": "entity-32e8876cc08a057b4dec62db92bf3a94",
+        "entity_name": "test_unicode_identifiers",
+        "score": 0.36127084
+      },
+      {
+        "entity_id": "entity-85c5cb1e15a265e987e6c9bbecc7ab65",
+        "entity_name": "test_index_stats_merge",
+        "score": 0.35576957
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.33736944
+      },
+      {
+        "entity_id": "entity-6fb85610f48156d9f8fbc4f7eaa693e8",
+        "entity_name": "test_index_stats_merge_with_empty",
+        "score": 0.33275276
+      },
+      {
+        "entity_id": "entity-f4b9062a7ee5177ed93884029e9ea45d",
+        "entity_name": "build_impl_entity",
+        "score": 0.31886
+      },
+      {
+        "entity_id": "entity-007c694e24fd5a918f1da293220fbcc8",
+        "entity_name": "extract_line_doc_text",
+        "score": 0.31872773
+      },
+      {
+        "entity_id": "entity-e4f48ea52ec5f4040e0001d986c8c4c7",
+        "entity_name": "RETRY_DELAY_SECS",
+        "score": 0.31309998
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.31274447
+      },
+      {
+        "entity_id": "entity-fe9f43524497a763177e179b16f391d2",
+        "entity_name": "with_max_entity_batch_size",
+        "score": 0.31264663
+      },
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.31049508
+      },
+      {
+        "entity_id": "entity-9135192ce7bf1c8868bb051680931485",
+        "entity_name": "test_delete_operation_with_entity_ids_array",
+        "score": 0.3094027
+      }
+    ]
+  },
+  {
+    "query": "timeout",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-181dc248b558722d25ff7aad10e7c0db",
+        "entity_name": "test_search_similar_no_filters",
+        "score": 0.5007353
+      },
+      {
+        "entity_id": "entity-7808de85aa41002454a6f0d764e0a79b",
+        "entity_name": "MAX_DOC_LINES",
+        "score": 0.45180297
+      },
+      {
+        "entity_id": "entity-5d8da52841a7477ac44732a8ad83e643",
+        "entity_name": "default_debounce_ms",
+        "score": 0.42968008
+      },
+      {
+        "entity_id": "entity-e4f48ea52ec5f4040e0001d986c8c4c7",
+        "entity_name": "RETRY_DELAY_SECS",
+        "score": 0.42042804
+      },
+      {
+        "entity_id": "entity-fe9f43524497a763177e179b16f391d2",
+        "entity_name": "with_max_entity_batch_size",
+        "score": 0.42004204
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.41436443
+      },
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.4021005
+      },
+      {
+        "entity_id": "entity-03f3209a3c053c23e439419922bd7779",
+        "entity_name": "test_outbox_record_failure",
+        "score": 0.38364977
+      },
+      {
+        "entity_id": "entity-eff6dd978bdb3b32a73766b1c008e7bc",
+        "entity_name": "test_delete_entities",
+        "score": 0.38364065
+      },
+      {
+        "entity_id": "entity-32f0ff6a39eb55f77fe1e5500b926461",
+        "entity_name": "simple_rust_repo",
+        "score": 0.38162804
+      },
+      {
+        "entity_id": "entity-c49c9a8965489b709cb37667813250c8",
+        "entity_name": "with_file_extraction_concurrency",
+        "score": 0.37501362
+      },
+      {
+        "entity_id": "entity-b0ec29a1c58f5b077920da845ede4915",
+        "entity_name": "handle_struct",
+        "score": 0.3709024
+      },
+      {
+        "entity_id": "entity-f3c2b374281bd0960256b1ed55aa69d8",
+        "entity_name": "collection_manager",
+        "score": 0.3703242
+      },
+      {
+        "entity_id": "entity-b65b04398c2a79acf1f66d1abd369ca4",
+        "entity_name": "test_mock_ensure_repository",
+        "score": 0.36752892
+      },
+      {
+        "entity_id": "entity-bf2c725cd8b9189dbb522b6f65dc3916",
+        "entity_name": "test_simple_repo_has_expected_structure",
+        "score": 0.3624128
+      },
+      {
+        "entity_id": "entity-818429f4d70caf4b0bbacb213463ed56",
+        "entity_name": "WatcherConfig",
+        "score": 0.3582806
+      },
+      {
+        "entity_id": "entity-0c53fff2996a1b0571316d5f8e6a96da",
+        "entity_name": "tests",
+        "score": 0.3560779
+      },
+      {
+        "entity_id": "entity-4f848a9201974dfd2a3b50fcbb5e9ea4",
+        "entity_name": "test_trait_with_associated_types",
+        "score": 0.35506034
+      },
+      {
+        "entity_id": "entity-59eec104d8c882bea3fcae0eb76b8531",
+        "entity_name": "default_server_port",
+        "score": 0.35436141
+      },
+      {
+        "entity_id": "entity-1c471e15afff87093420c865a66507d6",
+        "entity_name": "builder",
+        "score": 0.3490346
+      }
+    ]
+  },
+  {
+    "query": "tests",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-84e35b53166d3ed0e4fa7341f3761735",
+        "entity_name": "test_line_range",
+        "score": 0.5300916
+      },
+      {
+        "entity_id": "entity-0c53fff2996a1b0571316d5f8e6a96da",
+        "entity_name": "tests",
+        "score": 0.5227812
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-69217ab1db37a55b3656fd0078a5e3a9",
+        "entity_name": "test_language_filter_rust",
+        "score": 0.45703727
+      },
+      {
+        "entity_id": "entity-b19693cfb10d03ade72e0aa6020612bc",
+        "entity_name": "is_hidden",
+        "score": 0.44599143
+      },
+      {
+        "entity_id": "entity-891c4645bb9be4dcd2a5e781d717ad40",
+        "entity_name": "matches",
+        "score": 0.44128144
+      },
+      {
+        "entity_id": "entity-9f45bfa54f132664ad0f7f49a2b2dea8",
+        "entity_name": "test_ignore_filter_directories",
+        "score": 0.43699318
+      },
+      {
+        "entity_id": "entity-148e7f5ce20ce3d93689cccb57e69fda",
+        "entity_name": "clear_cache",
+        "score": 0.42931724
+      },
+      {
+        "entity_id": "entity-8ce61281a8543ef0b0192f69a9ad48df",
+        "entity_name": "PostgresClient",
+        "score": 0.42921072
+      },
+      {
+        "entity_id": "entity-4e15ef1d2180f4d33e991dbd2d1144cc",
+        "entity_name": "test_ignore_filter_extensions",
+        "score": 0.42824155
+      },
+      {
+        "entity_id": "entity-274d15facf1bfd3778c1deaf04a295f1",
+        "entity_name": "test_language_filter_python",
+        "score": 0.42776987
+      },
+      {
+        "entity_id": "entity-24cb440d99c160f8982e71fd235a73e1",
+        "entity_name": "get_entity_metadata",
+        "score": 0.422989
+      },
+      {
+        "entity_id": "entity-404999f0d11eed3ad301f0f83383afa1",
+        "entity_name": "test_composite_language_filter",
+        "score": 0.4138791
+      },
+      {
+        "entity_id": "entity-821f08453ffec52fda8646e29d4ce469",
+        "entity_name": "tests",
+        "score": 0.40407887
+      },
+      {
+        "entity_id": "entity-3a3a3c77869c2a3337960d4499c0a915",
+        "entity_name": "test_constants",
+        "score": 0.393834
+      },
+      {
+        "entity_id": "entity-f944407ded72dcbf73cf07923283d16e",
+        "entity_name": "extract_visibility",
+        "score": 0.38092566
+      },
+      {
+        "entity_id": "entity-e315b1e15d665e22fed0308b2ddafa1b",
+        "entity_name": "is_likely_binary",
+        "score": 0.37179914
+      },
+      {
+        "entity_id": "entity-1a7655ffbc84c06a7831ee06b8013baa",
+        "entity_name": "postgres",
+        "score": 0.36541188
+      },
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.36145836
+      }
+    ]
+  },
+  {
+    "query": "current_scope_path",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-47045637b8a5e2758343292eb00fd825",
+        "entity_name": "current_scope_path",
+        "score": 0.57212716
+      },
+      {
+        "entity_id": "entity-d9739dd1245ef8d0a9f145ff0e85ea6a",
+        "entity_name": "test_scope_context",
+        "score": 0.48114616
+      },
+      {
+        "entity_id": "entity-4c0dc5d364fffc0c32339e260c40bb92",
+        "entity_name": "ScopeContext",
+        "score": 0.42719108
+      },
+      {
+        "entity_id": "entity-03cf5e5f16bc861650e5830c5c4cd095",
+        "entity_name": "build_qualified_name",
+        "score": 0.36530167
+      },
+      {
+        "entity_id": "entity-7fe6a02e468b21c6c770ebfe74283a2a",
+        "entity_name": "push_scope",
+        "score": 0.3647413
+      },
+      {
+        "entity_id": "entity-288265f49ba394be2a6f0d1e8151b196",
+        "entity_name": "ScopeContext",
+        "score": 0.35932648
+      },
+      {
+        "entity_id": "entity-d28f50148b85ed255c79a161f486c914",
+        "entity_name": "pop_scope",
+        "score": 0.3578904
+      },
+      {
+        "entity_id": "entity-5ee353eec678b42cadd92adeba992fb0",
+        "entity_name": "tests",
+        "score": 0.3503747
+      },
+      {
+        "entity_id": "entity-b75c344c39d1cebad7161b8d87284746",
+        "entity_name": "test_file_module",
+        "score": 0.3460098
+      },
+      {
+        "entity_id": "entity-f77b67258e8c2bf599d795be358ff447",
+        "entity_name": "constant_handlers",
+        "score": 0.34140646
+      },
+      {
+        "entity_id": "entity-25c1c05ef5646297e9d596cd3cd7e21c",
+        "entity_name": "test_public_module",
+        "score": 0.33913678
+      },
+      {
+        "entity_id": "entity-5223180e21570842f45829cd72a8b1a0",
+        "entity_name": "tests",
+        "score": 0.33723462
+      },
+      {
+        "entity_id": "entity-9dda416667b7b1943c14e0476ea03654",
+        "entity_name": "new",
+        "score": 0.32928455
+      },
+      {
+        "entity_id": "entity-4b5f3aa467dd3ff075908eca03386635",
+        "entity_name": "test_const_with_doc_comments",
+        "score": 0.31465065
+      },
+      {
+        "entity_id": "entity-26a2caadd05242a5cd682901c25cbe75",
+        "entity_name": "test_inherent_impl_simple",
+        "score": 0.31383044
+      },
+      {
+        "entity_id": "entity-0e9ec076d375cf8c523b1a45d969a04b",
+        "entity_name": "test_nested_functions",
+        "score": 0.3085556
+      },
+      {
+        "entity_id": "entity-926144b9a39340464ba79e21a81b48b0",
+        "entity_name": "test_function_with_complex_parameters",
+        "score": 0.3035674
+      },
+      {
+        "entity_id": "entity-e871c79fc82631dac27f9209745291bc",
+        "entity_name": "mock_embedding",
+        "score": 0.30092064
+      },
+      {
+        "entity_id": "entity-9594afb87764b2cdcd2b161f846f0eec",
+        "entity_name": "test_multiple_macros",
+        "score": 0.29974037
+      },
+      {
+        "entity_id": "entity-41bfeabd7d1af6e4ab112352b4a9a57a",
+        "entity_name": "QdrantCollectionManager",
+        "score": 0.2945086
+      }
+    ]
+  },
+  {
+    "query": "Indexer",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-eb0a94d4af240bd96e6e9c0f158dd48e",
+        "entity_name": "debounce_duration",
+        "score": 0.513939
+      },
+      {
+        "entity_id": "entity-b0bdc70a605e5ec3385b0ad279a24bc4",
+        "entity_name": "default_ignore_patterns",
+        "score": 0.50083566
+      },
+      {
+        "entity_id": "entity-63034d8011668ec6303278ee1afca911",
+        "entity_name": "add_ignore_pattern",
+        "score": 0.46189317
+      },
+      {
+        "entity_id": "entity-bb0f02083ad8b628643b33c31967e940",
+        "entity_name": "test_concurrent_snapshot_updates",
+        "score": 0.46142375
+      },
+      {
+        "entity_id": "entity-511ef0f91146aaa2826c290ccadd1f37",
+        "entity_name": "test_get_entities_by_ids_some_missing",
+        "score": 0.45325994
+      },
+      {
+        "entity_id": "entity-c596f66c58148a4d51f18662a025f270",
+        "entity_name": "ignore_patterns",
+        "score": 0.44681287
+      },
+      {
+        "entity_id": "entity-a451421155f5cfca0ab71e96f2807aa8",
+        "entity_name": "test_watcher_config_builder",
+        "score": 0.4399978
+      },
+      {
+        "entity_id": "entity-b0a11af585323500723017b139d4e6d7",
+        "entity_name": "batch_timeout_duration",
+        "score": 0.436925
+      },
+      {
+        "entity_id": "entity-8554863cfa2a1a41aa856a9579d44679",
+        "entity_name": "test_mark_deleted_nonexistent_entities",
+        "score": 0.43537393
+      },
+      {
+        "entity_id": "entity-1ab590422d9448066f2f30f13dc5fb28",
+        "entity_name": "follow_symlinks",
+        "score": 0.4343331
+      },
+      {
+        "entity_id": "entity-f0b9de2198d128024479081cb8b88cd6",
+        "entity_name": "process_event",
+        "score": 0.4118222
+      },
+      {
+        "entity_id": "entity-9b501e8ba08aa61c6fb5c65514641681",
+        "entity_name": "IndexerConfig",
+        "score": 0.4113881
+      },
+      {
+        "entity_id": "entity-884b93583c70e6a5c79a11f1df9e8171",
+        "entity_name": "WatcherConfigBuilder",
+        "score": 0.39895883
+      },
+      {
+        "entity_id": "entity-65450fa9a7fa0a883fbb984469a3e676",
+        "entity_name": "Config",
+        "score": 0.39292192
+      },
+      {
+        "entity_id": "entity-8e69dd550b0c85e6feb537dab1153eca",
+        "entity_name": "events_per_batch",
+        "score": 0.38139436
+      },
+      {
+        "entity_id": "entity-cc736b318c54e1ac59b61b1c172ed0d8",
+        "entity_name": "test_outbox_mark_processed_twice",
+        "score": 0.37974665
+      },
+      {
+        "entity_id": "entity-c63dea89083a915dba24f3900036f9c4",
+        "entity_name": "max_file_size",
+        "score": 0.3793936
+      },
+      {
+        "entity_id": "entity-949c429768cff6078d408aafa4ee20ea",
+        "entity_name": "overlaps",
+        "score": 0.37369198
+      },
+      {
+        "entity_id": "entity-c7779c3cf55ad76241fb2c19329e4164",
+        "entity_name": "ConfigBuilder",
+        "score": 0.37156665
+      },
+      {
+        "entity_id": "entity-8857812e03c671b7690880bdb0d50c15",
+        "entity_name": "recursive_depth",
+        "score": 0.3680838
+      }
+    ]
+  },
+  {
+    "query": "api_key",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-70ada4367a343bcde66d33876f29eaa7",
+        "entity_name": "api_key",
+        "score": 0.5117576
+      },
+      {
+        "entity_id": "entity-0ac1958fb91963306e0b57f1ec21823b",
+        "entity_name": "DEFAULT_API_BASE_URL",
+        "score": 0.41569722
+      },
+      {
+        "entity_id": "entity-ca93ef24007db3b86240e1a5ca83c9f2",
+        "entity_name": "api_provider",
+        "score": 0.41074905
+      },
+      {
+        "entity_id": "entity-483ea3636e9ecad43467cb8a1ce1c6c8",
+        "entity_name": "default_api_base_url",
+        "score": 0.40388912
+      },
+      {
+        "entity_id": "entity-3d7fb02247f5f211e0b94e87eeda8843",
+        "entity_name": "default_texts_per_api_request",
+        "score": 0.37985554
+      },
+      {
+        "entity_id": "entity-db8e4f5eb110e1e10c7b3430a1047ef3",
+        "entity_name": "default_max_concurrent_api_requests",
+        "score": 0.37032545
+      },
+      {
+        "entity_id": "entity-02062ef5f38acd68abee01501982ad41",
+        "entity_name": "OpenAiApiProvider",
+        "score": 0.3618065
+      },
+      {
+        "entity_id": "entity-45186342d74fe6608f2fc72523803948",
+        "entity_name": "DEFAULT_PROVIDER",
+        "score": 0.36165738
+      },
+      {
+        "entity_id": "entity-8c48266804f5934faba41235a61cf154",
+        "entity_name": "api_base_url",
+        "score": 0.3574911
+      },
+      {
+        "entity_id": "entity-fe8bbcc06a4fa072855aeb3f277af1ff",
+        "entity_name": "test_type_alias_with_bounds",
+        "score": 0.35217145
+      },
+      {
+        "entity_id": "entity-5ab6cd7e92b4e7b7498a257ddeddc3a5",
+        "entity_name": "trait_tests",
+        "score": 0.34397832
+      },
+      {
+        "entity_id": "entity-9d7564632a1f31decda3be99f9d52fc3",
+        "entity_name": "DEFAULT_MODEL",
+        "score": 0.34394854
+      },
+      {
+        "entity_id": "entity-ff23cd75fab60e47a07588e90afbb7ae",
+        "entity_name": "macro_tests",
+        "score": 0.34342837
+      },
+      {
+        "entity_id": "entity-7281b82e759ee9e0a6387cbff988eb37",
+        "entity_name": "new",
+        "score": 0.3433762
+      },
+      {
+        "entity_id": "entity-ef2569af2c102475d5b237462a9a804b",
+        "entity_name": "test_generic_struct",
+        "score": 0.34254402
+      },
+      {
+        "entity_id": "entity-30ca519b72545eb928b592608a4e4a2b",
+        "entity_name": "function_tests",
+        "score": 0.3380907
+      },
+      {
+        "entity_id": "entity-25c1c05ef5646297e9d596cd3cd7e21c",
+        "entity_name": "test_public_module",
+        "score": 0.33631214
+      },
+      {
+        "entity_id": "entity-497fb7ec9a5ecfa8309038c12813e250",
+        "entity_name": "EmbeddingConfig",
+        "score": 0.3353533
+      },
+      {
+        "entity_id": "entity-af4719f602cc1d75c099494cfba9ec00",
+        "entity_name": "EmbeddingsConfig",
+        "score": 0.33360028
+      },
+      {
+        "entity_id": "entity-826b82c3524a85381b54da55b718bd63",
+        "entity_name": "test_public_type_alias",
+        "score": 0.33148623
+      }
+    ]
+  },
+  {
+    "query": "catch_up_from_git",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-5ced0442276e81ac3ac6e6309be6ff74",
+        "entity_name": "catch_up_from_git",
+        "score": 0.5357105
+      },
+      {
+        "entity_id": "entity-b0a11af585323500723017b139d4e6d7",
+        "entity_name": "batch_timeout_duration",
+        "score": 0.41207936
+      },
+      {
+        "entity_id": "entity-949850dddf9f16885936f67bbfb74a50",
+        "entity_name": "with_snapshot_update_concurrency",
+        "score": 0.40878642
+      },
+      {
+        "entity_id": "entity-32e8876cc08a057b4dec62db92bf3a94",
+        "entity_name": "test_unicode_identifiers",
+        "score": 0.37555343
+      },
+      {
+        "entity_id": "entity-8f64f529e20300f2ba2e8d0f22aaac98",
+        "entity_name": "extract_entities_from_file",
+        "score": 0.37102062
+      },
+      {
+        "entity_id": "entity-205e72a1b77c9bf876e4db12dab799fa",
+        "entity_name": "test_very_long_identifier",
+        "score": 0.36921093
+      },
+      {
+        "entity_id": "entity-41bfeabd7d1af6e4ab112352b4a9a57a",
+        "entity_name": "QdrantCollectionManager",
+        "score": 0.3575039
+      },
+      {
+        "entity_id": "entity-2377cc7d0fbb49c949369090f1fb37dd",
+        "entity_name": "find_repository_root",
+        "score": 0.35287613
+      },
+      {
+        "entity_id": "entity-714f112e2a346582d2812bc5bc20cacb",
+        "entity_name": "impl_handlers",
+        "score": 0.3524791
+      },
+      {
+        "entity_id": "entity-d5d55400cf705973bf8cb42fce89ea46",
+        "entity_name": "test_only_comments",
+        "score": 0.35098827
+      },
+      {
+        "entity_id": "entity-e1e48eb2f8ecf8313f97bf27bda81561",
+        "entity_name": "test_const_with_type_annotation",
+        "score": 0.34736058
+      },
+      {
+        "entity_id": "entity-15129bfb757d651e2ae525f7b1c2b2a2",
+        "entity_name": "test_empty_source",
+        "score": 0.34240898
+      },
+      {
+        "entity_id": "entity-4008f47b130a78be3f899b978e1adf42",
+        "entity_name": "function_handlers",
+        "score": 0.33829015
+      },
+      {
+        "entity_id": "entity-6d5f097b214996c7aaec14b8b68b4e07",
+        "entity_name": "is_method",
+        "score": 0.32872307
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.3266455
+      },
+      {
+        "entity_id": "entity-0e9ec076d375cf8c523b1a45d969a04b",
+        "entity_name": "test_nested_functions",
+        "score": 0.32277557
+      },
+      {
+        "entity_id": "entity-f3cd7585c23e95eec5549a69eef06af9",
+        "entity_name": "test_public_const",
+        "score": 0.3227239
+      },
+      {
+        "entity_id": "entity-eaab2d44440a45129f9c51a6711fe653",
+        "entity_name": "test_multiple_items_in_one_line",
+        "score": 0.3225145
+      },
+      {
+        "entity_id": "entity-c0bcd4521cf3d39b09ef7e9bc6b424c1",
+        "entity_name": "test_connection_pool_exhaustion",
+        "score": 0.32197553
+      },
+      {
+        "entity_id": "entity-2dd46c561c5a9cce4e8860d6eccfb1f2",
+        "entity_name": "test_static_mut",
+        "score": 0.32011586
+      }
+    ]
+  },
+  {
+    "query": "new",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-2604572e5e646695c5c9ec81bda3d4a9",
+        "entity_name": "entities_skipped_size",
+        "score": 0.4116602
+      },
+      {
+        "entity_id": "entity-9f4f25812e1b40f28bb4f5f97753a8df",
+        "entity_name": "is_size_valid",
+        "score": 0.40916398
+      },
+      {
+        "entity_id": "entity-2e8225bd6e128e1fa2fb5ac05be60d3c",
+        "entity_name": "ChangeType",
+        "score": 0.40304115
+      },
+      {
+        "entity_id": "entity-9dda416667b7b1943c14e0476ea03654",
+        "entity_name": "new",
+        "score": 0.4000367
+      },
+      {
+        "entity_id": "entity-e73aa3a4a1abc6e81e6adeb5f83f4aaa",
+        "entity_name": "write_outbox_entry",
+        "score": 0.3987058
+      },
+      {
+        "entity_id": "entity-1f5f31666019281713ae6ccc61e53ea8",
+        "entity_name": "LINE_INNER",
+        "score": 0.39850122
+      },
+      {
+        "entity_id": "entity-511ef0f91146aaa2826c290ccadd1f37",
+        "entity_name": "test_get_entities_by_ids_some_missing",
+        "score": 0.3963126
+      },
+      {
+        "entity_id": "entity-818429f4d70caf4b0bbacb213463ed56",
+        "entity_name": "WatcherConfig",
+        "score": 0.38888508
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.38303334
+      },
+      {
+        "entity_id": "entity-c49c9a8965489b709cb37667813250c8",
+        "entity_name": "with_file_extraction_concurrency",
+        "score": 0.3798486
+      },
+      {
+        "entity_id": "entity-f3c2b374281bd0960256b1ed55aa69d8",
+        "entity_name": "collection_manager",
+        "score": 0.37893108
+      },
+      {
+        "entity_id": "entity-76306a8124fc299ec4ab401189a91a6d",
+        "entity_name": "new",
+        "score": 0.3785593
+      },
+      {
+        "entity_id": "entity-5892494f428695a5dbe05d4c44df83da",
+        "entity_name": "create_test_config",
+        "score": 0.37819046
+      },
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.3776587
+      },
+      {
+        "entity_id": "entity-62a20cce80559e197100162cb69cfed7",
+        "entity_name": "infrastructure",
+        "score": 0.3744578
+      },
+      {
+        "entity_id": "entity-f6f9cfe1cc2026a0d52462e9ec6a19bc",
+        "entity_name": "add_extractor",
+        "score": 0.37305
+      },
+      {
+        "entity_id": "entity-fe9f43524497a763177e179b16f391d2",
+        "entity_name": "with_max_entity_batch_size",
+        "score": 0.371299
+      },
+      {
+        "entity_id": "entity-945b7bfb22af0767f323e65025163dca",
+        "entity_name": "test_generic_function",
+        "score": 0.36746523
+      },
+      {
+        "entity_id": "entity-6b44005a57643de6d8e5240089f05fb7",
+        "entity_name": "should_include_file",
+        "score": 0.365876
+      },
+      {
+        "entity_id": "entity-d5b407651d7b8039c366c6cef4937577",
+        "entity_name": "CLOSE_PAREN",
+        "score": 0.3632884
+      }
+    ]
+  },
+  {
+    "query": "start_watching",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.44954565
+      },
+      {
+        "entity_id": "entity-bb0f6da607c9e2f4591735a27e7ddf4f",
+        "entity_name": "test_filter_config_extensions",
+        "score": 0.4241562
+      },
+      {
+        "entity_id": "entity-f5abc47533ce3275dd64d0d9a631c6b7",
+        "entity_name": "flush",
+        "score": 0.4084667
+      },
+      {
+        "entity_id": "entity-b7849b345134d2186b852279dd221b07",
+        "entity_name": "EventBatcher<T>",
+        "score": 0.3731091
+      },
+      {
+        "entity_id": "entity-d8aef328c3d3eb6883249ae9440a144c",
+        "entity_name": "tests",
+        "score": 0.35868463
+      },
+      {
+        "entity_id": "entity-070658964a9451c94348520724c5d2fe",
+        "entity_name": "BatchProcessingStats",
+        "score": 0.3583544
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.34963816
+      },
+      {
+        "entity_id": "entity-714f112e2a346582d2812bc5bc20cacb",
+        "entity_name": "impl_handlers",
+        "score": 0.33246544
+      },
+      {
+        "entity_id": "entity-557152e4f4fe841ce31f2f93cf9e3063",
+        "entity_name": "test_batcher_flush",
+        "score": 0.32418275
+      },
+      {
+        "entity_id": "entity-2dd46c561c5a9cce4e8860d6eccfb1f2",
+        "entity_name": "test_static_mut",
+        "score": 0.3201214
+      },
+      {
+        "entity_id": "entity-cb444a104cfe5e220f7e4bb4f30b81c6",
+        "entity_name": "mark_file_entities_deleted",
+        "score": 0.31308365
+      },
+      {
+        "entity_id": "entity-9a18698868506562d55d5d1f2f880910",
+        "entity_name": "tests",
+        "score": 0.31249118
+      },
+      {
+        "entity_id": "entity-8f64f529e20300f2ba2e8d0f22aaac98",
+        "entity_name": "extract_entities_from_file",
+        "score": 0.30856404
+      },
+      {
+        "entity_id": "entity-e73aa3a4a1abc6e81e6adeb5f83f4aaa",
+        "entity_name": "write_outbox_entry",
+        "score": 0.30854577
+      },
+      {
+        "entity_id": "entity-b3b506e85a515ad5cb9559f746eed0cc",
+        "entity_name": "update_file_snapshot_and_mark_stale",
+        "score": 0.3078514
+      },
+      {
+        "entity_id": "entity-23b4747f11b5717f5bee37c831b2b6d4",
+        "entity_name": "test_const_with_complex_value",
+        "score": 0.30534208
+      },
+      {
+        "entity_id": "entity-8f8fc6f91a2c671052d8323f57247ace",
+        "entity_name": "test_processing_stats_merge_with_empty",
+        "score": 0.3049251
+      },
+      {
+        "entity_id": "entity-dbf4a78a73ce31bfae8b15c8c08c5e13",
+        "entity_name": "push",
+        "score": 0.3035028
+      },
+      {
+        "entity_id": "entity-d258c45fe4385f697f301377623ed84a",
+        "entity_name": "default_auto_start_deps",
+        "score": 0.30234027
+      },
+      {
+        "entity_id": "entity-65d179dc0bee22c61e677cf5341c1f2a",
+        "entity_name": "extract_rust_scope_name",
+        "score": 0.2991026
+      }
+    ]
+  },
+  {
+    "query": "tests",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-84e35b53166d3ed0e4fa7341f3761735",
+        "entity_name": "test_line_range",
+        "score": 0.5300916
+      },
+      {
+        "entity_id": "entity-0c53fff2996a1b0571316d5f8e6a96da",
+        "entity_name": "tests",
+        "score": 0.5227812
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-69217ab1db37a55b3656fd0078a5e3a9",
+        "entity_name": "test_language_filter_rust",
+        "score": 0.45703727
+      },
+      {
+        "entity_id": "entity-b19693cfb10d03ade72e0aa6020612bc",
+        "entity_name": "is_hidden",
+        "score": 0.44599143
+      },
+      {
+        "entity_id": "entity-891c4645bb9be4dcd2a5e781d717ad40",
+        "entity_name": "matches",
+        "score": 0.44128144
+      },
+      {
+        "entity_id": "entity-9f45bfa54f132664ad0f7f49a2b2dea8",
+        "entity_name": "test_ignore_filter_directories",
+        "score": 0.43699318
+      },
+      {
+        "entity_id": "entity-148e7f5ce20ce3d93689cccb57e69fda",
+        "entity_name": "clear_cache",
+        "score": 0.42931724
+      },
+      {
+        "entity_id": "entity-8ce61281a8543ef0b0192f69a9ad48df",
+        "entity_name": "PostgresClient",
+        "score": 0.42921072
+      },
+      {
+        "entity_id": "entity-4e15ef1d2180f4d33e991dbd2d1144cc",
+        "entity_name": "test_ignore_filter_extensions",
+        "score": 0.42824155
+      },
+      {
+        "entity_id": "entity-274d15facf1bfd3778c1deaf04a295f1",
+        "entity_name": "test_language_filter_python",
+        "score": 0.42776987
+      },
+      {
+        "entity_id": "entity-24cb440d99c160f8982e71fd235a73e1",
+        "entity_name": "get_entity_metadata",
+        "score": 0.422989
+      },
+      {
+        "entity_id": "entity-404999f0d11eed3ad301f0f83383afa1",
+        "entity_name": "test_composite_language_filter",
+        "score": 0.4138791
+      },
+      {
+        "entity_id": "entity-821f08453ffec52fda8646e29d4ce469",
+        "entity_name": "tests",
+        "score": 0.40407887
+      },
+      {
+        "entity_id": "entity-3a3a3c77869c2a3337960d4499c0a915",
+        "entity_name": "test_constants",
+        "score": 0.393834
+      },
+      {
+        "entity_id": "entity-f944407ded72dcbf73cf07923283d16e",
+        "entity_name": "extract_visibility",
+        "score": 0.38092566
+      },
+      {
+        "entity_id": "entity-e315b1e15d665e22fed0308b2ddafa1b",
+        "entity_name": "is_likely_binary",
+        "score": 0.37179914
+      },
+      {
+        "entity_id": "entity-1a7655ffbc84c06a7831ee06b8013baa",
+        "entity_name": "postgres",
+        "score": 0.36541188
+      },
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.36145836
+      }
+    ]
+  },
+  {
+    "query": "stage_store_entities",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-cf24b36a346a3c16c4a6fb7430c2065e",
+        "entity_name": "path",
+        "score": 0.49658832
+      },
+      {
+        "entity_id": "entity-2ada8eed04b0aa4f155f6e28c97f5e64",
+        "entity_name": "FileChange",
+        "score": 0.41709894
+      },
+      {
+        "entity_id": "entity-8e4b6fc97ee261ea0d98ae901c846611",
+        "entity_name": "FileChange",
+        "score": 0.38171193
+      },
+      {
+        "entity_id": "entity-6ce4661565f47996796aa1ee369ab196",
+        "entity_name": "stage_generate_embeddings",
+        "score": 0.37363708
+      },
+      {
+        "entity_id": "entity-00d4f9c31e1aa9740f6efb1afff2ee3b",
+        "entity_name": "priority",
+        "score": 0.37361783
+      },
+      {
+        "entity_id": "entity-725c1e0a6b72c7e5c725bbf7263fb70c",
+        "entity_name": "handle_qdrant_write_failure",
+        "score": 0.3393572
+      },
+      {
+        "entity_id": "entity-f984d4d212ab55e7442361d8f10b4ded",
+        "entity_name": "test_get_entities_by_ids_batch_limit",
+        "score": 0.33729857
+      },
+      {
+        "entity_id": "entity-72b336d22daf73d810c11bffa3fd0ceb",
+        "entity_name": "test_outbox_processor_basic_initialization",
+        "score": 0.33489424
+      },
+      {
+        "entity_id": "entity-85c2dde0a12eda734ea99bfcb9b713f9",
+        "entity_name": "entities",
+        "score": 0.32859927
+      },
+      {
+        "entity_id": "entity-ac76d313e7605da72e35cad69b16bd82",
+        "entity_name": "default_limit",
+        "score": 0.3233428
+      },
+      {
+        "entity_id": "entity-8ee49b11608b1c6ab254bbfc2e486d22",
+        "entity_name": "new",
+        "score": 0.3197826
+      },
+      {
+        "entity_id": "entity-f9e978ea6c31c4201d64fb370c91e72f",
+        "entity_name": "new",
+        "score": 0.3187734
+      },
+      {
+        "entity_id": "entity-9157f5402549931f8a68951fb6c2ade9",
+        "entity_name": "mark_entities_deleted",
+        "score": 0.31332523
+      },
+      {
+        "entity_id": "entity-079f1e05a3722b113fb227c64253f1d5",
+        "entity_name": "get_entities_by_ids",
+        "score": 0.3128599
+      },
+      {
+        "entity_id": "entity-e83c0b7a7a81623f4519cf45a6978024",
+        "entity_name": "new",
+        "score": 0.31284028
+      },
+      {
+        "entity_id": "entity-2cd11b3d4f0bf453a712a3985bd42729",
+        "entity_name": "test_get_entities_by_ids",
+        "score": 0.30742195
+      },
+      {
+        "entity_id": "entity-13c78306d2a660770fdde8a9adc5d449",
+        "entity_name": "FileMetadata",
+        "score": 0.30592647
+      },
+      {
+        "entity_id": "entity-c9d87eba34a7a294b4af51bef1918831",
+        "entity_name": "track_temp_dir",
+        "score": 0.30091065
+      },
+      {
+        "entity_id": "entity-bd37bdef4697f50dc6f2a24dc4c74df3",
+        "entity_name": "get_last_indexed_commit",
+        "score": 0.29943344
+      },
+      {
+        "entity_id": "entity-83ec08b29496a9d1302d5ed3074578c6",
+        "entity_name": "workspace_manifest",
+        "score": 0.2985416
+      }
+    ]
+  },
+  {
+    "query": "tests",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-84e35b53166d3ed0e4fa7341f3761735",
+        "entity_name": "test_line_range",
+        "score": 0.5300916
+      },
+      {
+        "entity_id": "entity-0c53fff2996a1b0571316d5f8e6a96da",
+        "entity_name": "tests",
+        "score": 0.5227812
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.49078324
+      },
+      {
+        "entity_id": "entity-69217ab1db37a55b3656fd0078a5e3a9",
+        "entity_name": "test_language_filter_rust",
+        "score": 0.45703727
+      },
+      {
+        "entity_id": "entity-b19693cfb10d03ade72e0aa6020612bc",
+        "entity_name": "is_hidden",
+        "score": 0.44599143
+      },
+      {
+        "entity_id": "entity-891c4645bb9be4dcd2a5e781d717ad40",
+        "entity_name": "matches",
+        "score": 0.44128144
+      },
+      {
+        "entity_id": "entity-9f45bfa54f132664ad0f7f49a2b2dea8",
+        "entity_name": "test_ignore_filter_directories",
+        "score": 0.43699318
+      },
+      {
+        "entity_id": "entity-148e7f5ce20ce3d93689cccb57e69fda",
+        "entity_name": "clear_cache",
+        "score": 0.42931724
+      },
+      {
+        "entity_id": "entity-8ce61281a8543ef0b0192f69a9ad48df",
+        "entity_name": "PostgresClient",
+        "score": 0.42921072
+      },
+      {
+        "entity_id": "entity-4e15ef1d2180f4d33e991dbd2d1144cc",
+        "entity_name": "test_ignore_filter_extensions",
+        "score": 0.42824155
+      },
+      {
+        "entity_id": "entity-274d15facf1bfd3778c1deaf04a295f1",
+        "entity_name": "test_language_filter_python",
+        "score": 0.42776987
+      },
+      {
+        "entity_id": "entity-24cb440d99c160f8982e71fd235a73e1",
+        "entity_name": "get_entity_metadata",
+        "score": 0.422989
+      },
+      {
+        "entity_id": "entity-404999f0d11eed3ad301f0f83383afa1",
+        "entity_name": "test_composite_language_filter",
+        "score": 0.4138791
+      },
+      {
+        "entity_id": "entity-821f08453ffec52fda8646e29d4ce469",
+        "entity_name": "tests",
+        "score": 0.40407887
+      },
+      {
+        "entity_id": "entity-3a3a3c77869c2a3337960d4499c0a915",
+        "entity_name": "test_constants",
+        "score": 0.393834
+      },
+      {
+        "entity_id": "entity-f944407ded72dcbf73cf07923283d16e",
+        "entity_name": "extract_visibility",
+        "score": 0.38092566
+      },
+      {
+        "entity_id": "entity-e315b1e15d665e22fed0308b2ddafa1b",
+        "entity_name": "is_likely_binary",
+        "score": 0.37179914
+      },
+      {
+        "entity_id": "entity-1a7655ffbc84c06a7831ee06b8013baa",
+        "entity_name": "postgres",
+        "score": 0.36541188
+      },
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.36145836
+      }
+    ]
+  },
+  {
+    "query": "config",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-9adb261eaceb8e0c235ac20cb92a7d1f",
+        "entity_name": "WatcherConfig",
+        "score": 0.5202104
+      },
+      {
+        "entity_id": "entity-46f0b4958084bdd4f152d57bd1c5e258",
+        "entity_name": "get_shared_postgres",
+        "score": 0.44963816
+      },
+      {
+        "entity_id": "entity-fd7203c83d712e22036bc347115e3358",
+        "entity_name": "config",
+        "score": 0.4496377
+      },
+      {
+        "entity_id": "entity-a6b75340cb1dd4fbcc5d4f10d2c8283b",
+        "entity_name": "config",
+        "score": 0.4496377
+      },
+      {
+        "entity_id": "entity-5d3af743252f0c7c4ccee60af25d8f55",
+        "entity_name": "config",
+        "score": 0.4496377
+      },
+      {
+        "entity_id": "entity-14591ee4c79c80dd408d8e196c1a2738",
+        "entity_name": "config",
+        "score": 0.41493025
+      },
+      {
+        "entity_id": "entity-65450fa9a7fa0a883fbb984469a3e676",
+        "entity_name": "Config",
+        "score": 0.3898579
+      },
+      {
+        "entity_id": "entity-af8d1907ce033ada218696653f94f32d",
+        "entity_name": "IndexResult",
+        "score": 0.3842434
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.36492512
+      },
+      {
+        "entity_id": "entity-bb0f02083ad8b628643b33c31967e940",
+        "entity_name": "test_concurrent_snapshot_updates",
+        "score": 0.358371
+      },
+      {
+        "entity_id": "entity-2810834e8f9ca3f084a274362d0b68ee",
+        "entity_name": "embeddings",
+        "score": 0.35313466
+      },
+      {
+        "entity_id": "entity-511ef0f91146aaa2826c290ccadd1f37",
+        "entity_name": "test_get_entities_by_ids_some_missing",
+        "score": 0.35192302
+      },
+      {
+        "entity_id": "entity-818429f4d70caf4b0bbacb213463ed56",
+        "entity_name": "WatcherConfig",
+        "score": 0.35109657
+      },
+      {
+        "entity_id": "entity-ae155d228bf0dd1f88a74bdb42cb6c27",
+        "entity_name": "build",
+        "score": 0.34288287
+      },
+      {
+        "entity_id": "entity-e73aa3a4a1abc6e81e6adeb5f83f4aaa",
+        "entity_name": "write_outbox_entry",
+        "score": 0.3427839
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.33951676
+      },
+      {
+        "entity_id": "entity-0054bf8709ee109a96aba41b8150c2f4",
+        "entity_name": "builder",
+        "score": 0.33814156
+      },
+      {
+        "entity_id": "entity-5392e494c3c56f8e29f868b0841a60f8",
+        "entity_name": "test_store_entity_metadata_update",
+        "score": 0.33314037
+      },
+      {
+        "entity_id": "entity-1bda64a7e3526f02880733ca2df77ebe",
+        "entity_name": "ConfigBuilder",
+        "score": 0.33286282
+      },
+      {
+        "entity_id": "entity-f3c2b374281bd0960256b1ed55aa69d8",
+        "entity_name": "collection_manager",
+        "score": 0.33191913
+      }
+    ]
+  },
+  {
+    "query": "test_handle_file_change_updates_snapshot_with_git_commit",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-e9b7ec2e20f0e41a55be505ed154384b",
+        "entity_name": "is_significant",
+        "score": 0.58888996
+      },
+      {
+        "entity_id": "entity-0d80aae1e20ee449967e94f22523eb76",
+        "entity_name": "new",
+        "score": 0.5094534
+      },
+      {
+        "entity_id": "entity-8ec2974af98bbbdd5548a410d35f33d9",
+        "entity_name": "symlink",
+        "score": 0.48271722
+      },
+      {
+        "entity_id": "entity-062b123d15c052c741542d20a8b6c0a0",
+        "entity_name": "is_structural",
+        "score": 0.45769352
+      },
+      {
+        "entity_id": "entity-4fb58d68dd7fb4615c30939b3115fe37",
+        "entity_name": "DiffStats",
+        "score": 0.45524868
+      },
+      {
+        "entity_id": "entity-5a9dda53e9ef9f89109c37ccad29b8b7",
+        "entity_name": "get_unprocessed_outbox_entries",
+        "score": 0.45215806
+      },
+      {
+        "entity_id": "entity-13c78306d2a660770fdde8a9adc5d449",
+        "entity_name": "FileMetadata",
+        "score": 0.4426353
+      },
+      {
+        "entity_id": "entity-7001d266b58e48c34d539fc1e74b1aaa",
+        "entity_name": "ensure_repository",
+        "score": 0.43783325
+      },
+      {
+        "entity_id": "entity-ef775d19bc4c6442d0acb09c79aa7298",
+        "entity_name": "new",
+        "score": 0.43300706
+      },
+      {
+        "entity_id": "entity-2af5952cd85f53a3412d00889ef3f9f7",
+        "entity_name": "DiffStats",
+        "score": 0.4324613
+      },
+      {
+        "entity_id": "entity-587e8a0bb973936a5356ef9797125d5a",
+        "entity_name": "DEFAULT_MAX_EMBEDDING_DIM",
+        "score": 0.4232853
+      },
+      {
+        "entity_id": "entity-c1c1b32c2e75cf130e637fbd1d25caa6",
+        "entity_name": "start_all_watchers",
+        "score": 0.4029886
+      },
+      {
+        "entity_id": "entity-b7e78375d53d0cf80ba26dce4fae0e1e",
+        "entity_name": "classify_change",
+        "score": 0.39998037
+      },
+      {
+        "entity_id": "entity-d25eef3f223ec47258101f2b65672f8c",
+        "entity_name": "mark_entities_deleted_with_outbox",
+        "score": 0.39287943
+      },
+      {
+        "entity_id": "entity-4008f47b130a78be3f899b978e1adf42",
+        "entity_name": "function_handlers",
+        "score": 0.38547325
+      },
+      {
+        "entity_id": "entity-f20aea45f6ce520415444fc4b6c037c3",
+        "entity_name": "test_processing_stats_merge",
+        "score": 0.38200557
+      },
+      {
+        "entity_id": "entity-e77502f792f31e1db476d48b4b33b588",
+        "entity_name": "test_raw_identifiers",
+        "score": 0.37742665
+      },
+      {
+        "entity_id": "entity-75c55be034c86db354928e98b41f6fb7",
+        "entity_name": "test_outbox_write_and_read",
+        "score": 0.37730289
+      },
+      {
+        "entity_id": "entity-5ced0442276e81ac3ac6e6309be6ff74",
+        "entity_name": "catch_up_from_git",
+        "score": 0.37575066
+      },
+      {
+        "entity_id": "entity-c0bcd4521cf3d39b09ef7e9bc6b424c1",
+        "entity_name": "test_connection_pool_exhaustion",
+        "score": 0.37186432
+      }
+    ]
+  },
+  {
+    "query": "create_test_repository",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-3a62accc09e8981a29ced1ffa352cf65",
+        "entity_name": "LineRange",
+        "score": 0.55763805
+      },
+      {
+        "entity_id": "entity-9f6ab7c5f260fd9a9a1d43e3573f43ad",
+        "entity_name": "create_test_repo",
+        "score": 0.49835694
+      },
+      {
+        "entity_id": "entity-f0da4d1f2cfa81dd69f149132a9692bf",
+        "entity_name": "test_attributes_and_macros",
+        "score": 0.47262964
+      },
+      {
+        "entity_id": "entity-59ad777c2c21d8d68218f91ee253296d",
+        "entity_name": "extract",
+        "score": 0.46354547
+      },
+      {
+        "entity_id": "entity-0f1ed70cf2c2c17a2f4af684d6c5d174",
+        "entity_name": "new",
+        "score": 0.4611273
+      },
+      {
+        "entity_id": "entity-c497cc53885343eecd509d69c054073c",
+        "entity_name": "test_repository_registration_success",
+        "score": 0.45972317
+      },
+      {
+        "entity_id": "entity-bb6a86afa0041e512e2b0350350e148f",
+        "entity_name": "LanguageConfigurationBuilder",
+        "score": 0.45626
+      },
+      {
+        "entity_id": "entity-278db08c2d10413565618e791537bc47",
+        "entity_name": "test_batcher_timeout_value",
+        "score": 0.45138597
+      },
+      {
+        "entity_id": "entity-9b1f3d294b28946f978ec911b60a1f36",
+        "entity_name": "create_postgres_client",
+        "score": 0.4465422
+      },
+      {
+        "entity_id": "entity-bb62606449f5f72be6f4f06bad82e1fc",
+        "entity_name": "new",
+        "score": 0.4401366
+      },
+      {
+        "entity_id": "entity-b0cc194f82d64843781c0c1eeec10a25",
+        "entity_name": "Extractor",
+        "score": 0.43299162
+      },
+      {
+        "entity_id": "entity-0378490aca672f47093822d11a3c46ea",
+        "entity_name": "qualified_name",
+        "score": 0.43264967
+      },
+      {
+        "entity_id": "entity-f6f9cfe1cc2026a0d52462e9ec6a19bc",
+        "entity_name": "add_extractor",
+        "score": 0.43171853
+      },
+      {
+        "entity_id": "entity-68100a8e2300ad5a2c6c30fadff6437a",
+        "entity_name": "query",
+        "score": 0.42558798
+      },
+      {
+        "entity_id": "entity-65578b45fc1ec8688e45eec9a591e1f4",
+        "entity_name": "test_multibyte_utf8_in_struct_fields",
+        "score": 0.42128703
+      },
+      {
+        "entity_id": "entity-5d34ed4f3fff00aa66c847d7c56f92e2",
+        "entity_name": "start_and_wait_for_outbox_sync",
+        "score": 0.420149
+      },
+      {
+        "entity_id": "entity-d737325a4c2fecb2d7e18c7f4f9917e6",
+        "entity_name": "FIELD_DECLARATION",
+        "score": 0.4201489
+      },
+      {
+        "entity_id": "entity-5804b404ceb3fa9d9ed0b726104290e6",
+        "entity_name": "FileMetadata",
+        "score": 0.41821474
+      },
+      {
+        "entity_id": "entity-7be0e59b4432ba20869ba19b4efe06cc",
+        "entity_name": "rust",
+        "score": 0.41288564
+      },
+      {
+        "entity_id": "entity-418260c72ac456ed680672d1529076dd",
+        "entity_name": "new",
+        "score": 0.41282547
+      }
+    ]
+  },
+  {
+    "query": "handle_constant",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-4f3ed6724c39a7bd0791d6acfc5b17e5",
+        "entity_name": "enum_tests",
+        "score": 0.5175487
+      },
+      {
+        "entity_id": "entity-8a36babbb18ac120fb58c530c3e9cd24",
+        "entity_name": "main",
+        "score": 0.4721722
+      },
+      {
+        "entity_id": "entity-891c4645bb9be4dcd2a5e781d717ad40",
+        "entity_name": "matches",
+        "score": 0.43840134
+      },
+      {
+        "entity_id": "entity-628df4a097b8d0782e4f3b4c64a0231c",
+        "entity_name": "handle_trait",
+        "score": 0.4137693
+      },
+      {
+        "entity_id": "entity-b0d80622715f286a95d2264127158b74",
+        "entity_name": "test_file_metadata_readonly",
+        "score": 0.4030227
+      },
+      {
+        "entity_id": "entity-ce4528fd558fc5b71b67f6c169674009",
+        "entity_name": "test_module_with_attributes",
+        "score": 0.40191564
+      },
+      {
+        "entity_id": "entity-4f848a9201974dfd2a3b50fcbb5e9ea4",
+        "entity_name": "test_trait_with_associated_types",
+        "score": 0.39048475
+      },
+      {
+        "entity_id": "entity-3f19bd2876261d8328e8e6a073042e03",
+        "entity_name": "is_detached_head",
+        "score": 0.38897216
+      },
+      {
+        "entity_id": "entity-2ea18f7baab12517529ec06a48fea611",
+        "entity_name": "test_nested_modules",
+        "score": 0.38240355
+      },
+      {
+        "entity_id": "entity-edc0365ef051c5c8e67c667c94e8795c",
+        "entity_name": "test_nested_generic_alias",
+        "score": 0.37996975
+      },
+      {
+        "entity_id": "entity-3ca044a378aeffce5df9cb2f11f4fcc4",
+        "entity_name": "module_tests",
+        "score": 0.37699842
+      },
+      {
+        "entity_id": "entity-cd3880be59df65289a7cd7c08d702f2d",
+        "entity_name": "CONSTANT_QUERY",
+        "score": 0.37686124
+      },
+      {
+        "entity_id": "entity-1ae1dfb1dbc5ee1b0ae22ba3cd6cca20",
+        "entity_name": "test_module_qualified_names",
+        "score": 0.3759855
+      },
+      {
+        "entity_id": "entity-2f3e8ad593b473b7c9ab2db397dc24ed",
+        "entity_name": "open",
+        "score": 0.3737449
+      },
+      {
+        "entity_id": "entity-d638f28d69528599b65641b21e7ca9fd",
+        "entity_name": "list_branches",
+        "score": 0.37181637
+      },
+      {
+        "entity_id": "entity-57b175fe2a5189939fd43ceb06746acf",
+        "entity_name": "test_debounced_event",
+        "score": 0.37156552
+      },
+      {
+        "entity_id": "entity-ff23cd75fab60e47a07588e90afbb7ae",
+        "entity_name": "macro_tests",
+        "score": 0.37060714
+      },
+      {
+        "entity_id": "entity-6fb535ee1a2640d91af0c1637a7f0a53",
+        "entity_name": "test_nested_generic_struct",
+        "score": 0.36942768
+      },
+      {
+        "entity_id": "entity-30ca519b72545eb928b592608a4e4a2b",
+        "entity_name": "function_tests",
+        "score": 0.36901087
+      },
+      {
+        "entity_id": "entity-ef2569af2c102475d5b237462a9a804b",
+        "entity_name": "test_generic_struct",
+        "score": 0.36880586
+      }
+    ]
+  },
+  {
+    "query": "handle_impl_trait",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-52ae8bdc55890dc6aa5780c9051ca13c",
+        "entity_name": "TRAIT_QUERY",
+        "score": 0.46859968
+      },
+      {
+        "entity_id": "entity-42686604a2750488d4a7c685f20143f1",
+        "entity_name": "STRUCT_QUERY",
+        "score": 0.43109876
+      },
+      {
+        "entity_id": "entity-12c4175461bc7dae05a07b3e4b64005c",
+        "entity_name": "OutboxProcessor",
+        "score": 0.4290136
+      },
+      {
+        "entity_id": "entity-db8df885d63db255f07c9a2d34eb276e",
+        "entity_name": "add_pattern",
+        "score": 0.41800618
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.39069855
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.39069855
+      },
+      {
+        "entity_id": "entity-fe8bbcc06a4fa072855aeb3f277af1ff",
+        "entity_name": "test_type_alias_with_bounds",
+        "score": 0.38640413
+      },
+      {
+        "entity_id": "entity-4a223b1b5e0d857cccc25f03185278dd",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.38404214
+      },
+      {
+        "entity_id": "entity-fa4ca4ffefa37887d2ac980d5a7b462d",
+        "entity_name": "assert_vector_dimensions",
+        "score": 0.3739606
+      },
+      {
+        "entity_id": "entity-826b82c3524a85381b54da55b718bd63",
+        "entity_name": "test_public_type_alias",
+        "score": 0.3647991
+      },
+      {
+        "entity_id": "entity-e8430a115b0a213ef138856acefb9ccf",
+        "entity_name": "patterns",
+        "score": 0.36469924
+      },
+      {
+        "entity_id": "entity-e17c1414cc16e13c8582566fedb2ee1c",
+        "entity_name": "LanguageFilter",
+        "score": 0.35741055
+      },
+      {
+        "entity_id": "entity-a35fe557e95315bcaecb37e398fdc52c",
+        "entity_name": "DebouncedEvent",
+        "score": 0.354711
+      },
+      {
+        "entity_id": "entity-e07fb4741468aa4f48240abcbf92d5c2",
+        "entity_name": "tests",
+        "score": 0.3544128
+      },
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.35356325
+      },
+      {
+        "entity_id": "entity-96eb2eaf44664d7dc2a4e14e7ded7415",
+        "entity_name": "OutboxProcessor",
+        "score": 0.34810916
+      },
+      {
+        "entity_id": "entity-5fa97538e75b350f44c1476e59381715",
+        "entity_name": "BLOCK_INNER_START",
+        "score": 0.34213257
+      },
+      {
+        "entity_id": "entity-5dbabebd730b8ffaa9d1781392130e77",
+        "entity_name": "PostgresClient",
+        "score": 0.33476663
+      },
+      {
+        "entity_id": "entity-99cfc98868efd2b3468fa2d71d449234",
+        "entity_name": "IgnoreFilterBuilder",
+        "score": 0.3347666
+      },
+      {
+        "entity_id": "entity-3942ac582ef947cb1e767f7b75208f6a",
+        "entity_name": "SHARED_POSTGRES",
+        "score": 0.329728
+      }
+    ]
+  },
+  {
+    "query": "handle_function",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.49285382
+      },
+      {
+        "entity_id": "entity-96eb2eaf44664d7dc2a4e14e7ded7415",
+        "entity_name": "OutboxProcessor",
+        "score": 0.4081213
+      },
+      {
+        "entity_id": "entity-4a223b1b5e0d857cccc25f03185278dd",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.39860764
+      },
+      {
+        "entity_id": "entity-3fef141e924aad81f07ba58335c50b93",
+        "entity_name": "test_branch_watcher",
+        "score": 0.3604874
+      },
+      {
+        "entity_id": "entity-4f848a9201974dfd2a3b50fcbb5e9ea4",
+        "entity_name": "test_trait_with_associated_types",
+        "score": 0.35856038
+      },
+      {
+        "entity_id": "entity-ee4d89078997133083979ed2ff757dda",
+        "entity_name": "checkout_branch",
+        "score": 0.35482395
+      },
+      {
+        "entity_id": "entity-1d678c0bfe8aabb95bed14c26698718b",
+        "entity_name": "builder",
+        "score": 0.3529268
+      },
+      {
+        "entity_id": "entity-0c53fff2996a1b0571316d5f8e6a96da",
+        "entity_name": "tests",
+        "score": 0.35286605
+      },
+      {
+        "entity_id": "entity-31ba184e32f64d60435eac6cbeaa2c8f",
+        "entity_name": "MODULE_QUERY",
+        "score": 0.33732128
+      },
+      {
+        "entity_id": "entity-a561ddcc56f9f171f6310799fad6e91e",
+        "entity_name": "FunctionSignature",
+        "score": 0.33693257
+      },
+      {
+        "entity_id": "entity-ae16f6f6bc58a86790dcc9ca613a3fb3",
+        "entity_name": "open_repo",
+        "score": 0.33466288
+      },
+      {
+        "entity_id": "entity-5223a6ec897114f4478b102684f89835",
+        "entity_name": "watch_for_branch_changes",
+        "score": 0.33340377
+      },
+      {
+        "entity_id": "entity-b20829f2b9723eb34e9b936478d71106",
+        "entity_name": "IgnoreFilterBuilder",
+        "score": 0.33134782
+      },
+      {
+        "entity_id": "entity-5ce31a6c843c8bc5489d61fc2e7023a9",
+        "entity_name": "IgnoreFilter",
+        "score": 0.3310225
+      },
+      {
+        "entity_id": "entity-db1a684f5580b1f69b22bde27ed053e1",
+        "entity_name": "IgnoreFilter",
+        "score": 0.329944
+      },
+      {
+        "entity_id": "entity-7e3d99382184f71c8981fe9cd6a3b32d",
+        "entity_name": "should_ignore",
+        "score": 0.3291548
+      },
+      {
+        "entity_id": "entity-f1a8f3e6b3fd8ac97de85cf8e7bd779b",
+        "entity_name": "has_uncommitted_changes",
+        "score": 0.32910728
+      },
+      {
+        "entity_id": "entity-93742f4b807a4e0ad91af1584e5a2f33",
+        "entity_name": "from_patterns",
+        "score": 0.3285935
+      },
+      {
+        "entity_id": "entity-9409d633c6ce617b59d6bd30930e2b28",
+        "entity_name": "should_follow_symlink",
+        "score": 0.3259225
+      },
+      {
+        "entity_id": "entity-cbb3000e5d68ac5b00728273022510bb",
+        "entity_name": "find_repositories",
+        "score": 0.32504573
+      }
+    ]
+  },
+  {
+    "query": "extract_method",
+    "query_type": "ExactName",
+    "results": [
+      {
+        "entity_id": "entity-985b010a361ffddacaeb43217e69b4ec",
+        "entity_name": "MACRO_QUERY",
+        "score": 0.47394827
+      },
+      {
+        "entity_id": "entity-dcc2e8d62e25087d20501257818fe3f1",
+        "entity_name": "test_unsafe_function",
+        "score": 0.44434643
+      },
+      {
+        "entity_id": "entity-62f6591966469622ddc66f26876c1f67",
+        "entity_name": "ENUM_QUERY",
+        "score": 0.39059335
+      },
+      {
+        "entity_id": "entity-31ba184e32f64d60435eac6cbeaa2c8f",
+        "entity_name": "MODULE_QUERY",
+        "score": 0.38849092
+      },
+      {
+        "entity_id": "entity-4a223b1b5e0d857cccc25f03185278dd",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.38760602
+      },
+      {
+        "entity_id": "entity-f9e247b9f41f0617055a4e1ebee1c713",
+        "entity_name": "build",
+        "score": 0.37751597
+      },
+      {
+        "entity_id": "entity-80284588af353b6c35c489194dc7a255",
+        "entity_name": "CleanupTracker",
+        "score": 0.37542194
+      },
+      {
+        "entity_id": "entity-a39422ad7e973a18c834ad48bd59ba4f",
+        "entity_name": "OutboxProcessorConfig",
+        "score": 0.36206347
+      },
+      {
+        "entity_id": "entity-7e4c0fe80dd7bf349ab9650706c1d480",
+        "entity_name": "validate_database_name",
+        "score": 0.36192712
+      },
+      {
+        "entity_id": "entity-84e85940d6af0430ba1a06d7151ba837",
+        "entity_name": "test_file_snapshot_create_and_retrieve",
+        "score": 0.35855335
+      },
+      {
+        "entity_id": "entity-99cfc98868efd2b3468fa2d71d449234",
+        "entity_name": "IgnoreFilterBuilder",
+        "score": 0.35713044
+      },
+      {
+        "entity_id": "entity-5dbabebd730b8ffaa9d1781392130e77",
+        "entity_name": "PostgresClient",
+        "score": 0.3571304
+      },
+      {
+        "entity_id": "entity-4f5a8c14c755bfccac552319153e659f",
+        "entity_name": "test_function_with_doc_comments",
+        "score": 0.35459632
+      },
+      {
+        "entity_id": "entity-85b41899521237d918d0d8db0704a8f0",
+        "entity_name": "test_assertions_with_real_qdrant",
+        "score": 0.35179362
+      },
+      {
+        "entity_id": "entity-4f848a9201974dfd2a3b50fcbb5e9ea4",
+        "entity_name": "test_trait_with_associated_types",
+        "score": 0.35069805
+      },
+      {
+        "entity_id": "entity-3f95105a361519491fd78131fcb1c17f",
+        "entity_name": "OutboxProcessorConfig",
+        "score": 0.35006982
+      },
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.34528086
+      },
+      {
+        "entity_id": "entity-3f199f640bf869c8d88e202d79f26ff6",
+        "entity_name": "test_async_function",
+        "score": 0.3428342
+      },
+      {
+        "entity_id": "entity-7bb7d0a07f9b3ea4dd08230ce1de5b3e",
+        "entity_name": "get_point_count",
+        "score": 0.3421029
+      },
+      {
+        "entity_id": "entity-a204e1e66a19253adccda95c78c5caa0",
+        "entity_name": "entity_extraction",
+        "score": 0.3415227
+      }
+    ]
+  },
+  {
+    "query": "Check if Qdrant container is running",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-58c5fbad05f8ba6545819b7720b56351",
+        "entity_name": "is_qdrant_running",
+        "score": 0.72498804
+      },
+      {
+        "entity_id": "entity-c3c21d4949b9ec4a89a0edc0bce1cce8",
+        "entity_name": "is_shared_infrastructure_running",
+        "score": 0.5256766
+      },
+      {
+        "entity_id": "entity-1a9e38feb85959507cbb1d09270881b0",
+        "entity_name": "test_handle_file_change_detects_stale_entities",
+        "score": 0.5133508
+      },
+      {
+        "entity_id": "entity-d9de517998f513e74501c17c03818b21",
+        "entity_name": "LanguageConfiguration",
+        "score": 0.5011737
+      },
+      {
+        "entity_id": "entity-bb89494c1832a4657373c258a862dd96",
+        "entity_name": "is_vllm_running",
+        "score": 0.500195
+      },
+      {
+        "entity_id": "entity-a555a17283f393913789100dbaf2c246",
+        "entity_name": "wait_for_qdrant",
+        "score": 0.4987945
+      },
+      {
+        "entity_id": "entity-24e272b16a47a0719c88c2c6791e8bf7",
+        "entity_name": "check_qdrant_health",
+        "score": 0.4929073
+      },
+      {
+        "entity_id": "entity-d23772f46e18a8590aa64cf5e24044db",
+        "entity_name": "create_test_entity",
+        "score": 0.4880523
+      },
+      {
+        "entity_id": "entity-792c3163592e5b45353b20bd7c0ea9cc",
+        "entity_name": "is_postgres_running",
+        "score": 0.47992697
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.47359717
+      },
+      {
+        "entity_id": "entity-e77cfb3648ba790cfa907c49b237a37b",
+        "entity_name": "event_batcher",
+        "score": 0.46178257
+      },
+      {
+        "entity_id": "entity-ce37a211ecad763c2984a55aac7e8b9b",
+        "entity_name": "ensure_dependencies_running",
+        "score": 0.45550013
+      },
+      {
+        "entity_id": "entity-015f5f8ce41d71af3c36477474c67156",
+        "entity_name": "is_container_running",
+        "score": 0.4519235
+      },
+      {
+        "entity_id": "entity-c70d49e32e94ea5cbe9b16bfd686207a",
+        "entity_name": "repository_path",
+        "score": 0.42770326
+      },
+      {
+        "entity_id": "entity-effb08906b8b72e062a7fda39a7b815e",
+        "entity_name": "is_container_stopped",
+        "score": 0.4268309
+      },
+      {
+        "entity_id": "entity-0ab0f148d9e407d35b644dad00fb8dcd",
+        "entity_name": "tests",
+        "score": 0.42355835
+      },
+      {
+        "entity_id": "entity-05b7666ae6e240075cca2b0dfed8325a",
+        "entity_name": "stage_file_discovery",
+        "score": 0.42286962
+      },
+      {
+        "entity_id": "entity-1d7d62eb92dbdd7e75b52bca1339f9dc",
+        "entity_name": "node_kinds",
+        "score": 0.41992426
+      },
+      {
+        "entity_id": "entity-8c458b7ec2e97efab2465361b1622fc7",
+        "entity_name": "VISIBILITY_MODIFIER",
+        "score": 0.4192276
+      },
+      {
+        "entity_id": "entity-79b147d8d8bcd7f5e3c9762cf520ffc0",
+        "entity_name": "test_handle_file_change_writes_delete_to_outbox",
+        "score": 0.41434783
+      }
+    ]
+  },
+  {
+    "query": "Calculate a combined hash of all files that affect the outbox processor build\n\nThis includes:\n- All",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-0e1bb24846105e10477ac40f87a0a709",
+        "entity_name": "calculate_outbox_source_hash",
+        "score": 0.5964095
+      },
+      {
+        "entity_id": "entity-2d9abf3a79f4eb5c359cbb0a254f2c31",
+        "entity_name": "build_outbox_processor_image",
+        "score": 0.49440688
+      },
+      {
+        "entity_id": "entity-4b38cf2450718ba4671f3a70c655689b",
+        "entity_name": "FileBatch",
+        "score": 0.48413697
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.45696232
+      },
+      {
+        "entity_id": "entity-f607dbf4b6b29f63970306e3c117af12",
+        "entity_name": "EntityBatch",
+        "score": 0.41380036
+      },
+      {
+        "entity_id": "entity-20464a234d5d499abfa3cf280c35d439",
+        "entity_name": "get_logs",
+        "score": 0.34964058
+      },
+      {
+        "entity_id": "entity-79b147d8d8bcd7f5e3c9762cf520ffc0",
+        "entity_name": "test_handle_file_change_writes_delete_to_outbox",
+        "score": 0.34511012
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.34298232
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.34009194
+      },
+      {
+        "entity_id": "entity-ff7ba5f054afc736c8349dc1cceb8be8",
+        "entity_name": "cleanup",
+        "score": 0.33805782
+      },
+      {
+        "entity_id": "entity-62c9a33ee578ab5ea30ecf1b4a7bb972",
+        "entity_name": "test_handle_file_change_no_previous_snapshot",
+        "score": 0.3239521
+      },
+      {
+        "entity_id": "entity-908e89e1466aa8be2d33a52d73884101",
+        "entity_name": "start",
+        "score": 0.31955674
+      },
+      {
+        "entity_id": "entity-54960733c1ab955372255bca95f552c8",
+        "entity_name": "test_handle_file_change_no_changes",
+        "score": 0.31744435
+      },
+      {
+        "entity_id": "entity-6efeb4988a451918aa956e85eda283a7",
+        "entity_name": "test_full_indexing_pipeline",
+        "score": 0.30549902
+      },
+      {
+        "entity_id": "entity-7b889225bbf2b6ef73c047936678923f",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.30374768
+      },
+      {
+        "entity_id": "entity-912c5c1223e52573854d40425719ded9",
+        "entity_name": "test_complete_pipeline_with_real_embeddings",
+        "score": 0.30153567
+      },
+      {
+        "entity_id": "entity-dc49200532eb1599e19e7b1b6143aebb",
+        "entity_name": "max_batch_wait_time_ms",
+        "score": 0.29975682
+      },
+      {
+        "entity_id": "entity-286681e9404aa3ed97702b6caabe7c82",
+        "entity_name": "rest_url",
+        "score": 0.2996763
+      },
+      {
+        "entity_id": "entity-790516eddb7a16fc0819b261a7a73dc5",
+        "entity_name": "run_multi_repo_server",
+        "score": 0.29817197
+      },
+      {
+        "entity_id": "entity-53f2f4727dc1ce03208f031288eee539",
+        "entity_name": "connection_string",
+        "score": 0.29496965
+      }
+    ]
+  },
+  {
+    "query": "Library interface for codesearch CLI\n\nThis module exposes internal functions for integration",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.55008984
+      },
+      {
+        "entity_id": "entity-646338e67a1f66bcd6e231279338043a",
+        "entity_name": "test_builder_creates_files",
+        "score": 0.4007532
+      },
+      {
+        "entity_id": "entity-284f92bc06bf3039d1d469fc7f2e6831",
+        "entity_name": "test_expected_entity_matches",
+        "score": 0.39014962
+      },
+      {
+        "entity_id": "entity-148e7f5ce20ce3d93689cccb57e69fda",
+        "entity_name": "clear_cache",
+        "score": 0.37322196
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.372734
+      },
+      {
+        "entity_id": "entity-83ec08b29496a9d1302d5ed3074578c6",
+        "entity_name": "workspace_manifest",
+        "score": 0.36978665
+      },
+      {
+        "entity_id": "entity-dd6f6459e25352edb3521f6c3fc1aa71",
+        "entity_name": "processor",
+        "score": 0.36338264
+      },
+      {
+        "entity_id": "entity-5ded9c468dd54afebbfbc0effb221d2c",
+        "entity_name": "main",
+        "score": 0.35823798
+      },
+      {
+        "entity_id": "entity-b8a5229af402243c7f64fb2f5c0761da",
+        "entity_name": "extract_generics_from_node",
+        "score": 0.35188103
+      },
+      {
+        "entity_id": "entity-d3241d8aee54e8bf9d38ea0306ef05f3",
+        "entity_name": "fixtures",
+        "score": 0.34778017
+      },
+      {
+        "entity_id": "entity-eb0a94d4af240bd96e6e9c0f158dd48e",
+        "entity_name": "debounce_duration",
+        "score": 0.34750214
+      },
+      {
+        "entity_id": "entity-96eb2eaf44664d7dc2a4e14e7ded7415",
+        "entity_name": "OutboxProcessor",
+        "score": 0.34713215
+      },
+      {
+        "entity_id": "entity-fc1a2a2fb70969d655f2e29509c12f91",
+        "entity_name": "create_embedding_manager",
+        "score": 0.347113
+      },
+      {
+        "entity_id": "entity-12c4175461bc7dae05a07b3e4b64005c",
+        "entity_name": "OutboxProcessor",
+        "score": 0.3438559
+      },
+      {
+        "entity_id": "entity-36affdb84b152f03c8fccd093c47a06c",
+        "entity_name": "test_multi_file_repo_has_all_files",
+        "score": 0.3435638
+      },
+      {
+        "entity_id": "entity-a0ff3e72799d2f135f9ba80a1657f0f5",
+        "entity_name": "collect_doc_lines",
+        "score": 0.3402385
+      },
+      {
+        "entity_id": "entity-b0a11af585323500723017b139d4e6d7",
+        "entity_name": "batch_timeout_duration",
+        "score": 0.3394029
+      },
+      {
+        "entity_id": "entity-62a20cce80559e197100162cb69cfed7",
+        "entity_name": "infrastructure",
+        "score": 0.33935815
+      },
+      {
+        "entity_id": "entity-47c7ea1d226055d21560c40d4c938b68",
+        "entity_name": "verify_cleanup",
+        "score": 0.33854496
+      },
+      {
+        "entity_id": "entity-24cb440d99c160f8982e71fd235a73e1",
+        "entity_name": "get_entity_metadata",
+        "score": 0.3377532
+      }
+    ]
+  },
+  {
+    "query": "Ensure storage is initialized, creating config and collection if needed\n\nThis function orchestrates",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-b391334566d4e9e6d81ea830c09846e1",
+        "entity_name": "test_creates_config_file_if_missing",
+        "score": 0.5141595
+      },
+      {
+        "entity_id": "entity-ba6d1d454f10a84018b6885fdeeec821",
+        "entity_name": "ensure_storage_initialized",
+        "score": 0.5053681
+      },
+      {
+        "entity_id": "entity-45bac84fd4ad0db57042947bfcb6ac35",
+        "entity_name": "test_generates_collection_name",
+        "score": 0.45846057
+      },
+      {
+        "entity_id": "entity-3a94d54ab8afcc3e7edecafaf1c5366b",
+        "entity_name": "initialize_collection",
+        "score": 0.45298183
+      },
+      {
+        "entity_id": "entity-0ac7d5ce518ec58959ae6fddee8b8b77",
+        "entity_name": "storage_init_tests",
+        "score": 0.43105054
+      },
+      {
+        "entity_id": "entity-c497cc53885343eecd509d69c054073c",
+        "entity_name": "test_repository_registration_success",
+        "score": 0.421548
+      },
+      {
+        "entity_id": "entity-7e48d96a583ec47fbb5b892497303915",
+        "entity_name": "test_collection_name_determinism",
+        "score": 0.41935962
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.405287
+      },
+      {
+        "entity_id": "entity-7f69e9c2b72bbfef5b262a91b34b7634",
+        "entity_name": "ATTRIBUTE_ITEM",
+        "score": 0.3941452
+      },
+      {
+        "entity_id": "entity-3eebed42b09a1fffb2394e344af24b43",
+        "entity_name": "test_collection_name_with_special_chars",
+        "score": 0.39355174
+      },
+      {
+        "entity_id": "entity-c7dc031180efaf87a4602581b5383cb0",
+        "entity_name": "test_collection_name_uniqueness",
+        "score": 0.38919026
+      },
+      {
+        "entity_id": "entity-66bd6d9246d1ab511b0ab8cb62c135fb",
+        "entity_name": "create_test_config",
+        "score": 0.38671383
+      },
+      {
+        "entity_id": "entity-712a4dcc31b54305524675a9941b6516",
+        "entity_name": "new",
+        "score": 0.3825614
+      },
+      {
+        "entity_id": "entity-8834f0a9e03bfb5b02461d4a1791ce43",
+        "entity_name": "StorageConfig",
+        "score": 0.38037875
+      },
+      {
+        "entity_id": "entity-9f28a259c34ed2e2a06f117f8027698b",
+        "entity_name": "create_collection_manager_with_retry",
+        "score": 0.37880617
+      },
+      {
+        "entity_id": "entity-15c3a949deb7f805cd6ad187001aea80",
+        "entity_name": "EntityMetadata",
+        "score": 0.37553805
+      },
+      {
+        "entity_id": "entity-7519d4cbcd1eb05f1f692702a94b404b",
+        "entity_name": "test_collection_name_length_limits",
+        "score": 0.37467283
+      },
+      {
+        "entity_id": "entity-61b326a346fdbf6cc791cb9f4a348c12",
+        "entity_name": "assertions",
+        "score": 0.3697187
+      },
+      {
+        "entity_id": "entity-8440b8ac09182252d79285158bba84d8",
+        "entity_name": "rest_port",
+        "score": 0.36797875
+      },
+      {
+        "entity_id": "entity-049c9d1372ac7536bf3212f91d637914",
+        "entity_name": "test_generate_collection_name_deterministic",
+        "score": 0.36592054
+      }
+    ]
+  },
+  {
+    "query": "Build outbox-processor Docker image from current directory\n\nIMPORTANT: This function requires",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-2d9abf3a79f4eb5c359cbb0a254f2c31",
+        "entity_name": "build_outbox_processor_image",
+        "score": 0.6800854
+      },
+      {
+        "entity_id": "entity-4b38cf2450718ba4671f3a70c655689b",
+        "entity_name": "FileBatch",
+        "score": 0.67826664
+      },
+      {
+        "entity_id": "entity-f607dbf4b6b29f63970306e3c117af12",
+        "entity_name": "EntityBatch",
+        "score": 0.66012156
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.5867612
+      },
+      {
+        "entity_id": "entity-79b147d8d8bcd7f5e3c9762cf520ffc0",
+        "entity_name": "test_handle_file_change_writes_delete_to_outbox",
+        "score": 0.50740147
+      },
+      {
+        "entity_id": "entity-54960733c1ab955372255bca95f552c8",
+        "entity_name": "test_handle_file_change_no_changes",
+        "score": 0.49750626
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.49453405
+      },
+      {
+        "entity_id": "entity-0e1bb24846105e10477ac40f87a0a709",
+        "entity_name": "calculate_outbox_source_hash",
+        "score": 0.48177487
+      },
+      {
+        "entity_id": "entity-abd134466e952b79e8172a6a27f25bbb",
+        "entity_name": "create_test_embedding_manager",
+        "score": 0.47168326
+      },
+      {
+        "entity_id": "entity-62c9a33ee578ab5ea30ecf1b4a7bb972",
+        "entity_name": "test_handle_file_change_no_previous_snapshot",
+        "score": 0.44600898
+      },
+      {
+        "entity_id": "entity-13c11ba2162dbfdd819a5cc9c8999c8e",
+        "entity_name": "test_handle_file_change_updates_snapshot_with_git_commit",
+        "score": 0.42932323
+      },
+      {
+        "entity_id": "entity-286681e9404aa3ed97702b6caabe7c82",
+        "entity_name": "rest_url",
+        "score": 0.41119152
+      },
+      {
+        "entity_id": "entity-bc58dc28fc967b44b47e2ee18210c85b",
+        "entity_name": "get_image_source_hash",
+        "score": 0.40959764
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.3948186
+      },
+      {
+        "entity_id": "entity-908e89e1466aa8be2d33a52d73884101",
+        "entity_name": "start",
+        "score": 0.38672724
+      },
+      {
+        "entity_id": "entity-c3c21d4949b9ec4a89a0edc0bce1cce8",
+        "entity_name": "is_shared_infrastructure_running",
+        "score": 0.38305604
+      },
+      {
+        "entity_id": "entity-f9505aa9aa2e9d4f50e8adf1e43622a6",
+        "entity_name": "docker",
+        "score": 0.37836114
+      },
+      {
+        "entity_id": "entity-7b9768177458ce220bdfae1c66846982",
+        "entity_name": "TestQdrant",
+        "score": 0.36592335
+      },
+      {
+        "entity_id": "entity-6efeb4988a451918aa956e85eda283a7",
+        "entity_name": "test_full_indexing_pipeline",
+        "score": 0.3651352
+      },
+      {
+        "entity_id": "entity-2375a58fab1d46ab1db38616fa1ed187",
+        "entity_name": "INFRASTRUCTURE_COMPOSE",
+        "score": 0.35601375
+      }
+    ]
+  },
+  {
+    "query": "Check if the batch is empty",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-076e2447d52f8e938c73ebac7ebb3ca1",
+        "entity_name": "test_bulk_load_entities",
+        "score": 0.53567576
+      },
+      {
+        "entity_id": "entity-8d8ddee47e8568205f31b9c8dcd55cc7",
+        "entity_name": "test_search_similar_with_file_path_filter",
+        "score": 0.3909679
+      },
+      {
+        "entity_id": "entity-49057684934c50b1c221f4df9f7a1d16",
+        "entity_name": "test_search_similar_with_language_filter",
+        "score": 0.3638211
+      },
+      {
+        "entity_id": "entity-b70a687e43f7098a8cdf02074c51c06c",
+        "entity_name": "test_connection_failure",
+        "score": 0.35663408
+      },
+      {
+        "entity_id": "entity-9deb0d76458ae3cd33071ecb658e24dc",
+        "entity_name": "common",
+        "score": 0.33692348
+      },
+      {
+        "entity_id": "entity-5f0bb90134baf0438e1fce712cfba27a",
+        "entity_name": "snapshot_count",
+        "score": 0.32202315
+      },
+      {
+        "entity_id": "entity-1c471e15afff87093420c865a66507d6",
+        "entity_name": "builder",
+        "score": 0.32010219
+      },
+      {
+        "entity_id": "entity-d6f1cbc73f805a03e7f6b690ec39e487",
+        "entity_name": "setup_qdrant",
+        "score": 0.31053555
+      },
+      {
+        "entity_id": "entity-9613a42c9052c7d945976672428e6322",
+        "entity_name": "test_search_similar_with_entity_type_filter",
+        "score": 0.30291766
+      },
+      {
+        "entity_id": "entity-08b82de70fc794104a288e7c9ce6f943",
+        "entity_name": "common",
+        "score": 0.29498923
+      },
+      {
+        "entity_id": "entity-181dc248b558722d25ff7aad10e7c0db",
+        "entity_name": "test_search_similar_no_filters",
+        "score": 0.29055265
+      },
+      {
+        "entity_id": "entity-4646b06fbd2f191f7fe31e6ea63ad329",
+        "entity_name": "default_files_per_discovery_batch",
+        "score": 0.28582525
+      },
+      {
+        "entity_id": "entity-15129bfb757d651e2ae525f7b1c2b2a2",
+        "entity_name": "test_empty_source",
+        "score": 0.2855755
+      },
+      {
+        "entity_id": "entity-1594a096cbf962d8ae19c5b32af772c3",
+        "entity_name": "test_transaction_rollback",
+        "score": 0.28418487
+      },
+      {
+        "entity_id": "entity-32b01d82ee01c6b03addc499ec0882e2",
+        "entity_name": "create_test_repository",
+        "score": 0.27862087
+      },
+      {
+        "entity_id": "entity-d521a2d78d8c0974d0c80fe18c8b2a6f",
+        "entity_name": "test_max_queued_events_increased",
+        "score": 0.2778387
+      },
+      {
+        "entity_id": "entity-6efeb4988a451918aa956e85eda283a7",
+        "entity_name": "test_full_indexing_pipeline",
+        "score": 0.2773569
+      },
+      {
+        "entity_id": "entity-957f9e8ede48198fdac66918e3732290",
+        "entity_name": "default_entities_per_embedding_batch",
+        "score": 0.2733022
+      },
+      {
+        "entity_id": "entity-03f3209a3c053c23e439419922bd7779",
+        "entity_name": "test_outbox_record_failure",
+        "score": 0.27296886
+      },
+      {
+        "entity_id": "entity-d258c45fe4385f697f301377623ed84a",
+        "entity_name": "default_auto_start_deps",
+        "score": 0.26757777
+      }
+    ]
+  },
+  {
+    "query": "RAII guard for file locking (duplicated from infrastructure",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-e2b63f4cb3eab2ce6568bfb8fde0d6dd",
+        "entity_name": "LockGuard",
+        "score": 0.6438745
+      },
+      {
+        "entity_id": "entity-3c72e3bc4fb24a7297402e31f4c3dd4f",
+        "entity_name": "LockGuard",
+        "score": 0.639235
+      },
+      {
+        "entity_id": "entity-73472aef2051e63538a0116d482436e8",
+        "entity_name": "test_lock_guard_auto_releases",
+        "score": 0.5304522
+      },
+      {
+        "entity_id": "entity-0960b1ec99b5d50907ed427997afa496",
+        "entity_name": "LockGuard",
+        "score": 0.49030995
+      },
+      {
+        "entity_id": "entity-c4090f6af5f841a9403114fe9c2508bf",
+        "entity_name": "LockGuard",
+        "score": 0.48531407
+      },
+      {
+        "entity_id": "entity-7745e71d5ce26a4680f78480368963bf",
+        "entity_name": "test_lock_file_prevents_concurrent_access",
+        "score": 0.4805722
+      },
+      {
+        "entity_id": "entity-f48c867e3149ceafd1a88c66f1f307fa",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.46969163
+      },
+      {
+        "entity_id": "entity-7492217d60003e21baaa0153b27c4b4d",
+        "entity_name": "test_concurrent_lock_attempts_from_multiple_threads",
+        "score": 0.4342508
+      },
+      {
+        "entity_id": "entity-f38e787c16919d0168b6526a7f7913a0",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.4335561
+      },
+      {
+        "entity_id": "entity-3f8e790bee9d3655ec71fb053fe89860",
+        "entity_name": "ensure_shared_infrastructure",
+        "score": 0.41998592
+      },
+      {
+        "entity_id": "entity-eaac5fd2666ee773e942319c2592646b",
+        "entity_name": "get_lock_file_path",
+        "score": 0.36611646
+      },
+      {
+        "entity_id": "entity-007c694e24fd5a918f1da293220fbcc8",
+        "entity_name": "extract_line_doc_text",
+        "score": 0.3532891
+      },
+      {
+        "entity_id": "entity-62a20cce80559e197100162cb69cfed7",
+        "entity_name": "infrastructure",
+        "score": 0.34134418
+      },
+      {
+        "entity_id": "entity-85c5cb1e15a265e987e6c9bbecc7ab65",
+        "entity_name": "test_index_stats_merge",
+        "score": 0.31082386
+      },
+      {
+        "entity_id": "entity-6fb85610f48156d9f8fbc4f7eaa693e8",
+        "entity_name": "test_index_stats_merge_with_empty",
+        "score": 0.30559444
+      },
+      {
+        "entity_id": "entity-1d376a987603b82af6cd0743f74c642a",
+        "entity_name": "tests",
+        "score": 0.30203098
+      },
+      {
+        "entity_id": "entity-b4a5202320711c6f2694676efb9f97ce",
+        "entity_name": "DELIM",
+        "score": 0.29313332
+      },
+      {
+        "entity_id": "entity-2375a58fab1d46ab1db38616fa1ed187",
+        "entity_name": "INFRASTRUCTURE_COMPOSE",
+        "score": 0.29236367
+      },
+      {
+        "entity_id": "entity-b36bbd67467f09ac1a535303a0401544",
+        "entity_name": "node_to_text",
+        "score": 0.28772816
+      },
+      {
+        "entity_id": "entity-031dd5d1337ecc2a5ee1710cc612a42f",
+        "entity_name": "CodeSearchMcpServer",
+        "score": 0.28743687
+      }
+    ]
+  },
+  {
+    "query": "Get the timeout duration",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-181dc248b558722d25ff7aad10e7c0db",
+        "entity_name": "test_search_similar_no_filters",
+        "score": 0.5529871
+      },
+      {
+        "entity_id": "entity-b65b04398c2a79acf1f66d1abd369ca4",
+        "entity_name": "test_mock_ensure_repository",
+        "score": 0.51037925
+      },
+      {
+        "entity_id": "entity-8b88b65da3a46ae4f309a98538ccde5e",
+        "entity_name": "create_test_entity",
+        "score": 0.4408535
+      },
+      {
+        "entity_id": "entity-5d8da52841a7477ac44732a8ad83e643",
+        "entity_name": "default_debounce_ms",
+        "score": 0.42624244
+      },
+      {
+        "entity_id": "entity-eff6dd978bdb3b32a73766b1c008e7bc",
+        "entity_name": "test_delete_entities",
+        "score": 0.42213216
+      },
+      {
+        "entity_id": "entity-7808de85aa41002454a6f0d764e0a79b",
+        "entity_name": "MAX_DOC_LINES",
+        "score": 0.4084554
+      },
+      {
+        "entity_id": "entity-58e959154dc89dc309fc3b179a65f07d",
+        "entity_name": "CLOSE_ANGLE",
+        "score": 0.37741017
+      },
+      {
+        "entity_id": "entity-e4f48ea52ec5f4040e0001d986c8c4c7",
+        "entity_name": "RETRY_DELAY_SECS",
+        "score": 0.36392164
+      },
+      {
+        "entity_id": "entity-7f5fa72a246f6caa034e1a4f917bb001",
+        "entity_name": "TRAIT",
+        "score": 0.3462332
+      },
+      {
+        "entity_id": "entity-32f0ff6a39eb55f77fe1e5500b926461",
+        "entity_name": "simple_rust_repo",
+        "score": 0.34618998
+      },
+      {
+        "entity_id": "entity-9db43b4a5d7c43c1a746e151ca543f64",
+        "entity_name": "COMMA",
+        "score": 0.33123446
+      },
+      {
+        "entity_id": "entity-bf2c725cd8b9189dbb522b6f65dc3916",
+        "entity_name": "test_simple_repo_has_expected_structure",
+        "score": 0.32835478
+      },
+      {
+        "entity_id": "entity-801e307e8d3a882bab973d6ebdd58b17",
+        "entity_name": "FilterConfig",
+        "score": 0.32403597
+      },
+      {
+        "entity_id": "entity-f38e787c16919d0168b6526a7f7913a0",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.32248402
+      },
+      {
+        "entity_id": "entity-f48c867e3149ceafd1a88c66f1f307fa",
+        "entity_name": "try_lock_exclusive",
+        "score": 0.32012835
+      },
+      {
+        "entity_id": "entity-44c1e98e14bd1490eca5816e86096bbf",
+        "entity_name": "payload_to_minimal_entity",
+        "score": 0.3193227
+      },
+      {
+        "entity_id": "entity-a555a17283f393913789100dbaf2c246",
+        "entity_name": "wait_for_qdrant",
+        "score": 0.3188517
+      },
+      {
+        "entity_id": "entity-03f3209a3c053c23e439419922bd7779",
+        "entity_name": "test_outbox_record_failure",
+        "score": 0.31849506
+      },
+      {
+        "entity_id": "entity-59eec104d8c882bea3fcae0eb76b8531",
+        "entity_name": "default_server_port",
+        "score": 0.31510928
+      },
+      {
+        "entity_id": "entity-d4ca82813836d167e4880978a5a71af6",
+        "entity_name": "test_handle_file_change_detects_renamed_function",
+        "score": 0.3144423
+      }
+    ]
+  },
+  {
+    "query": "Get the current scope path as a string",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-47045637b8a5e2758343292eb00fd825",
+        "entity_name": "current_scope_path",
+        "score": 0.62252367
+      },
+      {
+        "entity_id": "entity-d9739dd1245ef8d0a9f145ff0e85ea6a",
+        "entity_name": "test_scope_context",
+        "score": 0.45415395
+      },
+      {
+        "entity_id": "entity-03cf5e5f16bc861650e5830c5c4cd095",
+        "entity_name": "build_qualified_name",
+        "score": 0.4377955
+      },
+      {
+        "entity_id": "entity-4c0dc5d364fffc0c32339e260c40bb92",
+        "entity_name": "ScopeContext",
+        "score": 0.41443563
+      },
+      {
+        "entity_id": "entity-b75c344c39d1cebad7161b8d87284746",
+        "entity_name": "test_file_module",
+        "score": 0.37891167
+      },
+      {
+        "entity_id": "entity-25c1c05ef5646297e9d596cd3cd7e21c",
+        "entity_name": "test_public_module",
+        "score": 0.3640989
+      },
+      {
+        "entity_id": "entity-26a2caadd05242a5cd682901c25cbe75",
+        "entity_name": "test_inherent_impl_simple",
+        "score": 0.35973012
+      },
+      {
+        "entity_id": "entity-5223180e21570842f45829cd72a8b1a0",
+        "entity_name": "tests",
+        "score": 0.34951612
+      },
+      {
+        "entity_id": "entity-288265f49ba394be2a6f0d1e8151b196",
+        "entity_name": "ScopeContext",
+        "score": 0.3482327
+      },
+      {
+        "entity_id": "entity-f77b67258e8c2bf599d795be358ff447",
+        "entity_name": "constant_handlers",
+        "score": 0.34483057
+      },
+      {
+        "entity_id": "entity-07549ccb55bf4d6cd3eb6b61095ecdc2",
+        "entity_name": "default_provider",
+        "score": 0.3433969
+      },
+      {
+        "entity_id": "entity-7fe6a02e468b21c6c770ebfe74283a2a",
+        "entity_name": "push_scope",
+        "score": 0.34179127
+      },
+      {
+        "entity_id": "entity-926144b9a39340464ba79e21a81b48b0",
+        "entity_name": "test_function_with_complex_parameters",
+        "score": 0.3410207
+      },
+      {
+        "entity_id": "entity-236f16d0f750bb13dc0f553b40996889",
+        "entity_name": "test_complex_type_alias",
+        "score": 0.33084047
+      },
+      {
+        "entity_id": "entity-4b5f3aa467dd3ff075908eca03386635",
+        "entity_name": "test_const_with_doc_comments",
+        "score": 0.3261974
+      },
+      {
+        "entity_id": "entity-347f7297dc20984876a8fca48853ffb0",
+        "entity_name": "test_trait_impl",
+        "score": 0.32345304
+      },
+      {
+        "entity_id": "entity-d44ecf7be9babe8b3ba286f0d820af26",
+        "entity_name": "test_generic_impl",
+        "score": 0.32339847
+      },
+      {
+        "entity_id": "entity-826b82c3524a85381b54da55b718bd63",
+        "entity_name": "test_public_type_alias",
+        "score": 0.32333314
+      },
+      {
+        "entity_id": "entity-6b34c85f8c75a330603001b83dc78d7f",
+        "entity_name": "default_device",
+        "score": 0.31810546
+      },
+      {
+        "entity_id": "entity-5ee353eec678b42cadd92adeba992fb0",
+        "entity_name": "tests",
+        "score": 0.31315017
+      }
+    ]
+  },
+  {
+    "query": "Main trait for repository indexing",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-b0bdc70a605e5ec3385b0ad279a24bc4",
+        "entity_name": "default_ignore_patterns",
+        "score": 0.6176459
+      },
+      {
+        "entity_id": "entity-eb0a94d4af240bd96e6e9c0f158dd48e",
+        "entity_name": "debounce_duration",
+        "score": 0.49567747
+      },
+      {
+        "entity_id": "entity-f0b9de2198d128024479081cb8b88cd6",
+        "entity_name": "process_event",
+        "score": 0.4535109
+      },
+      {
+        "entity_id": "entity-c3c6c70389c4ac37147fb75108764e3c",
+        "entity_name": "index_repository",
+        "score": 0.45336995
+      },
+      {
+        "entity_id": "entity-a451421155f5cfca0ab71e96f2807aa8",
+        "entity_name": "test_watcher_config_builder",
+        "score": 0.40568736
+      },
+      {
+        "entity_id": "entity-1f83994d10dd08ca8b86a758c8a9efae",
+        "entity_name": "flush",
+        "score": 0.40203965
+      },
+      {
+        "entity_id": "entity-418260c72ac456ed680672d1529076dd",
+        "entity_name": "new",
+        "score": 0.39815784
+      },
+      {
+        "entity_id": "entity-1c7d1f5db6dde0f27b0b72ead8bc9cc9",
+        "entity_name": "qdrant",
+        "score": 0.3840105
+      },
+      {
+        "entity_id": "entity-afa9bea8c261ad54bf51dab788d2b608",
+        "entity_name": "complex_rust_repo",
+        "score": 0.3832193
+      },
+      {
+        "entity_id": "entity-e10b3534c1a37499fca7194df6851c12",
+        "entity_name": "pending_count",
+        "score": 0.38086694
+      },
+      {
+        "entity_id": "entity-83ec08b29496a9d1302d5ed3074578c6",
+        "entity_name": "workspace_manifest",
+        "score": 0.37823457
+      },
+      {
+        "entity_id": "entity-5223180e21570842f45829cd72a8b1a0",
+        "entity_name": "tests",
+        "score": 0.37726972
+      },
+      {
+        "entity_id": "entity-cdad5f2bd316e66ba7ec0030ea79b2fb",
+        "entity_name": "bulk_record_failures_in_tx",
+        "score": 0.35652822
+      },
+      {
+        "entity_id": "entity-b0a11af585323500723017b139d4e6d7",
+        "entity_name": "batch_timeout_duration",
+        "score": 0.34495127
+      },
+      {
+        "entity_id": "entity-61b326a346fdbf6cc791cb9f4a348c12",
+        "entity_name": "assertions",
+        "score": 0.33884782
+      },
+      {
+        "entity_id": "entity-36affdb84b152f03c8fccd093c47a06c",
+        "entity_name": "test_multi_file_repo_has_all_files",
+        "score": 0.33760172
+      },
+      {
+        "entity_id": "entity-bb0f02083ad8b628643b33c31967e940",
+        "entity_name": "test_concurrent_snapshot_updates",
+        "score": 0.33750606
+      },
+      {
+        "entity_id": "entity-646338e67a1f66bcd6e231279338043a",
+        "entity_name": "test_builder_creates_files",
+        "score": 0.3371082
+      },
+      {
+        "entity_id": "entity-63034d8011668ec6303278ee1afca911",
+        "entity_name": "add_ignore_pattern",
+        "score": 0.33628017
+      },
+      {
+        "entity_id": "entity-5ded9c468dd54afebbfbc0effb221d2c",
+        "entity_name": "main",
+        "score": 0.33310223
+      }
+    ]
+  },
+  {
+    "query": "Set the API key",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-70ada4367a343bcde66d33876f29eaa7",
+        "entity_name": "api_key",
+        "score": 0.5179906
+      },
+      {
+        "entity_id": "entity-8c48266804f5934faba41235a61cf154",
+        "entity_name": "api_base_url",
+        "score": 0.37946564
+      },
+      {
+        "entity_id": "entity-126bdc0f300c1009f6dd3d8406c95a46",
+        "entity_name": "max_concurrent_api_requests",
+        "score": 0.3484077
+      },
+      {
+        "entity_id": "entity-0ac1958fb91963306e0b57f1ec21823b",
+        "entity_name": "DEFAULT_API_BASE_URL",
+        "score": 0.3477729
+      },
+      {
+        "entity_id": "entity-10930b6b7d1c68925140ebb1680febcf",
+        "entity_name": "texts_per_api_request",
+        "score": 0.34268498
+      },
+      {
+        "entity_id": "entity-483ea3636e9ecad43467cb8a1ce1c6c8",
+        "entity_name": "default_api_base_url",
+        "score": 0.30415976
+      },
+      {
+        "entity_id": "entity-ca93ef24007db3b86240e1a5ca83c9f2",
+        "entity_name": "api_provider",
+        "score": 0.29738933
+      },
+      {
+        "entity_id": "entity-45186342d74fe6608f2fc72523803948",
+        "entity_name": "DEFAULT_PROVIDER",
+        "score": 0.29499626
+      },
+      {
+        "entity_id": "entity-db8e4f5eb110e1e10c7b3430a1047ef3",
+        "entity_name": "default_max_concurrent_api_requests",
+        "score": 0.28869182
+      },
+      {
+        "entity_id": "entity-3d7fb02247f5f211e0b94e87eeda8843",
+        "entity_name": "default_texts_per_api_request",
+        "score": 0.28665993
+      },
+      {
+        "entity_id": "entity-02062ef5f38acd68abee01501982ad41",
+        "entity_name": "OpenAiApiProvider",
+        "score": 0.28327298
+      },
+      {
+        "entity_id": "entity-af4719f602cc1d75c099494cfba9ec00",
+        "entity_name": "EmbeddingsConfig",
+        "score": 0.28234857
+      },
+      {
+        "entity_id": "entity-497fb7ec9a5ecfa8309038c12813e250",
+        "entity_name": "EmbeddingConfig",
+        "score": 0.2779153
+      },
+      {
+        "entity_id": "entity-3a06f4b8cf591947c5c307ff9cd270bf",
+        "entity_name": "new",
+        "score": 0.26767015
+      },
+      {
+        "entity_id": "entity-c810809858b884cc9387bf7bbc6d84e4",
+        "entity_name": "EmbeddingConfigBuilder",
+        "score": 0.2601054
+      },
+      {
+        "entity_id": "entity-61ac82e8443e2928be5ad23b8d190845",
+        "entity_name": "with_env_var",
+        "score": 0.25727972
+      },
+      {
+        "entity_id": "entity-7281b82e759ee9e0a6387cbff988eb37",
+        "entity_name": "new",
+        "score": 0.25482568
+      },
+      {
+        "entity_id": "entity-9d7564632a1f31decda3be99f9d52fc3",
+        "entity_name": "DEFAULT_MODEL",
+        "score": 0.25430584
+      },
+      {
+        "entity_id": "entity-3d7d34d2a173077c561da8f2461eea9b",
+        "entity_name": "provider",
+        "score": 0.25330296
+      },
+      {
+        "entity_id": "entity-6ced9e14c80995f3b50d1f6cf63bbbc6",
+        "entity_name": "new",
+        "score": 0.2528571
+      }
+    ]
+  },
+  {
+    "query": "Run catch-up indexing based on git diff\n\nThis compares the last indexed commit with the current",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-5ced0442276e81ac3ac6e6309be6ff74",
+        "entity_name": "catch_up_from_git",
+        "score": 0.5646707
+      },
+      {
+        "entity_id": "entity-b0a11af585323500723017b139d4e6d7",
+        "entity_name": "batch_timeout_duration",
+        "score": 0.36990547
+      },
+      {
+        "entity_id": "entity-cdad5f2bd316e66ba7ec0030ea79b2fb",
+        "entity_name": "bulk_record_failures_in_tx",
+        "score": 0.3528226
+      },
+      {
+        "entity_id": "entity-4008f47b130a78be3f899b978e1adf42",
+        "entity_name": "function_handlers",
+        "score": 0.34220016
+      },
+      {
+        "entity_id": "entity-f1bbc2aea15ce140ac2ebd61ad266a96",
+        "entity_name": "write_to_qdrant_insert_update",
+        "score": 0.327874
+      },
+      {
+        "entity_id": "entity-8cea4d65d065ad3565c8001d92ead39b",
+        "entity_name": "is_outbox_image_up_to_date",
+        "score": 0.31740186
+      },
+      {
+        "entity_id": "entity-728a3f2d51663f36a654d68a007473d0",
+        "entity_name": "test_const_function_call",
+        "score": 0.30585903
+      },
+      {
+        "entity_id": "entity-949850dddf9f16885936f67bbfb74a50",
+        "entity_name": "with_snapshot_update_concurrency",
+        "score": 0.30166262
+      },
+      {
+        "entity_id": "entity-c3c6c70389c4ac37147fb75108764e3c",
+        "entity_name": "index_repository",
+        "score": 0.30122638
+      },
+      {
+        "entity_id": "entity-c0bcd4521cf3d39b09ef7e9bc6b424c1",
+        "entity_name": "test_connection_pool_exhaustion",
+        "score": 0.29954594
+      },
+      {
+        "entity_id": "entity-714f112e2a346582d2812bc5bc20cacb",
+        "entity_name": "impl_handlers",
+        "score": 0.29003352
+      },
+      {
+        "entity_id": "entity-6d5f097b214996c7aaec14b8b68b4e07",
+        "entity_name": "is_method",
+        "score": 0.2840284
+      },
+      {
+        "entity_id": "entity-f3cd7585c23e95eec5549a69eef06af9",
+        "entity_name": "test_public_const",
+        "score": 0.28031275
+      },
+      {
+        "entity_id": "entity-08b82de70fc794104a288e7c9ce6f943",
+        "entity_name": "common",
+        "score": 0.27936465
+      },
+      {
+        "entity_id": "entity-83f9d60cf840e8e9aeedd9044aee7e26",
+        "entity_name": "CatchUpStats",
+        "score": 0.27878132
+      },
+      {
+        "entity_id": "entity-41bfeabd7d1af6e4ab112352b4a9a57a",
+        "entity_name": "QdrantCollectionManager",
+        "score": 0.27804118
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.27759308
+      },
+      {
+        "entity_id": "entity-32e8876cc08a057b4dec62db92bf3a94",
+        "entity_name": "test_unicode_identifiers",
+        "score": 0.2763753
+      },
+      {
+        "entity_id": "entity-23b4747f11b5717f5bee37c831b2b6d4",
+        "entity_name": "test_const_with_complex_value",
+        "score": 0.273688
+      },
+      {
+        "entity_id": "entity-afe482048221ab5e2cbba5e0148ee0c7",
+        "entity_name": "UNSAFE",
+        "score": 0.2732344
+      }
+    ]
+  },
+  {
+    "query": "Create stats with specific values (for internal use)",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-9f4f25812e1b40f28bb4f5f97753a8df",
+        "entity_name": "is_size_valid",
+        "score": 0.52451897
+      },
+      {
+        "entity_id": "entity-8857812e03c671b7690880bdb0d50c15",
+        "entity_name": "recursive_depth",
+        "score": 0.38451514
+      },
+      {
+        "entity_id": "entity-8e69dd550b0c85e6feb537dab1153eca",
+        "entity_name": "events_per_batch",
+        "score": 0.35708183
+      },
+      {
+        "entity_id": "entity-a1f76140618d88e0bc735ee72e914d01",
+        "entity_name": "ASYNC",
+        "score": 0.34751898
+      },
+      {
+        "entity_id": "entity-ee4362db8c2674018fb61d5d4cb5c5be",
+        "entity_name": "test_default_ignore_patterns_includes_editor_temp_files",
+        "score": 0.314309
+      },
+      {
+        "entity_id": "entity-b8c69a39882282477573c9bff515f250",
+        "entity_name": "test_mark_entities_deleted_batch_size_limit",
+        "score": 0.30851108
+      },
+      {
+        "entity_id": "entity-c518a57d216f2398db5bf93c46d5de86",
+        "entity_name": "test_concurrent_bulk_loads",
+        "score": 0.30843282
+      },
+      {
+        "entity_id": "entity-519986d193fe8855237c8152691268a1",
+        "entity_name": "test_bulk_load_empty_list",
+        "score": 0.30556327
+      },
+      {
+        "entity_id": "entity-360cbfcf084a0d308534c8b98c73e1a6",
+        "entity_name": "test_delete_entities_empty_list",
+        "score": 0.30223203
+      },
+      {
+        "entity_id": "entity-63034d8011668ec6303278ee1afca911",
+        "entity_name": "add_ignore_pattern",
+        "score": 0.30114356
+      },
+      {
+        "entity_id": "entity-7e2c8ef1dbfa76e801363f8ae1c7c8f6",
+        "entity_name": "should_include_hidden_file",
+        "score": 0.30110502
+      },
+      {
+        "entity_id": "entity-f0ceb9f202b71cf3d6b6f1e78b8168a7",
+        "entity_name": "RecoveryConfig",
+        "score": 0.29625955
+      },
+      {
+        "entity_id": "entity-8cea2e6998d401f7d1980b947b9ab6ca",
+        "entity_name": "function_modifiers",
+        "score": 0.29278523
+      },
+      {
+        "entity_id": "entity-83f9d60cf840e8e9aeedd9044aee7e26",
+        "entity_name": "CatchUpStats",
+        "score": 0.2918713
+      },
+      {
+        "entity_id": "entity-6f5887185d559d030db0bfed213d228a",
+        "entity_name": "logging",
+        "score": 0.2899046
+      },
+      {
+        "entity_id": "entity-37eceaaad70f3b81a00e9aad7f01a72d",
+        "entity_name": "test_delete_from_empty_collection",
+        "score": 0.2889329
+      },
+      {
+        "entity_id": "entity-0c8ca9d0c1a7e97ed0521b7bc66b810a",
+        "entity_name": "max_queued_events",
+        "score": 0.28653568
+      },
+      {
+        "entity_id": "entity-d44b9ee5321dcf09f5a1fc6c49b6e519",
+        "entity_name": "test_config_durations",
+        "score": 0.28555402
+      },
+      {
+        "entity_id": "entity-35088197df645d7969dcdea9a5c41eda",
+        "entity_name": "MetricsConfig",
+        "score": 0.28420758
+      },
+      {
+        "entity_id": "entity-c63dea89083a915dba24f3900036f9c4",
+        "entity_name": "max_file_size",
+        "score": 0.28003898
+      }
+    ]
+  },
+  {
+    "query": "Start watching for file changes and processing them in the background\n\nSpawns a background task",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-bb0f6da607c9e2f4591735a27e7ddf4f",
+        "entity_name": "test_filter_config_extensions",
+        "score": 0.52412945
+      },
+      {
+        "entity_id": "entity-cb444a104cfe5e220f7e4bb4f30b81c6",
+        "entity_name": "mark_file_entities_deleted",
+        "score": 0.43433344
+      },
+      {
+        "entity_id": "entity-070658964a9451c94348520724c5d2fe",
+        "entity_name": "BatchProcessingStats",
+        "score": 0.41088355
+      },
+      {
+        "entity_id": "entity-b7849b345134d2186b852279dd221b07",
+        "entity_name": "EventBatcher<T>",
+        "score": 0.4078884
+      },
+      {
+        "entity_id": "entity-171005c383c44be1d57c7f0b447e9ded",
+        "entity_name": "with_channel_buffer_size",
+        "score": 0.39816132
+      },
+      {
+        "entity_id": "entity-abc451a2f68fa0ce29dd4455f6e808b7",
+        "entity_name": "test_default_config",
+        "score": 0.39152193
+      },
+      {
+        "entity_id": "entity-8e85e1d7c37ddf9f8e36e7f47283a9df",
+        "entity_name": "BOUNDS",
+        "score": 0.37778518
+      },
+      {
+        "entity_id": "entity-c064e8c27a094db541ecbd679db5ebcd",
+        "entity_name": "extract_embedding_content",
+        "score": 0.36827797
+      },
+      {
+        "entity_id": "entity-f04defdebfb1b52c074d62d3b978795b",
+        "entity_name": "process_file_batch",
+        "score": 0.34936902
+      },
+      {
+        "entity_id": "entity-d8aef328c3d3eb6883249ae9440a144c",
+        "entity_name": "tests",
+        "score": 0.3489123
+      },
+      {
+        "entity_id": "entity-b4a5202320711c6f2694676efb9f97ce",
+        "entity_name": "DELIM",
+        "score": 0.33972633
+      },
+      {
+        "entity_id": "entity-f5abc47533ce3275dd64d0d9a631c6b7",
+        "entity_name": "flush",
+        "score": 0.33483785
+      },
+      {
+        "entity_id": "entity-286681e9404aa3ed97702b6caabe7c82",
+        "entity_name": "rest_url",
+        "score": 0.33233353
+      },
+      {
+        "entity_id": "entity-714f112e2a346582d2812bc5bc20cacb",
+        "entity_name": "impl_handlers",
+        "score": 0.33184695
+      },
+      {
+        "entity_id": "entity-dbf4a78a73ce31bfae8b15c8c08c5e13",
+        "entity_name": "push",
+        "score": 0.33096245
+      },
+      {
+        "entity_id": "entity-cc04aa6f05581360f8693457efe6e393",
+        "entity_name": "config",
+        "score": 0.3308121
+      },
+      {
+        "entity_id": "entity-7b889225bbf2b6ef73c047936678923f",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.32536173
+      },
+      {
+        "entity_id": "entity-4b6e479db85e9727add62922dc842729",
+        "entity_name": "merge",
+        "score": 0.3252496
+      },
+      {
+        "entity_id": "entity-47804c3df7f42ac3433fd5d1a3ca0292",
+        "entity_name": "ProcessingStats",
+        "score": 0.3188479
+      },
+      {
+        "entity_id": "entity-b3b506e85a515ad5cb9559f746eed0cc",
+        "entity_name": "update_file_snapshot_and_mark_stale",
+        "score": 0.31811705
+      }
+    ]
+  },
+  {
+    "query": "Stage 4: Store entities and embeddings in database",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-cf24b36a346a3c16c4a6fb7430c2065e",
+        "entity_name": "path",
+        "score": 0.56265014
+      },
+      {
+        "entity_id": "entity-8e4b6fc97ee261ea0d98ae901c846611",
+        "entity_name": "FileChange",
+        "score": 0.46730047
+      },
+      {
+        "entity_id": "entity-72b336d22daf73d810c11bffa3fd0ceb",
+        "entity_name": "test_outbox_processor_basic_initialization",
+        "score": 0.46371105
+      },
+      {
+        "entity_id": "entity-6ce4661565f47996796aa1ee369ab196",
+        "entity_name": "stage_generate_embeddings",
+        "score": 0.45688802
+      },
+      {
+        "entity_id": "entity-f984d4d212ab55e7442361d8f10b4ded",
+        "entity_name": "test_get_entities_by_ids_batch_limit",
+        "score": 0.44001284
+      },
+      {
+        "entity_id": "entity-079f1e05a3722b113fb227c64253f1d5",
+        "entity_name": "get_entities_by_ids",
+        "score": 0.42680055
+      },
+      {
+        "entity_id": "entity-9157f5402549931f8a68951fb6c2ade9",
+        "entity_name": "mark_entities_deleted",
+        "score": 0.412538
+      },
+      {
+        "entity_id": "entity-a5a56b2106674292684f9a476f34dedf",
+        "entity_name": "run_migrations",
+        "score": 0.39174634
+      },
+      {
+        "entity_id": "entity-bd37bdef4697f50dc6f2a24dc4c74df3",
+        "entity_name": "get_last_indexed_commit",
+        "score": 0.39069146
+      },
+      {
+        "entity_id": "entity-83ec08b29496a9d1302d5ed3074578c6",
+        "entity_name": "workspace_manifest",
+        "score": 0.3895888
+      },
+      {
+        "entity_id": "entity-2cd11b3d4f0bf453a712a3985bd42729",
+        "entity_name": "test_get_entities_by_ids",
+        "score": 0.37948108
+      },
+      {
+        "entity_id": "entity-4d9d927c892dbb772489824aa045f165",
+        "entity_name": "BINARY_PATH",
+        "score": 0.3779981
+      },
+      {
+        "entity_id": "entity-8ac36d1fa72b2144ab2c4d2c9926b105",
+        "entity_name": "get_cache_stats",
+        "score": 0.3778955
+      },
+      {
+        "entity_id": "entity-156afe38a5c208247883da786e6fd168",
+        "entity_name": "ENUM_VARIANT",
+        "score": 0.37621963
+      },
+      {
+        "entity_id": "entity-fe35202c539d2fc99a6cb2322c01328e",
+        "entity_name": "create_test_entity",
+        "score": 0.3707881
+      },
+      {
+        "entity_id": "entity-114bce43c8899980286a0836e012ba1b",
+        "entity_name": "create_test_entity",
+        "score": 0.3707881
+      },
+      {
+        "entity_id": "entity-3d7b1b0e2b3ae5ac80bec01c49c9c6fd",
+        "entity_name": "drop_all_data",
+        "score": 0.37078416
+      },
+      {
+        "entity_id": "entity-ac76d313e7605da72e35cad69b16bd82",
+        "entity_name": "default_limit",
+        "score": 0.3671804
+      },
+      {
+        "entity_id": "entity-05b971c552a0bc7df10a8e4f4463bcc6",
+        "entity_name": "get_collection_name",
+        "score": 0.36506027
+      },
+      {
+        "entity_id": "entity-ed3f8a60bd0da0c356cefcca0b25f9fa",
+        "entity_name": "new",
+        "score": 0.36406907
+      }
+    ]
+  },
+  {
+    "query": "Creates a configuration error",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-14591ee4c79c80dd408d8e196c1a2738",
+        "entity_name": "config",
+        "score": 0.5345224
+      },
+      {
+        "entity_id": "entity-2d369ce8654675ce8fee1ce5f7acada2",
+        "entity_name": "Error",
+        "score": 0.38214976
+      },
+      {
+        "entity_id": "entity-68b7a0676518818511be859477f75312",
+        "entity_name": "unprocessed_outbox_count",
+        "score": 0.34419897
+      },
+      {
+        "entity_id": "entity-418d326b8cbf07bb30af7d04687073db",
+        "entity_name": "embedding",
+        "score": 0.33318895
+      },
+      {
+        "entity_id": "entity-e5b28f68573fc821fba8819ae8e6d235",
+        "entity_name": "save",
+        "score": 0.33165258
+      },
+      {
+        "entity_id": "entity-a204e1e66a19253adccda95c78c5caa0",
+        "entity_name": "entity_extraction",
+        "score": 0.33148324
+      },
+      {
+        "entity_id": "entity-943fd3d4184e12386e74b83b97b1984d",
+        "entity_name": "create_temp_config_file",
+        "score": 0.3255854
+      },
+      {
+        "entity_id": "entity-4d0f8aceac5d626518885c9e7a0ac8f8",
+        "entity_name": "parse",
+        "score": 0.3224073
+      },
+      {
+        "entity_id": "entity-8ba2954241b8526949621d03d75ba957",
+        "entity_name": "storage",
+        "score": 0.3214578
+      },
+      {
+        "entity_id": "entity-2f324ed0e8c908ebb376b30279035777",
+        "entity_name": "test_from_toml_str_invalid_syntax",
+        "score": 0.31963497
+      },
+      {
+        "entity_id": "entity-1e7f95116ac290c758002aafa2351022",
+        "entity_name": "test_validate_zero_embedding_dimension",
+        "score": 0.3172637
+      },
+      {
+        "entity_id": "entity-9b1ffe33e5e5b3f7a51a991d4640d6aa",
+        "entity_name": "invalid_input",
+        "score": 0.31646562
+      },
+      {
+        "entity_id": "entity-511ef0f91146aaa2826c290ccadd1f37",
+        "entity_name": "test_get_entities_by_ids_some_missing",
+        "score": 0.3143127
+      },
+      {
+        "entity_id": "entity-ab316efe8c87a9ea712047d6aad48b71",
+        "entity_name": "EmbeddingError",
+        "score": 0.31002697
+      },
+      {
+        "entity_id": "entity-730dd4fa2d4cb38784f6738cf7760dcd",
+        "entity_name": "test_handles_qdrant_connection_failure",
+        "score": 0.3059988
+      },
+      {
+        "entity_id": "entity-fc1737e1f2f2eb18810f52e2f7d53262",
+        "entity_name": "test_validate_invalid_device",
+        "score": 0.3052187
+      },
+      {
+        "entity_id": "entity-e73aa3a4a1abc6e81e6adeb5f83f4aaa",
+        "entity_name": "write_outbox_entry",
+        "score": 0.30187738
+      },
+      {
+        "entity_id": "entity-0054bf8709ee109a96aba41b8150c2f4",
+        "entity_name": "builder",
+        "score": 0.30187565
+      },
+      {
+        "entity_id": "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9",
+        "entity_name": "Error",
+        "score": 0.30179787
+      },
+      {
+        "entity_id": "entity-2e8225bd6e128e1fa2fb5ac05be60d3c",
+        "entity_name": "ChangeType",
+        "score": 0.29657972
+      }
+    ]
+  },
+  {
+    "query": "Helper to create a test repository with sample Rust files",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-3a62accc09e8981a29ced1ffa352cf65",
+        "entity_name": "LineRange",
+        "score": 0.6564881
+      },
+      {
+        "entity_id": "entity-59ad777c2c21d8d68218f91ee253296d",
+        "entity_name": "extract",
+        "score": 0.5936166
+      },
+      {
+        "entity_id": "entity-b0cc194f82d64843781c0c1eeec10a25",
+        "entity_name": "Extractor",
+        "score": 0.57760274
+      },
+      {
+        "entity_id": "entity-0f1ed70cf2c2c17a2f4af684d6c5d174",
+        "entity_name": "new",
+        "score": 0.5628607
+      },
+      {
+        "entity_id": "entity-0378490aca672f47093822d11a3c46ea",
+        "entity_name": "qualified_name",
+        "score": 0.5554093
+      },
+      {
+        "entity_id": "entity-253a4f9d127c6ca471dae7c624283dc0",
+        "entity_name": "extraction_framework",
+        "score": 0.53770787
+      },
+      {
+        "entity_id": "entity-9f6ab7c5f260fd9a9a1d43e3573f43ad",
+        "entity_name": "create_test_repo",
+        "score": 0.5143497
+      },
+      {
+        "entity_id": "entity-7be0e59b4432ba20869ba19b4efe06cc",
+        "entity_name": "rust",
+        "score": 0.50976986
+      },
+      {
+        "entity_id": "entity-bb6a86afa0041e512e2b0350350e148f",
+        "entity_name": "LanguageConfigurationBuilder",
+        "score": 0.50311446
+      },
+      {
+        "entity_id": "entity-278db08c2d10413565618e791537bc47",
+        "entity_name": "test_batcher_timeout_value",
+        "score": 0.50134027
+      },
+      {
+        "entity_id": "entity-68100a8e2300ad5a2c6c30fadff6437a",
+        "entity_name": "query",
+        "score": 0.4962466
+      },
+      {
+        "entity_id": "entity-f0da4d1f2cfa81dd69f149132a9692bf",
+        "entity_name": "test_attributes_and_macros",
+        "score": 0.49471062
+      },
+      {
+        "entity_id": "entity-f6f9cfe1cc2026a0d52462e9ec6a19bc",
+        "entity_name": "add_extractor",
+        "score": 0.47569448
+      },
+      {
+        "entity_id": "entity-5d34ed4f3fff00aa66c847d7c56f92e2",
+        "entity_name": "start_and_wait_for_outbox_sync",
+        "score": 0.47339225
+      },
+      {
+        "entity_id": "entity-d737325a4c2fecb2d7e18c7f4f9917e6",
+        "entity_name": "FIELD_DECLARATION",
+        "score": 0.4733921
+      },
+      {
+        "entity_id": "entity-5804b404ceb3fa9d9ed0b726104290e6",
+        "entity_name": "FileMetadata",
+        "score": 0.4694171
+      },
+      {
+        "entity_id": "entity-65578b45fc1ec8688e45eec9a591e1f4",
+        "entity_name": "test_multibyte_utf8_in_struct_fields",
+        "score": 0.46442756
+      },
+      {
+        "entity_id": "entity-bb62606449f5f72be6f4f06bad82e1fc",
+        "entity_name": "new",
+        "score": 0.46326748
+      },
+      {
+        "entity_id": "entity-9b1f3d294b28946f978ec911b60a1f36",
+        "entity_name": "create_postgres_client",
+        "score": 0.4581666
+      },
+      {
+        "entity_id": "entity-c1029a526ced8f946565f697a9baac28",
+        "entity_name": "OutboxEntry",
+        "score": 0.4563589
+      }
+    ]
+  },
+  {
+    "query": "Process a constant or static query match and extract entity data",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-4f3ed6724c39a7bd0791d6acfc5b17e5",
+        "entity_name": "enum_tests",
+        "score": 0.5870179
+      },
+      {
+        "entity_id": "entity-5cf2a4c23c5b0504f4de8acde9bc9fb9",
+        "entity_name": "test_change_type_classification",
+        "score": 0.47084975
+      },
+      {
+        "entity_id": "entity-3e6e377ec6f7d64d9774d9e50cfcdc9b",
+        "entity_name": "assert_min_point_count",
+        "score": 0.45738727
+      },
+      {
+        "entity_id": "entity-634bd6792b749d38a09c6f21ebbaac47",
+        "entity_name": "test_macro_with_debug_assertions",
+        "score": 0.4482578
+      },
+      {
+        "entity_id": "entity-317493455873a2b3596dfb92b5f25c5a",
+        "entity_name": "GitRepository",
+        "score": 0.44105768
+      },
+      {
+        "entity_id": "entity-2ebb17900b5fd69ec66b70f89826a37a",
+        "entity_name": "assert_entity_in_qdrant",
+        "score": 0.43983442
+      },
+      {
+        "entity_id": "entity-7bb7d0a07f9b3ea4dd08230ce1de5b3e",
+        "entity_name": "get_point_count",
+        "score": 0.43928897
+      },
+      {
+        "entity_id": "entity-a00a2394bf3611d045b41cd965e2f552",
+        "entity_name": "load_from_env",
+        "score": 0.4379903
+      },
+      {
+        "entity_id": "entity-4e4ce73c62255b8715d5fb784d59efaa",
+        "entity_name": "CollectionInfo",
+        "score": 0.43554842
+      },
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.43349525
+      },
+      {
+        "entity_id": "entity-b0d80622715f286a95d2264127158b74",
+        "entity_name": "test_file_metadata_readonly",
+        "score": 0.4211475
+      },
+      {
+        "entity_id": "entity-29bb0771752873eca37d227cb340a172",
+        "entity_name": "ensure_outbox_image_built",
+        "score": 0.41176903
+      },
+      {
+        "entity_id": "entity-0f8a7704c36fa5ef95112fa93194a0b9",
+        "entity_name": "test_concurrent_modifications",
+        "score": 0.4105187
+      },
+      {
+        "entity_id": "entity-fa4ca4ffefa37887d2ac980d5a7b462d",
+        "entity_name": "assert_vector_dimensions",
+        "score": 0.4049959
+      },
+      {
+        "entity_id": "entity-f0884542cb81c88fec4a4380cd012464",
+        "entity_name": "GitRepository",
+        "score": 0.40336078
+      },
+      {
+        "entity_id": "entity-6cb0692f1bad98a03dbaca1645425c35",
+        "entity_name": "current_branch",
+        "score": 0.39982685
+      },
+      {
+        "entity_id": "entity-57b175fe2a5189939fd43ceb06746acf",
+        "entity_name": "test_debounced_event",
+        "score": 0.39525184
+      },
+      {
+        "entity_id": "entity-d638f28d69528599b65641b21e7ca9fd",
+        "entity_name": "list_branches",
+        "score": 0.39475322
+      },
+      {
+        "entity_id": "entity-3f19bd2876261d8328e8e6a073042e03",
+        "entity_name": "is_detached_head",
+        "score": 0.39384806
+      },
+      {
+        "entity_id": "entity-b943867750cdd40828f49acf085feb61",
+        "entity_name": "current_commit_short_hash",
+        "score": 0.3900997
+      }
+    ]
+  },
+  {
+    "query": "Process a trait impl block query match and extract entities",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-52ae8bdc55890dc6aa5780c9051ca13c",
+        "entity_name": "TRAIT_QUERY",
+        "score": 0.60857517
+      },
+      {
+        "entity_id": "entity-42686604a2750488d4a7c685f20143f1",
+        "entity_name": "STRUCT_QUERY",
+        "score": 0.5704417
+      },
+      {
+        "entity_id": "entity-fa4ca4ffefa37887d2ac980d5a7b462d",
+        "entity_name": "assert_vector_dimensions",
+        "score": 0.5393145
+      },
+      {
+        "entity_id": "entity-db8df885d63db255f07c9a2d34eb276e",
+        "entity_name": "add_pattern",
+        "score": 0.538344
+      },
+      {
+        "entity_id": "entity-3942ac582ef947cb1e767f7b75208f6a",
+        "entity_name": "SHARED_POSTGRES",
+        "score": 0.51741993
+      },
+      {
+        "entity_id": "entity-e07fb4741468aa4f48240abcbf92d5c2",
+        "entity_name": "tests",
+        "score": 0.48124248
+      },
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.4761935
+      },
+      {
+        "entity_id": "entity-bbf689c4e817deec17f7bf65d3c5a5dd",
+        "entity_name": "SHARED_QDRANT",
+        "score": 0.47244018
+      },
+      {
+        "entity_id": "entity-62f6591966469622ddc66f26876c1f67",
+        "entity_name": "ENUM_QUERY",
+        "score": 0.46633083
+      },
+      {
+        "entity_id": "entity-e17c1414cc16e13c8582566fedb2ee1c",
+        "entity_name": "LanguageFilter",
+        "score": 0.46599928
+      },
+      {
+        "entity_id": "entity-4c231a8ff407bc52bd99f21e383f03a2",
+        "entity_name": "stop",
+        "score": 0.46138513
+      },
+      {
+        "entity_id": "entity-e8430a115b0a213ef138856acefb9ccf",
+        "entity_name": "patterns",
+        "score": 0.45429462
+      },
+      {
+        "entity_id": "entity-46d1be4484bb305c58bd575b15ea197b",
+        "entity_name": "test_watch_path",
+        "score": 0.45236203
+      },
+      {
+        "entity_id": "entity-99cfc98868efd2b3468fa2d71d449234",
+        "entity_name": "IgnoreFilterBuilder",
+        "score": 0.45212883
+      },
+      {
+        "entity_id": "entity-5dbabebd730b8ffaa9d1781392130e77",
+        "entity_name": "PostgresClient",
+        "score": 0.4521286
+      },
+      {
+        "entity_id": "entity-985b010a361ffddacaeb43217e69b4ec",
+        "entity_name": "MACRO_QUERY",
+        "score": 0.44992593
+      },
+      {
+        "entity_id": "entity-5cf2a4c23c5b0504f4de8acde9bc9fb9",
+        "entity_name": "test_change_type_classification",
+        "score": 0.44930947
+      },
+      {
+        "entity_id": "entity-cf16bf84f254bc44f6d159386dac5f51",
+        "entity_name": "is_watching",
+        "score": 0.44785923
+      },
+      {
+        "entity_id": "entity-85b41899521237d918d0d8db0704a8f0",
+        "entity_name": "test_assertions_with_real_qdrant",
+        "score": 0.44676214
+      },
+      {
+        "entity_id": "entity-da518f61ec225985a9859612864f8d71",
+        "entity_name": "exclude_extensions",
+        "score": 0.44649953
+      }
+    ]
+  },
+  {
+    "query": "Process a function query match and extract entity data",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-15d33fffb3331085ce507a64e9872548",
+        "entity_name": "FUNCTION_QUERY",
+        "score": 0.57876813
+      },
+      {
+        "entity_id": "entity-5cf2a4c23c5b0504f4de8acde9bc9fb9",
+        "entity_name": "test_change_type_classification",
+        "score": 0.5170238
+      },
+      {
+        "entity_id": "entity-3e6e377ec6f7d64d9774d9e50cfcdc9b",
+        "entity_name": "assert_min_point_count",
+        "score": 0.50013566
+      },
+      {
+        "entity_id": "entity-4e4ce73c62255b8715d5fb784d59efaa",
+        "entity_name": "CollectionInfo",
+        "score": 0.4921013
+      },
+      {
+        "entity_id": "entity-7bb7d0a07f9b3ea4dd08230ce1de5b3e",
+        "entity_name": "get_point_count",
+        "score": 0.49090278
+      },
+      {
+        "entity_id": "entity-2ebb17900b5fd69ec66b70f89826a37a",
+        "entity_name": "assert_entity_in_qdrant",
+        "score": 0.48400813
+      },
+      {
+        "entity_id": "entity-a00a2394bf3611d045b41cd965e2f552",
+        "entity_name": "load_from_env",
+        "score": 0.45422405
+      },
+      {
+        "entity_id": "entity-634bd6792b749d38a09c6f21ebbaac47",
+        "entity_name": "test_macro_with_debug_assertions",
+        "score": 0.448691
+      },
+      {
+        "entity_id": "entity-0f8a7704c36fa5ef95112fa93194a0b9",
+        "entity_name": "test_concurrent_modifications",
+        "score": 0.44724333
+      },
+      {
+        "entity_id": "entity-4f3ed6724c39a7bd0791d6acfc5b17e5",
+        "entity_name": "enum_tests",
+        "score": 0.44023472
+      },
+      {
+        "entity_id": "entity-fa4ca4ffefa37887d2ac980d5a7b462d",
+        "entity_name": "assert_vector_dimensions",
+        "score": 0.4320366
+      },
+      {
+        "entity_id": "entity-949c429768cff6078d408aafa4ee20ea",
+        "entity_name": "overlaps",
+        "score": 0.42610827
+      },
+      {
+        "entity_id": "entity-897f3733ad1548b297a03e75dfd6dc16",
+        "entity_name": "test_is_hidden",
+        "score": 0.4248469
+      },
+      {
+        "entity_id": "entity-4a223b1b5e0d857cccc25f03185278dd",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.4172176
+      },
+      {
+        "entity_id": "entity-42686604a2750488d4a7c685f20143f1",
+        "entity_name": "STRUCT_QUERY",
+        "score": 0.41587868
+      },
+      {
+        "entity_id": "entity-db1a684f5580b1f69b22bde27ed053e1",
+        "entity_name": "IgnoreFilter",
+        "score": 0.4133193
+      },
+      {
+        "entity_id": "entity-3fef141e924aad81f07ba58335c50b93",
+        "entity_name": "test_branch_watcher",
+        "score": 0.41184634
+      },
+      {
+        "entity_id": "entity-3f199f640bf869c8d88e202d79f26ff6",
+        "entity_name": "test_async_function",
+        "score": 0.4103858
+      },
+      {
+        "entity_id": "entity-1d678c0bfe8aabb95bed14c26698718b",
+        "entity_name": "builder",
+        "score": 0.40706193
+      },
+      {
+        "entity_id": "entity-93742f4b807a4e0ad91af1584e5a2f33",
+        "entity_name": "from_patterns",
+        "score": 0.40408617
+      }
+    ]
+  },
+  {
+    "query": "Extract a single method from an impl block",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-985b010a361ffddacaeb43217e69b4ec",
+        "entity_name": "MACRO_QUERY",
+        "score": 0.4914667
+      },
+      {
+        "entity_id": "entity-5dbabebd730b8ffaa9d1781392130e77",
+        "entity_name": "PostgresClient",
+        "score": 0.46335977
+      },
+      {
+        "entity_id": "entity-99cfc98868efd2b3468fa2d71d449234",
+        "entity_name": "IgnoreFilterBuilder",
+        "score": 0.46335974
+      },
+      {
+        "entity_id": "entity-62f6591966469622ddc66f26876c1f67",
+        "entity_name": "ENUM_QUERY",
+        "score": 0.44243404
+      },
+      {
+        "entity_id": "entity-826b82c3524a85381b54da55b718bd63",
+        "entity_name": "test_public_type_alias",
+        "score": 0.43789682
+      },
+      {
+        "entity_id": "entity-42686604a2750488d4a7c685f20143f1",
+        "entity_name": "STRUCT_QUERY",
+        "score": 0.42588946
+      },
+      {
+        "entity_id": "entity-bbf689c4e817deec17f7bf65d3c5a5dd",
+        "entity_name": "SHARED_QDRANT",
+        "score": 0.41541755
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.4109537
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.4109537
+      },
+      {
+        "entity_id": "entity-4a223b1b5e0d857cccc25f03185278dd",
+        "entity_name": "exceeds_size_limit",
+        "score": 0.4073087
+      },
+      {
+        "entity_id": "entity-8c37623e588d1eb08635cf3dbcc0d946",
+        "entity_name": "javascript",
+        "score": 0.39824483
+      },
+      {
+        "entity_id": "entity-12c4175461bc7dae05a07b3e4b64005c",
+        "entity_name": "OutboxProcessor",
+        "score": 0.39809752
+      },
+      {
+        "entity_id": "entity-52ae8bdc55890dc6aa5780c9051ca13c",
+        "entity_name": "TRAIT_QUERY",
+        "score": 0.3971145
+      },
+      {
+        "entity_id": "entity-e8430a115b0a213ef138856acefb9ccf",
+        "entity_name": "patterns",
+        "score": 0.3934586
+      },
+      {
+        "entity_id": "entity-fbe1a9ae56cea9cf9085bc30b6c258f0",
+        "entity_name": "IMPL_TRAIT_QUERY",
+        "score": 0.39079225
+      },
+      {
+        "entity_id": "entity-a35fe557e95315bcaecb37e398fdc52c",
+        "entity_name": "DebouncedEvent",
+        "score": 0.39017594
+      },
+      {
+        "entity_id": "entity-78fc8b97f72175c2cdc4597f36c7744d",
+        "entity_name": "test_type_alias_with_doc_comments",
+        "score": 0.38570684
+      },
+      {
+        "entity_id": "entity-38fe0b5ce04c0d3ef25aea7342252eb4",
+        "entity_name": "ignored_dirs",
+        "score": 0.3857012
+      },
+      {
+        "entity_id": "entity-7c77e4d0b8a739714bba585037c91d95",
+        "entity_name": "max_file_size",
+        "score": 0.37892276
+      },
+      {
+        "entity_id": "entity-85417a67d290af50fa0c5186153edbc4",
+        "entity_name": "build",
+        "score": 0.37607116
+      }
+    ]
+  },
+  {
+    "query": "Creates a parse error",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-4d0f8aceac5d626518885c9e7a0ac8f8",
+        "entity_name": "parse",
+        "score": 0.5487086
+      },
+      {
+        "entity_id": "entity-14591ee4c79c80dd408d8e196c1a2738",
+        "entity_name": "config",
+        "score": 0.3589756
+      },
+      {
+        "entity_id": "entity-418d326b8cbf07bb30af7d04687073db",
+        "entity_name": "embedding",
+        "score": 0.34831893
+      },
+      {
+        "entity_id": "entity-a204e1e66a19253adccda95c78c5caa0",
+        "entity_name": "entity_extraction",
+        "score": 0.34688056
+      },
+      {
+        "entity_id": "entity-2d369ce8654675ce8fee1ce5f7acada2",
+        "entity_name": "Error",
+        "score": 0.34436867
+      },
+      {
+        "entity_id": "entity-abced853583a6a4fc6aeaea797a35e8a",
+        "entity_name": "debounce_ms",
+        "score": 0.3248
+      },
+      {
+        "entity_id": "entity-9b1ffe33e5e5b3f7a51a991d4640d6aa",
+        "entity_name": "invalid_input",
+        "score": 0.3229059
+      },
+      {
+        "entity_id": "entity-8ba2954241b8526949621d03d75ba957",
+        "entity_name": "storage",
+        "score": 0.32246408
+      },
+      {
+        "entity_id": "entity-ad0ad5d9a42c71813b6267ce7395dc63",
+        "entity_name": "watcher",
+        "score": 0.30671397
+      },
+      {
+        "entity_id": "entity-60e7d4479758a7033e150b73a92c1765",
+        "entity_name": "error",
+        "score": 0.3042485
+      },
+      {
+        "entity_id": "entity-70b3591025c9395d78ebb6ddc3d61236",
+        "entity_name": "error",
+        "score": 0.3042485
+      },
+      {
+        "entity_id": "entity-f7b189ba4f1901e6540747bac4de7a0c",
+        "entity_name": "WatcherConfigBuilder",
+        "score": 0.30031586
+      },
+      {
+        "entity_id": "entity-884b93583c70e6a5c79a11f1df9e8171",
+        "entity_name": "WatcherConfigBuilder",
+        "score": 0.2973723
+      },
+      {
+        "entity_id": "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9",
+        "entity_name": "Error",
+        "score": 0.29152077
+      },
+      {
+        "entity_id": "entity-ab316efe8c87a9ea712047d6aad48b71",
+        "entity_name": "EmbeddingError",
+        "score": 0.28893417
+      },
+      {
+        "entity_id": "entity-cd219e66007b8225dde71a1423844d91",
+        "entity_name": "test_simple_function",
+        "score": 0.28174767
+      },
+      {
+        "entity_id": "entity-661dfe2005557e9b5cffcc95e2713b96",
+        "entity_name": "handlers",
+        "score": 0.27282435
+      },
+      {
+        "entity_id": "entity-8857812e03c671b7690880bdb0d50c15",
+        "entity_name": "recursive_depth",
+        "score": 0.270792
+      },
+      {
+        "entity_id": "entity-acb42c1cf795ae2c88be9bd557d5cb01",
+        "entity_name": "with_context",
+        "score": 0.2699985
+      },
+      {
+        "entity_id": "entity-8ce61281a8543ef0b0192f69a9ad48df",
+        "entity_name": "PostgresClient",
+        "score": 0.26960412
+      }
+    ]
+  },
+  {
+    "query": "Large comprehensive Rust code sample (100+ lines)",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-537fd0afb167a26f7727039e599cd469",
+        "entity_name": "is_detaching",
+        "score": 0.51669735
+      },
+      {
+        "entity_id": "entity-b14c2fcaf0da37b1bffda370c6f73e23",
+        "entity_name": "find_repositories_recursive",
+        "score": 0.43272153
+      },
+      {
+        "entity_id": "entity-7be0e59b4432ba20869ba19b4efe06cc",
+        "entity_name": "rust",
+        "score": 0.41941398
+      },
+      {
+        "entity_id": "entity-87ecd724615112f686d96251ca8bed8c",
+        "entity_name": "is_attaching",
+        "score": 0.40518925
+      },
+      {
+        "entity_id": "entity-646338e67a1f66bcd6e231279338043a",
+        "entity_name": "test_builder_creates_files",
+        "score": 0.39506885
+      },
+      {
+        "entity_id": "entity-dd6f6459e25352edb3521f6c3fc1aa71",
+        "entity_name": "processor",
+        "score": 0.3893367
+      },
+      {
+        "entity_id": "entity-e07fb4741468aa4f48240abcbf92d5c2",
+        "entity_name": "tests",
+        "score": 0.3855302
+      },
+      {
+        "entity_id": "entity-f1a8f3e6b3fd8ac97de85cf8e7bd779b",
+        "entity_name": "has_uncommitted_changes",
+        "score": 0.38240752
+      },
+      {
+        "entity_id": "entity-e1f7545f21b1306d4bc5ed08ca71d685",
+        "entity_name": "test_impl_with_associated_constants",
+        "score": 0.3817817
+      },
+      {
+        "entity_id": "entity-3a62accc09e8981a29ced1ffa352cf65",
+        "entity_name": "LineRange",
+        "score": 0.37911367
+      },
+      {
+        "entity_id": "entity-7c1231f177ed5aa730bbdf2fb85671ec",
+        "entity_name": "find_repository_root",
+        "score": 0.3789476
+      },
+      {
+        "entity_id": "entity-06d175f964805109e7bf0b4b725f9ac6",
+        "entity_name": "test_ignore_filter_patterns",
+        "score": 0.3782583
+      },
+      {
+        "entity_id": "entity-94af9990a8e4f08bb054ea55d7fa3671",
+        "entity_name": "store_embeddings",
+        "score": 0.3782583
+      },
+      {
+        "entity_id": "entity-253a4f9d127c6ca471dae7c624283dc0",
+        "entity_name": "extraction_framework",
+        "score": 0.37784946
+      },
+      {
+        "entity_id": "entity-8cea2e6998d401f7d1980b947b9ab6ca",
+        "entity_name": "function_modifiers",
+        "score": 0.37307227
+      },
+      {
+        "entity_id": "entity-891c4645bb9be4dcd2a5e781d717ad40",
+        "entity_name": "matches",
+        "score": 0.36919427
+      },
+      {
+        "entity_id": "entity-b356b366feeea92cab9b12ad4490cccc",
+        "entity_name": "CodeEntity",
+        "score": 0.36628705
+      },
+      {
+        "entity_id": "entity-a561ddcc56f9f171f6310799fad6e91e",
+        "entity_name": "FunctionSignature",
+        "score": 0.3651723
+      },
+      {
+        "entity_id": "entity-84e85940d6af0430ba1a06d7151ba837",
+        "entity_name": "test_file_snapshot_create_and_retrieve",
+        "score": 0.36477634
+      },
+      {
+        "entity_id": "entity-96eb2eaf44664d7dc2a4e14e7ded7415",
+        "entity_name": "OutboxProcessor",
+        "score": 0.36246547
+      }
+    ]
+  },
+  {
+    "query": "Check if Postgres container is running",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-792c3163592e5b45353b20bd7c0ea9cc",
+        "entity_name": "is_postgres_running",
+        "score": 0.6929512
+      },
+      {
+        "entity_id": "entity-c3c21d4949b9ec4a89a0edc0bce1cce8",
+        "entity_name": "is_shared_infrastructure_running",
+        "score": 0.5495532
+      },
+      {
+        "entity_id": "entity-58c5fbad05f8ba6545819b7720b56351",
+        "entity_name": "is_qdrant_running",
+        "score": 0.53527284
+      },
+      {
+        "entity_id": "entity-015f5f8ce41d71af3c36477474c67156",
+        "entity_name": "is_container_running",
+        "score": 0.5108402
+      },
+      {
+        "entity_id": "entity-bb89494c1832a4657373c258a862dd96",
+        "entity_name": "is_vllm_running",
+        "score": 0.5094186
+      },
+      {
+        "entity_id": "entity-c72d00cbfdbc869b2a75dff26f3b86b7",
+        "entity_name": "set_total_files",
+        "score": 0.49469298
+      },
+      {
+        "entity_id": "entity-51c13f581a0ca4c93b985f827141b57d",
+        "entity_name": "container_exists",
+        "score": 0.49106812
+      },
+      {
+        "entity_id": "entity-3935ade8106bd5919b3584ff108cb5f0",
+        "entity_name": "is_outbox_processor_running",
+        "score": 0.48061708
+      },
+      {
+        "entity_id": "entity-effb08906b8b72e062a7fda39a7b815e",
+        "entity_name": "is_container_stopped",
+        "score": 0.47403887
+      },
+      {
+        "entity_id": "entity-ca28a31e5e1e5157789bc73711529c3e",
+        "entity_name": "check_postgres_health",
+        "score": 0.4734495
+      },
+      {
+        "entity_id": "entity-99fe450b7c5aafc5bb8a64dbf9b531cc",
+        "entity_name": "wait_for_postgres",
+        "score": 0.4672267
+      },
+      {
+        "entity_id": "entity-74193d39187a6a2a602df35e57d30871",
+        "entity_name": "StoredBatch",
+        "score": 0.46505052
+      },
+      {
+        "entity_id": "entity-d62ba373b831b04f493a5f6ca65758e3",
+        "entity_name": "RepositoryIndexer",
+        "score": 0.4647631
+      },
+      {
+        "entity_id": "entity-fa721c56cff4a9c95e99a4c38f743a98",
+        "entity_name": "EmbeddedBatch",
+        "score": 0.45949033
+      },
+      {
+        "entity_id": "entity-57665bb02f3ef459c755cf13e4bfeb05",
+        "entity_name": "LanguageConfigurationBuilder",
+        "score": 0.4446638
+      },
+      {
+        "entity_id": "entity-57db6680dd6fb65187680541d6146e37",
+        "entity_name": "containers",
+        "score": 0.42104155
+      },
+      {
+        "entity_id": "entity-8ca684e3753bc5242f07753d3c215c8f",
+        "entity_name": "stage_extract_entities",
+        "score": 0.42071337
+      },
+      {
+        "entity_id": "entity-54960733c1ab955372255bca95f552c8",
+        "entity_name": "test_handle_file_change_no_changes",
+        "score": 0.41158926
+      },
+      {
+        "entity_id": "entity-ce37a211ecad763c2984a55aac7e8b9b",
+        "entity_name": "ensure_dependencies_running",
+        "score": 0.4059611
+      },
+      {
+        "entity_id": "entity-79b147d8d8bcd7f5e3c9762cf520ffc0",
+        "entity_name": "test_handle_file_change_writes_delete_to_outbox",
+        "score": 0.40371254
+      }
+    ]
+  },
+  {
+    "query": "Creates an entity extraction error",
+    "query_type": "Documentation",
+    "results": [
+      {
+        "entity_id": "entity-a204e1e66a19253adccda95c78c5caa0",
+        "entity_name": "entity_extraction",
+        "score": 0.6112003
+      },
+      {
+        "entity_id": "entity-2d369ce8654675ce8fee1ce5f7acada2",
+        "entity_name": "Error",
+        "score": 0.48989883
+      },
+      {
+        "entity_id": "entity-949c429768cff6078d408aafa4ee20ea",
+        "entity_name": "overlaps",
+        "score": 0.41185272
+      },
+      {
+        "entity_id": "entity-562ffe119d150b82b57eb4ab50925e9e",
+        "entity_name": "update",
+        "score": 0.39117712
+      },
+      {
+        "entity_id": "entity-083cd1c1888cc8c1f7a024dd29fe330f",
+        "entity_name": "edge_cases",
+        "score": 0.38814783
+      },
+      {
+        "entity_id": "entity-fbe1a9ae56cea9cf9085bc30b6c258f0",
+        "entity_name": "IMPL_TRAIT_QUERY",
+        "score": 0.3812942
+      },
+      {
+        "entity_id": "entity-b840ba5db6e53e2f35027b141f2ac147",
+        "entity_name": "get_changed_files_between_commits",
+        "score": 0.37999102
+      },
+      {
+        "entity_id": "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9",
+        "entity_name": "Error",
+        "score": 0.37853968
+      },
+      {
+        "entity_id": "entity-7bb7d0a07f9b3ea4dd08230ce1de5b3e",
+        "entity_name": "get_point_count",
+        "score": 0.37834314
+      },
+      {
+        "entity_id": "entity-418d326b8cbf07bb30af7d04687073db",
+        "entity_name": "embedding",
+        "score": 0.37533253
+      },
+      {
+        "entity_id": "entity-35409ff1c941a3b2aa9c711dad1b2a5f",
+        "entity_name": "test_impl_with_self_parameters",
+        "score": 0.36234117
+      },
+      {
+        "entity_id": "entity-ceba01c2b68fab994691ea73f6eb4fbd",
+        "entity_name": "constant_tests",
+        "score": 0.3593103
+      },
+      {
+        "entity_id": "entity-98cedd80f10d4e0a48613eb38c53fe43",
+        "entity_name": "new",
+        "score": 0.3574021
+      },
+      {
+        "entity_id": "entity-ffcd7cf3bba3a1c50498ea681bb2c124",
+        "entity_name": "test_large_file_macro_extraction",
+        "score": 0.3567925
+      },
+      {
+        "entity_id": "entity-ab316efe8c87a9ea712047d6aad48b71",
+        "entity_name": "EmbeddingError",
+        "score": 0.35168427
+      },
+      {
+        "entity_id": "entity-4e4ce73c62255b8715d5fb784d59efaa",
+        "entity_name": "CollectionInfo",
+        "score": 0.34826666
+      },
+      {
+        "entity_id": "entity-46d387345f7d270a7c750c5ac57f7ac9",
+        "entity_name": "test_impl_with_const_methods",
+        "score": 0.34773868
+      },
+      {
+        "entity_id": "entity-97acbee78a0b589d705d439e5f6f12ed",
+        "entity_name": "new",
+        "score": 0.3466791
+      },
+      {
+        "entity_id": "entity-1eea799711b7176e7ec33dc0639e1ad6",
+        "entity_name": "test_mark_entities_deleted",
+        "score": 0.34622237
+      },
+      {
+        "entity_id": "entity-2d9db5e4b1039441734ed5a3ace0f117",
+        "entity_name": "EntityId",
+        "score": 0.34419745
+      }
+    ]
+  }
+]

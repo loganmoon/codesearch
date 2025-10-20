@@ -1,0 +1,575 @@
+{
+  "labels": [
+    {
+      "query": "is_qdrant_running",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-58c5fbad05f8ba6545819b7720b56351": 3,
+        "entity-c3c21d4949b9ec4a89a0edc0bce1cce8": 2,
+        "entity-a555a17283f393913789100dbaf2c246": 2,
+        "entity-24e272b16a47a0719c88c2c6791e8bf7": 2,
+        "entity-d3241d8aee54e8bf9d38ea0306ef05f3": 1,
+        "entity-48619cf41bd9088696d3acee0b13b963": 1,
+        "entity-ce37a211ecad763c2984a55aac7e8b9b": 2,
+        "entity-bb89494c1832a4657373c258a862dd96": 1,
+        "entity-792c3163592e5b45353b20bd7c0ea9cc": 1,
+        "entity-730dd4fa2d4cb38784f6738cf7760dcd": 1,
+        "entity-cd9f836c4174a78f7a5214f4a0de91f4": 1
+      }
+    },
+    {
+      "query": "calculate_outbox_source_hash",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-0e1bb24846105e10477ac40f87a0a709": 3,
+        "entity-8cea4d65d065ad3565c8001d92ead39b": 2,
+        "entity-2d9abf3a79f4eb5c359cbb0a254f2c31": 2,
+        "entity-bc58dc28fc967b44b47e2ee18210c85b": 2,
+        "entity-3935ade8106bd5919b3584ff108cb5f0": 1
+      }
+    },
+    {
+      "query": "docker",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-f9505aa9aa2e9d4f50e8adf1e43622a6": 3,
+        "entity-51c13f581a0ca4c93b985f827141b57d": 2,
+        "entity-8cea4d65d065ad3565c8001d92ead39b": 2,
+        "entity-015f5f8ce41d71af3c36477474c67156": 2,
+        "entity-bc58dc28fc967b44b47e2ee18210c85b": 1,
+        "entity-c3c21d4949b9ec4a89a0edc0bce1cce8": 1,
+        "entity-57db6680dd6fb65187680541d6146e37": 2,
+        "entity-2d9abf3a79f4eb5c359cbb0a254f2c31": 2,
+        "entity-2375a58fab1d46ab1db38616fa1ed187": 2,
+        "entity-62a20cce80559e197100162cb69cfed7": 1
+      }
+    },
+    {
+      "query": "ensure_storage_initialized",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-ba6d1d454f10a84018b6885fdeeec821": 3,
+        "entity-3f8e790bee9d3655ec71fb053fe89860": 2,
+        "entity-b391334566d4e9e6d81ea830c09846e1": 1,
+        "entity-c497cc53885343eecd509d69c054073c": 1,
+        "entity-276ec2cd19541566c0e171ee686f1e43": 2,
+        "entity-730dd4fa2d4cb38784f6738cf7760dcd": 1,
+        "entity-0ac7d5ce518ec58959ae6fddee8b8b77": 1,
+        "entity-a0e576bac4b7dd79f2d3167896aa3479": 2,
+        "entity-ce37a211ecad763c2984a55aac7e8b9b": 1,
+        "entity-3a94d54ab8afcc3e7edecafaf1c5366b": 2,
+        "entity-8ba2954241b8526949621d03d75ba957": 1
+      }
+    },
+    {
+      "query": "build_outbox_processor_image",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-2d9abf3a79f4eb5c359cbb0a254f2c31": 3,
+        "entity-8cea4d65d065ad3565c8001d92ead39b": 2,
+        "entity-3935ade8106bd5919b3584ff108cb5f0": 2,
+        "entity-0e1bb24846105e10477ac40f87a0a709": 2
+      }
+    },
+    {
+      "query": "is_empty",
+      "query_type": "ExactName",
+      "entity_relevance": {}
+    },
+    {
+      "query": "LockGuard",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-e2b63f4cb3eab2ce6568bfb8fde0d6dd": 3,
+        "entity-3c72e3bc4fb24a7297402e31f4c3dd4f": 3,
+        "entity-c4090f6af5f841a9403114fe9c2508bf": 3,
+        "entity-0960b1ec99b5d50907ed427997afa496": 3,
+        "entity-73472aef2051e63538a0116d482436e8": 2,
+        "entity-f48c867e3149ceafd1a88c66f1f307fa": 2,
+        "entity-f38e787c16919d0168b6526a7f7913a0": 2,
+        "entity-7745e71d5ce26a4680f78480368963bf": 1,
+        "entity-7492217d60003e21baaa0153b27c4b4d": 1
+      }
+    },
+    {
+      "query": "timeout",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-5d8da52841a7477ac44732a8ad83e643": 1,
+        "entity-e4f48ea52ec5f4040e0001d986c8c4c7": 1,
+        "entity-abc451a2f68fa0ce29dd4455f6e808b7": 1,
+        "entity-818429f4d70caf4b0bbacb213463ed56": 1
+      }
+    },
+    {
+      "query": "tests",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-0c53fff2996a1b0571316d5f8e6a96da": 3,
+        "entity-821f08453ffec52fda8646e29d4ce469": 3,
+        "entity-84e35b53166d3ed0e4fa7341f3761735": 2,
+        "entity-06d175f964805109e7bf0b4b725f9ac6": 2,
+        "entity-69217ab1db37a55b3656fd0078a5e3a9": 2,
+        "entity-9f45bfa54f132664ad0f7f49a2b2dea8": 2,
+        "entity-4e15ef1d2180f4d33e991dbd2d1144cc": 2,
+        "entity-274d15facf1bfd3778c1deaf04a295f1": 2,
+        "entity-404999f0d11eed3ad301f0f83383afa1": 2,
+        "entity-3a3a3c77869c2a3337960d4499c0a915": 2
+      }
+    },
+    {
+      "query": "current_scope_path",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-47045637b8a5e2758343292eb00fd825": 3,
+        "entity-d9739dd1245ef8d0a9f145ff0e85ea6a": 2,
+        "entity-4c0dc5d364fffc0c32339e260c40bb92": 2,
+        "entity-288265f49ba394be2a6f0d1e8151b196": 2,
+        "entity-03cf5e5f16bc861650e5830c5c4cd095": 2,
+        "entity-7fe6a02e468b21c6c770ebfe74283a2a": 2,
+        "entity-d28f50148b85ed255c79a161f486c914": 2,
+        "entity-5ee353eec678b42cadd92adeba992fb0": 1,
+        "entity-b75c344c39d1cebad7161b8d87284746": 1,
+        "entity-25c1c05ef5646297e9d596cd3cd7e21c": 1,
+        "entity-5223180e21570842f45829cd72a8b1a0": 1
+      }
+    },
+    {
+      "query": "Indexer",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-9b501e8ba08aa61c6fb5c65514641681": 3
+      }
+    },
+    {
+      "query": "api_key",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-70ada4367a343bcde66d33876f29eaa7": 3,
+        "entity-0ac1958fb91963306e0b57f1ec21823b": 1,
+        "entity-ca93ef24007db3b86240e1a5ca83c9f2": 1,
+        "entity-483ea3636e9ecad43467cb8a1ce1c6c8": 1,
+        "entity-8c48266804f5934faba41235a61cf154": 1
+      }
+    },
+    {
+      "query": "catch_up_from_git",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-5ced0442276e81ac3ac6e6309be6ff74": 3
+      }
+    },
+    {
+      "query": "new",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-9dda416667b7b1943c14e0476ea03654": 3,
+        "entity-76306a8124fc299ec4ab401189a91a6d": 3
+      }
+    },
+    {
+      "query": "start_watching",
+      "query_type": "ExactName",
+      "entity_relevance": {}
+    },
+    {
+      "query": "tests",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-0c53fff2996a1b0571316d5f8e6a96da": 3,
+        "entity-821f08453ffec52fda8646e29d4ce469": 3,
+        "entity-84e35b53166d3ed0e4fa7341f3761735": 2,
+        "entity-06d175f964805109e7bf0b4b725f9ac6": 2,
+        "entity-69217ab1db37a55b3656fd0078a5e3a9": 2,
+        "entity-9f45bfa54f132664ad0f7f49a2b2dea8": 2,
+        "entity-4e15ef1d2180f4d33e991dbd2d1144cc": 2,
+        "entity-274d15facf1bfd3778c1deaf04a295f1": 2,
+        "entity-404999f0d11eed3ad301f0f83383afa1": 2,
+        "entity-3a3a3c77869c2a3337960d4499c0a915": 2
+      }
+    },
+    {
+      "query": "stage_store_entities",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-6ce4661565f47996796aa1ee369ab196": 2
+      }
+    },
+    {
+      "query": "tests",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-0c53fff2996a1b0571316d5f8e6a96da": 3,
+        "entity-821f08453ffec52fda8646e29d4ce469": 3,
+        "entity-84e35b53166d3ed0e4fa7341f3761735": 2,
+        "entity-06d175f964805109e7bf0b4b725f9ac6": 2,
+        "entity-69217ab1db37a55b3656fd0078a5e3a9": 2,
+        "entity-9f45bfa54f132664ad0f7f49a2b2dea8": 2,
+        "entity-4e15ef1d2180f4d33e991dbd2d1144cc": 2,
+        "entity-274d15facf1bfd3778c1deaf04a295f1": 2,
+        "entity-404999f0d11eed3ad301f0f83383afa1": 2,
+        "entity-3a3a3c77869c2a3337960d4499c0a915": 2
+      }
+    },
+    {
+      "query": "config",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-fd7203c83d712e22036bc347115e3358": 3,
+        "entity-a6b75340cb1dd4fbcc5d4f10d2c8283b": 3,
+        "entity-5d3af743252f0c7c4ccee60af25d8f55": 3,
+        "entity-14591ee4c79c80dd408d8e196c1a2738": 3,
+        "entity-9adb261eaceb8e0c235ac20cb92a7d1f": 2,
+        "entity-65450fa9a7fa0a883fbb984469a3e676": 2,
+        "entity-818429f4d70caf4b0bbacb213463ed56": 2,
+        "entity-1bda64a7e3526f02880733ca2df77ebe": 2
+      }
+    },
+    {
+      "query": "test_handle_file_change_updates_snapshot_with_git_commit",
+      "query_type": "ExactName",
+      "entity_relevance": {}
+    },
+    {
+      "query": "create_test_repository",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-9f6ab7c5f260fd9a9a1d43e3573f43ad": 3,
+        "entity-c497cc53885343eecd509d69c054073c": 2
+      }
+    },
+    {
+      "query": "handle_constant",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-628df4a097b8d0782e4f3b4c64a0231c": 2,
+        "entity-cd3880be59df65289a7cd7c08d702f2d": 1
+      }
+    },
+    {
+      "query": "handle_impl_trait",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-52ae8bdc55890dc6aa5780c9051ca13c": 1
+      }
+    },
+    {
+      "query": "handle_function",
+      "query_type": "ExactName",
+      "entity_relevance": {
+        "entity-15d33fffb3331085ce507a64e9872548": 1
+      }
+    },
+    {
+      "query": "extract_method",
+      "query_type": "ExactName",
+      "entity_relevance": {}
+    },
+    {
+      "query": "Check if Qdrant container is running",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-58c5fbad05f8ba6545819b7720b56351": 3,
+        "entity-c3c21d4949b9ec4a89a0edc0bce1cce8": 2,
+        "entity-bb89494c1832a4657373c258a862dd96": 2,
+        "entity-a555a17283f393913789100dbaf2c246": 2,
+        "entity-24e272b16a47a0719c88c2c6791e8bf7": 2,
+        "entity-792c3163592e5b45353b20bd7c0ea9cc": 1,
+        "entity-3935ade8106bd5919b3584ff108cb5f0": 1,
+        "entity-ce37a211ecad763c2984a55aac7e8b9b": 1,
+        "entity-015f5f8ce41d71af3c36477474c67156": 2,
+        "entity-effb08906b8b72e062a7fda39a7b815e": 1
+      }
+    },
+    {
+      "query": "Calculate a combined hash of all files that affect the outbox processor build\n\nThis includes:\n- All",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-0e1bb24846105e10477ac40f87a0a709": 3,
+        "entity-2d9abf3a79f4eb5c359cbb0a254f2c31": 2,
+        "entity-8cea4d65d065ad3565c8001d92ead39b": 2
+      }
+    },
+    {
+      "query": "Library interface for codesearch CLI\n\nThis module exposes internal functions for integration",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-f9505aa9aa2e9d4f50e8adf1e43622a6": 2,
+        "entity-62a20cce80559e197100162cb69cfed7": 2
+      }
+    },
+    {
+      "query": "Ensure storage is initialized, creating config and collection if needed\n\nThis function orchestrates",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-ba6d1d454f10a84018b6885fdeeec821": 3,
+        "entity-b391334566d4e9e6d81ea830c09846e1": 2,
+        "entity-45bac84fd4ad0db57042947bfcb6ac35": 2,
+        "entity-3a94d54ab8afcc3e7edecafaf1c5366b": 2,
+        "entity-0ac7d5ce518ec58959ae6fddee8b8b77": 1,
+        "entity-c497cc53885343eecd509d69c054073c": 1,
+        "entity-3f8e790bee9d3655ec71fb053fe89860": 1,
+        "entity-9f28a259c34ed2e2a06f117f8027698b": 1
+      }
+    },
+    {
+      "query": "Build outbox-processor Docker image from current directory\n\nIMPORTANT: This function requires",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-2d9abf3a79f4eb5c359cbb0a254f2c31": 3,
+        "entity-8cea4d65d065ad3565c8001d92ead39b": 2,
+        "entity-0e1bb24846105e10477ac40f87a0a709": 2,
+        "entity-bc58dc28fc967b44b47e2ee18210c85b": 1,
+        "entity-3f8e790bee9d3655ec71fb053fe89860": 1,
+        "entity-f9505aa9aa2e9d4f50e8adf1e43622a6": 1
+      }
+    },
+    {
+      "query": "Check if the batch is empty",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-076e2447d52f8e938c73ebac7ebb3ca1": 1,
+        "entity-15129bfb757d651e2ae525f7b1c2b2a2": 2,
+        "entity-4646b06fbd2f191f7fe31e6ea63ad329": 1,
+        "entity-519986d193fe8855237c8152691268a1": 2
+      }
+    },
+    {
+      "query": "RAII guard for file locking (duplicated from infrastructure",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-e2b63f4cb3eab2ce6568bfb8fde0d6dd": 3,
+        "entity-3c72e3bc4fb24a7297402e31f4c3dd4f": 3,
+        "entity-73472aef2051e63538a0116d482436e8": 2,
+        "entity-0960b1ec99b5d50907ed427997afa496": 3,
+        "entity-c4090f6af5f841a9403114fe9c2508bf": 3,
+        "entity-7745e71d5ce26a4680f78480368963bf": 2,
+        "entity-f48c867e3149ceafd1a88c66f1f307fa": 2,
+        "entity-7492217d60003e21baaa0153b27c4b4d": 2,
+        "entity-f38e787c16919d0168b6526a7f7913a0": 2,
+        "entity-eaac5fd2666ee773e942319c2592646b": 1
+      }
+    },
+    {
+      "query": "Get the timeout duration",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-5d8da52841a7477ac44732a8ad83e643": 3,
+        "entity-e4f48ea52ec5f4040e0001d986c8c4c7": 2,
+        "entity-a555a17283f393913789100dbaf2c246": 1,
+        "entity-b0a11af585323500723017b139d4e6d7": 2
+      }
+    },
+    {
+      "query": "Get the current scope path as a string",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-47045637b8a5e2758343292eb00fd825": 3,
+        "entity-d9739dd1245ef8d0a9f145ff0e85ea6a": 2,
+        "entity-03cf5e5f16bc861650e5830c5c4cd095": 2,
+        "entity-4c0dc5d364fffc0c32339e260c40bb92": 2,
+        "entity-7fe6a02e468b21c6c770ebfe74283a2a": 1
+      }
+    },
+    {
+      "query": "Main trait for repository indexing",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-c3c6c70389c4ac37147fb75108764e3c": 3,
+        "entity-f0b9de2198d128024479081cb8b88cd6": 2,
+        "entity-1f83994d10dd08ca8b86a758c8a9efae": 1,
+        "entity-b0bdc70a605e5ec3385b0ad279a24bc4": 1
+      }
+    },
+    {
+      "query": "Set the API key",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-70ada4367a343bcde66d33876f29eaa7": 3,
+        "entity-8c48266804f5934faba41235a61cf154": 2,
+        "entity-126bdc0f300c1009f6dd3d8406c95a46": 1,
+        "entity-0ac1958fb91963306e0b57f1ec21823b": 1,
+        "entity-10930b6b7d1c68925140ebb1680febcf": 1,
+        "entity-483ea3636e9ecad43467cb8a1ce1c6c8": 1,
+        "entity-ca93ef24007db3b86240e1a5ca83c9f2": 1
+      }
+    },
+    {
+      "query": "Run catch-up indexing based on git diff\n\nThis compares the last indexed commit with the current",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-5ced0442276e81ac3ac6e6309be6ff74": 3,
+        "entity-83f9d60cf840e8e9aeedd9044aee7e26": 2,
+        "entity-c3c6c70389c4ac37147fb75108764e3c": 1
+      }
+    },
+    {
+      "query": "Create stats with specific values (for internal use)",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-83f9d60cf840e8e9aeedd9044aee7e26": 2,
+        "entity-35088197df645d7969dcdea9a5c41eda": 2,
+        "entity-f0ceb9f202b71cf3d6b6f1e78b8168a7": 1
+      }
+    },
+    {
+      "query": "Start watching for file changes and processing them in the background\n\nSpawns a background task",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-cb444a104cfe5e220f7e4bb4f30b81c6": 2,
+        "entity-070658964a9451c94348520724c5d2fe": 2,
+        "entity-b7849b345134d2186b852279dd221b07": 2,
+        "entity-171005c383c44be1d57c7f0b447e9ded": 1,
+        "entity-f04defdebfb1b52c074d62d3b978795b": 2,
+        "entity-f5abc47533ce3275dd64d0d9a631c6b7": 1,
+        "entity-dbf4a78a73ce31bfae8b15c8c08c5e13": 1,
+        "entity-47804c3df7f42ac3433fd5d1a3ca0292": 2,
+        "entity-b3b506e85a515ad5cb9559f746eed0cc": 2
+      }
+    },
+    {
+      "query": "Stage 4: Store entities and embeddings in database",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-6ce4661565f47996796aa1ee369ab196": 2,
+        "entity-079f1e05a3722b113fb227c64253f1d5": 2,
+        "entity-9157f5402549931f8a68951fb6c2ade9": 1,
+        "entity-a5a56b2106674292684f9a476f34dedf": 1,
+        "entity-bd37bdef4697f50dc6f2a24dc4c74df3": 1,
+        "entity-3d7b1b0e2b3ae5ac80bec01c49c9c6fd": 1
+      }
+    },
+    {
+      "query": "Creates a configuration error",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-2d369ce8654675ce8fee1ce5f7acada2": 3,
+        "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9": 3,
+        "entity-14591ee4c79c80dd408d8e196c1a2738": 2,
+        "entity-2f324ed0e8c908ebb376b30279035777": 2,
+        "entity-1e7f95116ac290c758002aafa2351022": 2,
+        "entity-fc1737e1f2f2eb18810f52e2f7d53262": 2,
+        "entity-943fd3d4184e12386e74b83b97b1984d": 1,
+        "entity-ab316efe8c87a9ea712047d6aad48b71": 1,
+        "entity-9b1ffe33e5e5b3f7a51a991d4640d6aa": 1
+      }
+    },
+    {
+      "query": "Helper to create a test repository with sample Rust files",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-9f6ab7c5f260fd9a9a1d43e3573f43ad": 3,
+        "entity-7be0e59b4432ba20869ba19b4efe06cc": 2,
+        "entity-253a4f9d127c6ca471dae7c624283dc0": 2,
+        "entity-f0da4d1f2cfa81dd69f149132a9692bf": 2,
+        "entity-65578b45fc1ec8688e45eec9a591e1f4": 2,
+        "entity-646338e67a1f66bcd6e231279338043a": 2,
+        "entity-b0cc194f82d64843781c0c1eeec10a25": 1,
+        "entity-59ad777c2c21d8d68218f91ee253296d": 1,
+        "entity-bb6a86afa0041e512e2b0350350e148f": 1
+      }
+    },
+    {
+      "query": "Process a constant or static query match and extract entity data",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-15d33fffb3331085ce507a64e9872548": 2,
+        "entity-52ae8bdc55890dc6aa5780c9051ca13c": 2,
+        "entity-42686604a2750488d4a7c685f20143f1": 2,
+        "entity-62f6591966469622ddc66f26876c1f67": 2,
+        "entity-985b010a361ffddacaeb43217e69b4ec": 2,
+        "entity-ceba01c2b68fab994691ea73f6eb4fbd": 2
+      }
+    },
+    {
+      "query": "Process a trait impl block query match and extract entities",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-52ae8bdc55890dc6aa5780c9051ca13c": 3,
+        "entity-fbe1a9ae56cea9cf9085bc30b6c258f0": 3,
+        "entity-42686604a2750488d4a7c685f20143f1": 2,
+        "entity-15d33fffb3331085ce507a64e9872548": 2,
+        "entity-62f6591966469622ddc66f26876c1f67": 2,
+        "entity-985b010a361ffddacaeb43217e69b4ec": 2
+      }
+    },
+    {
+      "query": "Process a function query match and extract entity data",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-15d33fffb3331085ce507a64e9872548": 3,
+        "entity-a561ddcc56f9f171f6310799fad6e91e": 2,
+        "entity-8cea2e6998d401f7d1980b947b9ab6ca": 2,
+        "entity-52ae8bdc55890dc6aa5780c9051ca13c": 2,
+        "entity-42686604a2750488d4a7c685f20143f1": 2,
+        "entity-3f199f640bf869c8d88e202d79f26ff6": 1,
+        "entity-cd219e66007b8225dde71a1423844d91": 1
+      }
+    },
+    {
+      "query": "Extract a single method from an impl block",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-fbe1a9ae56cea9cf9085bc30b6c258f0": 3,
+        "entity-15d33fffb3331085ce507a64e9872548": 2,
+        "entity-e1f7545f21b1306d4bc5ed08ca71d685": 2,
+        "entity-35409ff1c941a3b2aa9c711dad1b2a5f": 2,
+        "entity-46d387345f7d270a7c750c5ac57f7ac9": 2,
+        "entity-52ae8bdc55890dc6aa5780c9051ca13c": 1
+      }
+    },
+    {
+      "query": "Creates a parse error",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-4d0f8aceac5d626518885c9e7a0ac8f8": 3,
+        "entity-2d369ce8654675ce8fee1ce5f7acada2": 2,
+        "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9": 2,
+        "entity-9b1ffe33e5e5b3f7a51a991d4640d6aa": 2,
+        "entity-ab316efe8c87a9ea712047d6aad48b71": 1,
+        "entity-a204e1e66a19253adccda95c78c5caa0": 1
+      }
+    },
+    {
+      "query": "Large comprehensive Rust code sample (100+ lines)",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-7be0e59b4432ba20869ba19b4efe06cc": 2,
+        "entity-253a4f9d127c6ca471dae7c624283dc0": 2,
+        "entity-e07fb4741468aa4f48240abcbf92d5c2": 2,
+        "entity-06d175f964805109e7bf0b4b725f9ac6": 2,
+        "entity-e1f7545f21b1306d4bc5ed08ca71d685": 1,
+        "entity-646338e67a1f66bcd6e231279338043a": 1,
+        "entity-ffcd7cf3bba3a1c50498ea681bb2c124": 1
+      }
+    },
+    {
+      "query": "Check if Postgres container is running",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-792c3163592e5b45353b20bd7c0ea9cc": 3,
+        "entity-015f5f8ce41d71af3c36477474c67156": 3,
+        "entity-ca28a31e5e1e5157789bc73711529c3e": 3,
+        "entity-99fe450b7c5aafc5bb8a64dbf9b531cc": 2,
+        "entity-51c13f581a0ca4c93b985f827141b57d": 2,
+        "entity-effb08906b8b72e062a7fda39a7b815e": 2,
+        "entity-c3c21d4949b9ec4a89a0edc0bce1cce8": 1,
+        "entity-58c5fbad05f8ba6545819b7720b56351": 1,
+        "entity-bb89494c1832a4657373c258a862dd96": 1,
+        "entity-3935ade8106bd5919b3584ff108cb5f0": 1
+      }
+    },
+    {
+      "query": "Creates an entity extraction error",
+      "query_type": "Documentation",
+      "entity_relevance": {
+        "entity-a204e1e66a19253adccda95c78c5caa0": 3,
+        "entity-2d369ce8654675ce8fee1ce5f7acada2": 3,
+        "entity-243d6d58d5418ec9a3d5ef2a2ee7ead9": 3,
+        "entity-ab316efe8c87a9ea712047d6aad48b71": 2,
+        "entity-b0cc194f82d64843781c0c1eeec10a25": 1,
+        "entity-59ad777c2c21d8d68218f91ee253296d": 1
+      }
+    }
+  ]
+}

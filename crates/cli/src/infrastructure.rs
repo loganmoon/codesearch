@@ -446,7 +446,7 @@ async fn wait_for_all_services(config: &StorageConfig) -> Result<()> {
     docker::wait_for_vllm(api_url, Duration::from_secs(60)).await?;
 
     // Wait for vLLM reranker
-    let reranker_api_url = "http://localhost:8001/v1";
+    let reranker_api_url = "http://localhost:8001";
     docker::wait_for_vllm(reranker_api_url, Duration::from_secs(60)).await?;
 
     // Outbox processor doesn't have health endpoint - just wait a bit

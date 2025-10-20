@@ -173,7 +173,7 @@ Enable reranking in your `~/.codesearch/config.toml`:
 [reranking]
 enabled = true
 model = "BAAI/bge-reranker-v2-m3"
-api_base_url = "http://localhost:8001/v1"  # Optional, defaults to embeddings.api_base_url
+api_base_url = "http://localhost:8001"  # Optional, defaults to embeddings.api_base_url
 ```
 
 ### Infrastructure Requirements
@@ -193,9 +193,29 @@ vllm:
 ### Implementation Details
 
 - **Content Consistency**: Reranking uses the same `extract_embedding_content()` function as indexing to ensure identical content representation
+- **Document Truncation**: Documents are automatically truncated to ~4,800 characters (~1,200 tokens) to fit within the model's 8,192 token context window, with room for the query and multiple candidates
 - **Graceful Degradation**: If reranking fails (network error, timeout), the system falls back to vector search scores
 - **Performance**: Borrowed strings minimize allocations during reranking
 - **Error Handling**: All errors are logged and handled gracefully without crashing the search
+
+### BGE Instruction Usage
+
+The codebase correctly implements asymmetric BGE instruction usage:
+
+- **Queries**: Use BGE instruction prefix format: `<instruct>{instruction}\n<query>{query}`
+- **Documents**: Do NOT use instruction prefix (raw content only)
+- **Reranking**: Neither queries nor documents use instruction prefix
+
+This asymmetry is INTENTIONAL and follows official BGE model design:
+- BGE embedding model (bge-code-v1) is trained for asymmetric search
+- Queries with instructions guide the model for search intent
+- Documents without instructions preserve raw semantic representation
+- Reranker model (bge-reranker-v2-m3) uses simple `[query, passage]` pairs without instructions
+
+**References:**
+- BGE Code Embedding: https://huggingface.co/BAAI/bge-code-v1
+- BGE Reranker: https://huggingface.co/BAAI/bge-reranker-v2-m3
+- Research: docs/research/reranking_bugs_investigation.md
 
 ### Testing
 

@@ -64,7 +64,7 @@ impl VllmRerankerProvider {
     ///
     /// # Arguments
     /// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
-    /// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001/v1")
+    /// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001")
     /// * `timeout_secs` - Request timeout in seconds
     pub fn new(model: String, api_base_url: String, timeout_secs: u64) -> Result<Self> {
         info!("Initializing vLLM reranker provider");
@@ -113,6 +113,23 @@ impl VllmRerankerProvider {
     }
 }
 
+/// Truncate text to approximately fit within token limit
+///
+/// Uses a conservative estimate of ~4 characters per token.
+/// For an 8192 token model with 50 documents, we target ~1200 tokens per document
+/// (4,800 chars) to leave room for the query and safety margin.
+fn truncate_for_reranking(text: &str, max_chars: usize) -> String {
+    if text.len() <= max_chars {
+        text.to_string()
+    } else {
+        // Truncate and add ellipsis
+        let truncated = &text[..max_chars.saturating_sub(3)];
+        format!("{truncated}...")
+    }
+}
+
+const MAX_DOCUMENT_CHARS: usize = 4_800; // ~1200 tokens per document
+
 #[async_trait]
 impl RerankerProvider for VllmRerankerProvider {
     async fn rerank(
@@ -125,10 +142,20 @@ impl RerankerProvider for VllmRerankerProvider {
             return Ok(Vec::new());
         }
 
-        // Build request payload
+        // Build request payload with truncation to fit within token limits
         let doc_texts: Vec<String> = documents
             .iter()
-            .map(|(_, content)| content.to_string())
+            .map(|(_, content)| {
+                let truncated = truncate_for_reranking(content, MAX_DOCUMENT_CHARS);
+                if truncated.len() < content.len() {
+                    debug!(
+                        "Truncated document from {} to {} chars for reranking",
+                        content.len(),
+                        truncated.len()
+                    );
+                }
+                truncated
+            })
             .collect();
 
         let request = RerankRequest {
@@ -172,15 +199,29 @@ impl RerankerProvider for VllmRerankerProvider {
         let mut scored_docs: Vec<(String, f32)> = rerank_response
             .results
             .into_iter()
-            .filter_map(|result| {
-                documents
-                    .get(result.index)
-                    .map(|(id, _)| (id.clone(), result.relevance_score))
+            .filter_map(|result| match documents.get(result.index) {
+                Some((id, _)) => Some((id.clone(), result.relevance_score)),
+                None => {
+                    warn!(
+                        "Rerank API returned out-of-bounds index {}, dropping result",
+                        result.index
+                    );
+                    None
+                }
             })
             .collect();
 
-        // Sort by relevance score descending
-        scored_docs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort by relevance score descending with explicit NaN handling
+        scored_docs.sort_by(|a, b| {
+            let a_is_nan = a.1.is_nan();
+            let b_is_nan = b.1.is_nan();
+            match (a_is_nan, b_is_nan) {
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater, // NaN sorts to end
+                (false, true) => std::cmp::Ordering::Less,    // NaN sorts to end
+                (false, false) => b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal),
+            }
+        });
 
         // Truncate to top_k
         scored_docs.truncate(top_k);
@@ -195,7 +236,7 @@ impl RerankerProvider for VllmRerankerProvider {
 ///
 /// # Arguments
 /// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
-/// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001/v1")
+/// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001")
 /// * `timeout_secs` - Request timeout in seconds
 pub async fn create_reranker_provider(
     model: String,

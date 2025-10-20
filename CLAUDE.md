@@ -153,6 +153,60 @@ codesearch drop
 codesearch index
 ```
 
+## Reranking Feature
+
+Codesearch supports optional reranking of search results using cross-encoder models to improve relevance ranking.
+
+### Overview
+
+Reranking is a two-stage search approach:
+1. **Initial Retrieval**: Vector search retrieves top candidates using embedding similarity
+2. **Reranking**: A cross-encoder model reranks candidates for improved relevance
+
+This provides better accuracy than vector search alone, as cross-encoders can model query-document interactions more precisely.
+
+### Configuration
+
+Enable reranking in your `~/.codesearch/config.toml`:
+
+```toml
+[reranking]
+enabled = true
+model = "BAAI/bge-reranker-v2-m3"
+api_base_url = "http://localhost:8001/v1"  # Optional, defaults to embeddings.api_base_url
+```
+
+### Infrastructure Requirements
+
+Reranking requires a vLLM instance with the reranker model loaded. The shared infrastructure at `~/.codesearch/infrastructure/` includes vLLM by default.
+
+To configure vLLM for reranking, update your `docker-compose.yml`:
+
+```yaml
+vllm:
+  image: vllm/vllm-openai:latest
+  command: --model BAAI/bge-reranker-v2-m3 --served-model-name BAAI/bge-reranker-v2-m3
+  ports:
+    - "8001:8000"
+```
+
+### Implementation Details
+
+- **Content Consistency**: Reranking uses the same `extract_embedding_content()` function as indexing to ensure identical content representation
+- **Graceful Degradation**: If reranking fails (network error, timeout), the system falls back to vector search scores
+- **Performance**: Borrowed strings minimize allocations during reranking
+- **Error Handling**: All errors are logged and handled gracefully without crashing the search
+
+### Testing
+
+Run reranking tests:
+```bash
+cargo test --package codesearch-embeddings
+
+# Tests requiring a running vLLM instance (ignored by default):
+cargo test --package codesearch-embeddings -- --ignored
+```
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.

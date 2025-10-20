@@ -15,12 +15,14 @@ pub mod config;
 pub mod error;
 mod mock_provider;
 pub mod provider;
+pub mod reranker;
 
 pub use api_provider::create_api_provider;
 pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType};
 pub use error::EmbeddingError;
 pub use mock_provider::MockEmbeddingProvider;
 pub use provider::EmbeddingProvider;
+pub use reranker::{create_reranker_provider, RerankerProvider};
 
 /// Helper function to parse provider type from string
 fn parse_provider_type(provider: &str) -> EmbeddingProviderType {

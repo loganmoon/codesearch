@@ -1,6 +1,6 @@
 # Shared Infrastructure for Codesearch Multi-Repository Setup
 #
-# This provides PostgreSQL, Qdrant, vLLM embeddings, and outbox-processor services
+# This provides PostgreSQL, Qdrant, vLLM embeddings, vLLM reranker, and outbox-processor services
 # that multiple repositories can connect to.
 #
 # This file is automatically managed by the codesearch CLI.
@@ -95,6 +95,44 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    networks:
+      - codesearch
+    restart: unless-stopped
+
+  vllm-reranker:
+    image: vllm/vllm-openai:latest
+    container_name: codesearch-vllm-reranker
+    ports:
+      - "127.0.0.1:8001:8000"  # OpenAI-compatible API - localhost only (port 8001 on host)
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:64
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ipc: host
+    command:
+      - "vllm"
+      - "serve"
+      - "BAAI/bge-reranker-v2-m3"
+      - "--revision"
+      - "refs/pr/9"
+      - "--max-model-len"
+      - "8192"
+      - "--trust-remote-code"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - codesearch
     restart: unless-stopped

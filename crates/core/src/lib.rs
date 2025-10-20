@@ -20,7 +20,9 @@ pub mod entity_id;
 pub mod error;
 
 // Re-export main types for convenience
-pub use config::{Config, EmbeddingsConfig, IndexerConfig, StorageConfig, WatcherConfig};
+pub use config::{
+    Config, EmbeddingsConfig, IndexerConfig, RerankingConfig, StorageConfig, WatcherConfig,
+};
 pub use entities::{
     CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,
     RelationshipType, SourceLocation, Visibility,

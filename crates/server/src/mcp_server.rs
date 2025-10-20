@@ -1,6 +1,6 @@
 use axum::Router;
 use codesearch_core::error::{Error, ResultExt};
-use codesearch_core::{config::Config, entities::EntityType};
+use codesearch_core::{config::Config, entities::EntityType, CodeEntity};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{
     create_storage_client, PostgresClientTrait, SearchFilters, StorageClient,
@@ -51,6 +51,8 @@ struct CodeSearchMcpServer {
     watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
     tool_router: ToolRouter<Self>,
     default_bge_instruction: String,
+    reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
+    reranking_config: codesearch_core::config::RerankingConfig,
 }
 
 /// Request parameters for search_code tool
@@ -244,11 +246,21 @@ impl CodeSearchMcpServer {
             }
         }
 
-        // Sort by score and limit
+        // Sort by score and determine candidate limit based on reranking config
         all_results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        all_results.truncate(limit);
 
-        // Batch fetch entities from Postgres
+        let (candidates_limit, final_limit) =
+            if self.reranking_config.enabled && self.reranker.is_some() {
+                (
+                    self.reranking_config.candidates,
+                    self.reranking_config.top_k.min(limit),
+                )
+            } else {
+                (limit, limit)
+            };
+        all_results.truncate(candidates_limit);
+
+        // Batch fetch entities from Postgres for all candidates
         let entity_refs: Vec<_> = all_results
             .iter()
             .map(|(repo_id, eid, _)| (*repo_id, eid.to_string()))
@@ -266,14 +278,50 @@ impl CodeSearchMcpServer {
                 )
             })?;
 
-        // Convert to HashMap for efficient lookup
-        let mut entities_map: HashMap<String, _> = HashMap::with_capacity(entities_vec.len());
-        for entity in entities_vec {
-            entities_map.insert(entity.entity_id.clone(), entity);
-        }
+        // Rerank if enabled, otherwise use vector scores
+        let final_results = if let Some(ref reranker) = self.reranker {
+            // Build documents for reranking
+            let documents: Vec<(String, String)> = entities_vec
+                .iter()
+                .map(|entity| {
+                    let content = extract_reranking_content(entity);
+                    (entity.entity_id.clone(), content)
+                })
+                .collect();
+
+            // Attempt reranking with fallback
+            match reranker.rerank(&query_text, &documents, final_limit).await {
+                Ok(reranked) => {
+                    // Map reranked entity IDs back to (repo_id, entity_id, score) tuples
+                    reranked
+                        .into_iter()
+                        .filter_map(|(entity_id, score)| {
+                            all_results
+                                .iter()
+                                .find(|(_, eid, _)| eid == &entity_id)
+                                .map(|(repo_id, _, _)| (*repo_id, entity_id, score))
+                        })
+                        .collect::<Vec<_>>()
+                }
+                Err(e) => {
+                    // Log warning and fall back to vector search scores
+                    tracing::warn!("Reranking failed: {e}, falling back to vector search scores");
+                    all_results.into_iter().take(final_limit).collect()
+                }
+            }
+        } else {
+            // Reranking disabled, use vector search scores
+            all_results.into_iter().take(final_limit).collect()
+        };
+
+        // Build entity lookup map
+        let entities_map: HashMap<String, CodeEntity> = entities_vec
+            .into_iter()
+            .map(|entity| (entity.entity_id.clone(), entity))
+            .collect();
 
         // Format results with repository information
-        let formatted_results: Vec<_> = all_results
+        let formatted_results: Vec<_> = final_results
             .into_iter()
             .filter_map(|(repo_id, entity_id, score)| {
                 match entities_map.get(&entity_id) {
@@ -370,6 +418,8 @@ impl CodeSearchMcpServer {
         postgres_client: Arc<dyn PostgresClientTrait>,
         watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
         default_bge_instruction: String,
+        reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
+        reranking_config: codesearch_core::config::RerankingConfig,
     ) -> Self {
         Self {
             repositories,
@@ -378,8 +428,50 @@ impl CodeSearchMcpServer {
             watchers,
             tool_router: Self::tool_router(),
             default_bge_instruction,
+            reranker,
+            reranking_config,
         }
     }
+}
+
+/// Extract content for reranking from a CodeEntity
+///
+/// Mirrors the content generation in entity_processor.rs to ensure consistency
+/// between indexed embeddings and reranking documents.
+fn extract_reranking_content(entity: &CodeEntity) -> String {
+    let mut parts = Vec::new();
+
+    // Add entity type
+    parts.push(format!("{:?}", entity.entity_type));
+
+    // Add name
+    parts.push(entity.name.clone());
+
+    // Add qualified name if different from name
+    if entity.qualified_name != entity.name {
+        parts.push(entity.qualified_name.clone());
+    }
+
+    // Add documentation summary
+    if let Some(doc_summary) = entity.documentation_summary.as_ref() {
+        if !doc_summary.is_empty() {
+            parts.push(doc_summary.clone());
+        }
+    }
+
+    // Add signature
+    if let Some(signature) = entity.signature.as_ref() {
+        parts.push(format!("{signature:?}"));
+    }
+
+    // Add content
+    if let Some(content) = entity.content.as_ref() {
+        if !content.is_empty() {
+            parts.push(content.clone());
+        }
+    }
+
+    parts.join(" ")
 }
 
 #[tool_handler]
@@ -498,6 +590,36 @@ pub(crate) async fn run_multi_repo_server(
 
     let embedding_manager = crate::storage_init::create_embedding_manager(&config).await?;
 
+    // Initialize reranker if enabled
+    let reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>> =
+        if config.reranking.enabled {
+            let api_base_url = config
+                .reranking
+                .api_base_url
+                .clone()
+                .or_else(|| config.embeddings.api_base_url.clone())
+                .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
+
+            match codesearch_embeddings::create_reranker_provider(
+                config.reranking.model.clone(),
+                api_base_url,
+            )
+            .await
+            {
+                Ok(provider) => {
+                    info!("Reranker initialized successfully");
+                    Some(Arc::from(provider))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize reranker: {e}");
+                    tracing::warn!("Reranking will be disabled for this session");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Parallelize repository loading (including collection existence checks)
     let repo_load_futures =
         all_repos
@@ -576,6 +698,8 @@ pub(crate) async fn run_multi_repo_server(
         postgres_client,
         watchers.clone(),
         config.embeddings.default_bge_instruction.clone(),
+        reranker,
+        config.reranking.clone(),
     );
 
     run_mcp_server_with_shutdown_multi(mcp_server, watchers, config.server.port).await

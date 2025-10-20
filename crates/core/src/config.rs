@@ -72,6 +72,10 @@ pub struct Config {
     /// Language configuration
     #[serde(default)]
     pub languages: LanguagesConfig,
+
+    /// Reranking configuration
+    #[serde(default)]
+    pub reranking: RerankingConfig,
 }
 
 /// Configuration for embeddings generation
@@ -229,6 +233,32 @@ pub struct LanguagesConfig {
     pub enabled: Vec<String>,
 }
 
+/// Configuration for reranking with cross-encoder models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankingConfig {
+    /// Whether reranking is enabled (default: false)
+    #[serde(default = "default_enable_reranking")]
+    pub enabled: bool,
+
+    /// Reranker model name
+    #[serde(default = "default_reranking_model")]
+    pub model: String,
+
+    /// Number of candidates to retrieve from vector search before reranking
+    #[serde(default = "default_reranking_candidates")]
+    pub candidates: usize,
+
+    /// Number of top results to return after reranking
+    #[serde(default = "default_reranking_top_k")]
+    pub top_k: usize,
+
+    /// API base URL for reranker service (defaults to embeddings URL if not set)
+    pub api_base_url: Option<String>,
+
+    /// API key for reranker service (uses VLLM_API_KEY env if not set)
+    pub api_key: Option<String>,
+}
+
 // Default constants
 const DEFAULT_DEVICE: &str = "cpu";
 const DEFAULT_PROVIDER: &str = "localapi";
@@ -362,6 +392,22 @@ fn default_max_concurrent_snapshot_updates() -> usize {
     16
 }
 
+fn default_enable_reranking() -> bool {
+    false
+}
+
+fn default_reranking_model() -> String {
+    "BAAI/bge-reranker-v2-m3".to_string()
+}
+
+fn default_reranking_candidates() -> usize {
+    50
+}
+
+fn default_reranking_top_k() -> usize {
+    10
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -399,6 +445,19 @@ impl Default for LanguagesConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled_languages(),
+        }
+    }
+}
+
+impl Default for RerankingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enable_reranking(),
+            model: default_reranking_model(),
+            candidates: default_reranking_candidates(),
+            top_k: default_reranking_top_k(),
+            api_base_url: None,
+            api_key: None,
         }
     }
 }
@@ -666,6 +725,17 @@ impl Config {
 
         // Merge languages config
         self.languages = other.languages;
+
+        // Merge reranking config
+        self.reranking.enabled = other.reranking.enabled;
+        self.reranking.model = other.reranking.model;
+        self.reranking.candidates = other.reranking.candidates;
+        self.reranking.top_k = other.reranking.top_k;
+        self.reranking.api_base_url = other
+            .reranking
+            .api_base_url
+            .or(self.reranking.api_base_url.clone());
+        self.reranking.api_key = other.reranking.api_key.or(self.reranking.api_key.clone());
     }
 
     /// Load configuration with layered precedence (git-style)
@@ -700,6 +770,7 @@ impl Config {
             },
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
+            reranking: RerankingConfig::default(),
         };
 
         // Try to load global config
@@ -830,6 +901,32 @@ impl Config {
                 "indexer.max_concurrent_snapshot_updates too large (max 128, got {})",
                 self.indexer.max_concurrent_snapshot_updates
             )));
+        }
+
+        // Validate reranking configuration
+        if self.reranking.enabled {
+            if self.reranking.candidates == 0 {
+                return Err(Error::config(
+                    "reranking.candidates must be greater than 0".to_string(),
+                ));
+            }
+            if self.reranking.candidates > 1000 {
+                return Err(Error::config(format!(
+                    "reranking.candidates too large (max 1000, got {})",
+                    self.reranking.candidates
+                )));
+            }
+            if self.reranking.top_k == 0 {
+                return Err(Error::config(
+                    "reranking.top_k must be greater than 0".to_string(),
+                ));
+            }
+            if self.reranking.top_k > self.reranking.candidates {
+                return Err(Error::config(format!(
+                    "reranking.top_k ({}) cannot exceed candidates ({})",
+                    self.reranking.top_k, self.reranking.candidates
+                )));
+            }
         }
 
         Ok(())
@@ -1248,6 +1345,137 @@ mod tests {
             .to_string()
             .contains("no valid filename component"));
     }
+
+    #[test]
+    fn test_reranking_config_defaults() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse minimal TOML");
+
+        // Verify reranking defaults
+        assert!(
+            !config.reranking.enabled,
+            "Reranking should be disabled by default"
+        );
+        assert_eq!(config.reranking.model, "BAAI/bge-reranker-v2-m3");
+        assert_eq!(config.reranking.candidates, 50);
+        assert_eq!(config.reranking.top_k, 10);
+        assert!(config.reranking.api_base_url.is_none());
+        assert!(config.reranking.api_key.is_none());
+    }
+
+    #[test]
+    fn test_reranking_config_custom_values() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+
+            [reranking]
+            enabled = true
+            model = "custom-model"
+            candidates = 100
+            top_k = 20
+            api_base_url = "http://localhost:8001/v1"
+        "#;
+
+        let config =
+            Config::from_toml_str(toml).expect("Failed to parse TOML with custom reranking");
+
+        assert!(config.reranking.enabled);
+        assert_eq!(config.reranking.model, "custom-model");
+        assert_eq!(config.reranking.candidates, 100);
+        assert_eq!(config.reranking.top_k, 20);
+        assert_eq!(
+            config.reranking.api_base_url,
+            Some("http://localhost:8001/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_reranking_validation_candidates_too_large() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+
+            [reranking]
+            enabled = true
+            candidates = 2000
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too large"));
+    }
+
+    #[test]
+    fn test_reranking_validation_top_k_exceeds_candidates() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+
+            [reranking]
+            enabled = true
+            candidates = 50
+            top_k = 100
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("top_k"));
+        assert!(error_msg.contains("cannot exceed"));
+    }
+
+    #[test]
+    fn test_reranking_validation_disabled_no_check() {
+        let toml = r#"
+            [indexer]
+
+            [embeddings]
+
+            [watcher]
+
+            [storage]
+
+            [reranking]
+            enabled = false
+            candidates = 2000
+            top_k = 100
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+
+        // Should pass validation because reranking is disabled
+        assert!(result.is_ok());
+    }
 }
 
 /// Builder for Config with fluent API
@@ -1259,6 +1487,7 @@ pub struct ConfigBuilder {
     storage: StorageConfig,
     server: ServerConfig,
     languages: LanguagesConfig,
+    reranking: RerankingConfig,
 }
 
 impl ConfigBuilder {
@@ -1271,6 +1500,7 @@ impl ConfigBuilder {
             storage,
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
+            reranking: RerankingConfig::default(),
         }
     }
 
@@ -1292,6 +1522,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the reranking configuration
+    pub fn reranking(mut self, reranking: RerankingConfig) -> Self {
+        self.reranking = reranking;
+        self
+    }
+
     /// Build the Config
     pub fn build(self) -> Config {
         Config {
@@ -1301,6 +1537,7 @@ impl ConfigBuilder {
             storage: self.storage,
             server: self.server,
             languages: self.languages,
+            reranking: self.reranking,
         }
     }
 }

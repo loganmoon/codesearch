@@ -36,6 +36,11 @@ pub fn is_vllm_running() -> Result<bool> {
     is_container_running("codesearch-vllm")
 }
 
+/// Check if vLLM reranker container is running
+pub fn is_vllm_reranker_running() -> Result<bool> {
+    is_container_running("codesearch-vllm-reranker")
+}
+
 /// Check if Postgres container is running
 pub fn is_postgres_running() -> Result<bool> {
     is_container_running("codesearch-postgres")
@@ -84,6 +89,7 @@ pub fn get_stopped_infrastructure_containers() -> Result<Vec<String>> {
         "codesearch-postgres",
         "codesearch-qdrant",
         "codesearch-vllm",
+        "codesearch-vllm-reranker",
         "codesearch-outbox-processor",
     ];
 

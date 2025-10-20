@@ -208,8 +208,9 @@ pub fn is_shared_infrastructure_running() -> Result<bool> {
     let qdrant_running = docker::is_qdrant_running()?;
     let outbox_running = docker::is_outbox_processor_running()?;
     let vllm_running = docker::is_vllm_running()?;
+    let reranker_running = docker::is_vllm_reranker_running()?;
 
-    Ok(postgres_running && qdrant_running && outbox_running && vllm_running)
+    Ok(postgres_running && qdrant_running && outbox_running && vllm_running && reranker_running)
 }
 
 /// Ensure shared infrastructure directory and compose file exist
@@ -395,6 +396,7 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         "postgres",
         "qdrant",
         "vllm-embeddings",
+        "vllm-reranker",
         "outbox-processor",
     ]);
 
@@ -439,9 +441,13 @@ async fn wait_for_all_services(config: &StorageConfig) -> Result<()> {
     // Wait for Qdrant
     docker::wait_for_qdrant(config, Duration::from_secs(60)).await?;
 
-    // Wait for vLLM
+    // Wait for vLLM embeddings
     let api_url = "http://localhost:8000/v1";
     docker::wait_for_vllm(api_url, Duration::from_secs(60)).await?;
+
+    // Wait for vLLM reranker
+    let reranker_api_url = "http://localhost:8001/v1";
+    docker::wait_for_vllm(reranker_api_url, Duration::from_secs(60)).await?;
 
     // Outbox processor doesn't have health endpoint - just wait a bit
     info!("Waiting for outbox processor to start...");

@@ -20,6 +20,8 @@ reqwest = "0.12.12"
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = "0.1.83"
+bm25 = { version = "2.3", default-features = false }
+unicode-segmentation = "1.12"
 
 [dev-dependencies]
 codesearch-indexer = { path = "../indexer" }

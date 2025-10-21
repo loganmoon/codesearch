@@ -215,7 +215,6 @@ This asymmetry is INTENTIONAL and follows official BGE model design:
 **References:**
 - BGE Code Embedding: https://huggingface.co/BAAI/bge-code-v1
 - BGE Reranker: https://huggingface.co/BAAI/bge-reranker-v2-m3
-- Research: docs/research/reranking_bugs_investigation.md
 
 ### Testing
 

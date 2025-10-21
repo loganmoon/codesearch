@@ -66,7 +66,7 @@ async fn create_qdrant_collection(
 
     let collection_manager = create_collection_manager(&storage_config).await?;
     collection_manager
-        .ensure_collection(collection_name, vector_size)
+        .ensure_collection(collection_name, vector_size, 100_000)
         .await?;
     Ok(())
 }

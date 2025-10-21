@@ -155,9 +155,17 @@ pub async fn ensure_storage_initialized(
         .await
         .context("Failed to create collection manager")?;
 
-    storage_init::initialize_collection(collection_manager.as_ref(), &collection_name, dimensions)
-        .await
-        .context("Failed to initialize collection")?;
+    // Default sparse vocab size for BM25
+    const SPARSE_VOCAB_SIZE: u32 = 100_000;
+
+    storage_init::initialize_collection(
+        collection_manager.as_ref(),
+        &collection_name,
+        dimensions,
+        SPARSE_VOCAB_SIZE,
+    )
+    .await
+    .context("Failed to initialize collection")?;
 
     // Perform health check
     storage_init::verify_storage_health(collection_manager.as_ref())

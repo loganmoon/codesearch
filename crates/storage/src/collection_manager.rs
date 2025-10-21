@@ -13,7 +13,8 @@ pub trait CollectionManager: Send + Sync {
     async fn ensure_collection(
         &self,
         collection_name: &str,
-        vector_dimensions: usize,
+        dense_dimensions: usize,
+        sparse_vocab_size: u32,
     ) -> Result<()>;
 
     /// Delete collection (for testing/reset)

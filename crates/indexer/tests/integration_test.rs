@@ -158,6 +158,11 @@ pub fn format_number(n: i64) -> String {
         .await
         .unwrap();
 
+    // Create .gitignore to exclude target directory
+    fs::write(base.join(".gitignore"), "target/\n")
+        .await
+        .unwrap();
+
     // Create some non-Rust files that should be ignored
     fs::write(base.join("README.md"), "# Test Project")
         .await

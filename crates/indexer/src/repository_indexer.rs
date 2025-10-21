@@ -2,7 +2,7 @@
 //!
 //! Provides the main pipelined indexing pipeline for processing repositories.
 
-use crate::common::{find_files, get_current_commit, path_to_str, ResultExt};
+use crate::common::{get_current_commit, path_to_str, ResultExt};
 use crate::config::IndexerConfig;
 use crate::entity_processor;
 use crate::{IndexResult, IndexStats};
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 // Pipeline data structures for multi-stage indexing
@@ -104,26 +104,131 @@ impl RepositoryIndexer {
 
 // Pipeline stage functions
 
-/// Stage 1: Discover all files in the repository and batch them
+/// Stage 1: Discover all files in the repository and stream them in batches
+///
+/// This function implements streaming file discovery with the following optimizations:
+/// - **Parallel traversal**: Uses multiple threads (auto-detected, capped at 6) for faster discovery
+/// - **Gitignore support**: Automatically respects `.gitignore`, `.git/info/exclude`, and global ignore files
+/// - **Streaming batches**: Sends batches to downstream stages as they're discovered, enabling
+///   pipeline parallelism where Stage 2 (entity extraction) begins processing files before
+///   Stage 1 completes discovery
+/// - **Memory efficiency**: Only keeps one batch in memory at a time, rather than all file paths
+///
+/// Benefits over collect-then-batch approach:
+/// - Reduced time-to-first-extraction: Downstream stages start immediately
+/// - Better CPU utilization: All pipeline stages can run concurrently
+/// - Lower peak memory usage: No need to hold all paths in memory
 async fn stage_file_discovery(
     file_tx: mpsc::Sender<FileBatch>,
     repo_path: PathBuf,
     batch_size: usize,
 ) -> Result<usize> {
-    let files = find_files(&repo_path)?;
-    let total = files.len();
-    info!("Discovered {total} files to index");
+    use ignore::WalkBuilder;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
-    for chunk in files.chunks(batch_size) {
-        file_tx
-            .send(FileBatch {
-                paths: chunk.to_vec(),
+    // Calculate parallelism: min(available cores, 6)
+    let parallelism = std::thread::available_parallelism()
+        .map(|n| n.get().min(6))
+        .unwrap_or(4);
+
+    debug!(
+        "Streaming file discovery using {} threads for {}",
+        parallelism,
+        repo_path.display()
+    );
+
+    // Thread-safe batch accumulator and total counter
+    let current_batch = Arc::new(Mutex::new(Vec::new()));
+    let total_files = Arc::new(AtomicUsize::new(0));
+    let tx = Arc::new(file_tx);
+
+    // Clone for the walker
+    let batch_clone = Arc::clone(&current_batch);
+    let total_clone = Arc::clone(&total_files);
+    let tx_clone = Arc::clone(&tx);
+
+    // Build parallel walker with gitignore support
+    WalkBuilder::new(&repo_path)
+        .standard_filters(true)
+        .hidden(false)
+        .parents(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .require_git(false)
+        .threads(parallelism)
+        .build_parallel()
+        .run(|| {
+            let batch = Arc::clone(&batch_clone);
+            let total = Arc::clone(&total_clone);
+            let tx = Arc::clone(&tx_clone);
+
+            Box::new(move |entry_result| {
+                use crate::common::{has_supported_extension, should_include_file};
+                use ignore::WalkState;
+
+                match entry_result {
+                    Ok(entry) => {
+                        let path = entry.path();
+
+                        // Apply filters
+                        if !should_include_file(path) {
+                            return WalkState::Continue;
+                        }
+
+                        if !has_supported_extension(path) {
+                            return WalkState::Continue;
+                        }
+
+                        // Add to batch
+                        if let Ok(mut batch_lock) = batch.lock() {
+                            batch_lock.push(path.to_path_buf());
+                            total.fetch_add(1, Ordering::Relaxed);
+
+                            // Send batch if it reaches batch_size
+                            if batch_lock.len() >= batch_size {
+                                let paths = std::mem::take(&mut *batch_lock);
+                                drop(batch_lock);
+
+                                // Use blocking_send since we're in a sync context
+                                if let Err(e) = tx.blocking_send(FileBatch { paths }) {
+                                    warn!("Failed to send file batch: {}", e);
+                                    return WalkState::Quit;
+                                }
+                            }
+                        }
+
+                        WalkState::Continue
+                    }
+                    Err(e) => {
+                        warn!("Error reading file entry: {}", e);
+                        WalkState::Continue
+                    }
+                }
             })
-            .await
-            .map_err(|_| Error::Other(anyhow::anyhow!("File channel closed")))?;
+        });
+
+    // Send any remaining files in the last batch
+    let remaining_paths = {
+        let remaining = current_batch
+            .lock()
+            .map_err(|e| Error::Other(anyhow!("Failed to lock batch: {e}")))?;
+        remaining.clone()
+    };
+
+    if !remaining_paths.is_empty() {
+        tx.send(FileBatch {
+            paths: remaining_paths,
+        })
+        .await
+        .map_err(|_| Error::Other(anyhow!("File channel closed")))?;
     }
 
-    drop(file_tx);
+    drop(tx);
+
+    let total = total_files.load(Ordering::Relaxed);
+    info!("Discovered {total} files to index");
     Ok(total)
 }
 

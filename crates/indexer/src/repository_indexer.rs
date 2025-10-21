@@ -107,7 +107,7 @@ impl RepositoryIndexer {
 /// Stage 1: Discover all files in the repository and stream them in batches
 ///
 /// This function implements streaming file discovery with the following optimizations:
-/// - **Parallel traversal**: Uses multiple threads (auto-detected, capped at 12) for faster discovery
+/// - **Parallel traversal**: Uses multiple threads (auto-detected, capped at 12, defaults to 4 if detection fails) for faster discovery
 /// - **Gitignore support**: Automatically respects `.gitignore`, `.git/info/exclude`, and global ignore files
 /// - **Streaming batches**: Sends batches to downstream stages as they're discovered, enabling
 ///   pipeline parallelism where Stage 2 (entity extraction) begins processing files before
@@ -141,9 +141,10 @@ async fn stage_file_discovery(
         repo_path.display()
     );
 
-    // Create channel for individual paths from walker threads
-    // Use unbounded channel to prevent walker threads from blocking
-    let (path_tx, mut path_rx) = mpsc::unbounded_channel::<PathBuf>();
+    // Create bounded channel for individual paths from walker threads
+    // Capacity of batch_size * 2 provides buffering while preventing unbounded memory growth
+    // Walker threads will apply backpressure if coordinator falls behind
+    let (path_tx, mut path_rx) = mpsc::channel::<PathBuf>(batch_size * 2);
     let total_files = Arc::new(AtomicUsize::new(0));
 
     // Spawn coordinator task to batch individual paths
@@ -168,11 +169,14 @@ async fn stage_file_discovery(
 
         // Send any remaining files in the last batch
         if !current_batch.is_empty() {
-            let _ = batch_tx
+            if let Err(e) = batch_tx
                 .send(FileBatch {
                     paths: current_batch,
                 })
-                .await;
+                .await
+            {
+                warn!("Failed to send final file batch: {}", e);
+            }
         }
     });
 
@@ -200,17 +204,27 @@ async fn stage_file_discovery(
                         Ok(entry) => {
                             let path = entry.path();
 
-                            // Apply filters (check cheap operations first)
+                            // Apply filters in order of cost (cheap to expensive)
+                            // 1. Check file type first (already cached in DirEntry, free)
+                            if let Some(file_type) = entry.file_type() {
+                                if !file_type.is_file() {
+                                    return WalkState::Continue;
+                                }
+                            }
+
+                            // 2. Check extension (cheap string operation)
                             if !has_supported_extension(path) {
                                 return WalkState::Continue;
                             }
 
+                            // 3. Check symlink/size (requires metadata syscall)
                             if !should_include_file(path) {
                                 return WalkState::Continue;
                             }
 
                             // Send path to coordinator for batching
-                            if let Err(e) = tx.send(path.to_path_buf()) {
+                            // Use blocking_send since we're in a sync context with bounded channel
+                            if let Err(e) = tx.blocking_send(path.to_path_buf()) {
                                 warn!("Failed to send path to coordinator: {}", e);
                                 return WalkState::Quit;
                             }

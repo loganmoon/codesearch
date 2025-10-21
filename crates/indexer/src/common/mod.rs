@@ -59,29 +59,35 @@ pub fn has_supported_extension(path: &Path) -> bool {
 
 /// Check if a file should be included in indexing
 pub fn should_include_file(file_path: &Path) -> bool {
+    // Single metadata call to avoid redundant syscalls and TOCTOU race conditions
+    // Use symlink_metadata() to check the symlink itself, not its target
+    let metadata = match file_path.symlink_metadata() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+
     // Reject symlinks to prevent following links outside repository
-    // Note: ignore crate may also filter symlinks, but double-check for safety
-    if file_path.is_symlink() {
+    // Note: The ignore crate's default behavior is to not follow symlinks,
+    // but we explicitly check here as a defense-in-depth measure for safety
+    if metadata.is_symlink() {
         debug!("Excluding symlink: {}", file_path.display());
         return false;
     }
 
     // Check if it's a regular file (not a directory)
-    if !file_path.is_file() {
+    if !metadata.is_file() {
         return false;
     }
 
     // Check file size (skip very large files > 10MB)
-    if let Ok(metadata) = file_path.metadata() {
-        const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
-        if metadata.len() > MAX_FILE_SIZE {
-            debug!(
-                "Excluding large file: {} (size: {} bytes)",
-                file_path.display(),
-                metadata.len()
-            );
-            return false;
-        }
+    const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    if metadata.len() > MAX_FILE_SIZE {
+        debug!(
+            "Excluding large file: {} (size: {} bytes)",
+            file_path.display(),
+            metadata.len()
+        );
+        return false;
     }
 
     true

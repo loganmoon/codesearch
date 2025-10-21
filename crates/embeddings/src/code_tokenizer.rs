@@ -21,9 +21,9 @@ impl CodeTokenizer {
     /// Split a camelCase or PascalCase string into components
     ///
     /// Examples:
-    /// - "getUserName" → ["get", "User", "Name"]
-    /// - "HTTPResponse" → ["HTTP", "Response"]
-    /// - "IOError" → ["IO", "Error"]
+    /// - "getUserName" → ["get", "user", "name"]
+    /// - "HTTPResponse" → ["http", "response"]
+    /// - "IOError" → ["io", "error"]
     fn split_camel_case(s: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut current = String::new();

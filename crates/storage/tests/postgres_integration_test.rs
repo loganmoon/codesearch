@@ -926,3 +926,281 @@ async fn test_transaction_rollback() -> Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn test_bm25_statistics_initialization() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+
+        assert_eq!(
+            stats.avgdl, 50.0,
+            "Default avgdl should be 50.0 for new repository"
+        );
+        assert_eq!(stats.total_tokens, 0, "Initial total_tokens should be 0");
+        assert_eq!(stats.entity_count, 0, "Initial entity_count should be 0");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_incremental_update() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add entities with known token counts: 10, 20, 30
+        let token_counts_batch1 = vec![10, 20, 30];
+        let avgdl_1 = client
+            .update_bm25_statistics_incremental(repository_id, &token_counts_batch1)
+            .await?;
+
+        // Expected: total=60, count=3, avgdl=20.0
+        let expected_avgdl_1 = 60.0 / 3.0;
+        assert!(
+            (avgdl_1 - expected_avgdl_1).abs() < 0.01,
+            "First batch avgdl should be {expected_avgdl_1}, got {avgdl_1}"
+        );
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 60, "Total tokens should be 60");
+        assert_eq!(stats.entity_count, 3, "Entity count should be 3");
+        assert!(
+            (stats.avgdl - expected_avgdl_1).abs() < 0.01,
+            "Stored avgdl should match calculated"
+        );
+
+        // Add more entities with token counts: 40, 50
+        let token_counts_batch2 = vec![40, 50];
+        let avgdl_2 = client
+            .update_bm25_statistics_incremental(repository_id, &token_counts_batch2)
+            .await?;
+
+        // Expected: total=150, count=5, avgdl=30.0
+        let expected_avgdl_2 = 150.0 / 5.0;
+        assert!(
+            (avgdl_2 - expected_avgdl_2).abs() < 0.01,
+            "Second batch avgdl should be {expected_avgdl_2}, got {avgdl_2}"
+        );
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 150, "Total tokens should be 150");
+        assert_eq!(stats.entity_count, 5, "Entity count should be 5");
+        assert!(
+            (stats.avgdl - expected_avgdl_2).abs() < 0.01,
+            "Final avgdl should be 30.0"
+        );
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_after_deletion() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add initial entities with token counts: 10, 20, 30, 40, 50
+        let token_counts_initial = vec![10, 20, 30, 40, 50];
+        client
+            .update_bm25_statistics_incremental(repository_id, &token_counts_initial)
+            .await?;
+
+        // Total=150, count=5, avgdl=30.0
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 150);
+        assert_eq!(stats.entity_count, 5);
+
+        // Delete entities with token counts: 10, 30 (total=40)
+        let deleted_token_counts = vec![10, 30];
+        let avgdl_after_delete = client
+            .update_bm25_statistics_after_deletion(repository_id, &deleted_token_counts)
+            .await?;
+
+        // Expected: total=110, count=3, avgdl=36.666...
+        let expected_avgdl = 110.0 / 3.0;
+        assert!(
+            (avgdl_after_delete - expected_avgdl).abs() < 0.01,
+            "avgdl after deletion should be {expected_avgdl}, got {avgdl_after_delete}"
+        );
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 110, "Total tokens should be 110");
+        assert_eq!(stats.entity_count, 3, "Entity count should be 3");
+        assert!(
+            (stats.avgdl - expected_avgdl).abs() < 0.01,
+            "Stored avgdl should match"
+        );
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_delete_all_entities() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add entities
+        let token_counts = vec![10, 20, 30];
+        client
+            .update_bm25_statistics_incremental(repository_id, &token_counts)
+            .await?;
+
+        // Delete all entities
+        let avgdl_after_delete_all = client
+            .update_bm25_statistics_after_deletion(repository_id, &token_counts)
+            .await?;
+
+        // Should fall back to default avgdl=50.0 when no entities remain
+        assert_eq!(
+            avgdl_after_delete_all, 50.0,
+            "avgdl should be 50.0 when all entities deleted"
+        );
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 0, "Total tokens should be 0");
+        assert_eq!(stats.entity_count, 0, "Entity count should be 0");
+        assert_eq!(stats.avgdl, 50.0, "avgdl should be default 50.0");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_single_entity() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add single entity with 42 tokens
+        let token_counts = vec![42];
+        let avgdl = client
+            .update_bm25_statistics_incremental(repository_id, &token_counts)
+            .await?;
+
+        // For single entity, avgdl should equal its token count
+        assert_eq!(avgdl, 42.0, "avgdl for single entity should be 42.0");
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 42);
+        assert_eq!(stats.entity_count, 1);
+        assert_eq!(stats.avgdl, 42.0);
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_empty_batch() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add entities first
+        let token_counts = vec![10, 20, 30];
+        client
+            .update_bm25_statistics_incremental(repository_id, &token_counts)
+            .await?;
+
+        // Try deleting empty batch (should not change stats)
+        let empty_batch: Vec<usize> = vec![];
+        let avgdl = client
+            .update_bm25_statistics_after_deletion(repository_id, &empty_batch)
+            .await?;
+
+        // Stats should remain unchanged
+        assert_eq!(avgdl, 20.0, "avgdl should remain 20.0");
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 60);
+        assert_eq!(stats.entity_count, 3);
+        assert_eq!(stats.avgdl, 20.0);
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_bm25_statistics_over_deletion() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Add entities with total 50 tokens, 2 entities
+        let token_counts = vec![20, 30];
+        client
+            .update_bm25_statistics_incremental(repository_id, &token_counts)
+            .await?;
+
+        // Try to delete more than exists (this simulates edge case where counts are mismatched)
+        // Deletion should be clamped to 0
+        let over_deletion = vec![30, 40, 50]; // total 120 > 50
+        let avgdl = client
+            .update_bm25_statistics_after_deletion(repository_id, &over_deletion)
+            .await?;
+
+        // Should clamp to 0 and return default avgdl
+        assert_eq!(avgdl, 50.0, "Should fall back to default avgdl");
+
+        let stats = client.get_bm25_statistics(repository_id).await?;
+        assert_eq!(stats.total_tokens, 0, "Should clamp to 0");
+        assert_eq!(stats.entity_count, 0, "Should clamp to 0");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}

@@ -323,7 +323,7 @@ async fn process_entity_chunk(
         );
 
         let new_embeddings = embedding_manager
-            .embed(cache_miss_texts.clone())
+            .embed(cache_miss_texts)
             .await
             .storage_err("Failed to generate embeddings")?;
 

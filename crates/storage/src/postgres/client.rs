@@ -313,8 +313,8 @@ impl PostgresClient {
         let new_total_tokens: i64 = new_token_counts.iter().sum::<usize>() as i64;
         let new_entity_count: i64 = new_token_counts.len() as i64;
 
-        let updated_total = stats.total_tokens + new_total_tokens;
-        let updated_count = stats.entity_count + new_entity_count;
+        let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
+        let updated_count = stats.entity_count.saturating_add(new_entity_count);
 
         let updated_avgdl = if updated_count > 0 {
             updated_total as f32 / updated_count as f32

@@ -10,6 +10,13 @@ use codesearch_core::error::Result;
 ///
 /// Uses the bm25 crate with a custom code tokenizer to generate
 /// sparse BM25 embeddings for code search.
+///
+/// # Vocabulary Size Constraint
+///
+/// The BM25 tokenizer generates unbounded vocabulary (any token can appear),
+/// but Qdrant sparse vectors are typically configured with a fixed vocabulary size
+/// (default: 100,000). The `bm25` crate uses a hash-based approach to constrain
+/// token indices to fit within the configured vocabulary size.
 pub struct Bm25SparseProvider {
     embedder: Embedder<u32, CodeTokenizer>,
 }

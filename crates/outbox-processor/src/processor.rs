@@ -438,7 +438,7 @@ impl OutboxProcessor {
 
         let content = extract_embedding_content(&entity);
         let sparse_embeddings = sparse_manager
-            .embed_sparse(vec![content])
+            .embed_sparse(vec![content.as_str()])
             .await
             .map_err(|e| Error::storage(format!("Failed to generate sparse embedding: {e}")))?;
 

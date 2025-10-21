@@ -13,7 +13,7 @@ pub trait SparseEmbeddingProvider: Send + Sync {
     /// Generate sparse embeddings for a list of texts
     ///
     /// # Arguments
-    /// * `texts` - List of text strings to embed
+    /// * `texts` - List of text string references to embed
     ///
     /// # Returns
     /// A vector of Option sparse embedding vectors, one for each input text.
@@ -21,5 +21,5 @@ pub trait SparseEmbeddingProvider: Send + Sync {
     /// - u32 is the feature index
     /// - f32 is the weight/value
     /// Returns None for texts that cannot be processed.
-    async fn embed_sparse(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<(u32, f32)>>>>;
+    async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>>;
 }

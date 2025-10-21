@@ -37,7 +37,7 @@ impl Bm25SparseProvider {
 
 #[async_trait]
 impl SparseEmbeddingProvider for Bm25SparseProvider {
-    async fn embed_sparse(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
+    async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
         let mut results = Vec::with_capacity(texts.len());
 
         for text in texts {
@@ -47,7 +47,7 @@ impl SparseEmbeddingProvider for Bm25SparseProvider {
             }
 
             // Generate BM25 embedding
-            let embedding = self.embedder.embed(&text);
+            let embedding = self.embedder.embed(text);
 
             // Convert bm25::Embedding to Vec<(u32, f32)>
             let sparse_vec: Vec<(u32, f32)> = embedding
@@ -74,7 +74,7 @@ mod tests {
     async fn test_bm25_embedding_non_empty() {
         let provider = Bm25SparseProvider::new(50.0);
         let result = provider
-            .embed_sparse(vec!["fn calculate_sum(a: i32, b: i32) -> i32".to_string()])
+            .embed_sparse(vec!["fn calculate_sum(a: i32, b: i32) -> i32"])
             .await
             .unwrap();
 
@@ -87,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn test_bm25_empty_input() {
         let provider = Bm25SparseProvider::new(50.0);
-        let result = provider.embed_sparse(vec!["".to_string()]).await.unwrap();
+        let result = provider.embed_sparse(vec![""]).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert!(result[0].is_none(), "Empty input should return None");
@@ -96,9 +96,9 @@ mod tests {
     #[tokio::test]
     async fn test_bm25_deterministic() {
         let provider = Bm25SparseProvider::new(50.0);
-        let text = "fn calculate_sum(a: i32, b: i32) -> i32".to_string();
+        let text = "fn calculate_sum(a: i32, b: i32) -> i32";
 
-        let result1 = provider.embed_sparse(vec![text.clone()]).await.unwrap();
+        let result1 = provider.embed_sparse(vec![text]).await.unwrap();
         let result2 = provider.embed_sparse(vec![text]).await.unwrap();
 
         assert_eq!(result1, result2, "BM25 should be deterministic");
@@ -108,9 +108,9 @@ mod tests {
     async fn test_bm25_different_avgdl() {
         let provider1 = Bm25SparseProvider::new(50.0);
         let provider2 = Bm25SparseProvider::new(100.0);
-        let text = "fn calculate_sum(a: i32, b: i32) -> i32".to_string();
+        let text = "fn calculate_sum(a: i32, b: i32) -> i32";
 
-        let result1 = provider1.embed_sparse(vec![text.clone()]).await.unwrap();
+        let result1 = provider1.embed_sparse(vec![text]).await.unwrap();
         let result2 = provider2.embed_sparse(vec![text]).await.unwrap();
 
         // Different avgdl should produce different scores
@@ -123,10 +123,7 @@ mod tests {
     #[tokio::test]
     async fn test_bm25_sparse_format() {
         let provider = Bm25SparseProvider::new(50.0);
-        let result = provider
-            .embed_sparse(vec!["test function".to_string()])
-            .await
-            .unwrap();
+        let result = provider.embed_sparse(vec!["test function"]).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert!(result[0].is_some());

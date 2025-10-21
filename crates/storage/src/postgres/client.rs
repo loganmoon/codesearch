@@ -310,7 +310,10 @@ impl PostgresClient {
     ) -> Result<f32> {
         let stats = self.get_bm25_statistics(repository_id).await?;
 
-        let new_total_tokens: i64 = new_token_counts.iter().sum::<usize>() as i64;
+        let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
+            acc.checked_add(count as i64)
+                .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
+        })?;
         let new_entity_count: i64 = new_token_counts.len() as i64;
 
         let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
@@ -346,7 +349,10 @@ impl PostgresClient {
     ) -> Result<f32> {
         let stats = self.get_bm25_statistics(repository_id).await?;
 
-        let removed_total: i64 = deleted_token_counts.iter().sum::<usize>() as i64;
+        let removed_total: i64 = deleted_token_counts.iter().try_fold(0i64, |acc, &count| {
+            acc.checked_add(count as i64)
+                .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
+        })?;
         let removed_count: i64 = deleted_token_counts.len() as i64;
 
         let updated_total = (stats.total_tokens - removed_total).max(0);

@@ -377,9 +377,9 @@ async fn process_entity_chunk(
 
     // Generate sparse embeddings for ALL entities (locally generated, not cached)
     info!("Generating {} sparse embeddings locally", entities.len());
-    let all_entity_contents: Vec<String> = entity_contents_and_hashes
+    let all_entity_contents: Vec<&str> = entity_contents_and_hashes
         .iter()
-        .map(|(content, _)| content.clone())
+        .map(|(content, _)| content.as_str())
         .collect();
 
     let all_sparse_embeddings = sparse_manager

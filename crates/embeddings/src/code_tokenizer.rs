@@ -7,7 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 /// Tokenization strategy:
 /// 1. Split on whitespace
 /// 2. Split on underscores (snake_case: get_user_name → ["get", "user", "name"])
-/// 3. Split on camelCase boundaries (getUserName → ["get", "User", "Name"])
+/// 3. Split on camelCase boundaries (getUserName → ["get", "user", "name"])
 /// 4. Normalize to lowercase
 /// 5. Filter empty tokens
 #[derive(Debug, Clone, Default)]
@@ -20,38 +20,34 @@ impl CodeTokenizer {
 
     /// Split a camelCase or PascalCase string into components
     ///
-    /// Examples:
+    /// Examples (after lowercase normalization):
     /// - "getUserName" → ["get", "user", "name"]
     /// - "HTTPResponse" → ["http", "response"]
     /// - "IOError" → ["io", "error"]
     fn split_camel_case(s: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut current = String::new();
-        let chars: Vec<char> = s.chars().collect();
+        let mut chars = s.chars().peekable();
+        let mut prev_char: Option<char> = None;
 
-        for i in 0..chars.len() {
-            let ch = chars[i];
-
-            let should_split = if i > 0 {
-                let prev = chars[i - 1];
-
+        while let Some(ch) = chars.next() {
+            let should_split = if let Some(prev) = prev_char {
                 // Split on lowercase → uppercase transition (camelCase)
                 (prev.is_lowercase() && ch.is_uppercase())
-                // Split on multiple uppercase followed by lowercase (HTTPResponse)
-                || (i + 1 < chars.len()
-                    && prev.is_uppercase()
-                    && ch.is_uppercase()
-                    && chars[i + 1].is_lowercase())
+                    // Split on multiple uppercase followed by lowercase (HTTPResponse)
+                    || (prev.is_uppercase()
+                        && ch.is_uppercase()
+                        && chars.peek().is_some_and(|next| next.is_lowercase()))
             } else {
                 false
             };
 
             if should_split && !current.is_empty() {
-                result.push(current.clone());
-                current.clear();
+                result.push(std::mem::take(&mut current));
             }
 
             current.push(ch);
+            prev_char = Some(ch);
         }
 
         if !current.is_empty() {

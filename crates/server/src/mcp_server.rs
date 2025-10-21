@@ -235,7 +235,7 @@ impl CodeSearchMcpServer {
                 })?;
 
             let sparse_embeddings = sparse_manager
-                .embed_sparse(vec![query_text.clone()])
+                .embed_sparse(vec![query_text.as_str()])
                 .await
                 .map_err(|e| {
                     McpError::new(

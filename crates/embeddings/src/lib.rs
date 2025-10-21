@@ -157,7 +157,7 @@ impl SparseEmbeddingManager {
     }
 
     /// Generate sparse embeddings for texts
-    pub async fn embed_sparse(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
+    pub async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
         self.provider.embed_sparse(texts).await
     }
 }

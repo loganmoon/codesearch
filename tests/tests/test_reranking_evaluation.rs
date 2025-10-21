@@ -177,11 +177,11 @@ impl QueryGenerator {
         let entities_with_content: Vec<_> = all_entities
             .iter()
             .filter(|entity| {
-                entity.content.as_ref().map_or(false, |c| c.len() > 100)
+                entity.content.as_ref().is_some_and(|c| c.len() > 100)
                     || entity
                         .documentation_summary
                         .as_ref()
-                        .map_or(false, |d| d.len() > 20)
+                        .is_some_and(|d| d.len() > 20)
             })
             .collect();
 

@@ -5,9 +5,8 @@
 
 use codesearch_core::error::{Error, Result};
 use codesearch_watcher::GitRepository;
-use glob::glob;
-use std::path::{Path, PathBuf};
-use tracing::{debug, warn};
+use std::path::Path;
+use tracing::debug;
 
 /// Convert a Path to &str with proper error handling
 pub fn path_to_str(path: &Path) -> Result<&str> {
@@ -38,26 +37,6 @@ impl<T, E: std::fmt::Display> ResultExt<T> for std::result::Result<T, E> {
     }
 }
 
-/// Default patterns to exclude from indexing
-const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &[
-    "**/target/**",
-    "**/node_modules/**",
-    "**/.git/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/.vscode/**",
-    "**/.idea/**",
-    "**/vendor/**",
-    "**/__pycache__/**",
-    "**/.pytest_cache/**",
-    "**/.cargo/**",
-    "**/Cargo.lock",
-    "**/package-lock.json",
-    "**/yarn.lock",
-    "**/*.min.js",
-    "**/*.min.css",
-];
-
 /// Supported file extensions for indexing
 /// Note: Only Rust is fully implemented. Python, JS/TS, and Go have partial infrastructure.
 const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -70,102 +49,48 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "go",  // Go (partial infrastructure, no parsing)
 ];
 
-/// Find all files in a directory that should be indexed
-pub fn find_files(root_path: &Path) -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> = Vec::new();
-
-    // Process each supported extension separately
-    for ext in SUPPORTED_EXTENSIONS {
-        let pattern = format!("{}/**/*.{ext}", root_path.display());
-        debug!("Searching for {} files with pattern: {}", ext, pattern);
-
-        for entry in glob(&pattern)
-            .map_err(|e| Error::parse("glob", format!("Invalid glob pattern: {e}")))?
-        {
-            match entry {
-                Ok(path) => {
-                    // Check if file should be included
-                    if should_include_file(&path) {
-                        files.push(path);
-                    }
-                }
-                Err(e) => {
-                    warn!("Error reading file entry: {}", e);
-                }
-            }
-        }
-    }
-
-    // Sort files for consistent processing order
-    files.sort();
-
-    debug!("Found {} files to index", files.len());
-    Ok(files)
+/// Check if a file has a supported extension
+pub fn has_supported_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext))
+        .unwrap_or(false)
 }
 
 /// Check if a file should be included in indexing
 pub fn should_include_file(file_path: &Path) -> bool {
-    let path_str = file_path.to_string_lossy();
-
-    // Check against exclude patterns
-    for pattern in DEFAULT_EXCLUDE_PATTERNS {
-        if path_matches_pattern(&path_str, pattern) {
-            debug!(
-                "Excluding file: {} (matches pattern: {})",
-                path_str, pattern
-            );
-            return false;
-        }
-    }
+    // Single metadata call to avoid redundant syscalls and TOCTOU race conditions
+    // Use symlink_metadata() to check the symlink itself, not its target
+    let metadata = match file_path.symlink_metadata() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
 
     // Reject symlinks to prevent following links outside repository
-    if file_path.is_symlink() {
-        debug!("Excluding symlink: {}", path_str);
+    // Note: The ignore crate's default behavior is to not follow symlinks,
+    // but we explicitly check here as a defense-in-depth measure for safety
+    if metadata.is_symlink() {
+        debug!("Excluding symlink: {}", file_path.display());
         return false;
     }
 
     // Check if it's a regular file (not a directory)
-    if !file_path.is_file() {
+    if !metadata.is_file() {
         return false;
     }
 
     // Check file size (skip very large files > 10MB)
-    if let Ok(metadata) = file_path.metadata() {
-        const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
-        if metadata.len() > MAX_FILE_SIZE {
-            debug!(
-                "Excluding large file: {} (size: {} bytes)",
-                path_str,
-                metadata.len()
-            );
-            return false;
-        }
+    const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    if metadata.len() > MAX_FILE_SIZE {
+        debug!(
+            "Excluding large file: {} (size: {} bytes)",
+            file_path.display(),
+            metadata.len()
+        );
+        return false;
     }
 
     true
-}
-
-/// Check if a path matches a glob-like pattern
-fn path_matches_pattern(path: &str, pattern: &str) -> bool {
-    // Simple pattern matching for common cases
-    // This is a simplified version - could be enhanced with full glob support
-
-    // Handle ** wildcard (matches any number of directories)
-    let pattern = pattern.replace("**", "__STARSTAR__");
-    let pattern = pattern.replace('*', "__STAR__");
-    let pattern = pattern.replace("__STARSTAR__", ".*");
-    let pattern = pattern.replace("__STAR__", "[^/]*");
-
-    // Convert to regex pattern
-    let pattern = format!("^{pattern}$");
-
-    // Try to match
-    if let Ok(re) = regex::Regex::new(&pattern) {
-        re.is_match(path)
-    } else {
-        // Fallback to simple contains check
-        path.contains(&pattern.replace(".*", "").replace("[^/]*", ""))
-    }
 }
 
 #[cfg(test)]
@@ -177,18 +102,31 @@ mod tests {
 
     #[test]
     fn test_should_include_file() {
-        // Test exclude patterns
-        assert!(!should_include_file(Path::new("target/debug/main")));
-        assert!(!should_include_file(Path::new(
-            "node_modules/package/index.js"
-        )));
-        assert!(!should_include_file(Path::new(".git/config")));
-
-        // Test include patterns (these would need actual files to fully test)
+        // Test that regular files are included
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "fn main() {}").expect("Failed to write test file");
         assert!(should_include_file(&test_file));
+
+        // Test that large files are excluded (> 10MB)
+        let large_file = temp_dir.path().join("large.rs");
+        let large_content = "x".repeat(11 * 1024 * 1024); // 11MB
+        fs::write(&large_file, large_content).expect("Failed to write large file");
+        assert!(!should_include_file(&large_file));
+    }
+
+    #[test]
+    fn test_has_supported_extension() {
+        assert!(has_supported_extension(Path::new("main.rs")));
+        assert!(has_supported_extension(Path::new("lib.py")));
+        assert!(has_supported_extension(Path::new("app.js")));
+        assert!(has_supported_extension(Path::new("component.jsx")));
+        assert!(has_supported_extension(Path::new("module.ts")));
+        assert!(has_supported_extension(Path::new("component.tsx")));
+        assert!(has_supported_extension(Path::new("main.go")));
+        assert!(!has_supported_extension(Path::new("README.md")));
+        assert!(!has_supported_extension(Path::new("Cargo.toml")));
+        assert!(!has_supported_extension(Path::new("file.txt")));
     }
 
     #[test]

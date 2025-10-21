@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 tree-sitter = { workspace = true }
 tokio = { workspace = true }
 glob = { workspace = true }
+ignore = "0.4.24"  # Gitignore-aware parallel directory traversal
 tree-sitter-rust = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-javascript = { workspace = true }

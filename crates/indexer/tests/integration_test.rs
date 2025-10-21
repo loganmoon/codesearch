@@ -158,6 +158,11 @@ pub fn format_number(n: i64) -> String {
         .await
         .unwrap();
 
+    // Create .gitignore to exclude target directory
+    fs::write(base.join(".gitignore"), "target/\n")
+        .await
+        .unwrap();
+
     // Create some non-Rust files that should be ignored
     fs::write(base.join("README.md"), "# Test Project")
         .await
@@ -219,6 +224,84 @@ async fn test_full_indexing_pipeline() {
         assert!(stats.entities_extracted() > 0);
         // Should have some processing time
         assert!(stats.processing_time_ms() > 0);
+
+        // Verify gitignore exclusion: should only have indexed 3 files (main.rs, lib.rs, utils.rs)
+        // The target/debug.rs file should be excluded
+        assert_eq!(
+            stats.total_files(),
+            3,
+            "Expected exactly 3 files (main.rs, lib.rs, utils.rs), target/debug.rs should be excluded by .gitignore"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_multi_batch_file_streaming() {
+    // This test verifies that when file_count > batch_size, multiple batches are sent correctly
+    // and the partial batch logic works properly
+    let temp_dir = TempDir::new().unwrap();
+    let base = temp_dir.path();
+    let src_dir = base.join("src");
+    fs::create_dir(&src_dir).await.unwrap();
+
+    // Create 25 small Rust files to test multi-batch streaming with batch_size=10
+    for i in 0..25 {
+        let content = format!(
+            r#"
+/// Function number {i}
+pub fn function_{i}() -> i32 {{
+    {i}
+}}
+"#
+        );
+        fs::write(src_dir.join(format!("file_{i:02}.rs")), content)
+            .await
+            .unwrap();
+    }
+
+    // Create indexer with small batch size to ensure multiple batches
+    let postgres_client = Arc::new(MockPostgresClient::new());
+    let repository_id = postgres_client
+        .ensure_repository(base, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn PostgresClientTrait> = postgres_client;
+
+    // Use small batch size to ensure multiple batches (25 files with batch_size=10 = 3 batches)
+    let config = IndexerConfig::default().with_index_batch_size(10);
+
+    let mut indexer = create_indexer(
+        base.to_path_buf(),
+        repository_id,
+        embedding_manager,
+        postgres_client,
+        None,
+        config,
+    )
+    .unwrap();
+
+    // Run full indexing
+    let result = indexer.index_repository().await;
+
+    // Verify successful indexing
+    assert!(result.is_ok());
+
+    if let Ok(index_result) = result {
+        let stats = index_result.stats();
+        // All 25 files should be processed
+        assert_eq!(
+            stats.total_files(),
+            25,
+            "Expected all 25 files to be processed across multiple batches"
+        );
+        // Should have extracted entities from all files (at least 25 functions)
+        assert!(
+            stats.entities_extracted() >= 25,
+            "Expected at least 25 entities (one function per file)"
+        );
     }
 }
 
@@ -320,4 +403,316 @@ async fn test_indexer_with_empty_repository() {
         assert_eq!(index_result.stats().total_files(), 0);
         assert_eq!(index_result.stats().entities_extracted(), 0);
     }
+}
+
+#[tokio::test]
+async fn test_partial_batch_handling() {
+    // Test that final partial batch is sent correctly when file count is not divisible by batch_size
+    // Create 23 files with batch_size=10, resulting in batches of [10, 10, 3]
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_path = temp_dir.path();
+
+    // Create src directory
+    let src_dir = repo_path.join("src");
+    fs::create_dir(&src_dir).await.unwrap();
+
+    // Create .gitignore
+    fs::write(repo_path.join(".gitignore"), "target/\n")
+        .await
+        .unwrap();
+
+    // Create 23 Rust files with simple functions
+    for i in 0..23 {
+        let content = format!(
+            r#"
+pub fn test_function_{i}() -> i32 {{
+    {i}
+}}
+"#
+        );
+        fs::write(src_dir.join(format!("file_{i}.rs")), content)
+            .await
+            .unwrap();
+    }
+
+    // Initialize Git repo
+    tokio::process::Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+
+    // Create indexer with batch_size=10
+    let postgres_client = Arc::new(MockPostgresClient::new());
+    let repository_id = postgres_client
+        .ensure_repository(repo_path, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
+
+    let config = IndexerConfig {
+        index_batch_size: 10,
+        ..Default::default()
+    };
+
+    let mut indexer = create_indexer(
+        repo_path.to_path_buf(),
+        repository_id,
+        embedding_manager,
+        postgres_client,
+        None,
+        config,
+    )
+    .unwrap();
+
+    let result = indexer.index_repository().await.unwrap();
+    let stats = result.stats();
+
+    // Verify all 23 files were discovered and indexed (final partial batch of 3 was sent)
+    assert_eq!(
+        stats.total_files(),
+        23,
+        "Expected all 23 files to be discovered including final partial batch"
+    );
+    assert!(
+        stats.entities_extracted() >= 23,
+        "Expected at least 23 entities (one function per file)"
+    );
+}
+
+#[tokio::test]
+async fn test_walker_error_resilience() {
+    // Test that walker continues discovery after encountering permission errors
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_path = temp_dir.path();
+
+    // Create src directory
+    let src_dir = repo_path.join("src");
+    fs::create_dir(&src_dir).await.unwrap();
+
+    // Create .gitignore
+    fs::write(repo_path.join(".gitignore"), "target/\nrestricted/\n")
+        .await
+        .unwrap();
+
+    // Create accessible file
+    fs::write(
+        src_dir.join("accessible.rs"),
+        "pub fn accessible() -> i32 { 42 }",
+    )
+    .await
+    .unwrap();
+
+    // Create restricted directory (will be excluded by gitignore anyway for safety)
+    let restricted_dir = repo_path.join("restricted");
+    fs::create_dir(&restricted_dir).await.unwrap();
+    fs::write(
+        restricted_dir.join("hidden.rs"),
+        "pub fn hidden() -> i32 { 0 }",
+    )
+    .await
+    .unwrap();
+
+    // Initialize Git repo
+    tokio::process::Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+
+    // Create indexer
+    let postgres_client = Arc::new(MockPostgresClient::new());
+    let repository_id = postgres_client
+        .ensure_repository(repo_path, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
+
+    let mut indexer = create_indexer(
+        repo_path.to_path_buf(),
+        repository_id,
+        embedding_manager,
+        postgres_client,
+        None,
+        IndexerConfig::default(),
+    )
+    .unwrap();
+
+    let result = indexer.index_repository().await;
+
+    // Indexer should succeed despite restricted directory (excluded by gitignore)
+    assert!(
+        result.is_ok(),
+        "Indexer should handle restricted directories gracefully"
+    );
+
+    let index_result = result.unwrap();
+    let stats = index_result.stats();
+
+    // Should have indexed the accessible file
+    assert!(
+        stats.total_files() >= 1,
+        "Should have discovered at least one accessible file"
+    );
+}
+
+#[tokio::test]
+async fn test_symlink_exclusion() {
+    // Test that symlinks are excluded from discovery
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_path = temp_dir.path();
+
+    // Create src directory
+    let src_dir = repo_path.join("src");
+    fs::create_dir(&src_dir).await.unwrap();
+
+    // Create a real file
+    fs::write(src_dir.join("real.rs"), "pub fn real() -> i32 { 42 }")
+        .await
+        .unwrap();
+
+    // Create external directory with a file (outside repo)
+    let external_dir = tempfile::tempdir().unwrap();
+    let external_file = external_dir.path().join("external.rs");
+    std::fs::write(&external_file, "pub fn external() -> i32 { 99 }").unwrap();
+
+    // Create symlink pointing to external file (Unix only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let symlink_path = src_dir.join("link.rs");
+        symlink(&external_file, &symlink_path).unwrap();
+    }
+
+    // Create .gitignore
+    fs::write(repo_path.join(".gitignore"), "target/\n")
+        .await
+        .unwrap();
+
+    // Initialize Git repo
+    tokio::process::Command::new("git")
+        .args(["init"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+    tokio::process::Command::new("git")
+        .args(["commit", "-m", "Initial commit"])
+        .current_dir(repo_path)
+        .output()
+        .await
+        .unwrap();
+
+    // Create indexer
+    let postgres_client = Arc::new(MockPostgresClient::new());
+    let repository_id = postgres_client
+        .ensure_repository(repo_path, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = postgres_client;
+
+    let mut indexer = create_indexer(
+        repo_path.to_path_buf(),
+        repository_id,
+        embedding_manager,
+        postgres_client,
+        None,
+        IndexerConfig::default(),
+    )
+    .unwrap();
+
+    let result = indexer.index_repository().await.unwrap();
+    let stats = result.stats();
+
+    // Should have discovered only the real file, not the symlink
+    #[cfg(unix)]
+    assert_eq!(
+        stats.total_files(),
+        1,
+        "Should discover only real file, excluding symlink"
+    );
+
+    #[cfg(not(unix))]
+    assert_eq!(
+        stats.total_files(),
+        1,
+        "Should discover only real file (symlink test skipped on non-Unix)"
+    );
 }

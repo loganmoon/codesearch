@@ -224,6 +224,84 @@ async fn test_full_indexing_pipeline() {
         assert!(stats.entities_extracted() > 0);
         // Should have some processing time
         assert!(stats.processing_time_ms() > 0);
+
+        // Verify gitignore exclusion: should only have indexed 3 files (main.rs, lib.rs, utils.rs)
+        // The target/debug.rs file should be excluded
+        assert_eq!(
+            stats.total_files(),
+            3,
+            "Expected exactly 3 files (main.rs, lib.rs, utils.rs), target/debug.rs should be excluded by .gitignore"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_multi_batch_file_streaming() {
+    // This test verifies that when file_count > batch_size, multiple batches are sent correctly
+    // and the partial batch logic works properly
+    let temp_dir = TempDir::new().unwrap();
+    let base = temp_dir.path();
+    let src_dir = base.join("src");
+    fs::create_dir(&src_dir).await.unwrap();
+
+    // Create 25 small Rust files to test multi-batch streaming with batch_size=10
+    for i in 0..25 {
+        let content = format!(
+            r#"
+/// Function number {i}
+pub fn function_{i}() -> i32 {{
+    {i}
+}}
+"#
+        );
+        fs::write(src_dir.join(format!("file_{i:02}.rs")), content)
+            .await
+            .unwrap();
+    }
+
+    // Create indexer with small batch size to ensure multiple batches
+    let postgres_client = Arc::new(MockPostgresClient::new());
+    let repository_id = postgres_client
+        .ensure_repository(base, "test_collection", None)
+        .await
+        .unwrap()
+        .to_string();
+
+    let embedding_manager = create_test_embedding_manager();
+    let postgres_client: Arc<dyn PostgresClientTrait> = postgres_client;
+
+    // Use small batch size to ensure multiple batches (25 files with batch_size=10 = 3 batches)
+    let config = IndexerConfig::default().with_index_batch_size(10);
+
+    let mut indexer = create_indexer(
+        base.to_path_buf(),
+        repository_id,
+        embedding_manager,
+        postgres_client,
+        None,
+        config,
+    )
+    .unwrap();
+
+    // Run full indexing
+    let result = indexer.index_repository().await;
+
+    // Verify successful indexing
+    assert!(result.is_ok());
+
+    if let Ok(index_result) = result {
+        let stats = index_result.stats();
+        // All 25 files should be processed
+        assert_eq!(
+            stats.total_files(),
+            25,
+            "Expected all 25 files to be processed across multiple batches"
+        );
+        // Should have extracted entities from all files (at least 25 functions)
+        assert!(
+            stats.entities_extracted() >= 25,
+            "Expected at least 25 entities (one function per file)"
+        );
     }
 }
 

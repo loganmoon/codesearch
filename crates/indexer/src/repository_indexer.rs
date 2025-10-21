@@ -107,17 +107,19 @@ impl RepositoryIndexer {
 /// Stage 1: Discover all files in the repository and stream them in batches
 ///
 /// This function implements streaming file discovery with the following optimizations:
-/// - **Parallel traversal**: Uses multiple threads (auto-detected, capped at 6) for faster discovery
+/// - **Parallel traversal**: Uses multiple threads (auto-detected, capped at 12) for faster discovery
 /// - **Gitignore support**: Automatically respects `.gitignore`, `.git/info/exclude`, and global ignore files
 /// - **Streaming batches**: Sends batches to downstream stages as they're discovered, enabling
 ///   pipeline parallelism where Stage 2 (entity extraction) begins processing files before
 ///   Stage 1 completes discovery
 /// - **Memory efficiency**: Only keeps one batch in memory at a time, rather than all file paths
+/// - **Lock-free architecture**: Uses channels instead of shared mutable state (Arc<Mutex<Vec>>)
 ///
 /// Benefits over collect-then-batch approach:
 /// - Reduced time-to-first-extraction: Downstream stages start immediately
 /// - Better CPU utilization: All pipeline stages can run concurrently
 /// - Lower peak memory usage: No need to hold all paths in memory
+/// - No mutex contention between walker threads
 async fn stage_file_discovery(
     file_tx: mpsc::Sender<FileBatch>,
     repo_path: PathBuf,
@@ -125,11 +127,12 @@ async fn stage_file_discovery(
 ) -> Result<usize> {
     use ignore::WalkBuilder;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
-    // Calculate parallelism: min(available cores, 6)
+    // Calculate parallelism: min(available cores, 12)
+    // Higher cap for I/O-bound file discovery (benefits from concurrency on modern SSDs)
     let parallelism = std::thread::available_parallelism()
-        .map(|n| n.get().min(6))
+        .map(|n| n.get().min(12))
         .unwrap_or(4);
 
     debug!(
@@ -138,94 +141,101 @@ async fn stage_file_discovery(
         repo_path.display()
     );
 
-    // Thread-safe batch accumulator and total counter
-    let current_batch = Arc::new(Mutex::new(Vec::new()));
+    // Create channel for individual paths from walker threads
+    // Use unbounded channel to prevent walker threads from blocking
+    let (path_tx, mut path_rx) = mpsc::unbounded_channel::<PathBuf>();
     let total_files = Arc::new(AtomicUsize::new(0));
-    let tx = Arc::new(file_tx);
 
-    // Clone for the walker
-    let batch_clone = Arc::clone(&current_batch);
-    let total_clone = Arc::clone(&total_files);
-    let tx_clone = Arc::clone(&tx);
+    // Spawn coordinator task to batch individual paths
+    let batch_tx = file_tx.clone();
+    let total_for_coordinator = Arc::clone(&total_files);
+    let coordinator = tokio::spawn(async move {
+        let mut current_batch = Vec::with_capacity(batch_size);
+
+        while let Some(path) = path_rx.recv().await {
+            current_batch.push(path);
+            total_for_coordinator.fetch_add(1, Ordering::Relaxed);
+
+            // Send batch when it reaches batch_size
+            if current_batch.len() >= batch_size {
+                let batch = std::mem::replace(&mut current_batch, Vec::with_capacity(batch_size));
+                if let Err(e) = batch_tx.send(FileBatch { paths: batch }).await {
+                    warn!("Failed to send file batch: {}", e);
+                    break;
+                }
+            }
+        }
+
+        // Send any remaining files in the last batch
+        if !current_batch.is_empty() {
+            let _ = batch_tx
+                .send(FileBatch {
+                    paths: current_batch,
+                })
+                .await;
+        }
+    });
 
     // Build parallel walker with gitignore support
-    WalkBuilder::new(&repo_path)
-        .standard_filters(true)
-        .hidden(false)
-        .parents(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .require_git(false)
-        .threads(parallelism)
-        .build_parallel()
-        .run(|| {
-            let batch = Arc::clone(&batch_clone);
-            let total = Arc::clone(&total_clone);
-            let tx = Arc::clone(&tx_clone);
+    // Run in blocking task since WalkBuilder::run is synchronous
+    let walk_handle = tokio::task::spawn_blocking(move || {
+        WalkBuilder::new(&repo_path)
+            .standard_filters(true)
+            .hidden(false)
+            .parents(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .require_git(false)
+            .threads(parallelism)
+            .build_parallel()
+            .run(|| {
+                let tx = path_tx.clone();
 
-            Box::new(move |entry_result| {
-                use crate::common::{has_supported_extension, should_include_file};
-                use ignore::WalkState;
+                Box::new(move |entry_result| {
+                    use crate::common::{has_supported_extension, should_include_file};
+                    use ignore::WalkState;
 
-                match entry_result {
-                    Ok(entry) => {
-                        let path = entry.path();
+                    match entry_result {
+                        Ok(entry) => {
+                            let path = entry.path();
 
-                        // Apply filters
-                        if !should_include_file(path) {
-                            return WalkState::Continue;
-                        }
-
-                        if !has_supported_extension(path) {
-                            return WalkState::Continue;
-                        }
-
-                        // Add to batch
-                        if let Ok(mut batch_lock) = batch.lock() {
-                            batch_lock.push(path.to_path_buf());
-                            total.fetch_add(1, Ordering::Relaxed);
-
-                            // Send batch if it reaches batch_size
-                            if batch_lock.len() >= batch_size {
-                                let paths = std::mem::take(&mut *batch_lock);
-                                drop(batch_lock);
-
-                                // Use blocking_send since we're in a sync context
-                                if let Err(e) = tx.blocking_send(FileBatch { paths }) {
-                                    warn!("Failed to send file batch: {}", e);
-                                    return WalkState::Quit;
-                                }
+                            // Apply filters (check cheap operations first)
+                            if !has_supported_extension(path) {
+                                return WalkState::Continue;
                             }
+
+                            if !should_include_file(path) {
+                                return WalkState::Continue;
+                            }
+
+                            // Send path to coordinator for batching
+                            if let Err(e) = tx.send(path.to_path_buf()) {
+                                warn!("Failed to send path to coordinator: {}", e);
+                                return WalkState::Quit;
+                            }
+
+                            WalkState::Continue
                         }
-
-                        WalkState::Continue
+                        Err(e) => {
+                            warn!("Error reading file entry: {}", e);
+                            WalkState::Continue
+                        }
                     }
-                    Err(e) => {
-                        warn!("Error reading file entry: {}", e);
-                        WalkState::Continue
-                    }
-                }
-            })
-        });
+                })
+            });
+    });
 
-    // Send any remaining files in the last batch
-    let remaining_paths = {
-        let remaining = current_batch
-            .lock()
-            .map_err(|e| Error::Other(anyhow!("Failed to lock batch: {e}")))?;
-        remaining.clone()
-    };
-
-    if !remaining_paths.is_empty() {
-        tx.send(FileBatch {
-            paths: remaining_paths,
-        })
+    // Wait for walker to complete
+    // When this completes, path_tx is automatically dropped, signaling coordinator
+    walk_handle
         .await
-        .map_err(|_| Error::Other(anyhow!("File channel closed")))?;
-    }
+        .map_err(|e| Error::Other(anyhow!("Walker task panicked: {e}")))?;
 
-    drop(tx);
+    // Wait for coordinator to finish sending all batches
+    coordinator
+        .await
+        .map_err(|e| Error::Other(anyhow!("Coordinator task panicked: {e}")))?;
 
     let total = total_files.load(Ordering::Relaxed);
     info!("Discovered {total} files to index");

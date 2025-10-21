@@ -118,9 +118,10 @@ pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
     i64, // embedding_id instead of &[f32]
     OutboxOperation,
-    Uuid,
+    Uuid, // qdrant_point_id
     TargetStore,
-    Option<String>,
+    Option<String>, // git_commit_hash
+    usize,          // bm25_token_count
 );
 
 pub struct PostgresClient {
@@ -280,6 +281,135 @@ impl PostgresClient {
         Ok(rows
             .into_iter()
             .map(|(id, name, path)| (id, name, std::path::PathBuf::from(path)))
+            .collect())
+    }
+
+    /// Get BM25 statistics for a repository
+    pub async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
+        let row = sqlx::query_as::<_, (Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get BM25 statistics: {e}")))?;
+
+        Ok(super::BM25Statistics {
+            avgdl: row.0.unwrap_or(50.0),
+            total_tokens: row.1.unwrap_or(0),
+            entity_count: row.2.unwrap_or(0),
+        })
+    }
+
+    /// Update BM25 statistics incrementally after adding new entities
+    pub async fn update_bm25_statistics_incremental(
+        &self,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        let stats = self.get_bm25_statistics(repository_id).await?;
+
+        let new_total_tokens: i64 = new_token_counts.iter().sum::<usize>() as i64;
+        let new_entity_count: i64 = new_token_counts.len() as i64;
+
+        let updated_total = stats.total_tokens + new_total_tokens;
+        let updated_count = stats.entity_count + new_entity_count;
+
+        let updated_avgdl = if updated_count > 0 {
+            updated_total as f32 / updated_count as f32
+        } else {
+            50.0
+        };
+
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+             WHERE repository_id = $4",
+        )
+        .bind(updated_avgdl)
+        .bind(updated_total)
+        .bind(updated_count)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to update BM25 statistics: {e}")))?;
+
+        Ok(updated_avgdl)
+    }
+
+    /// Update BM25 statistics after deleting entities
+    pub async fn update_bm25_statistics_after_deletion(
+        &self,
+        repository_id: Uuid,
+        deleted_token_counts: &[usize],
+    ) -> Result<f32> {
+        let stats = self.get_bm25_statistics(repository_id).await?;
+
+        let removed_total: i64 = deleted_token_counts.iter().sum::<usize>() as i64;
+        let removed_count: i64 = deleted_token_counts.len() as i64;
+
+        let updated_total = (stats.total_tokens - removed_total).max(0);
+        let updated_count = (stats.entity_count - removed_count).max(0);
+
+        let updated_avgdl = if updated_count > 0 {
+            updated_total as f32 / updated_count as f32
+        } else {
+            50.0
+        };
+
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+             WHERE repository_id = $4",
+        )
+        .bind(updated_avgdl)
+        .bind(updated_total)
+        .bind(updated_count)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to update BM25 statistics after deletion: {e}"
+            ))
+        })?;
+
+        Ok(updated_avgdl)
+    }
+
+    /// Get token counts for entities (needed before deletion/update)
+    pub async fn get_entity_token_counts(
+        &self,
+        entity_refs: &[(Uuid, String)],
+    ) -> Result<Vec<usize>> {
+        if entity_refs.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT bm25_token_count FROM entity_metadata
+             WHERE deleted_at IS NULL AND (repository_id, entity_id) IN ",
+        );
+
+        query_builder.push_tuples(entity_refs, |mut b, (repo_id, entity_id)| {
+            b.push_bind(repo_id).push_bind(entity_id);
+        });
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to get entity token counts: {e}")))?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                row.try_get::<Option<i32>, _>("bm25_token_count")
+                    .ok()
+                    .flatten()
+            })
+            .map(|count| count as usize)
             .collect())
     }
 
@@ -692,26 +822,29 @@ impl PostgresClient {
         // Pre-validate and convert entities to avoid unwrap in closure
         let validated_entities: Result<Vec<_>> = entities
             .iter()
-            .map(|(entity, embedding, op, point_id, target, git_commit)| {
-                let entity_json = serde_json::to_value(entity)
-                    .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
+            .map(
+                |(entity, embedding, op, point_id, target, git_commit, token_count)| {
+                    let entity_json = serde_json::to_value(entity)
+                        .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
-                let file_path_str = entity
-                    .file_path
-                    .to_str()
-                    .ok_or_else(|| Error::storage("Invalid file path"))?;
+                    let file_path_str = entity
+                        .file_path
+                        .to_str()
+                        .ok_or_else(|| Error::storage("Invalid file path"))?;
 
-                Ok((
-                    entity,
-                    embedding,
-                    op,
-                    point_id,
-                    target,
-                    git_commit,
-                    entity_json,
-                    file_path_str,
-                ))
-            })
+                    Ok((
+                        entity,
+                        embedding,
+                        op,
+                        point_id,
+                        target,
+                        git_commit,
+                        token_count,
+                        entity_json,
+                        file_path_str,
+                    ))
+                },
+            )
             .collect();
 
         let validated_entities = validated_entities?;
@@ -721,7 +854,7 @@ impl PostgresClient {
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
                 entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id, embedding_id
+                entity_data, git_commit_hash, qdrant_point_id, embedding_id, bm25_token_count
             ) ",
         );
 
@@ -735,6 +868,7 @@ impl PostgresClient {
                 point_id,
                 _target,
                 git_commit,
+                token_count,
                 entity_json,
                 file_path_str,
             )| {
@@ -750,7 +884,8 @@ impl PostgresClient {
                     .push_bind(entity_json)
                     .push_bind(git_commit)
                     .push_bind(point_id)
-                    .push_bind(embedding_id);
+                    .push_bind(embedding_id)
+                    .push_bind(**token_count as i32);
             },
         );
 
@@ -768,6 +903,7 @@ impl PostgresClient {
                 git_commit_hash = EXCLUDED.git_commit_hash,
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
                 embedding_id = EXCLUDED.embedding_id,
+                bm25_token_count = EXCLUDED.bm25_token_count,
                 updated_at = NOW(),
                 deleted_at = NULL",
         );
@@ -780,7 +916,7 @@ impl PostgresClient {
                 // Extract entity IDs for debugging duplicate key errors
                 let entity_ids: Vec<String> = validated_entities
                     .iter()
-                    .map(|(entity, _, _, _, _, _, _, _)| entity.entity_id.clone())
+                    .map(|(entity, _, _, _, _, _, _, _, _)| entity.entity_id.clone())
                     .collect();
                 let unique_ids: std::collections::HashSet<_> = entity_ids.iter().collect();
 
@@ -815,6 +951,7 @@ impl PostgresClient {
                 point_id,
                 target,
                 _git_commit,
+                _token_count,
                 entity_json,
                 _file_path_str,
             )| {
@@ -1331,6 +1468,32 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
         self.list_all_repositories().await
+    }
+
+    async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
+        self.get_bm25_statistics(repository_id).await
+    }
+
+    async fn update_bm25_statistics_incremental(
+        &self,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        self.update_bm25_statistics_incremental(repository_id, new_token_counts)
+            .await
+    }
+
+    async fn update_bm25_statistics_after_deletion(
+        &self,
+        repository_id: Uuid,
+        deleted_token_counts: &[usize],
+    ) -> Result<f32> {
+        self.update_bm25_statistics_after_deletion(repository_id, deleted_token_counts)
+            .await
+    }
+
+    async fn get_entity_token_counts(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<usize>> {
+        self.get_entity_token_counts(entity_refs).await
     }
 
     async fn get_entities_metadata_batch(

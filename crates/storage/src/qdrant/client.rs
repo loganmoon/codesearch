@@ -168,13 +168,40 @@ impl StorageClient for QdrantStorageClient {
         let points: Vec<_> = embedded_entities
             .into_iter()
             .map(|embedded| {
+                use qdrant_client::qdrant::vectors::VectorsOptions;
+                use qdrant_client::qdrant::SparseVector;
+                use qdrant_client::qdrant::{NamedVectors, Vector, Vectors};
+
                 let point_id = embedded.qdrant_point_id;
                 let entity_id = embedded.entity.entity_id.clone();
-                let point = PointStruct::new(
-                    PointId::from(point_id.to_string()),
-                    embedded.embedding,
-                    Self::entity_to_minimal_payload(&embedded.entity),
-                );
+
+                // Convert sparse vector format from Vec<(u32, f32)> to separate indices and values
+                let (sparse_indices, sparse_values): (Vec<u32>, Vec<f32>) =
+                    embedded.sparse_embedding.into_iter().unzip();
+
+                // Build named vectors map
+                let mut vectors_map = std::collections::HashMap::new();
+
+                // Add dense vector
+                vectors_map.insert("dense".to_string(), Vector::from(embedded.dense_embedding));
+
+                // Add sparse vector
+                let sparse_vec = SparseVector {
+                    indices: sparse_indices,
+                    values: sparse_values,
+                };
+                vectors_map.insert("sparse".to_string(), sparse_vec.into());
+
+                let point = PointStruct {
+                    id: Some(PointId::from(point_id.to_string())),
+                    vectors: Some(Vectors {
+                        vectors_options: Some(VectorsOptions::Vectors(NamedVectors {
+                            vectors: vectors_map,
+                        })),
+                    }),
+                    payload: Self::entity_to_minimal_payload(&embedded.entity).into(),
+                };
+
                 (entity_id, point_id, point)
             })
             .collect();
@@ -216,12 +243,97 @@ impl StorageClient for QdrantStorageClient {
                     query_embedding,
                     limit as u64,
                 )
+                .vector_name("dense")
                 .filter(filter.unwrap_or_default())
                 .with_payload(true),
             ))
             .await
             .map_err(|e| Error::storage(e.to_string()))?;
 
+        let mut results = Vec::new();
+        for point in search_result.result {
+            if !point.payload.is_empty() {
+                if let Ok(payload) = Self::payload_to_minimal_entity(&point.payload) {
+                    results.push((payload.entity_id, payload.repository_id, point.score));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn search_similar_hybrid(
+        &self,
+        dense_query_embedding: Vec<f32>,
+        sparse_query_embedding: Vec<(u32, f32)>,
+        limit: usize,
+        filters: Option<SearchFilters>,
+        prefetch_multiplier: usize,
+    ) -> Result<Vec<(String, String, f32)>> {
+        use qdrant_client::qdrant::{
+            vector_input, Fusion, PrefetchQueryBuilder, Query, QueryPoints, SparseVector,
+            VectorInput,
+        };
+
+        let filter = filters.and_then(|f| Self::build_filter(&f));
+        let prefetch_limit = (limit * prefetch_multiplier) as u64;
+
+        // Convert sparse vector format
+        let (sparse_indices, sparse_values): (Vec<u32>, Vec<f32>) =
+            sparse_query_embedding.into_iter().unzip();
+
+        // Build hybrid query with RRF fusion
+        let mut query_builder =
+            qdrant_client::qdrant::QueryPointsBuilder::new(self.collection_name.as_ref());
+
+        // Sparse prefetch
+        let sparse_vector_input = VectorInput {
+            variant: Some(vector_input::Variant::Sparse(SparseVector {
+                indices: sparse_indices,
+                values: sparse_values,
+            })),
+        };
+
+        let mut sparse_prefetch = PrefetchQueryBuilder::default();
+        sparse_prefetch = sparse_prefetch
+            .query(Query::new_nearest(sparse_vector_input))
+            .using("sparse")
+            .limit(prefetch_limit);
+
+        if let Some(f) = filter.as_ref() {
+            sparse_prefetch = sparse_prefetch.filter(f.clone());
+        }
+
+        query_builder = query_builder.add_prefetch(sparse_prefetch);
+
+        // Dense prefetch
+        let mut dense_prefetch = PrefetchQueryBuilder::default();
+        dense_prefetch = dense_prefetch
+            .query(Query::new_nearest(dense_query_embedding))
+            .using("dense")
+            .limit(prefetch_limit);
+
+        if let Some(f) = filter.as_ref() {
+            dense_prefetch = dense_prefetch.filter(f.clone());
+        }
+
+        query_builder = query_builder.add_prefetch(dense_prefetch);
+
+        // Apply RRF fusion
+        query_builder = query_builder
+            .query(Query::new_fusion(Fusion::Rrf))
+            .limit(limit as u64)
+            .with_payload(true);
+
+        let query_points = QueryPoints::from(query_builder);
+
+        let search_result = self
+            .qdrant_client
+            .query(query_points)
+            .await
+            .map_err(|e| Error::storage(e.to_string()))?;
+
+        // Extract results (same as search_similar)
         let mut results = Vec::new();
         for point in search_result.result {
             if !point.payload.is_empty() {

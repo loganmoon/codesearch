@@ -76,6 +76,10 @@ pub struct Config {
     /// Reranking configuration
     #[serde(default)]
     pub reranking: RerankingConfig,
+
+    /// Hybrid search configuration
+    #[serde(default)]
+    pub hybrid_search: HybridSearchConfig,
 }
 
 /// Configuration for embeddings generation
@@ -263,6 +267,18 @@ pub struct RerankingConfig {
     pub timeout_secs: u64,
 }
 
+/// Hybrid search configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HybridSearchConfig {
+    /// Whether hybrid search is enabled (default: true)
+    #[serde(default = "default_enable_hybrid_search")]
+    pub enabled: bool,
+
+    /// Prefetch multiplier: retrieve N * limit candidates per method (default: 5)
+    #[serde(default = "default_prefetch_multiplier")]
+    pub prefetch_multiplier: usize,
+}
+
 // Default constants
 const DEFAULT_DEVICE: &str = "cpu";
 const DEFAULT_PROVIDER: &str = "localapi";
@@ -416,6 +432,14 @@ fn default_reranking_timeout_secs() -> u64 {
     5
 }
 
+fn default_enable_hybrid_search() -> bool {
+    true
+}
+
+fn default_prefetch_multiplier() -> usize {
+    5
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -467,6 +491,15 @@ impl Default for RerankingConfig {
             api_base_url: None,
             api_key: None,
             timeout_secs: default_reranking_timeout_secs(),
+        }
+    }
+}
+
+impl Default for HybridSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enable_hybrid_search(),
+            prefetch_multiplier: default_prefetch_multiplier(),
         }
     }
 }
@@ -780,6 +813,7 @@ impl Config {
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
             reranking: RerankingConfig::default(),
+            hybrid_search: HybridSearchConfig::default(),
         };
 
         // Try to load global config
@@ -1471,6 +1505,7 @@ pub struct ConfigBuilder {
     server: ServerConfig,
     languages: LanguagesConfig,
     reranking: RerankingConfig,
+    hybrid_search: HybridSearchConfig,
 }
 
 impl ConfigBuilder {
@@ -1484,6 +1519,7 @@ impl ConfigBuilder {
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),
             reranking: RerankingConfig::default(),
+            hybrid_search: HybridSearchConfig::default(),
         }
     }
 
@@ -1511,6 +1547,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the hybrid search configuration
+    pub fn hybrid_search(mut self, hybrid_search: HybridSearchConfig) -> Self {
+        self.hybrid_search = hybrid_search;
+        self
+    }
+
     /// Build the Config
     pub fn build(self) -> Config {
         Config {
@@ -1521,6 +1563,7 @@ impl ConfigBuilder {
             server: self.server,
             languages: self.languages,
             reranking: self.reranking,
+            hybrid_search: self.hybrid_search,
         }
     }
 }

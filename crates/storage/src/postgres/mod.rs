@@ -11,6 +11,14 @@ pub use client::{
     EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
 };
 
+/// BM25 statistics for a repository
+#[derive(Debug, Clone)]
+pub struct BM25Statistics {
+    pub avgdl: f32,
+    pub total_tokens: i64,
+    pub entity_count: i64,
+}
+
 /// Trait for PostgreSQL metadata operations
 #[async_trait]
 pub trait PostgresClientTrait: Send + Sync {
@@ -97,6 +105,74 @@ pub trait PostgresClientTrait: Send + Sync {
     ///
     /// A vector of `(repository_id, collection_name, repository_path)` tuples
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>>;
+
+    /// Get BM25 statistics for a repository
+    ///
+    /// Returns the current average document length (avgdl) and related statistics
+    /// used for BM25 sparse embedding generation.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    ///
+    /// # Returns
+    ///
+    /// BM25Statistics containing avgdl, total_tokens, and entity_count.
+    /// If statistics are not yet calculated, returns default values (avgdl=50.0).
+    async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
+
+    /// Update BM25 statistics incrementally after adding new entities
+    ///
+    /// Updates the running average document length by incorporating token counts
+    /// from newly added entities. This avoids full repository rescans.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `new_token_counts` - Token counts for newly added entities
+    ///
+    /// # Returns
+    ///
+    /// The updated average document length (avgdl)
+    async fn update_bm25_statistics_incremental(
+        &self,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32>;
+
+    /// Update BM25 statistics after deleting entities
+    ///
+    /// Updates the running average by subtracting token counts from deleted entities.
+    /// Call this after fetching token counts via `get_entity_token_counts`.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `deleted_token_counts` - Token counts for deleted entities
+    ///
+    /// # Returns
+    ///
+    /// The updated average document length (avgdl)
+    async fn update_bm25_statistics_after_deletion(
+        &self,
+        repository_id: Uuid,
+        deleted_token_counts: &[usize],
+    ) -> Result<f32>;
+
+    /// Get token counts for entities (needed before deletion/update)
+    ///
+    /// Fetches the stored token counts for specified entities.
+    /// This is used to accurately update avgdl when deleting or modifying entities.
+    ///
+    /// # Parameters
+    ///
+    /// * `entity_refs` - Slice of (repository_id, entity_id) pairs
+    ///
+    /// # Returns
+    ///
+    /// Vector of token counts in the same order as entity_refs.
+    /// Entities not found or with NULL token counts are omitted.
+    async fn get_entity_token_counts(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<usize>>;
 
     /// Batch fetch entity metadata (qdrant_point_id and deleted_at) for multiple entities
     ///

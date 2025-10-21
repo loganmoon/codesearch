@@ -29,6 +29,7 @@ serde_json = "1.0"
 uuid = "1.18"
 schemars = "1.0"
 futures = "0.3"
+ordered-float = "5.0"
 
 # HTTP server for MCP transport
 axum = "0.8.6"

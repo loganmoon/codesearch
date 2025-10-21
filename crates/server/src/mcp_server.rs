@@ -54,6 +54,7 @@ struct CodeSearchMcpServer {
     default_bge_instruction: String,
     reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
     reranking_config: codesearch_core::config::RerankingConfig,
+    hybrid_search_config: codesearch_core::config::HybridSearchConfig,
 }
 
 /// Request parameters for search_code tool
@@ -185,13 +186,80 @@ impl CodeSearchMcpServer {
                 )
             })?;
 
-        let query_embedding = embeddings.into_iter().next().flatten().ok_or_else(|| {
+        let dense_query_embedding = embeddings.into_iter().next().flatten().ok_or_else(|| {
             McpError::new(
                 ErrorCode::INTERNAL_ERROR,
                 "Failed to generate embedding".to_string(),
                 None,
             )
         })?;
+
+        // Generate sparse embeddings grouped by repository avgdl
+        // This batches repositories with the same avgdl to minimize sparse embedding calls
+        use ordered_float::OrderedFloat;
+        let mut avgdl_to_repos: HashMap<OrderedFloat<f32>, Vec<(Uuid, &RepositoryInfo)>> =
+            HashMap::new();
+
+        for (repo_id, repo_info) in &target_repos {
+            let stats = self
+                .postgres_client
+                .get_bm25_statistics(*repo_id)
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to get BM25 statistics: {e}"),
+                        None,
+                    )
+                })?;
+
+            avgdl_to_repos
+                .entry(OrderedFloat(stats.avgdl))
+                .or_default()
+                .push((*repo_id, *repo_info));
+        }
+
+        // Generate sparse query embedding once per unique avgdl value
+        // Note: Use raw query text WITHOUT BGE instruction prefix for sparse embeddings
+        let mut avgdl_to_sparse_embedding: HashMap<OrderedFloat<f32>, Vec<(u32, f32)>> =
+            HashMap::new();
+
+        for avgdl in avgdl_to_repos.keys() {
+            let sparse_manager =
+                codesearch_embeddings::create_sparse_manager(avgdl.0).map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to create sparse manager: {e}"),
+                        None,
+                    )
+                })?;
+
+            let sparse_embeddings = sparse_manager
+                .embed_sparse(vec![query_text.clone()])
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to generate sparse embedding: {e}"),
+                        None,
+                    )
+                })?;
+
+            let sparse_embedding =
+                sparse_embeddings
+                    .into_iter()
+                    .next()
+                    .flatten()
+                    .ok_or_else(|| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            "Failed to generate sparse embedding".to_string(),
+                            None,
+                        )
+                    })?;
+
+            avgdl_to_sparse_embedding.insert(*avgdl, sparse_embedding);
+        }
 
         // Parse entity type filter
         let entity_type = request
@@ -206,17 +274,49 @@ impl CodeSearchMcpServer {
             file_path: request.file_path.as_ref().map(PathBuf::from),
         };
 
-        // Search all target repositories in parallel
+        // Search all target repositories in parallel using hybrid search
         let search_futures = target_repos.iter().map(|(repo_id, repo_info)| {
             let storage_client = repo_info.storage_client.clone();
-            let query_emb = query_embedding.clone();
+            let dense_query_emb = dense_query_embedding.clone();
             let filters_clone = filters.clone();
             let collection_name = repo_info.collection_name.clone();
             let repo_id = *repo_id;
+            let postgres_client = self.postgres_client.clone();
+            let avgdl_to_sparse = avgdl_to_sparse_embedding.clone();
+            let prefetch_multiplier = self.hybrid_search_config.prefetch_multiplier;
 
             async move {
+                // Get repository avgdl to look up the correct sparse embedding
+                let stats = postgres_client
+                    .get_bm25_statistics(repo_id)
+                    .await
+                    .map_err(|e| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            format!("Failed to get BM25 statistics: {e}"),
+                            None,
+                        )
+                    })?;
+
+                let sparse_query_emb = avgdl_to_sparse
+                    .get(&OrderedFloat(stats.avgdl))
+                    .ok_or_else(|| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            "Sparse embedding not found for repository avgdl".to_string(),
+                            None,
+                        )
+                    })?
+                    .clone();
+
                 storage_client
-                    .search_similar(query_emb, limit, Some(filters_clone))
+                    .search_similar_hybrid(
+                        dense_query_emb,
+                        sparse_query_emb,
+                        limit,
+                        Some(filters_clone),
+                        prefetch_multiplier,
+                    )
                     .await
                     .map(|results| {
                         results
@@ -229,7 +329,7 @@ impl CodeSearchMcpServer {
                     .map_err(|e| {
                         McpError::new(
                             ErrorCode::INTERNAL_ERROR,
-                            format!("Search failed in repository {collection_name}: {e}"),
+                            format!("Hybrid search failed in repository {collection_name}: {e}"),
                             None,
                         )
                     })
@@ -422,6 +522,7 @@ impl CodeSearchMcpServer {
         Ok(CallToolResult::success(vec![Content::text(response_str)]))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
         embedding_manager: Arc<EmbeddingManager>,
@@ -430,6 +531,7 @@ impl CodeSearchMcpServer {
         default_bge_instruction: String,
         reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
         reranking_config: codesearch_core::config::RerankingConfig,
+        hybrid_search_config: codesearch_core::config::HybridSearchConfig,
     ) -> Self {
         Self {
             repositories,
@@ -440,6 +542,7 @@ impl CodeSearchMcpServer {
             default_bge_instruction,
             reranker,
             reranking_config,
+            hybrid_search_config,
         }
     }
 }
@@ -671,6 +774,7 @@ pub(crate) async fn run_multi_repo_server(
         config.embeddings.default_bge_instruction.clone(),
         reranker,
         config.reranking.clone(),
+        config.hybrid_search.clone(),
     );
 
     run_mcp_server_with_shutdown_multi(mcp_server, watchers, config.server.port).await

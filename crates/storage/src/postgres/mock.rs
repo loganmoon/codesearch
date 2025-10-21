@@ -288,6 +288,34 @@ impl PostgresClientTrait for MockPostgresClient {
             .collect())
     }
 
+    async fn get_bm25_statistics(&self, _repository_id: Uuid) -> Result<super::BM25Statistics> {
+        Ok(super::BM25Statistics {
+            avgdl: 50.0,
+            total_tokens: 0,
+            entity_count: 0,
+        })
+    }
+
+    async fn update_bm25_statistics_incremental(
+        &self,
+        _repository_id: Uuid,
+        _new_token_counts: &[usize],
+    ) -> Result<f32> {
+        Ok(50.0)
+    }
+
+    async fn update_bm25_statistics_after_deletion(
+        &self,
+        _repository_id: Uuid,
+        _deleted_token_counts: &[usize],
+    ) -> Result<f32> {
+        Ok(50.0)
+    }
+
+    async fn get_entity_token_counts(&self, _entity_refs: &[(Uuid, String)]) -> Result<Vec<usize>> {
+        Ok(vec![])
+    }
+
     async fn get_entities_metadata_batch(
         &self,
         repository_id: Uuid,
@@ -465,7 +493,16 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut outbox_ids = Vec::with_capacity(entities.len());
         let now = chrono::Utc::now();
 
-        for (entity, embedding_id, operation, point_id, target_store, git_commit_hash) in entities {
+        for (
+            entity,
+            embedding_id,
+            operation,
+            point_id,
+            target_store,
+            git_commit_hash,
+            _token_count,
+        ) in entities
+        {
             // Store entity metadata
             data.entities.insert(
                 (repository_id, entity.entity_id.clone()),

@@ -30,6 +30,9 @@ pub use provider::EmbeddingProvider;
 pub use reranker::{create_reranker_provider, RerankerProvider};
 pub use sparse_provider::SparseEmbeddingProvider;
 
+// Re-export Tokenizer trait for use in indexer
+pub use bm25::Tokenizer;
+
 /// Helper function to parse provider type from string
 fn parse_provider_type(provider: &str) -> EmbeddingProviderType {
     match provider.to_lowercase().as_str() {

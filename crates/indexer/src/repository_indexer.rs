@@ -538,13 +538,19 @@ async fn stage_store_entities(
                 .await
                 .storage_err("Failed to fetch metadata")?;
 
+            // Calculate token counts for this chunk
+            let entities_vec: Vec<&CodeEntity> = chunk.iter().map(|(e, _)| e).collect();
+            let entities_owned: Vec<CodeEntity> = entities_vec.iter().map(|&e| e.clone()).collect();
+            let token_counts = crate::entity_processor::calculate_token_counts(&entities_owned)
+                .storage_err("Failed to calculate token counts")?;
+
             // Prepare batch refs (no cloning - use references)
             let mut batch_refs = Vec::with_capacity(chunk.len());
 
             // Clone git_commit once for the chunk instead of per entity
             let git_commit = batch.git_commit.clone();
 
-            for (entity, embedding_id) in chunk {
+            for (idx, (entity, embedding_id)) in chunk.iter().enumerate() {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
                     metadata_map.get(&entity.entity_id)
                 {
@@ -564,6 +570,7 @@ async fn stage_store_entities(
                     point_id,
                     TargetStore::Qdrant,
                     git_commit.clone(),
+                    token_counts[idx],
                 ));
             }
 
@@ -573,12 +580,19 @@ async fn stage_store_entities(
                 .await
                 .storage_err("Failed to store entities")?;
 
+            // Update avgdl statistics incrementally
+            let avgdl = postgres_client
+                .update_bm25_statistics_incremental(batch.repo_id, &token_counts)
+                .await
+                .storage_err("Failed to update BM25 statistics")?;
+
             total_stored += batch_refs.len();
             info!(
-                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
+                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch), avgdl={:.2}",
                 batch_refs.len(),
                 chunk_end,
-                batch.entity_embedding_id_pairs.len()
+                batch.entity_embedding_id_pairs.len(),
+                avgdl
             );
         }
 

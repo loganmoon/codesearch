@@ -121,6 +121,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -176,6 +177,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -196,6 +198,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("def456".to_string()),
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -273,6 +276,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
             (
                 &entity2,
@@ -281,6 +285,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
             (
                 &entity3,
@@ -289,6 +294,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
         ];
 
@@ -476,6 +482,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -591,6 +598,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -687,6 +695,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
             (
                 &entity2,
@@ -695,6 +704,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
             (
                 &entity3,
@@ -703,6 +713,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
+                50, // token_count
             ),
         ];
 
@@ -759,6 +770,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
+            50, // token_count
         )];
 
         let outbox_ids = client
@@ -812,6 +824,7 @@ async fn test_outbox_record_failure() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
+            50, // token_count
         )];
 
         let outbox_ids = client
@@ -894,6 +907,7 @@ async fn test_transaction_rollback() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)

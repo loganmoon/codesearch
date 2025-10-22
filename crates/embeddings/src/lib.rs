@@ -11,18 +11,27 @@ use codesearch_core::error::{Result, ResultExt};
 use std::sync::Arc;
 
 mod api_provider;
+mod bm25_provider;
+mod code_tokenizer;
 pub mod config;
 pub mod error;
 mod mock_provider;
 pub mod provider;
 pub mod reranker;
+mod sparse_provider;
 
 pub use api_provider::create_api_provider;
+pub use bm25_provider::Bm25SparseProvider;
+pub use code_tokenizer::CodeTokenizer;
 pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType};
 pub use error::EmbeddingError;
 pub use mock_provider::MockEmbeddingProvider;
 pub use provider::EmbeddingProvider;
 pub use reranker::{create_reranker_provider, RerankerProvider};
+pub use sparse_provider::SparseEmbeddingProvider;
+
+// Re-export Tokenizer trait for use in indexer
+pub use bm25::Tokenizer;
 
 /// Helper function to parse provider type from string
 fn parse_provider_type(provider: &str) -> EmbeddingProviderType {
@@ -122,4 +131,48 @@ impl EmbeddingManager {
     pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
         self.provider.embed(texts).await
     }
+}
+
+/// Manager for handling sparse embedding generation with immutable configuration
+pub struct SparseEmbeddingManager {
+    provider: Arc<dyn crate::sparse_provider::SparseEmbeddingProvider>,
+    model_version: String,
+}
+
+impl SparseEmbeddingManager {
+    /// Creates a new sparse embedding manager with the specified provider and model version
+    pub fn new(
+        provider: Arc<dyn crate::sparse_provider::SparseEmbeddingProvider>,
+        model_version: String,
+    ) -> Self {
+        Self {
+            provider,
+            model_version,
+        }
+    }
+
+    /// Get the model version string for cache keying
+    pub fn model_version(&self) -> &str {
+        &self.model_version
+    }
+
+    /// Generate sparse embeddings for texts
+    pub async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
+        self.provider.embed_sparse(texts).await
+    }
+}
+
+/// Create a sparse embedding manager with the specified average document length
+///
+/// # Arguments
+/// * `avgdl` - Average document length in tokens (calculated per-repository)
+///
+/// # Returns
+/// A configured sparse embedding manager using BM25
+pub fn create_sparse_manager(avgdl: f32) -> Result<Arc<SparseEmbeddingManager>> {
+    let provider = crate::bm25_provider::Bm25SparseProvider::new(avgdl);
+    Ok(Arc::new(SparseEmbeddingManager::new(
+        Arc::new(provider),
+        "bm25-v2.3".to_string(),
+    )))
 }

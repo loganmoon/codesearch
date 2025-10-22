@@ -52,7 +52,7 @@ pub async fn create_collection_manager_with_retry(
 pub async fn initialize_collection(
     manager: &dyn CollectionManager,
     collection_name: &str,
-    dimensions: usize,
+    dense_dimensions: usize,
 ) -> Result<()> {
     // Check if collection already exists
     let exists = manager
@@ -67,14 +67,14 @@ pub async fn initialize_collection(
         );
     } else {
         info!(
-            "Creating new collection '{}' with {} dimensions...",
-            collection_name, dimensions
+            "Creating new collection '{}' with {} dense dimensions...",
+            collection_name, dense_dimensions
         );
     }
 
     // Ensure collection with proper dimensions
     manager
-        .ensure_collection(collection_name, dimensions)
+        .ensure_collection(collection_name, dense_dimensions)
         .await
         .context("Failed to ensure collection")?;
 

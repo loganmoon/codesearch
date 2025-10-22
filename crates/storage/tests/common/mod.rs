@@ -35,7 +35,9 @@ pub fn create_test_entity(name: &str, entity_type: EntityType, repository_id: &s
 #[allow(dead_code)]
 pub fn create_embedded_entity(entity: CodeEntity, dimension: usize) -> EmbeddedEntity {
     EmbeddedEntity {
-        embedding: mock_embedding(dimension),
+        dense_embedding: mock_embedding(dimension),
+        sparse_embedding: vec![(0, 0.5), (1, 0.3), (2, 0.2)], // Mock sparse embedding
+        bm25_token_count: 50,                                 // Mock token count
         qdrant_point_id: Uuid::new_v4(),
         entity,
     }

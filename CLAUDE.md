@@ -215,7 +215,6 @@ This asymmetry is INTENTIONAL and follows official BGE model design:
 **References:**
 - BGE Code Embedding: https://huggingface.co/BAAI/bge-code-v1
 - BGE Reranker: https://huggingface.co/BAAI/bge-reranker-v2-m3
-- Research: docs/research/reranking_bugs_investigation.md
 
 ### Testing
 
@@ -225,6 +224,64 @@ cargo test --package codesearch-embeddings
 
 # Tests requiring a running vLLM instance (ignored by default):
 cargo test --package codesearch-embeddings -- --ignored
+```
+
+## Hybrid Search Feature
+
+Codesearch uses hybrid search by default, combining BM25 sparse embeddings with dense vector embeddings using Reciprocal Rank Fusion (RRF) for optimal search relevance.
+
+### Overview
+
+Hybrid search is a multi-stage retrieval approach:
+1. **BM25 Sparse Retrieval**: Traditional keyword-based search using term frequency and inverse document frequency
+2. **Dense Vector Retrieval**: Semantic search using learned embeddings
+3. **RRF Fusion**: Combines results from both methods using Reciprocal Rank Fusion
+
+This approach provides better accuracy than either method alone, capturing both exact keyword matches and semantic similarity.
+
+### Configuration
+
+Configure hybrid search in your `~/.codesearch/config.toml`:
+
+```toml
+[hybrid_search]
+# Prefetch multiplier: retrieve N × limit candidates per method before fusion
+# Valid range: 1-100, default: 5
+# Higher values improve recall but increase latency
+prefetch_multiplier = 5
+```
+
+### BM25 Implementation Details
+
+**Tokenization:**
+- Uses `CodeTokenizer` for consistent tokenization
+- Splits on whitespace and special characters appropriate for code
+- Same tokenization used for both indexing and querying
+
+**Average Document Length (avgdl):**
+- Calculated incrementally as entities are indexed
+- Preserved when entity count reaches zero (not reset to default)
+- Default fallback value: 50.0 tokens (only for brand new repositories)
+- Stored per-repository in PostgreSQL
+
+**Statistics Management:**
+- `update_bm25_statistics_incremental()`: Updates after adding entities
+- `update_bm25_statistics_after_deletion()`: Updates after removing entities
+- `get_bm25_statistics_batch()`: Batch fetches statistics for multiple repositories
+- `get_bm25_statistics_in_tx()`: Transaction-safe statistics retrieval
+
+### Testing
+
+Run hybrid search tests:
+```bash
+# Unit tests for tokenization and BM25
+cargo test --package codesearch-storage test_bm25
+
+# Integration tests for hybrid search
+cargo test --workspace
+
+# E2E tests (requires Docker)
+cargo test --package codesearch-e2e-tests -- --ignored
 ```
 
 # important-instruction-reminders

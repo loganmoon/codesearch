@@ -102,6 +102,25 @@ pub async fn extract_entities_from_file(
     Ok(entities)
 }
 
+/// Calculate token counts for a batch of entities
+///
+/// Uses the BM25 tokenizer to count tokens in each entity's embedding content.
+/// These counts are used for maintaining avgdl statistics.
+pub fn calculate_token_counts(entities: &[CodeEntity]) -> Result<Vec<usize>> {
+    use codesearch_embeddings::{CodeTokenizer, Tokenizer};
+
+    let tokenizer = CodeTokenizer;
+    let mut token_counts = Vec::with_capacity(entities.len());
+
+    for entity in entities {
+        let content = extract_embedding_content(entity);
+        let tokens = tokenizer.tokenize(&content);
+        token_counts.push(tokens.len());
+    }
+
+    Ok(token_counts)
+}
+
 /// Statistics for entity batch processing
 #[derive(Debug, Default)]
 pub struct BatchProcessingStats {
@@ -221,6 +240,20 @@ async fn process_entity_chunk(
 
     info!("Generating embeddings for {} entities", entities.len());
 
+    // Calculate token counts for all entities (will be used for storage)
+    // Note: BM25 statistics are updated by the outbox processor within its transaction
+    let token_counts = calculate_token_counts(&entities)?;
+
+    // Get current avgdl for sparse embedding generation
+    let bm25_stats = postgres_client
+        .get_bm25_statistics(repo_id)
+        .await
+        .storage_err("Failed to get BM25 statistics")?;
+
+    // Create sparse embedding manager with current avgdl
+    let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
+        .storage_err("Failed to create sparse embedding manager")?;
+
     // Phase 1: Compute content hashes for all entities
     let entity_contents_and_hashes: Vec<(String, String)> = entities
         .iter()
@@ -284,7 +317,7 @@ async fn process_entity_chunk(
     // Generate embeddings for cache misses only
     if !cache_miss_texts.is_empty() {
         info!(
-            "Generating {} new embeddings via API",
+            "Generating {} new dense embeddings via API",
             cache_miss_texts.len()
         );
 
@@ -341,14 +374,31 @@ async fn process_entity_chunk(
         }
     }
 
-    // Filter entities with valid embedding IDs
-    let mut entity_embedding_id_pairs: Vec<(CodeEntity, i64)> = Vec::with_capacity(entities.len());
-    for ((entity, opt_embedding), opt_embedding_id) in entities
+    // Generate sparse embeddings for ALL entities (locally generated, not cached)
+    info!("Generating {} sparse embeddings locally", entities.len());
+    let all_entity_contents: Vec<&str> = entity_contents_and_hashes
+        .iter()
+        .map(|(content, _)| content.as_str())
+        .collect();
+
+    let all_sparse_embeddings = sparse_manager
+        .embed_sparse(all_entity_contents)
+        .await
+        .storage_err("Failed to generate sparse embeddings")?;
+
+    // Filter entities with valid embedding IDs and sparse embeddings
+    type EntityEmbeddingPair = (CodeEntity, i64, Vec<(u32, f32)>);
+    let mut entity_embedding_id_pairs: Vec<EntityEmbeddingPair> =
+        Vec::with_capacity(entities.len());
+    for (((entity, opt_embedding), opt_embedding_id), opt_sparse_embedding) in entities
         .into_iter()
         .zip(all_embeddings.into_iter())
         .zip(all_embedding_ids.into_iter())
+        .zip(all_sparse_embeddings.into_iter())
     {
-        if let (Some(embedding), Some(embedding_id)) = (opt_embedding, opt_embedding_id) {
+        if let (Some(embedding), Some(embedding_id), Some(sparse_embedding)) =
+            (opt_embedding, opt_embedding_id, opt_sparse_embedding)
+        {
             // Validate embedding is not all zeros
             let is_all_zeros = embedding.iter().all(|&v| v == 0.0);
             if is_all_zeros {
@@ -358,7 +408,7 @@ async fn process_entity_chunk(
                     entity.file_path.display()
                 );
             }
-            entity_embedding_id_pairs.push((entity, embedding_id));
+            entity_embedding_id_pairs.push((entity, embedding_id, sparse_embedding));
         } else {
             stats.entities_skipped_size += 1;
             debug!(
@@ -381,7 +431,7 @@ async fn process_entity_chunk(
     // Batch fetch all entity metadata in a single query
     let entity_ids: Vec<String> = entity_embedding_id_pairs
         .iter()
-        .map(|(entity, _)| entity.entity_id.clone())
+        .map(|(entity, _, _)| entity.entity_id.clone())
         .collect();
 
     let metadata_map = postgres_client
@@ -392,7 +442,9 @@ async fn process_entity_chunk(
     // Prepare batch data directly as references (no intermediate cloning)
     let mut batch_refs = Vec::with_capacity(entity_embedding_id_pairs.len());
 
-    for (entity, embedding_id) in &entity_embedding_id_pairs {
+    for (idx, (entity, embedding_id, sparse_embedding)) in
+        entity_embedding_id_pairs.iter().enumerate()
+    {
         let existing_metadata = metadata_map.get(&entity.entity_id);
 
         let (point_id, operation) = if let Some((existing_point_id, deleted_at)) = existing_metadata
@@ -423,6 +475,8 @@ async fn process_entity_chunk(
             point_id,
             TargetStore::Qdrant,
             git_commit.clone(),
+            token_counts[idx],
+            sparse_embedding.clone(),
         ));
     }
 
@@ -468,10 +522,30 @@ pub async fn update_file_snapshot_and_mark_stale(
     if !stale_ids.is_empty() {
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
+        // Fetch token counts for stale entities before deletion
+        let entity_refs: Vec<(Uuid, String)> = stale_ids
+            .iter()
+            .map(|entity_id| (repo_id, entity_id.clone()))
+            .collect();
+
+        let token_counts = postgres_client
+            .get_entity_token_counts(&entity_refs)
+            .await
+            .storage_err("Failed to get entity token counts")?;
+
+        // Mark entities as deleted
         postgres_client
             .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
+
+        // Update avgdl statistics after deletion
+        if !token_counts.is_empty() {
+            postgres_client
+                .update_bm25_statistics_after_deletion(repo_id, &token_counts)
+                .await
+                .storage_err("Failed to update BM25 statistics after deletion")?;
+        }
     }
 
     postgres_client
@@ -503,11 +577,31 @@ pub async fn mark_file_entities_deleted(
 
     let count = entity_ids.len();
 
+    // Fetch token counts for entities before deletion
+    let entity_refs: Vec<(Uuid, String)> = entity_ids
+        .iter()
+        .map(|entity_id| (repo_id, entity_id.clone()))
+        .collect();
+
+    let token_counts = postgres_client
+        .get_entity_token_counts(&entity_refs)
+        .await
+        .storage_err("Failed to get entity token counts")?;
+
+    // Mark entities as deleted
     postgres_client
         .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 
-    info!("Marked {} entities as deleted", count);
+    // Update avgdl statistics after deletion
+    if !token_counts.is_empty() {
+        postgres_client
+            .update_bm25_statistics_after_deletion(repo_id, &token_counts)
+            .await
+            .storage_err("Failed to update BM25 statistics after deletion")?;
+    }
+
+    info!("Marked {} entities as deleted and updated avgdl", count);
     Ok(count)
 }

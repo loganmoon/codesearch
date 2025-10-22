@@ -116,11 +116,13 @@ pub struct OutboxEntry {
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    i64, // embedding_id instead of &[f32]
+    i64, // embedding_id (dense)
     OutboxOperation,
-    Uuid,
+    Uuid, // qdrant_point_id
     TargetStore,
-    Option<String>,
+    Option<String>,  // git_commit_hash
+    usize,           // bm25_token_count
+    Vec<(u32, f32)>, // sparse_embedding
 );
 
 pub struct PostgresClient {
@@ -187,8 +189,8 @@ impl PostgresClient {
             .unwrap_or("unknown");
 
         let (repository_id,): (Uuid,) = sqlx::query_as(
-            "INSERT INTO repositories (repository_path, repository_name, collection_name, created_at, updated_at)
-             VALUES ($1, $2, $3, NOW(), NOW())
+            "INSERT INTO repositories (repository_path, repository_name, collection_name, bm25_avgdl, bm25_total_tokens, bm25_entity_count, created_at, updated_at)
+             VALUES ($1, $2, $3, 50.0, 0, 0, NOW(), NOW())
              RETURNING repository_id",
         )
         .bind(repo_path_str)
@@ -280,6 +282,316 @@ impl PostgresClient {
         Ok(rows
             .into_iter()
             .map(|(id, name, path)| (id, name, std::path::PathBuf::from(path)))
+            .collect())
+    }
+
+    /// Get BM25 statistics for a repository
+    pub async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
+        let row = sqlx::query_as::<_, (Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get BM25 statistics: {e}")))?;
+
+        let avgdl = row.0.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 statistics not initialized for repository {repository_id}"
+            ))
+        })?;
+        let total_tokens = row.1.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 total_tokens not initialized for repository {repository_id}"
+            ))
+        })?;
+        let entity_count = row.2.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 entity_count not initialized for repository {repository_id}"
+            ))
+        })?;
+
+        Ok(super::BM25Statistics {
+            avgdl,
+            total_tokens,
+            entity_count,
+        })
+    }
+
+    /// Get BM25 statistics for a repository within a transaction (with row lock)
+    pub async fn get_bm25_statistics_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+    ) -> Result<super::BM25Statistics> {
+        let row = sqlx::query_as::<_, (Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories WHERE repository_id = $1
+             FOR UPDATE",
+        )
+        .bind(repository_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get BM25 statistics in tx: {e}")))?;
+
+        let avgdl = row.0.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 statistics not initialized for repository {repository_id}"
+            ))
+        })?;
+        let total_tokens = row.1.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 total_tokens not initialized for repository {repository_id}"
+            ))
+        })?;
+        let entity_count = row.2.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 entity_count not initialized for repository {repository_id}"
+            ))
+        })?;
+
+        Ok(super::BM25Statistics {
+            avgdl,
+            total_tokens,
+            entity_count,
+        })
+    }
+
+    /// Get BM25 statistics for multiple repositories in a single query
+    ///
+    /// Optimized batch version for fetching statistics for many repositories at once.
+    /// Uses PostgreSQL's ANY operator for efficient multi-row retrieval.
+    pub async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, super::BM25Statistics>> {
+        if repository_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows = sqlx::query_as::<_, (Uuid, Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT repository_id, bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories
+             WHERE repository_id = ANY($1)",
+        )
+        .bind(repository_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to fetch batch BM25 statistics: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for (repo_id, avgdl_opt, total_tokens_opt, entity_count_opt) in rows {
+            let avgdl = avgdl_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 statistics not initialized for repository {repo_id}"
+                ))
+            })?;
+            let total_tokens = total_tokens_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 total_tokens not initialized for repository {repo_id}"
+                ))
+            })?;
+            let entity_count = entity_count_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 entity_count not initialized for repository {repo_id}"
+                ))
+            })?;
+
+            result.insert(
+                repo_id,
+                super::BM25Statistics {
+                    avgdl,
+                    total_tokens,
+                    entity_count,
+                },
+            );
+        }
+
+        Ok(result)
+    }
+
+    /// Update BM25 statistics incrementally after adding new entities (within transaction)
+    pub async fn update_bm25_statistics_incremental_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        let stats = self.get_bm25_statistics_in_tx(tx, repository_id).await?;
+
+        let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
+                .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
+        })?;
+        let new_entity_count: i64 = i64::try_from(new_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
+
+        let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
+        let updated_count = stats.entity_count.saturating_add(new_entity_count);
+
+        let updated_avgdl = if updated_count > 0 {
+            updated_total as f32 / updated_count as f32
+        } else {
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
+        };
+
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+             WHERE repository_id = $4",
+        )
+        .bind(updated_avgdl)
+        .bind(updated_total)
+        .bind(updated_count)
+        .bind(repository_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to update BM25 statistics: {e}")))?;
+
+        Ok(updated_avgdl)
+    }
+
+    /// Update BM25 statistics incrementally after adding new entities
+    pub async fn update_bm25_statistics_incremental(
+        &self,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        let stats = self.get_bm25_statistics(repository_id).await?;
+
+        let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
+                .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
+        })?;
+        let new_entity_count: i64 = i64::try_from(new_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
+
+        let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
+        let updated_count = stats.entity_count.saturating_add(new_entity_count);
+
+        let updated_avgdl = if updated_count > 0 {
+            updated_total as f32 / updated_count as f32
+        } else {
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
+        };
+
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+             WHERE repository_id = $4",
+        )
+        .bind(updated_avgdl)
+        .bind(updated_total)
+        .bind(updated_count)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to update BM25 statistics: {e}")))?;
+
+        Ok(updated_avgdl)
+    }
+
+    /// Update BM25 statistics after deleting entities
+    pub async fn update_bm25_statistics_after_deletion(
+        &self,
+        repository_id: Uuid,
+        deleted_token_counts: &[usize],
+    ) -> Result<f32> {
+        let stats = self.get_bm25_statistics(repository_id).await?;
+
+        let removed_total: i64 = deleted_token_counts.iter().try_fold(0i64, |acc, &count| {
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
+                .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
+        })?;
+        let removed_count: i64 = i64::try_from(deleted_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
+
+        let updated_total = (stats.total_tokens - removed_total).max(0);
+        let updated_count = (stats.entity_count - removed_count).max(0);
+
+        let updated_avgdl = if updated_count > 0 {
+            updated_total as f32 / updated_count as f32
+        } else {
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
+        };
+
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+             WHERE repository_id = $4",
+        )
+        .bind(updated_avgdl)
+        .bind(updated_total)
+        .bind(updated_count)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to update BM25 statistics after deletion: {e}"
+            ))
+        })?;
+
+        Ok(updated_avgdl)
+    }
+
+    /// Get token counts for entities (needed before deletion/update)
+    pub async fn get_entity_token_counts(
+        &self,
+        entity_refs: &[(Uuid, String)],
+    ) -> Result<Vec<usize>> {
+        if entity_refs.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
+            "SELECT bm25_token_count FROM entity_metadata
+             WHERE deleted_at IS NULL AND (repository_id, entity_id) IN ",
+        );
+
+        query_builder.push_tuples(entity_refs, |mut b, (repo_id, entity_id)| {
+            b.push_bind(repo_id).push_bind(entity_id);
+        });
+
+        let rows = query_builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to get entity token counts: {e}")))?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                row.try_get::<Option<i32>, _>("bm25_token_count")
+                    .ok()
+                    .flatten()
+            })
+            .map(|count| count as usize)
             .collect())
     }
 
@@ -692,26 +1004,39 @@ impl PostgresClient {
         // Pre-validate and convert entities to avoid unwrap in closure
         let validated_entities: Result<Vec<_>> = entities
             .iter()
-            .map(|(entity, embedding, op, point_id, target, git_commit)| {
-                let entity_json = serde_json::to_value(entity)
-                    .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
-
-                let file_path_str = entity
-                    .file_path
-                    .to_str()
-                    .ok_or_else(|| Error::storage("Invalid file path"))?;
-
-                Ok((
+            .map(
+                |(
                     entity,
                     embedding,
                     op,
                     point_id,
                     target,
                     git_commit,
-                    entity_json,
-                    file_path_str,
-                ))
-            })
+                    token_count,
+                    sparse_embedding,
+                )| {
+                    let entity_json = serde_json::to_value(entity)
+                        .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
+
+                    let file_path_str = entity
+                        .file_path
+                        .to_str()
+                        .ok_or_else(|| Error::storage("Invalid file path"))?;
+
+                    Ok((
+                        entity,
+                        embedding,
+                        op,
+                        point_id,
+                        target,
+                        git_commit,
+                        token_count,
+                        sparse_embedding,
+                        entity_json,
+                        file_path_str,
+                    ))
+                },
+            )
             .collect();
 
         let validated_entities = validated_entities?;
@@ -721,7 +1046,7 @@ impl PostgresClient {
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
                 entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id, embedding_id
+                entity_data, git_commit_hash, qdrant_point_id, embedding_id, bm25_token_count
             ) ",
         );
 
@@ -735,6 +1060,8 @@ impl PostgresClient {
                 point_id,
                 _target,
                 git_commit,
+                token_count,
+                _sparse_embedding,
                 entity_json,
                 file_path_str,
             )| {
@@ -750,7 +1077,8 @@ impl PostgresClient {
                     .push_bind(entity_json)
                     .push_bind(git_commit)
                     .push_bind(point_id)
-                    .push_bind(embedding_id);
+                    .push_bind(embedding_id)
+                    .push_bind(**token_count as i32);
             },
         );
 
@@ -768,35 +1096,17 @@ impl PostgresClient {
                 git_commit_hash = EXCLUDED.git_commit_hash,
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
                 embedding_id = EXCLUDED.embedding_id,
+                bm25_token_count = EXCLUDED.bm25_token_count,
                 updated_at = NOW(),
                 deleted_at = NULL",
         );
 
-        entity_query
-            .build()
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                // Extract entity IDs for debugging duplicate key errors
-                let entity_ids: Vec<String> = validated_entities
-                    .iter()
-                    .map(|(entity, _, _, _, _, _, _, _)| entity.entity_id.clone())
-                    .collect();
-                let unique_ids: std::collections::HashSet<_> = entity_ids.iter().collect();
-
-                if entity_ids.len() != unique_ids.len() {
-                    Error::storage(format!(
-                        "Failed to bulk insert entity metadata (detected {} duplicate entity_ids in batch of {}): {e}",
-                        entity_ids.len() - unique_ids.len(),
-                        entity_ids.len()
-                    ))
-                } else {
-                    Error::storage(format!(
-                        "Failed to bulk insert entity metadata (batch size {}): {e}",
-                        entity_ids.len()
-                    ))
-                }
-            })?;
+        entity_query.build().execute(&mut *tx).await.map_err(|e| {
+            Error::storage(format!(
+                "Failed to bulk insert entity metadata (batch size {}): {e}",
+                validated_entities.len()
+            ))
+        })?;
 
         // Build bulk insert for entity_outbox
         let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
@@ -815,12 +1125,15 @@ impl PostgresClient {
                 point_id,
                 target,
                 _git_commit,
+                _token_count,
+                sparse_embedding,
                 entity_json,
                 _file_path_str,
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
-                    "qdrant_point_id": point_id.to_string()
+                    "qdrant_point_id": point_id.to_string(),
+                    "sparse_embedding": sparse_embedding
                 });
 
                 b.push_bind(repository_id)
@@ -1331,6 +1644,57 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
         self.list_all_repositories().await
+    }
+
+    async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
+        self.get_bm25_statistics(repository_id).await
+    }
+
+    async fn get_bm25_statistics_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+    ) -> Result<super::BM25Statistics> {
+        self.get_bm25_statistics_in_tx(tx, repository_id).await
+    }
+
+    async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, super::BM25Statistics>> {
+        self.get_bm25_statistics_batch(repository_ids).await
+    }
+
+    async fn update_bm25_statistics_incremental_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        self.update_bm25_statistics_incremental_in_tx(tx, repository_id, new_token_counts)
+            .await
+    }
+
+    async fn update_bm25_statistics_incremental(
+        &self,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32> {
+        self.update_bm25_statistics_incremental(repository_id, new_token_counts)
+            .await
+    }
+
+    async fn update_bm25_statistics_after_deletion(
+        &self,
+        repository_id: Uuid,
+        deleted_token_counts: &[usize],
+    ) -> Result<f32> {
+        self.update_bm25_statistics_after_deletion(repository_id, deleted_token_counts)
+            .await
+    }
+
+    async fn get_entity_token_counts(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<usize>> {
+        self.get_entity_token_counts(entity_refs).await
     }
 
     async fn get_entities_metadata_batch(

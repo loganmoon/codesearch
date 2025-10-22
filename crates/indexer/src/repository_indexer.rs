@@ -38,9 +38,12 @@ struct EntityBatch {
     failed_files: usize,
 }
 
+/// Triple of (entity, embedding_id, sparse_embedding) for entities that have been embedded
+type EntityEmbeddingTriple = (CodeEntity, i64, Vec<(u32, f32)>);
+
 struct EmbeddedBatch {
-    // Entities paired with embedding IDs (skipped entities filtered out)
-    entity_embedding_id_pairs: Vec<(CodeEntity, i64)>,
+    // Entities paired with embedding IDs and sparse embeddings (skipped entities filtered out)
+    entity_embedding_id_sparse_triples: Vec<EntityEmbeddingTriple>,
     file_indices: Vec<(PathBuf, Vec<usize>)>,
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
@@ -576,29 +579,50 @@ async fn stage_generate_embeddings(
             texts.len() - successful_embeddings
         );
 
-        // Pair entities with embedding IDs, tracking which indices survived
-        let mut pairs = Vec::new();
+        // Generate sparse embeddings for BM25
+        info!("Stage 3: Generating {} sparse embeddings", texts.len());
+
+        // Get current avgdl for sparse embedding generation
+        let bm25_stats = postgres_client
+            .get_bm25_statistics(batch.repo_id)
+            .await
+            .storage_err("Failed to get BM25 statistics")?;
+
+        // Create sparse embedding manager with current avgdl
+        let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
+            .storage_err("Failed to create sparse embedding manager")?;
+
+        let sparse_embeddings = sparse_manager
+            .embed_sparse(texts.iter().map(|s| s.as_str()).collect())
+            .await
+            .storage_err("Failed to generate sparse embeddings")?;
+
+        // Create triples of (entity, embedding_id, sparse_embedding), tracking which indices survived
+        let mut triples = Vec::new();
         let mut old_to_new_idx: HashMap<usize, usize> = HashMap::new();
 
-        for (old_idx, (entity, (emb_opt, id_opt))) in batch
+        for (old_idx, (entity, ((emb_opt, id_opt), sparse_emb_opt))) in batch
             .entities
             .into_iter()
             .zip(
                 all_embeddings
                     .into_iter()
-                    .zip(all_embedding_ids.into_iter()),
+                    .zip(all_embedding_ids.into_iter())
+                    .zip(sparse_embeddings.into_iter()),
             )
             .enumerate()
         {
-            if let (Some(_embedding), Some(embedding_id)) = (emb_opt, id_opt) {
-                let new_idx = pairs.len();
+            if let (Some(_embedding), Some(embedding_id), Some(sparse_emb)) =
+                (emb_opt, id_opt, sparse_emb_opt)
+            {
+                let new_idx = triples.len();
                 old_to_new_idx.insert(old_idx, new_idx);
-                pairs.push((entity, embedding_id));
+                triples.push((entity, embedding_id, sparse_emb));
             }
         }
 
-        let skipped = texts.len() - pairs.len();
-        total_embedded += pairs.len();
+        let skipped = texts.len() - triples.len();
+        total_embedded += triples.len();
         total_skipped += skipped;
 
         // Update file_indices to use new indices (after filtering)
@@ -618,7 +642,7 @@ async fn stage_generate_embeddings(
 
         embedded_tx
             .send(EmbeddedBatch {
-                entity_embedding_id_pairs: pairs,
+                entity_embedding_id_sparse_triples: triples,
                 file_indices: updated_file_indices,
                 repo_id: batch.repo_id,
                 git_commit: batch.git_commit,
@@ -645,8 +669,8 @@ async fn stage_store_entities(
 
     while let Some(batch) = embedded_rx.recv().await {
         info!(
-            "Stage 4: Received {} entity-embedding_id pairs from {} files",
-            batch.entity_embedding_id_pairs.len(),
+            "Stage 4: Received {} entity-embedding_id-sparse triples from {} files",
+            batch.entity_embedding_id_sparse_triples.len(),
             batch.file_indices.len()
         );
 
@@ -654,18 +678,27 @@ async fn stage_store_entities(
         let collection_name = &batch.collection_name;
 
         // Process in chunks to respect max_entity_batch_size
-        for chunk_start in (0..batch.entity_embedding_id_pairs.len()).step_by(max_batch_size) {
+        for chunk_start in
+            (0..batch.entity_embedding_id_sparse_triples.len()).step_by(max_batch_size)
+        {
             let chunk_end =
-                (chunk_start + max_batch_size).min(batch.entity_embedding_id_pairs.len());
-            let chunk = &batch.entity_embedding_id_pairs[chunk_start..chunk_end];
+                (chunk_start + max_batch_size).min(batch.entity_embedding_id_sparse_triples.len());
+            let chunk = &batch.entity_embedding_id_sparse_triples[chunk_start..chunk_end];
 
             // Batch fetch existing metadata for this chunk
-            let entity_ids: Vec<String> = chunk.iter().map(|(e, _)| e.entity_id.clone()).collect();
+            let entity_ids: Vec<String> =
+                chunk.iter().map(|(e, _, _)| e.entity_id.clone()).collect();
 
             let metadata_map = postgres_client
                 .get_entities_metadata_batch(batch.repo_id, &entity_ids)
                 .await
                 .storage_err("Failed to fetch metadata")?;
+
+            // Calculate token counts for this chunk
+            let entities_vec: Vec<&CodeEntity> = chunk.iter().map(|(e, _, _)| e).collect();
+            let entities_owned: Vec<CodeEntity> = entities_vec.iter().map(|&e| e.clone()).collect();
+            let token_counts = crate::entity_processor::calculate_token_counts(&entities_owned)
+                .storage_err("Failed to calculate token counts")?;
 
             // Prepare batch refs (no cloning - use references)
             let mut batch_refs = Vec::with_capacity(chunk.len());
@@ -673,7 +706,7 @@ async fn stage_store_entities(
             // Clone git_commit once for the chunk instead of per entity
             let git_commit = batch.git_commit.clone();
 
-            for (entity, embedding_id) in chunk {
+            for (idx, (entity, embedding_id, sparse_embedding)) in chunk.iter().enumerate() {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
                     metadata_map.get(&entity.entity_id)
                 {
@@ -693,6 +726,8 @@ async fn stage_store_entities(
                     point_id,
                     TargetStore::Qdrant,
                     git_commit.clone(),
+                    token_counts[idx],
+                    sparse_embedding.clone(),
                 ));
             }
 
@@ -702,18 +737,20 @@ async fn stage_store_entities(
                 .await
                 .storage_err("Failed to store entities")?;
 
+            // Note: BM25 statistics are updated by the outbox processor within its transaction
+
             total_stored += batch_refs.len();
             info!(
                 "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
                 batch_refs.len(),
                 chunk_end,
-                batch.entity_embedding_id_pairs.len()
+                batch.entity_embedding_id_sparse_triples.len()
             );
         }
 
         info!(
             "Stage 4: Completed storing {} entities from this batch",
-            batch.entity_embedding_id_pairs.len()
+            batch.entity_embedding_id_sparse_triples.len()
         );
 
         // Build file→entity_id map for snapshots
@@ -723,13 +760,18 @@ async fn stage_store_entities(
             let entity_ids: Vec<String> = entity_indices
                 .iter()
                 .filter_map(|&idx| {
-                    if idx < batch.entity_embedding_id_pairs.len() {
-                        Some(batch.entity_embedding_id_pairs[idx].0.entity_id.clone())
+                    if idx < batch.entity_embedding_id_sparse_triples.len() {
+                        Some(
+                            batch.entity_embedding_id_sparse_triples[idx]
+                                .0
+                                .entity_id
+                                .clone(),
+                        )
                     } else {
                         error!(
                             "Stage 4: Index {} out of bounds (len: {})",
                             idx,
-                            batch.entity_embedding_id_pairs.len()
+                            batch.entity_embedding_id_sparse_triples.len()
                         );
                         None
                     }

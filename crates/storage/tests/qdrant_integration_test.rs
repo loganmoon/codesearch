@@ -480,3 +480,296 @@ async fn test_concurrent_bulk_loads() -> Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn test_hybrid_search_basic() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        let entities: Vec<_> = (0..10)
+            .map(|i| {
+                create_embedded_entity(
+                    create_test_entity(&format!("func{i}"), EntityType::Function, &repository_id),
+                    1536,
+                )
+            })
+            .collect();
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+        let limit = 5;
+        let prefetch_multiplier = 3;
+
+        let results = client
+            .search_similar_hybrid(dense_query, sparse_query, limit, None, prefetch_multiplier)
+            .await?;
+
+        assert!(
+            results.len() <= limit,
+            "Should return at most {limit} results"
+        );
+        assert!(!results.is_empty(), "Should return some results");
+
+        for (entity_id, repo_id, score) in &results {
+            assert!(!entity_id.is_empty(), "Entity ID should not be empty");
+            assert_eq!(repo_id, &repository_id, "Repository ID should match");
+            assert!(*score >= 0.0, "Score should be non-negative");
+        }
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_respects_limit() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        let entities: Vec<_> = (0..20)
+            .map(|i| {
+                create_embedded_entity(
+                    create_test_entity(&format!("func{i}"), EntityType::Function, &repository_id),
+                    1536,
+                )
+            })
+            .collect();
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+
+        // Test different limits
+        for limit in [1, 3, 5, 10] {
+            let results = client
+                .search_similar_hybrid(dense_query.clone(), sparse_query.clone(), limit, None, 3)
+                .await?;
+
+            assert!(
+                results.len() <= limit,
+                "Results should not exceed limit of {limit}, got {}",
+                results.len()
+            );
+        }
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_with_filters() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        let entities = vec![
+            create_embedded_entity(
+                create_test_entity("func1", EntityType::Function, &repository_id),
+                1536,
+            ),
+            create_embedded_entity(
+                create_test_entity("Calculator", EntityType::Struct, &repository_id),
+                1536,
+            ),
+            create_embedded_entity(
+                create_test_entity("func2", EntityType::Function, &repository_id),
+                1536,
+            ),
+            create_embedded_entity(
+                create_test_entity("DataStore", EntityType::Struct, &repository_id),
+                1536,
+            ),
+        ];
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+        let filters = SearchFilters {
+            entity_type: Some(EntityType::Function),
+            ..Default::default()
+        };
+
+        let results = client
+            .search_similar_hybrid(dense_query, sparse_query, 10, Some(filters), 3)
+            .await?;
+
+        assert!(
+            results.len() >= 2,
+            "Should find at least 2 function entities"
+        );
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_empty_collection() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+
+        let results = client
+            .search_similar_hybrid(dense_query, sparse_query, 10, None, 3)
+            .await?;
+
+        assert_eq!(
+            results.len(),
+            0,
+            "Should return empty results for empty collection"
+        );
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_prefetch_multiplier() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        // Add many entities to see effect of prefetch multiplier
+        let entities: Vec<_> = (0..50)
+            .map(|i| {
+                create_embedded_entity(
+                    create_test_entity(&format!("func{i}"), EntityType::Function, &repository_id),
+                    1536,
+                )
+            })
+            .collect();
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+        let limit = 10;
+
+        // Test with different prefetch multipliers
+        // Higher multiplier should consider more candidates for fusion
+        for multiplier in [1, 2, 5] {
+            let results = client
+                .search_similar_hybrid(
+                    dense_query.clone(),
+                    sparse_query.clone(),
+                    limit,
+                    None,
+                    multiplier,
+                )
+                .await?;
+
+            assert!(
+                results.len() <= limit,
+                "Results should not exceed limit regardless of prefetch multiplier"
+            );
+        }
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_scores_ordered() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        let entities: Vec<_> = (0..10)
+            .map(|i| {
+                create_embedded_entity(
+                    create_test_entity(&format!("func{i}"), EntityType::Function, &repository_id),
+                    1536,
+                )
+            })
+            .collect();
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+
+        let results = client
+            .search_similar_hybrid(dense_query, sparse_query, 5, None, 3)
+            .await?;
+
+        // Verify scores are in descending order (RRF fusion should rank by relevance)
+        for i in 1..results.len() {
+            assert!(
+                results[i - 1].2 >= results[i].2,
+                "Scores should be in descending order: {} >= {}",
+                results[i - 1].2,
+                results[i].2
+            );
+        }
+
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_hybrid_search_with_file_path_filter() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (_qdrant, client, _collection) = setup_qdrant().await?;
+        let repository_id = Uuid::new_v4().to_string();
+
+        let entities = vec![
+            create_embedded_entity(
+                create_test_entity_with_file(
+                    "main_func1",
+                    EntityType::Function,
+                    &repository_id,
+                    "main.rs",
+                ),
+                1536,
+            ),
+            create_embedded_entity(
+                create_test_entity_with_file(
+                    "lib_func1",
+                    EntityType::Function,
+                    &repository_id,
+                    "lib.rs",
+                ),
+                1536,
+            ),
+            create_embedded_entity(
+                create_test_entity_with_file(
+                    "main_func2",
+                    EntityType::Function,
+                    &repository_id,
+                    "main.rs",
+                ),
+                1536,
+            ),
+        ];
+
+        client.bulk_load_entities(entities).await?;
+
+        let dense_query = mock_embedding(1536);
+        let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
+        let filters = SearchFilters {
+            file_path: Some(PathBuf::from("main.rs")),
+            ..Default::default()
+        };
+
+        let results = client
+            .search_similar_hybrid(dense_query, sparse_query, 10, Some(filters), 3)
+            .await?;
+
+        assert_eq!(results.len(), 2, "Should return 2 entities from main.rs");
+
+        Ok(())
+    })
+    .await
+}

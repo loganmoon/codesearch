@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 // Re-export only the trait
 pub use collection_manager::CollectionManager;
-pub use postgres::{OutboxOperation, PostgresClientTrait};
+pub use postgres::{BM25Statistics, OutboxOperation, PostgresClientTrait};
 
 // Re-export types needed by outbox-processor
 pub use postgres::{OutboxEntry, TargetStore};
@@ -83,11 +83,13 @@ pub struct SearchFilters {
     pub file_path: Option<PathBuf>,
 }
 
-/// Represents a code entity with its vector embedding
+/// Represents a code entity with its vector embeddings
 #[derive(Debug, Clone)]
 pub struct EmbeddedEntity {
     pub entity: CodeEntity,
-    pub embedding: Vec<f32>,
+    pub dense_embedding: Vec<f32>,
+    pub sparse_embedding: Vec<(u32, f32)>,
+    pub bm25_token_count: usize,
     pub qdrant_point_id: Uuid,
 }
 
@@ -108,6 +110,17 @@ pub trait StorageClient: Send + Sync {
         query_embedding: Vec<f32>,
         limit: usize,
         filters: Option<SearchFilters>,
+    ) -> Result<Vec<(String, String, f32)>>;
+
+    /// Hybrid search combining dense and sparse vectors with RRF fusion
+    /// Returns (entity_id, repository_id, score) tuples
+    async fn search_similar_hybrid(
+        &self,
+        dense_query_embedding: Vec<f32>,
+        sparse_query_embedding: Vec<(u32, f32)>,
+        limit: usize,
+        filters: Option<SearchFilters>,
+        prefetch_multiplier: usize,
     ) -> Result<Vec<(String, String, f32)>>;
 
     /// Get entity by ID
@@ -148,6 +161,18 @@ impl StorageClient for MockStorageClient {
         _query_embedding: Vec<f32>,
         _limit: usize,
         _filters: Option<SearchFilters>,
+    ) -> Result<Vec<(String, String, f32)>> {
+        // Mock implementation - return empty results
+        Ok(vec![])
+    }
+
+    async fn search_similar_hybrid(
+        &self,
+        _dense_query_embedding: Vec<f32>,
+        _sparse_query_embedding: Vec<(u32, f32)>,
+        _limit: usize,
+        _filters: Option<SearchFilters>,
+        _prefetch_multiplier: usize,
     ) -> Result<Vec<(String, String, f32)>> {
         // Mock implementation - return empty results
         Ok(vec![])

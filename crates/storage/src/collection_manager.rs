@@ -10,11 +10,8 @@ use codesearch_core::error::Result;
 #[async_trait]
 pub trait CollectionManager: Send + Sync {
     /// Create or verify collection with specified dimensions
-    async fn ensure_collection(
-        &self,
-        collection_name: &str,
-        vector_dimensions: usize,
-    ) -> Result<()>;
+    async fn ensure_collection(&self, collection_name: &str, dense_dimensions: usize)
+        -> Result<()>;
 
     /// Delete collection (for testing/reset)
     async fn delete_collection(&self, collection_name: &str) -> Result<()>;

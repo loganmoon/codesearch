@@ -132,8 +132,9 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            None, // git_commit
-            50,   // token_count
+            None,   // git_commit
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)
@@ -235,8 +236,9 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
             OutboxOperation::Insert,
             Uuid::new_v4(),
             TargetStore::Qdrant,
-            None, // git_commit
-            50,   // token_count
+            None,   // git_commit
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         postgres_client
             .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)

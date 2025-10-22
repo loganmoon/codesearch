@@ -116,12 +116,13 @@ pub struct OutboxEntry {
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    i64, // embedding_id instead of &[f32]
+    i64, // embedding_id (dense)
     OutboxOperation,
     Uuid, // qdrant_point_id
     TargetStore,
-    Option<String>, // git_commit_hash
-    usize,          // bm25_token_count
+    Option<String>,  // git_commit_hash
+    usize,           // bm25_token_count
+    Vec<(u32, f32)>, // sparse_embedding
 );
 
 pub struct PostgresClient {
@@ -1004,7 +1005,16 @@ impl PostgresClient {
         let validated_entities: Result<Vec<_>> = entities
             .iter()
             .map(
-                |(entity, embedding, op, point_id, target, git_commit, token_count)| {
+                |(
+                    entity,
+                    embedding,
+                    op,
+                    point_id,
+                    target,
+                    git_commit,
+                    token_count,
+                    sparse_embedding,
+                )| {
                     let entity_json = serde_json::to_value(entity)
                         .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
@@ -1021,6 +1031,7 @@ impl PostgresClient {
                         target,
                         git_commit,
                         token_count,
+                        sparse_embedding,
                         entity_json,
                         file_path_str,
                     ))
@@ -1050,6 +1061,7 @@ impl PostgresClient {
                 _target,
                 git_commit,
                 token_count,
+                _sparse_embedding,
                 entity_json,
                 file_path_str,
             )| {
@@ -1114,12 +1126,14 @@ impl PostgresClient {
                 target,
                 _git_commit,
                 _token_count,
+                sparse_embedding,
                 entity_json,
                 _file_path_str,
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
-                    "qdrant_point_id": point_id.to_string()
+                    "qdrant_point_id": point_id.to_string(),
+                    "sparse_embedding": sparse_embedding
                 });
 
                 b.push_bind(repository_id)

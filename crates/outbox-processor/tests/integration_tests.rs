@@ -136,7 +136,8 @@ async fn test_outbox_entries_can_be_created_and_queried() {
         point_id,
         TargetStore::Qdrant,
         None,
-        50, // token_count
+        50,     // token_count
+        vec![], // sparse_embedding
     )];
 
     postgres_client

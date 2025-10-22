@@ -1,5 +1,4 @@
 use codesearch_core::error::{Error, Result};
-use codesearch_indexer::extract_embedding_content;
 use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
@@ -396,27 +395,15 @@ impl OutboxProcessor {
             ))
         })?;
 
-        // Get current avgdl for the repository
-        let stats = self
-            .postgres_client
-            .get_bm25_statistics(entry.repository_id)
-            .await?;
-
-        // Generate sparse embedding using BM25 provider
-        let sparse_manager = codesearch_embeddings::create_sparse_manager(stats.avgdl)
-            .map_err(|e| Error::storage(format!("Failed to create sparse manager: {e}")))?;
-
-        let content = extract_embedding_content(&entity);
-        let sparse_embeddings = sparse_manager
-            .embed_sparse(vec![content.as_str()])
-            .await
-            .map_err(|e| Error::storage(format!("Failed to generate sparse embedding: {e}")))?;
-
-        let sparse_embedding = sparse_embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::storage("No sparse embedding returned"))?
-            .ok_or_else(|| Error::storage("Sparse embedding is None"))?;
+        // Read precomputed sparse embedding from payload
+        let sparse_embedding: Vec<(u32, f32)> = serde_json::from_value(
+            entry
+                .payload
+                .get("sparse_embedding")
+                .ok_or_else(|| Error::storage("Missing sparse_embedding in payload"))?
+                .clone(),
+        )
+        .map_err(|e| Error::storage(format!("Failed to deserialize sparse_embedding: {e}")))?;
 
         Ok(EmbeddedEntity {
             entity,

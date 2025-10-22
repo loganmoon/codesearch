@@ -540,6 +540,7 @@ impl PostgresClientTrait for MockPostgresClient {
             target_store,
             git_commit_hash,
             _token_count,
+            sparse_embedding,
         ) in entities
         {
             // Store entity metadata
@@ -557,7 +558,8 @@ impl PostgresClientTrait for MockPostgresClient {
             let outbox_id = Uuid::new_v4();
             let payload = serde_json::json!({
                 "entity": entity,
-                "qdrant_point_id": point_id.to_string()
+                "qdrant_point_id": point_id.to_string(),
+                "sparse_embedding": sparse_embedding
             });
 
             data.outbox.push(MockOutboxEntry {

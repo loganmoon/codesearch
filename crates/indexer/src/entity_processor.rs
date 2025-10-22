@@ -442,7 +442,7 @@ async fn process_entity_chunk(
     // Prepare batch data directly as references (no intermediate cloning)
     let mut batch_refs = Vec::with_capacity(entity_embedding_id_pairs.len());
 
-    for (idx, (entity, embedding_id, _sparse_embedding)) in
+    for (idx, (entity, embedding_id, sparse_embedding)) in
         entity_embedding_id_pairs.iter().enumerate()
     {
         let existing_metadata = metadata_map.get(&entity.entity_id);
@@ -476,6 +476,7 @@ async fn process_entity_chunk(
             TargetStore::Qdrant,
             git_commit.clone(),
             token_counts[idx],
+            sparse_embedding.clone(),
         ));
     }
 

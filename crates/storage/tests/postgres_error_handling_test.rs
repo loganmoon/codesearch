@@ -79,7 +79,8 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
                     point_id,
                     TargetStore::Qdrant,
                     None,
-                    50, // token_count
+                    50,     // token_count
+                    vec![], // sparse_embedding
                 )];
                 client_clone
                     .store_entities_with_outbox_batch(repo_id, &collection_name_clone, &batch)
@@ -166,7 +167,8 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
                 point_id,
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             )];
             client1
                 .store_entities_with_outbox_batch(repository_id, &collection_name1, &batch)
@@ -190,7 +192,8 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
                 point_id,
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             )];
             client2
                 .store_entities_with_outbox_batch(repository_id, &collection_name2, &batch)
@@ -341,7 +344,8 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
                 point_id,
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -409,7 +413,8 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
                     Uuid::new_v4(),
                     TargetStore::Qdrant,
                     None,
-                    50, // token_count
+                    50,     // token_count
+                    vec![], // sparse_embedding
                 )];
 
                 client_clone
@@ -470,7 +475,8 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
 
         let outbox_ids = client

@@ -121,7 +121,8 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -177,7 +178,8 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -198,7 +200,8 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("def456".to_string()),
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -276,7 +279,8 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
             (
                 &entity2,
@@ -285,7 +289,8 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
             (
                 &entity3,
@@ -294,7 +299,8 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
         ];
 
@@ -482,7 +488,8 @@ async fn test_mark_entities_deleted() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -598,7 +605,8 @@ async fn test_get_entities_by_ids() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -695,7 +703,8 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
             (
                 &entity2,
@@ -704,7 +713,8 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
             (
                 &entity3,
@@ -713,7 +723,8 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50, // token_count
+                50,     // token_count
+                vec![], // sparse_embedding
             ),
         ];
 
@@ -770,7 +781,8 @@ async fn test_outbox_mark_processed() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
 
         let outbox_ids = client
@@ -824,7 +836,8 @@ async fn test_outbox_record_failure() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
 
         let outbox_ids = client
@@ -907,7 +920,8 @@ async fn test_transaction_rollback() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50, // token_count
+            50,     // token_count
+            vec![], // sparse_embedding
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -1083,16 +1097,16 @@ async fn test_bm25_statistics_delete_all_entities() -> Result<()> {
             .update_bm25_statistics_after_deletion(repository_id, &token_counts)
             .await?;
 
-        // Should fall back to default avgdl=50.0 when no entities remain
+        // Should preserve last known avgdl (60/3 = 20.0) when all entities deleted
         assert_eq!(
-            avgdl_after_delete_all, 50.0,
-            "avgdl should be 50.0 when all entities deleted"
+            avgdl_after_delete_all, 20.0,
+            "avgdl should preserve last known value when all entities deleted"
         );
 
         let stats = client.get_bm25_statistics(repository_id).await?;
         assert_eq!(stats.total_tokens, 0, "Total tokens should be 0");
         assert_eq!(stats.entity_count, 0, "Entity count should be 0");
-        assert_eq!(stats.avgdl, 50.0, "avgdl should be default 50.0");
+        assert_eq!(stats.avgdl, 20.0, "avgdl should preserve last known value");
 
         drop_test_database(&postgres, &db_name).await?;
         Ok(())
@@ -1192,8 +1206,8 @@ async fn test_bm25_statistics_over_deletion() -> Result<()> {
             .update_bm25_statistics_after_deletion(repository_id, &over_deletion)
             .await?;
 
-        // Should clamp to 0 and return default avgdl
-        assert_eq!(avgdl, 50.0, "Should fall back to default avgdl");
+        // Should clamp to 0 and preserve last known avgdl (50/2 = 25.0)
+        assert_eq!(avgdl, 25.0, "Should preserve last known avgdl");
 
         let stats = client.get_bm25_statistics(repository_id).await?;
         assert_eq!(stats.total_tokens, 0, "Should clamp to 0");

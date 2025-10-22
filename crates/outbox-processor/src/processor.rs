@@ -300,21 +300,37 @@ impl OutboxProcessor {
 
             // Process INSERT/UPDATE operations
             if !insert_update_entries.is_empty() {
-                if let Err(e) = self
+                let repo_token_counts = match self
                     .write_to_qdrant_insert_update(&storage_client, &insert_update_entries)
                     .await
                 {
-                    let ids: Vec<Uuid> =
-                        insert_update_entries.iter().map(|e| e.outbox_id).collect();
-                    let context = FailureContext {
-                        operation_type: "INSERT/UPDATE",
-                        collection_name,
-                        entry_count: insert_update_entries.len(),
-                        first_entity_id: insert_update_entries
-                            .first()
-                            .map(|e| e.entity_id.as_str()),
-                    };
-                    return self.handle_qdrant_write_failure(tx, ids, e, context).await;
+                    Ok(counts) => counts,
+                    Err(e) => {
+                        let ids: Vec<Uuid> =
+                            insert_update_entries.iter().map(|e| e.outbox_id).collect();
+                        let context = FailureContext {
+                            operation_type: "INSERT/UPDATE",
+                            collection_name,
+                            entry_count: insert_update_entries.len(),
+                            first_entity_id: insert_update_entries
+                                .first()
+                                .map(|e| e.entity_id.as_str()),
+                        };
+                        return self.handle_qdrant_write_failure(tx, ids, e, context).await;
+                    }
+                };
+
+                // Update BM25 statistics within transaction
+                use std::collections::HashMap;
+                let mut repo_counts: HashMap<Uuid, Vec<usize>> = HashMap::new();
+                for (repo_id, token_count) in repo_token_counts {
+                    repo_counts.entry(repo_id).or_default().push(token_count);
+                }
+
+                for (repo_id, token_counts) in repo_counts {
+                    self.postgres_client
+                        .update_bm25_statistics_incremental_in_tx(&mut tx, repo_id, &token_counts)
+                        .await?;
                 }
 
                 // Mark as processed
@@ -424,7 +440,12 @@ impl OutboxProcessor {
             .get_entity_token_counts(&[(entry.repository_id, entity.entity_id.clone())])
             .await?;
 
-        let bm25_token_count = token_counts.first().copied().unwrap_or(50); // Default fallback if not found
+        let bm25_token_count = token_counts.first().copied().ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 token count not found for entity {} in repository {}",
+                entity.entity_id, entry.repository_id
+            ))
+        })?;
 
         // Get current avgdl for the repository
         let stats = self
@@ -545,19 +566,23 @@ impl OutboxProcessor {
     /// CRITICAL: This ONLY writes to Qdrant. The caller is responsible for
     /// marking entries as processed in the transaction AFTER this succeeds.
     ///
+    /// Returns the embedded entities with their repository IDs and token counts for BM25 stats update.
+    ///
     /// Note: Qdrant writes are idempotent (same point ID = same data), making
     /// retries safe if the DB commit fails after a successful Qdrant write.
     async fn write_to_qdrant_insert_update(
         &self,
         storage_client: &Arc<dyn StorageClient>,
         entries: &[&OutboxEntry],
-    ) -> Result<()> {
+    ) -> Result<Vec<(Uuid, usize)>> {
         let mut embedded_entities = Vec::with_capacity(entries.len());
+        let mut repo_token_counts = Vec::with_capacity(entries.len());
 
         // Prepare entities (fetches embeddings from database)
         for entry in entries {
             match self.prepare_embedded_entity(entry).await {
                 Ok(embedded) => {
+                    repo_token_counts.push((entry.repository_id, embedded.bm25_token_count));
                     embedded_entities.push(embedded);
                 }
                 Err(e) => {
@@ -582,7 +607,7 @@ impl OutboxProcessor {
             debug!("Successfully wrote {} entities to Qdrant", entries.len());
         }
 
-        Ok(())
+        Ok(repo_token_counts)
     }
 
     /// Delete entries from Qdrant (without DB marking)

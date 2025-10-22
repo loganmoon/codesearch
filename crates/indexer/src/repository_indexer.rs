@@ -709,19 +709,14 @@ async fn stage_store_entities(
                 .await
                 .storage_err("Failed to store entities")?;
 
-            // Update avgdl statistics incrementally
-            let avgdl = postgres_client
-                .update_bm25_statistics_incremental(batch.repo_id, &token_counts)
-                .await
-                .storage_err("Failed to update BM25 statistics")?;
+            // Note: BM25 statistics are updated by the outbox processor within its transaction
 
             total_stored += batch_refs.len();
             info!(
-                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch), avgdl={:.2}",
+                "Stage 4: Successfully stored chunk of {} entities ({}/{} total in this batch)",
                 batch_refs.len(),
                 chunk_end,
-                batch.entity_embedding_id_pairs.len(),
-                avgdl
+                batch.entity_embedding_id_pairs.len()
             );
         }
 

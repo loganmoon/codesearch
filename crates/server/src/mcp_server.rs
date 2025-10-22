@@ -186,13 +186,23 @@ impl CodeSearchMcpServer {
                 )
             })?;
 
-        let dense_query_embedding = embeddings.into_iter().next().flatten().ok_or_else(|| {
-            McpError::new(
-                ErrorCode::INTERNAL_ERROR,
-                "Failed to generate embedding".to_string(),
-                None,
-            )
-        })?;
+        let dense_query_embedding = embeddings
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "No embedding returned from provider".to_string(),
+                    None,
+                )
+            })?
+            .ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    "Embedding provider returned None".to_string(),
+                    None,
+                )
+            })?;
 
         // Generate sparse embeddings grouped by repository avgdl
         // This batches repositories with the same avgdl to minimize sparse embedding calls

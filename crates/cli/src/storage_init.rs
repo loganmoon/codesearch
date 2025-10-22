@@ -53,7 +53,6 @@ pub async fn initialize_collection(
     manager: &dyn CollectionManager,
     collection_name: &str,
     dense_dimensions: usize,
-    sparse_vocab_size: u32,
 ) -> Result<()> {
     // Check if collection already exists
     let exists = manager
@@ -68,14 +67,14 @@ pub async fn initialize_collection(
         );
     } else {
         info!(
-            "Creating new collection '{}' with {} dense dimensions and {} sparse vocab size...",
-            collection_name, dense_dimensions, sparse_vocab_size
+            "Creating new collection '{}' with {} dense dimensions...",
+            collection_name, dense_dimensions
         );
     }
 
     // Ensure collection with proper dimensions
     manager
-        .ensure_collection(collection_name, dense_dimensions, sparse_vocab_size)
+        .ensure_collection(collection_name, dense_dimensions)
         .await
         .context("Failed to ensure collection")?;
 

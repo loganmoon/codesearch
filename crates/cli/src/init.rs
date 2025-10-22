@@ -155,23 +155,9 @@ pub async fn ensure_storage_initialized(
         .await
         .context("Failed to create collection manager")?;
 
-    // Default sparse vocab size for BM25
-    //
-    // NOTE: The BM25 tokenizer generates unbounded vocabulary (any token can appear),
-    // but Qdrant sparse vectors are configured with a fixed vocab size limit.
-    // Token indices exceeding this limit may cause indexing failures.
-    // The current implementation uses a hash-based approach in the `bm25` crate
-    // to constrain indices to fit within the vocab size.
-    const SPARSE_VOCAB_SIZE: u32 = 100_000;
-
-    storage_init::initialize_collection(
-        collection_manager.as_ref(),
-        &collection_name,
-        dimensions,
-        SPARSE_VOCAB_SIZE,
-    )
-    .await
-    .context("Failed to initialize collection")?;
+    storage_init::initialize_collection(collection_manager.as_ref(), &collection_name, dimensions)
+        .await
+        .context("Failed to initialize collection")?;
 
     // Perform health check
     storage_init::verify_storage_health(collection_manager.as_ref())

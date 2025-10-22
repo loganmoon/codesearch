@@ -28,9 +28,7 @@ async fn setup_qdrant() -> Result<(TestQdrant, Arc<dyn StorageClient>, String)> 
 
     // Create collection
     let manager = create_collection_manager(&config).await?;
-    manager
-        .ensure_collection(&collection_name, 1536, 100_000)
-        .await?;
+    manager.ensure_collection(&collection_name, 1536).await?;
 
     // Create storage client
     let client = create_storage_client(&config, &collection_name).await?;

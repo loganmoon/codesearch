@@ -240,19 +240,18 @@ async fn process_entity_chunk(
 
     info!("Generating embeddings for {} entities", entities.len());
 
-    // Calculate token counts for all entities (will be used for avgdl and storage)
+    // Calculate token counts for all entities (will be used for storage)
+    // Note: BM25 statistics are updated by the outbox processor within its transaction
     let token_counts = calculate_token_counts(&entities)?;
 
-    // Update avgdl statistics incrementally with new token counts
-    let avgdl = postgres_client
-        .update_bm25_statistics_incremental(repo_id, &token_counts)
+    // Get current avgdl for sparse embedding generation
+    let bm25_stats = postgres_client
+        .get_bm25_statistics(repo_id)
         .await
-        .storage_err("Failed to update BM25 statistics")?;
+        .storage_err("Failed to get BM25 statistics")?;
 
-    info!("Updated avgdl to {:.2} for repository {}", avgdl, repo_id);
-
-    // Create sparse embedding manager with updated avgdl
-    let sparse_manager = codesearch_embeddings::create_sparse_manager(avgdl)
+    // Create sparse embedding manager with current avgdl
+    let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
         .storage_err("Failed to create sparse embedding manager")?;
 
     // Phase 1: Compute content hashes for all entities

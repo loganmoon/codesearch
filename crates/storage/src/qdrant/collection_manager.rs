@@ -32,7 +32,6 @@ impl CollectionManager for QdrantCollectionManager {
         &self,
         collection_name: &str,
         dense_dimensions: usize,
-        _sparse_vocab_size: u32,
     ) -> Result<()> {
         // Check if collection exists
         let exists = self.collection_exists(collection_name).await?;
@@ -97,6 +96,7 @@ impl CollectionManager for QdrantCollectionManager {
                 "dense".to_string(),
                 VectorParams {
                     size: dense_dimensions as u64,
+                    // Note: distance field is i32 per qdrant-client API (enum discriminant)
                     distance: Distance::Cosine as i32,
                     ..Default::default()
                 },

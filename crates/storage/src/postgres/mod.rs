@@ -121,6 +121,28 @@ pub trait PostgresClientTrait: Send + Sync {
     /// If statistics are not yet calculated, returns default values (avgdl=50.0).
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
 
+    /// Update BM25 statistics incrementally after adding new entities (within transaction)
+    ///
+    /// Updates the running average document length by incorporating token counts
+    /// from newly added entities within an existing transaction. This is used by
+    /// the outbox processor to maintain atomicity.
+    ///
+    /// # Parameters
+    ///
+    /// * `tx` - The active transaction
+    /// * `repository_id` - The repository UUID
+    /// * `new_token_counts` - Token counts for newly added entities
+    ///
+    /// # Returns
+    ///
+    /// The updated average document length (avgdl)
+    async fn update_bm25_statistics_incremental_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+        new_token_counts: &[usize],
+    ) -> Result<f32>;
+
     /// Update BM25 statistics incrementally after adding new entities
     ///
     /// Updates the running average document length by incorporating token counts

@@ -296,6 +296,15 @@ impl PostgresClientTrait for MockPostgresClient {
         })
     }
 
+    async fn update_bm25_statistics_incremental_in_tx(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _repository_id: Uuid,
+        _new_token_counts: &[usize],
+    ) -> Result<f32> {
+        Ok(50.0)
+    }
+
     async fn update_bm25_statistics_incremental(
         &self,
         _repository_id: Uuid,

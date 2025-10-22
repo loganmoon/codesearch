@@ -38,6 +38,8 @@ impl Bm25SparseProvider {
 #[async_trait]
 impl SparseEmbeddingProvider for Bm25SparseProvider {
     async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
+        use std::collections::HashSet;
+
         let mut results = Vec::with_capacity(texts.len());
 
         for text in texts {
@@ -49,11 +51,17 @@ impl SparseEmbeddingProvider for Bm25SparseProvider {
             // Generate BM25 embedding
             let embedding = self.embedder.embed(text);
 
-            // Convert bm25::Embedding to Vec<(u32, f32)>
-            let sparse_vec: Vec<(u32, f32)> = embedding
-                .iter()
-                .map(|token_embedding| (token_embedding.index, token_embedding.value))
-                .collect();
+            // Deduplicate indices - the bm25 crate emits one entry per token occurrence,
+            // but Qdrant requires unique indices in sparse vectors.
+            // Since duplicate indices have identical values, we keep only the first occurrence.
+            let mut seen_indices = HashSet::new();
+            let mut sparse_vec = Vec::new();
+
+            for token_embedding in embedding.iter() {
+                if seen_indices.insert(token_embedding.index) {
+                    sparse_vec.push((token_embedding.index, token_embedding.value));
+                }
+            }
 
             if sparse_vec.is_empty() {
                 results.push(None);
@@ -136,5 +144,35 @@ mod tests {
             let _: u32 = *index;
             let _: f32 = *value;
         }
+    }
+
+    #[tokio::test]
+    async fn test_bm25_unique_indices() {
+        use std::collections::HashSet;
+
+        let provider = Bm25SparseProvider::new(50.0);
+        let result = provider
+            .embed_sparse(vec!["fn calculate_sum(a: i32, b: i32) -> i32"])
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_some());
+
+        let sparse_vec = result[0].as_ref().unwrap();
+
+        // Verify all indices are unique
+        let indices: Vec<u32> = sparse_vec.iter().map(|(idx, _)| *idx).collect();
+        let unique_indices: HashSet<u32> = indices.iter().copied().collect();
+
+        assert_eq!(
+            indices.len(),
+            unique_indices.len(),
+            "All indices should be unique after deduplication"
+        );
+
+        // Verify we have 6 unique tokens (fn, calculate, sum, a, i32, b)
+        // Note: "i32" appears 3 times in input but should only appear once in output
+        assert_eq!(sparse_vec.len(), 6, "Should have 6 unique indices");
     }
 }

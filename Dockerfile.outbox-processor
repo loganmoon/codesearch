@@ -26,8 +26,12 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the binary from builder
+# Copy the binary and migrations from builder
 COPY --from=builder /app/target/release/outbox-processor /usr/local/bin/outbox-processor
+COPY --from=builder /app/migrations /migrations
+
+# Set the working directory so migrations can be found
+WORKDIR /
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/outbox-processor"]

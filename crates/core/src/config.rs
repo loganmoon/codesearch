@@ -270,10 +270,6 @@ pub struct RerankingConfig {
 /// Hybrid search configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HybridSearchConfig {
-    /// Whether hybrid search is enabled (default: true)
-    #[serde(default = "default_enable_hybrid_search")]
-    pub enabled: bool,
-
     /// Prefetch multiplier: retrieve N * limit candidates per method (default: 5)
     #[serde(default = "default_prefetch_multiplier")]
     pub prefetch_multiplier: usize,
@@ -432,10 +428,6 @@ fn default_reranking_timeout_secs() -> u64 {
     5
 }
 
-fn default_enable_hybrid_search() -> bool {
-    true
-}
-
 fn default_prefetch_multiplier() -> usize {
     5
 }
@@ -498,7 +490,6 @@ impl Default for RerankingConfig {
 impl Default for HybridSearchConfig {
     fn default() -> Self {
         Self {
-            enabled: default_enable_hybrid_search(),
             prefetch_multiplier: default_prefetch_multiplier(),
         }
     }
@@ -970,6 +961,19 @@ impl Config {
                     self.reranking.top_k, self.reranking.candidates
                 )));
             }
+        }
+
+        // Validate hybrid search configuration
+        if self.hybrid_search.prefetch_multiplier == 0 {
+            return Err(Error::config(
+                "hybrid_search.prefetch_multiplier must be greater than 0".to_string(),
+            ));
+        }
+        if self.hybrid_search.prefetch_multiplier > 100 {
+            return Err(Error::config(format!(
+                "hybrid_search.prefetch_multiplier too large (max 100, got {})",
+                self.hybrid_search.prefetch_multiplier
+            )));
         }
 
         Ok(())

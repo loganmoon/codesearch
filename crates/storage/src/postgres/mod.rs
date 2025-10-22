@@ -121,6 +121,44 @@ pub trait PostgresClientTrait: Send + Sync {
     /// If statistics are not yet calculated, returns default values (avgdl=50.0).
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
 
+    /// Get BM25 statistics for a repository within a transaction
+    ///
+    /// Similar to get_bm25_statistics but operates within an existing transaction
+    /// and uses FOR UPDATE to lock the row. This is used by the outbox processor
+    /// to ensure atomic reads and updates without additional round trips.
+    ///
+    /// # Parameters
+    ///
+    /// * `tx` - The active transaction
+    /// * `repository_id` - The repository UUID
+    ///
+    /// # Returns
+    ///
+    /// BM25Statistics containing avgdl, total_tokens, and entity_count
+    async fn get_bm25_statistics_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+    ) -> Result<BM25Statistics>;
+
+    /// Get BM25 statistics for multiple repositories in a single query
+    ///
+    /// Optimized batch version for fetching statistics for many repositories at once.
+    /// This reduces database round trips when loading statistics for multiple repositories,
+    /// such as when the MCP server initializes all repositories at startup.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_ids` - Slice of repository UUIDs to fetch statistics for
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping repository_id to BM25Statistics
+    async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, BM25Statistics>>;
+
     /// Update BM25 statistics incrementally after adding new entities (within transaction)
     ///
     /// Updates the running average document length by incorporating token counts

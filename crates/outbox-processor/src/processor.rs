@@ -1,5 +1,5 @@
 use codesearch_core::error::{Error, Result};
-use codesearch_core::CodeEntity;
+use codesearch_indexer::extract_embedding_content;
 use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
@@ -11,57 +11,6 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-const DELIM: &str = " ";
-
-/// Extract embeddable content from a CodeEntity
-fn extract_embedding_content(entity: &CodeEntity) -> String {
-    // Calculate accurate capacity
-    let estimated_size = entity.name.len()
-        + entity.qualified_name.len()
-        + entity.documentation_summary.as_ref().map_or(0, |s| s.len())
-        + entity.content.as_ref().map_or(0, |s| s.len())
-        + 100; // Extra padding for delimiters and formatting
-
-    let mut content = String::with_capacity(estimated_size);
-
-    // Add entity type and name
-    content.push_str(&format!("{} {}", entity.entity_type, entity.name));
-    chain_delim(&mut content, &entity.qualified_name);
-
-    // Add documentation summary if available
-    if let Some(doc) = &entity.documentation_summary {
-        chain_delim(&mut content, doc);
-    }
-
-    // Add signature information for functions/methods
-    if let Some(sig) = &entity.signature {
-        for (name, type_opt) in &sig.parameters {
-            content.push_str(DELIM);
-            content.push_str(name);
-            if let Some(param_type) = type_opt {
-                content.push_str(": ");
-                content.push_str(param_type);
-            }
-        }
-
-        if let Some(ret_type) = &sig.return_type {
-            chain_delim(&mut content, &format!("-> {ret_type}"));
-        }
-    }
-
-    // Add the full entity content (most important for semantic search)
-    if let Some(entity_content) = &entity.content {
-        chain_delim(&mut content, entity_content);
-    }
-
-    content
-}
-
-fn chain_delim(out_str: &mut String, text: &str) {
-    out_str.push_str(DELIM);
-    out_str.push_str(text);
-}
 
 /// Context information for Qdrant write failure handling
 struct FailureContext<'a> {

@@ -318,6 +318,98 @@ impl PostgresClient {
         })
     }
 
+    /// Get BM25 statistics for a repository within a transaction (with row lock)
+    pub async fn get_bm25_statistics_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+    ) -> Result<super::BM25Statistics> {
+        let row = sqlx::query_as::<_, (Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories WHERE repository_id = $1
+             FOR UPDATE",
+        )
+        .bind(repository_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get BM25 statistics in tx: {e}")))?;
+
+        let avgdl = row.0.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 statistics not initialized for repository {repository_id}"
+            ))
+        })?;
+        let total_tokens = row.1.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 total_tokens not initialized for repository {repository_id}"
+            ))
+        })?;
+        let entity_count = row.2.ok_or_else(|| {
+            Error::storage(format!(
+                "BM25 entity_count not initialized for repository {repository_id}"
+            ))
+        })?;
+
+        Ok(super::BM25Statistics {
+            avgdl,
+            total_tokens,
+            entity_count,
+        })
+    }
+
+    /// Get BM25 statistics for multiple repositories in a single query
+    ///
+    /// Optimized batch version for fetching statistics for many repositories at once.
+    /// Uses PostgreSQL's ANY operator for efficient multi-row retrieval.
+    pub async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, super::BM25Statistics>> {
+        if repository_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows = sqlx::query_as::<_, (Uuid, Option<f32>, Option<i64>, Option<i64>)>(
+            "SELECT repository_id, bm25_avgdl, bm25_total_tokens, bm25_entity_count
+             FROM repositories
+             WHERE repository_id = ANY($1)",
+        )
+        .bind(repository_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to fetch batch BM25 statistics: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for (repo_id, avgdl_opt, total_tokens_opt, entity_count_opt) in rows {
+            let avgdl = avgdl_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 statistics not initialized for repository {repo_id}"
+                ))
+            })?;
+            let total_tokens = total_tokens_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 total_tokens not initialized for repository {repo_id}"
+                ))
+            })?;
+            let entity_count = entity_count_opt.ok_or_else(|| {
+                Error::storage(format!(
+                    "BM25 entity_count not initialized for repository {repo_id}"
+                ))
+            })?;
+
+            result.insert(
+                repo_id,
+                super::BM25Statistics {
+                    avgdl,
+                    total_tokens,
+                    entity_count,
+                },
+            );
+        }
+
+        Ok(result)
+    }
+
     /// Update BM25 statistics incrementally after adding new entities (within transaction)
     pub async fn update_bm25_statistics_incremental_in_tx(
         &self,
@@ -325,13 +417,16 @@ impl PostgresClient {
         repository_id: Uuid,
         new_token_counts: &[usize],
     ) -> Result<f32> {
-        let stats = self.get_bm25_statistics(repository_id).await?;
+        let stats = self.get_bm25_statistics_in_tx(tx, repository_id).await?;
 
         let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
-            acc.checked_add(count as i64)
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
                 .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
         })?;
-        let new_entity_count: i64 = new_token_counts.len() as i64;
+        let new_entity_count: i64 = i64::try_from(new_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
         let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
         let updated_count = stats.entity_count.saturating_add(new_entity_count);
@@ -339,7 +434,13 @@ impl PostgresClient {
         let updated_avgdl = if updated_count > 0 {
             updated_total as f32 / updated_count as f32
         } else {
-            50.0
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
         };
 
         sqlx::query(
@@ -367,10 +468,13 @@ impl PostgresClient {
         let stats = self.get_bm25_statistics(repository_id).await?;
 
         let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
-            acc.checked_add(count as i64)
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
                 .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
         })?;
-        let new_entity_count: i64 = new_token_counts.len() as i64;
+        let new_entity_count: i64 = i64::try_from(new_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
         let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
         let updated_count = stats.entity_count.saturating_add(new_entity_count);
@@ -378,7 +482,13 @@ impl PostgresClient {
         let updated_avgdl = if updated_count > 0 {
             updated_total as f32 / updated_count as f32
         } else {
-            50.0
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
         };
 
         sqlx::query(
@@ -406,10 +516,13 @@ impl PostgresClient {
         let stats = self.get_bm25_statistics(repository_id).await?;
 
         let removed_total: i64 = deleted_token_counts.iter().try_fold(0i64, |acc, &count| {
-            acc.checked_add(count as i64)
+            let count_i64 = i64::try_from(count)
+                .map_err(|_| Error::storage("Token count too large for i64"))?;
+            acc.checked_add(count_i64)
                 .ok_or_else(|| Error::storage("Token count overflow during aggregation"))
         })?;
-        let removed_count: i64 = deleted_token_counts.len() as i64;
+        let removed_count: i64 = i64::try_from(deleted_token_counts.len())
+            .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
         let updated_total = (stats.total_tokens - removed_total).max(0);
         let updated_count = (stats.entity_count - removed_count).max(0);
@@ -417,7 +530,13 @@ impl PostgresClient {
         let updated_avgdl = if updated_count > 0 {
             updated_total as f32 / updated_count as f32
         } else {
-            50.0
+            // Preserve last known avgdl when count becomes 0
+            // Only use 50.0 as ultimate fallback for brand new repos
+            if stats.avgdl > 0.0 {
+                stats.avgdl
+            } else {
+                50.0
+            }
         };
 
         sqlx::query(
@@ -1515,6 +1634,21 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
         self.get_bm25_statistics(repository_id).await
+    }
+
+    async fn get_bm25_statistics_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        repository_id: Uuid,
+    ) -> Result<super::BM25Statistics> {
+        self.get_bm25_statistics_in_tx(tx, repository_id).await
+    }
+
+    async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, super::BM25Statistics>> {
+        self.get_bm25_statistics_batch(repository_ids).await
     }
 
     async fn update_bm25_statistics_incremental_in_tx(

@@ -296,6 +296,36 @@ impl PostgresClientTrait for MockPostgresClient {
         })
     }
 
+    async fn get_bm25_statistics_in_tx(
+        &self,
+        _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        _repository_id: Uuid,
+    ) -> Result<super::BM25Statistics> {
+        Ok(super::BM25Statistics {
+            avgdl: 50.0,
+            total_tokens: 0,
+            entity_count: 0,
+        })
+    }
+
+    async fn get_bm25_statistics_batch(
+        &self,
+        repository_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, super::BM25Statistics>> {
+        let mut result = std::collections::HashMap::new();
+        for &repo_id in repository_ids {
+            result.insert(
+                repo_id,
+                super::BM25Statistics {
+                    avgdl: 50.0,
+                    total_tokens: 0,
+                    entity_count: 0,
+                },
+            );
+        }
+        Ok(result)
+    }
+
     async fn update_bm25_statistics_incremental_in_tx(
         &self,
         _tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

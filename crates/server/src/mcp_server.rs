@@ -210,18 +210,28 @@ impl CodeSearchMcpServer {
         let mut avgdl_to_repos: HashMap<OrderedFloat<f32>, Vec<(Uuid, &RepositoryInfo)>> =
             HashMap::new();
 
+        // Batch fetch BM25 statistics for all repositories in a single query
+        let repo_ids: Vec<Uuid> = target_repos.iter().map(|(id, _)| *id).collect();
+        let stats_batch = self
+            .postgres_client
+            .get_bm25_statistics_batch(&repo_ids)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to get batch BM25 statistics: {e}"),
+                    None,
+                )
+            })?;
+
         for (repo_id, repo_info) in &target_repos {
-            let stats = self
-                .postgres_client
-                .get_bm25_statistics(*repo_id)
-                .await
-                .map_err(|e| {
-                    McpError::new(
-                        ErrorCode::INTERNAL_ERROR,
-                        format!("Failed to get BM25 statistics: {e}"),
-                        None,
-                    )
-                })?;
+            let stats = stats_batch.get(repo_id).ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Missing BM25 statistics for repository {repo_id}"),
+                    None,
+                )
+            })?;
 
             avgdl_to_repos
                 .entry(OrderedFloat(stats.avgdl))
@@ -285,31 +295,33 @@ impl CodeSearchMcpServer {
         };
 
         // Search all target repositories in parallel using hybrid search
+        let stats_batch_clone = stats_batch.clone();
         let search_futures = target_repos.iter().map(|(repo_id, repo_info)| {
             let storage_client = repo_info.storage_client.clone();
             let dense_query_emb = dense_query_embedding.clone();
             let filters_clone = filters.clone();
             let collection_name = repo_info.collection_name.clone();
             let repo_id = *repo_id;
-            let postgres_client = self.postgres_client.clone();
             let avgdl_to_sparse = avgdl_to_sparse_embedding.clone();
             let prefetch_multiplier = self.hybrid_search_config.prefetch_multiplier;
+            let stats_batch_inner = stats_batch_clone.clone();
 
             async move {
-                // Get repository avgdl to look up the correct sparse embedding
-                let stats = postgres_client
-                    .get_bm25_statistics(repo_id)
-                    .await
-                    .map_err(|e| {
+                // Get avgdl from batch results (already fetched above)
+                let avgdl = stats_batch_inner
+                    .get(&repo_id)
+                    .map(|s| s.avgdl)
+                    .ok_or_else(|| {
                         McpError::new(
                             ErrorCode::INTERNAL_ERROR,
-                            format!("Failed to get BM25 statistics: {e}"),
+                            format!("Missing BM25 statistics for repository {repo_id}"),
                             None,
                         )
                     })?;
 
+                // Look up the correct sparse embedding using the repository's avgdl
                 let sparse_query_emb = avgdl_to_sparse
-                    .get(&OrderedFloat(stats.avgdl))
+                    .get(&OrderedFloat(avgdl))
                     .ok_or_else(|| {
                         McpError::new(
                             ErrorCode::INTERNAL_ERROR,

@@ -1,0 +1,502 @@
+[
+  {
+    "query": "How do I add a required command line argument?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me how to define subcommands",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "How do I add default values to arguments?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "What types can I use for argument values?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the argument parser implementation",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "Show me where argument validation happens",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I handle multiple values for an argument?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Find the error handling code for invalid arguments",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "What's the difference between Arg and Command types?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Show me examples of custom value parsers",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "How do I make arguments mutually exclusive?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Find where help text is generated",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I add environment variable support?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the derive macro implementation",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "What traits does ArgMatches implement?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the code that parses command line strings",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "How do I customize error messages?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me where argument conflicts are detected",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "What builder methods are available for Arg?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the completion generation code",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I validate argument values?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the TypedValueParser trait",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find where short and long argument names are handled",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I create optional arguments?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the main parsing entry point",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "What error types can parsing return?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the code that matches arguments to their definitions",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "How do I add positional arguments?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me where argument groups are implemented",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "What's the Command builder pattern?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the version display code",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I handle boolean flags?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the argument value conversion logic",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "What methods does Command provide?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find where suggestion generation happens",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I make an argument take multiple values?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the lexer implementation",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "What's the difference between required and optional?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the argument ordering logic",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "How do I add custom validators?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me where default values are applied",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "What's the Parser trait used for?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the color output configuration",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "How do I hide arguments from help?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the usage string generation",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "What's ValueEnum used for?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "Find the argument matching algorithm",
+    "query_type": "realistic",
+    "category": "implementation"
+  },
+  {
+    "query": "How do I create argument aliases?",
+    "query_type": "realistic",
+    "category": "usage"
+  },
+  {
+    "query": "Show me the error formatting code",
+    "query_type": "realistic",
+    "category": "feature_location"
+  },
+  {
+    "query": "What builder methods can chain together?",
+    "query_type": "realistic",
+    "category": "type_discovery"
+  },
+  {
+    "query": "find the conflict_output_rev function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the set_false_with_default_value_if_present function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find general",
+    "query_type": "entity_focused",
+    "category": "module"
+  },
+  {
+    "query": "find HELP",
+    "query_type": "entity_focused",
+    "category": "constant"
+  },
+  {
+    "query": "find the aliases function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the is_short method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find utf16",
+    "query_type": "entity_focused",
+    "category": "module"
+  },
+  {
+    "query": "find the required_unless_present_err function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the Mode enum",
+    "query_type": "entity_focused",
+    "category": "enum"
+  },
+  {
+    "query": "find the did_you_mean function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find MESSAGE",
+    "query_type": "entity_focused",
+    "category": "constant"
+  },
+  {
+    "query": "find the propagate_global_arg_in_subcommand_to_subsubcommand_1385 function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find help_template",
+    "query_type": "entity_focused",
+    "category": "module"
+  },
+  {
+    "query": "find the refuse_invalid_utf8_subcommand_args_with_allow_external_subcommands function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the arg_next_line_help method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find macros",
+    "query_type": "entity_focused",
+    "category": "module"
+  },
+  {
+    "query": "find the parse_key_val function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the _ValueParserViaFromString trait",
+    "query_type": "entity_focused",
+    "category": "trait"
+  },
+  {
+    "query": "find the issue_1052_require_delim_help function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the flag_using_mixed function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the attribute method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find the suggest method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find the single_positional_required_usage_string function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the title method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find the translate_char method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find the show_long_about_issue_897 function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the short_alias_on_a_subcommand_option function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the ParseResult enum",
+    "query_type": "entity_focused",
+    "category": "enum"
+  },
+  {
+    "query": "find the hide_opt_args_only function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find implementation of AppFlags",
+    "query_type": "entity_focused",
+    "category": "impl"
+  },
+  {
+    "query": "find implementation of StyledStr",
+    "query_type": "entity_focused",
+    "category": "impl"
+  },
+  {
+    "query": "find FINAL_WORD_WRAPPING",
+    "query_type": "entity_focused",
+    "category": "constant"
+  },
+  {
+    "query": "find the valid_delimited_default_values function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the ignore_case_multiple_fail function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the implicit_value_parser function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the help_required_globally function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the main function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the MakeCookie struct",
+    "query_type": "entity_focused",
+    "category": "struct"
+  },
+  {
+    "query": "find typed_derive",
+    "query_type": "entity_focused",
+    "category": "module"
+  },
+  {
+    "query": "find the possible_values function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the main function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the unset_global_setting method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find the trailing_var_arg method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find SCFOP",
+    "query_type": "entity_focused",
+    "category": "constant"
+  },
+  {
+    "query": "find the check_complex_output function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the OsStrExt trait",
+    "query_type": "entity_focused",
+    "category": "trait"
+  },
+  {
+    "query": "find the insert function",
+    "query_type": "entity_focused",
+    "category": "function"
+  },
+  {
+    "query": "find the sort_by_key method",
+    "query_type": "entity_focused",
+    "category": "method"
+  },
+  {
+    "query": "find implementation of Name",
+    "query_type": "entity_focused",
+    "category": "impl"
+  },
+  {
+    "query": "find the possible_values_alias_output function",
+    "query_type": "entity_focused",
+    "category": "function"
+  }
+]

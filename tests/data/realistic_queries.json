@@ -1,0 +1,255 @@
+{
+  "description": "Realistic coding agent queries for clap v4.5.0 evaluation",
+  "queries": [
+    {
+      "query": "How do I add a required command line argument?",
+      "category": "usage",
+      "intent": "learning basic API usage"
+    },
+    {
+      "query": "Show me how to define subcommands",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "How do I add default values to arguments?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "What types can I use for argument values?",
+      "category": "type_discovery",
+      "intent": "API exploration"
+    },
+    {
+      "query": "Find the argument parser implementation",
+      "category": "implementation",
+      "intent": "understanding internals"
+    },
+    {
+      "query": "Show me where argument validation happens",
+      "category": "feature_location",
+      "intent": "finding specific functionality"
+    },
+    {
+      "query": "How do I handle multiple values for an argument?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Find the error handling code for invalid arguments",
+      "category": "feature_location",
+      "intent": "finding error handling"
+    },
+    {
+      "query": "What's the difference between Arg and Command types?",
+      "category": "type_discovery",
+      "intent": "understanding type hierarchy"
+    },
+    {
+      "query": "Show me examples of custom value parsers",
+      "category": "usage",
+      "intent": "finding examples"
+    },
+    {
+      "query": "How do I make arguments mutually exclusive?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Find where help text is generated",
+      "category": "feature_location",
+      "intent": "understanding help generation"
+    },
+    {
+      "query": "How do I add environment variable support?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the derive macro implementation",
+      "category": "implementation",
+      "intent": "understanding macros"
+    },
+    {
+      "query": "What traits does ArgMatches implement?",
+      "category": "type_discovery",
+      "intent": "trait exploration"
+    },
+    {
+      "query": "Find the code that parses command line strings",
+      "category": "implementation",
+      "intent": "understanding parsing logic"
+    },
+    {
+      "query": "How do I customize error messages?",
+      "category": "usage",
+      "intent": "customization"
+    },
+    {
+      "query": "Show me where argument conflicts are detected",
+      "category": "feature_location",
+      "intent": "finding validation logic"
+    },
+    {
+      "query": "What builder methods are available for Arg?",
+      "category": "type_discovery",
+      "intent": "API exploration"
+    },
+    {
+      "query": "Find the completion generation code",
+      "category": "feature_location",
+      "intent": "finding feature implementation"
+    },
+    {
+      "query": "How do I validate argument values?",
+      "category": "usage",
+      "intent": "learning validation"
+    },
+    {
+      "query": "Show me the TypedValueParser trait",
+      "category": "type_discovery",
+      "intent": "understanding traits"
+    },
+    {
+      "query": "Find where short and long argument names are handled",
+      "category": "feature_location",
+      "intent": "understanding argument naming"
+    },
+    {
+      "query": "How do I create optional arguments?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the main parsing entry point",
+      "category": "implementation",
+      "intent": "understanding control flow"
+    },
+    {
+      "query": "What error types can parsing return?",
+      "category": "type_discovery",
+      "intent": "error handling exploration"
+    },
+    {
+      "query": "Find the code that matches arguments to their definitions",
+      "category": "implementation",
+      "intent": "understanding matching logic"
+    },
+    {
+      "query": "How do I add positional arguments?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me where argument groups are implemented",
+      "category": "feature_location",
+      "intent": "finding feature implementation"
+    },
+    {
+      "query": "What's the Command builder pattern?",
+      "category": "type_discovery",
+      "intent": "understanding design patterns"
+    },
+    {
+      "query": "Find the version display code",
+      "category": "feature_location",
+      "intent": "finding feature implementation"
+    },
+    {
+      "query": "How do I handle boolean flags?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the argument value conversion logic",
+      "category": "implementation",
+      "intent": "understanding type conversion"
+    },
+    {
+      "query": "What methods does Command provide?",
+      "category": "type_discovery",
+      "intent": "API exploration"
+    },
+    {
+      "query": "Find where suggestion generation happens",
+      "category": "feature_location",
+      "intent": "finding suggestion logic"
+    },
+    {
+      "query": "How do I make an argument take multiple values?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the lexer implementation",
+      "category": "implementation",
+      "intent": "understanding tokenization"
+    },
+    {
+      "query": "What's the difference between required and optional?",
+      "category": "type_discovery",
+      "intent": "understanding concepts"
+    },
+    {
+      "query": "Find the argument ordering logic",
+      "category": "implementation",
+      "intent": "understanding ordering"
+    },
+    {
+      "query": "How do I add custom validators?",
+      "category": "usage",
+      "intent": "learning customization"
+    },
+    {
+      "query": "Show me where default values are applied",
+      "category": "feature_location",
+      "intent": "finding default handling"
+    },
+    {
+      "query": "What's the Parser trait used for?",
+      "category": "type_discovery",
+      "intent": "understanding traits"
+    },
+    {
+      "query": "Find the color output configuration",
+      "category": "feature_location",
+      "intent": "finding styling code"
+    },
+    {
+      "query": "How do I hide arguments from help?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the usage string generation",
+      "category": "implementation",
+      "intent": "understanding help generation"
+    },
+    {
+      "query": "What's ValueEnum used for?",
+      "category": "type_discovery",
+      "intent": "understanding enums"
+    },
+    {
+      "query": "Find the argument matching algorithm",
+      "category": "implementation",
+      "intent": "understanding matching"
+    },
+    {
+      "query": "How do I create argument aliases?",
+      "category": "usage",
+      "intent": "learning API usage"
+    },
+    {
+      "query": "Show me the error formatting code",
+      "category": "feature_location",
+      "intent": "finding error handling"
+    },
+    {
+      "query": "What builder methods can chain together?",
+      "category": "type_discovery",
+      "intent": "understanding builder pattern"
+    }
+  ]
+}

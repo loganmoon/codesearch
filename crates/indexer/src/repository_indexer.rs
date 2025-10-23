@@ -854,15 +854,19 @@ async fn stage_update_snapshots(
 
         // Merge file entity maps
         for (path, entity_ids) in batch.file_entity_map {
-            aggregated_files
-                .entry(path)
-                .or_insert_with(Vec::new)
-                .extend(entity_ids);
+            aggregated_files.entry(path).or_default().extend(entity_ids);
         }
     }
 
+    // Handle empty repository case (no files indexed)
+    if total_batches == 0 {
+        info!("Stage 5: No batches received (empty repository)");
+        return Ok(0);
+    }
+
     let repo_id = repo_id_opt.ok_or_else(|| Error::Other(anyhow!("No batches received")))?;
-    let collection_name = collection_name_opt.unwrap();
+    let collection_name =
+        collection_name_opt.ok_or_else(|| Error::Other(anyhow!("No batches received")))?;
     let git_commit = git_commit_opt.as_ref();
 
     info!(

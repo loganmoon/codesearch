@@ -23,7 +23,10 @@ use codesearch_core::{
     config::{global_config_path, Config},
     CodeEntity,
 };
-use codesearch_embeddings::{create_embedding_manager_from_app_config, EmbeddingManager};
+use codesearch_embeddings::{
+    create_embedding_manager_from_app_config, Bm25SparseProvider, EmbeddingManager,
+    SparseEmbeddingProvider,
+};
 use codesearch_indexer::entity_processor::extract_embedding_content;
 use codesearch_storage::{
     create_postgres_client, create_storage_client, PostgresClientTrait, StorageClient,
@@ -410,6 +413,8 @@ struct SearchExecutor {
     reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
     repository_id: Uuid,
     bge_instruction: String,
+    sparse_provider: Option<Bm25SparseProvider>,
+    prefetch_multiplier: usize,
 }
 
 impl SearchExecutor {
@@ -418,6 +423,8 @@ impl SearchExecutor {
         repository_id: Uuid,
         collection_name: &str,
         enable_reranking: bool,
+        enable_hybrid: bool,
+        prefetch_multiplier: usize,
     ) -> Result<Self> {
         let storage_client = create_storage_client(&config.storage, collection_name)
             .await
@@ -455,6 +462,17 @@ impl SearchExecutor {
 
         let bge_instruction = config.embeddings.default_bge_instruction.clone();
 
+        let sparse_provider = if enable_hybrid {
+            let bm25_stats = postgres_client
+                .get_bm25_statistics(repository_id)
+                .await
+                .context("Failed to fetch BM25 statistics")?;
+
+            Some(Bm25SparseProvider::new(bm25_stats.avgdl))
+        } else {
+            None
+        };
+
         Ok(Self {
             storage_client,
             postgres_client,
@@ -462,6 +480,8 @@ impl SearchExecutor {
             reranker,
             repository_id,
             bge_instruction,
+            sparse_provider,
+            prefetch_multiplier,
         })
     }
 
@@ -490,15 +510,41 @@ impl SearchExecutor {
             .flatten()
             .context("Failed to generate embedding")?;
 
-        // Retrieve 50 candidates for both baseline and reranking (fair comparison)
-        let candidates_limit = 50;
+        // Determine candidate limit based on reranking config
+        let candidates_limit = if use_reranking { 50 } else { limit };
 
-        // Vector search
-        let search_results = self
-            .storage_client
-            .search_similar(query_embedding, candidates_limit, None)
-            .await
-            .context("Search failed")?;
+        // Perform either hybrid or dense search based on sparse_provider presence
+        let search_results = if let Some(ref sparse_provider) = self.sparse_provider {
+            // Generate sparse query embedding
+            let sparse_embeddings = sparse_provider
+                .embed_sparse(vec![query])
+                .await
+                .context("Failed to generate sparse embedding")?;
+
+            let sparse_embedding = sparse_embeddings
+                .into_iter()
+                .next()
+                .flatten()
+                .context("Failed to generate sparse embedding")?;
+
+            // Hybrid search with RRF fusion
+            self.storage_client
+                .search_similar_hybrid(
+                    query_embedding,
+                    sparse_embedding,
+                    candidates_limit,
+                    None,
+                    self.prefetch_multiplier,
+                )
+                .await
+                .context("Hybrid search failed")?
+        } else {
+            // Dense-only search
+            self.storage_client
+                .search_similar(query_embedding, candidates_limit, None)
+                .await
+                .context("Search failed")?
+        };
 
         // Fetch entities from Postgres
         let entity_refs: Vec<_> = search_results
@@ -632,9 +678,9 @@ async fn evaluate_reranking(
 
     // Step 2: Create search executors
     let baseline_executor =
-        SearchExecutor::new(config, repository_id, collection_name, false).await?;
+        SearchExecutor::new(config, repository_id, collection_name, false, false, 5).await?;
     let reranking_executor =
-        SearchExecutor::new(config, repository_id, collection_name, true).await?;
+        SearchExecutor::new(config, repository_id, collection_name, true, false, 5).await?;
 
     // Step 3: Run searches and compare
     let mut comparisons = Vec::new();
@@ -989,7 +1035,7 @@ async fn test_collect_labeling_data() -> Result<()> {
 
     // Create search executor
     let search_executor =
-        SearchExecutor::new(&config, repository_id, &collection_name, false).await?;
+        SearchExecutor::new(&config, repository_id, &collection_name, false, false, 5).await?;
 
     // Collect all queries and results
     let output_path = std::path::Path::new(manifest_dir).join("data/labeling_data.json");

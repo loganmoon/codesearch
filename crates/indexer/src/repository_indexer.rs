@@ -685,9 +685,30 @@ async fn stage_store_entities(
                 (chunk_start + max_batch_size).min(batch.entity_embedding_id_sparse_triples.len());
             let chunk = &batch.entity_embedding_id_sparse_triples[chunk_start..chunk_end];
 
+            // Deduplicate chunk by entity_id (keep last occurrence)
+            // This prevents "ON CONFLICT DO UPDATE command cannot affect row a second time" errors
+            let mut unique_chunk: std::collections::HashMap<String, &EntityEmbeddingTriple> =
+                std::collections::HashMap::new();
+            for triple in chunk {
+                unique_chunk.insert(triple.0.entity_id.clone(), triple);
+            }
+            let deduplicated_chunk: Vec<&EntityEmbeddingTriple> =
+                unique_chunk.into_values().collect();
+
+            if deduplicated_chunk.len() < chunk.len() {
+                warn!(
+                    "Deduplicated {} duplicate entity_ids in Stage 4 chunk ({} -> {} unique)",
+                    chunk.len() - deduplicated_chunk.len(),
+                    chunk.len(),
+                    deduplicated_chunk.len()
+                );
+            }
+
             // Batch fetch existing metadata for this chunk
-            let entity_ids: Vec<String> =
-                chunk.iter().map(|(e, _, _)| e.entity_id.clone()).collect();
+            let entity_ids: Vec<String> = deduplicated_chunk
+                .iter()
+                .map(|(e, _, _)| e.entity_id.clone())
+                .collect();
 
             let metadata_map = postgres_client
                 .get_entities_metadata_batch(batch.repo_id, &entity_ids)
@@ -695,18 +716,21 @@ async fn stage_store_entities(
                 .storage_err("Failed to fetch metadata")?;
 
             // Calculate token counts for this chunk
-            let entities_vec: Vec<&CodeEntity> = chunk.iter().map(|(e, _, _)| e).collect();
+            let entities_vec: Vec<&CodeEntity> =
+                deduplicated_chunk.iter().map(|(e, _, _)| e).collect();
             let entities_owned: Vec<CodeEntity> = entities_vec.iter().map(|&e| e.clone()).collect();
             let token_counts = crate::entity_processor::calculate_token_counts(&entities_owned)
                 .storage_err("Failed to calculate token counts")?;
 
             // Prepare batch refs (no cloning - use references)
-            let mut batch_refs = Vec::with_capacity(chunk.len());
+            let mut batch_refs = Vec::with_capacity(deduplicated_chunk.len());
 
             // Clone git_commit once for the chunk instead of per entity
             let git_commit = batch.git_commit.clone();
 
-            for (idx, (entity, embedding_id, sparse_embedding)) in chunk.iter().enumerate() {
+            for (idx, (entity, embedding_id, sparse_embedding)) in
+                deduplicated_chunk.iter().enumerate()
+            {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
                     metadata_map.get(&entity.entity_id)
                 {
@@ -810,100 +834,122 @@ async fn stage_update_snapshots(
     postgres_client: Arc<dyn PostgresClientTrait>,
     _snapshot_update_concurrency: usize,
 ) -> Result<usize> {
-    let mut total_snapshots = 0;
+    // Collect all batches and aggregate files to prevent duplicate processing
+    // when a file's entities span multiple batches
+    let mut aggregated_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let mut repo_id_opt: Option<Uuid> = None;
+    let mut collection_name_opt: Option<String> = None;
+    let mut git_commit_opt: Option<String> = None;
+    let mut total_batches = 0;
 
     while let Some(batch) = stored_rx.recv().await {
-        info!(
-            "Stage 5: Updating {} file snapshots",
-            batch.file_entity_map.len()
-        );
+        total_batches += 1;
 
-        let file_count = batch.file_entity_map.len();
-        let repo_id = batch.repo_id;
-        let collection_name = &batch.collection_name;
-        let git_commit = batch.git_commit.as_ref();
-
-        // Convert PathBuf to String for all files
-        let file_data: Result<Vec<(String, Vec<String>)>> = batch
-            .file_entity_map
-            .into_iter()
-            .map(|(path, entity_ids)| {
-                let file_path_str = path_to_str(&path)?.to_string();
-                Ok((file_path_str, entity_ids))
-            })
-            .collect();
-        let file_data = file_data?;
-
-        // Batch fetch all old snapshots
-        let file_refs: Vec<(Uuid, String)> = file_data
-            .iter()
-            .map(|(path, _)| (repo_id, path.clone()))
-            .collect();
-
-        let old_snapshots = postgres_client
-            .get_file_snapshots_batch(&file_refs)
-            .await
-            .storage_err("Failed to batch fetch file snapshots")?;
-
-        // Compute stale entities for all files
-        let mut all_stale_ids = Vec::new();
-        for (file_path, new_entity_ids) in &file_data {
-            let old_entity_ids = old_snapshots
-                .get(&(repo_id, file_path.clone()))
-                .cloned()
-                .unwrap_or_default();
-
-            // Use HashSet for O(1) lookups instead of O(n) Vec::contains
-            let new_entity_set: std::collections::HashSet<&String> =
-                new_entity_ids.iter().collect();
-            let stale_ids: Vec<String> = old_entity_ids
-                .iter()
-                .filter(|old_id| !new_entity_set.contains(old_id))
-                .cloned()
-                .collect();
-
-            if !stale_ids.is_empty() {
-                info!(
-                    "Stage 5: Found {} stale entities in {}",
-                    stale_ids.len(),
-                    file_path
-                );
-                all_stale_ids.extend(stale_ids);
-            }
+        // Store metadata from first batch (all batches have same repo/collection/commit)
+        if repo_id_opt.is_none() {
+            repo_id_opt = Some(batch.repo_id);
+            collection_name_opt = Some(batch.collection_name.clone());
+            git_commit_opt = batch.git_commit.clone();
         }
 
-        // Batch mark all stale entities as deleted
-        if !all_stale_ids.is_empty() {
-            info!(
-                "Stage 5: Marking {} total stale entities as deleted",
-                all_stale_ids.len()
-            );
-            postgres_client
-                .mark_entities_deleted_with_outbox(repo_id, collection_name, &all_stale_ids)
-                .await
-                .storage_err("Failed to mark entities as deleted")?;
+        // Merge file entity maps
+        for (path, entity_ids) in batch.file_entity_map {
+            aggregated_files
+                .entry(path)
+                .or_insert_with(Vec::new)
+                .extend(entity_ids);
         }
-
-        // Batch update all file snapshots
-        let snapshot_updates: Vec<(String, Vec<String>, Option<String>)> = file_data
-            .into_iter()
-            .map(|(file_path, entity_ids)| (file_path, entity_ids, git_commit.cloned()))
-            .collect();
-
-        postgres_client
-            .update_file_snapshots_batch(repo_id, &snapshot_updates)
-            .await
-            .storage_err("Failed to batch update file snapshots")?;
-
-        info!(
-            "Stage 5: Successfully updated {} file snapshots",
-            file_count
-        );
-
-        total_snapshots += file_count;
     }
 
-    info!("Updated {total_snapshots} file snapshots");
+    let repo_id = repo_id_opt.ok_or_else(|| Error::Other(anyhow!("No batches received")))?;
+    let collection_name = collection_name_opt.unwrap();
+    let git_commit = git_commit_opt.as_ref();
+
+    info!(
+        "Stage 5: Aggregated {} batches into {} unique files",
+        total_batches,
+        aggregated_files.len()
+    );
+
+    if aggregated_files.is_empty() {
+        return Ok(0);
+    }
+
+    // Convert PathBuf to String for all files
+    let file_data: Result<Vec<(String, Vec<String>)>> = aggregated_files
+        .into_iter()
+        .map(|(path, entity_ids)| {
+            let file_path_str = path_to_str(&path)?.to_string();
+            Ok((file_path_str, entity_ids))
+        })
+        .collect();
+    let file_data = file_data?;
+
+    // Batch fetch all old snapshots
+    let file_refs: Vec<(Uuid, String)> = file_data
+        .iter()
+        .map(|(path, _)| (repo_id, path.clone()))
+        .collect();
+
+    let old_snapshots = postgres_client
+        .get_file_snapshots_batch(&file_refs)
+        .await
+        .storage_err("Failed to batch fetch file snapshots")?;
+
+    // Compute stale entities for all files
+    let mut all_stale_ids = Vec::new();
+    for (file_path, new_entity_ids) in &file_data {
+        let old_entity_ids = old_snapshots
+            .get(&(repo_id, file_path.clone()))
+            .cloned()
+            .unwrap_or_default();
+
+        // Use HashSet for O(1) lookups instead of O(n) Vec::contains
+        let new_entity_set: std::collections::HashSet<&String> = new_entity_ids.iter().collect();
+        let stale_ids: Vec<String> = old_entity_ids
+            .iter()
+            .filter(|old_id| !new_entity_set.contains(old_id))
+            .cloned()
+            .collect();
+
+        if !stale_ids.is_empty() {
+            info!(
+                "Stage 5: Found {} stale entities in {}",
+                stale_ids.len(),
+                file_path
+            );
+            all_stale_ids.extend(stale_ids);
+        }
+    }
+
+    // Batch mark all stale entities as deleted
+    if !all_stale_ids.is_empty() {
+        info!(
+            "Stage 5: Marking {} total stale entities as deleted",
+            all_stale_ids.len()
+        );
+        postgres_client
+            .mark_entities_deleted_with_outbox(repo_id, &collection_name, &all_stale_ids)
+            .await
+            .storage_err("Failed to mark entities as deleted")?;
+    }
+
+    // Batch update all file snapshots
+    let total_snapshots = file_data.len();
+    let snapshot_updates: Vec<(String, Vec<String>, Option<String>)> = file_data
+        .into_iter()
+        .map(|(file_path, entity_ids)| (file_path, entity_ids, git_commit.cloned()))
+        .collect();
+
+    postgres_client
+        .update_file_snapshots_batch(repo_id, &snapshot_updates)
+        .await
+        .storage_err("Failed to batch update file snapshots")?;
+    info!(
+        "Stage 5: Successfully updated {} file snapshots",
+        total_snapshots
+    );
+
     Ok(total_snapshots)
 }
 

@@ -69,15 +69,13 @@ pub fn handle_impl(
     let mut entities = Vec::new();
 
     if let Some(body_node) = impl_body {
-        let methods = extract_impl_methods(
-            body_node,
-            source,
-            file_path,
-            repository_id,
-            &impl_qualified_name,
-            &for_type,
-            None, // No trait for inherent impl
-        )?;
+        let impl_ctx = ImplContext {
+            qualified_name: &impl_qualified_name,
+            for_type: &for_type,
+            trait_name: None,          // No trait for inherent impl
+            line: location.start_line, // Pass impl line number for unique method IDs
+        };
+        let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
     }
 
@@ -173,15 +171,13 @@ pub fn handle_impl_trait(
     let mut entities = Vec::new();
 
     if let Some(body_node) = impl_body {
-        let methods = extract_impl_methods(
-            body_node,
-            source,
-            file_path,
-            repository_id,
-            &impl_qualified_name,
-            &for_type,
-            Some(&trait_name),
-        )?;
+        let impl_ctx = ImplContext {
+            qualified_name: &impl_qualified_name,
+            for_type: &for_type,
+            trait_name: Some(&trait_name),
+            line: location.start_line, // Pass impl line number for unique method IDs
+        };
+        let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
     }
 
@@ -241,9 +237,7 @@ fn extract_impl_methods(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    impl_qualified_name: &str,
-    for_type: &str,
-    trait_name: Option<&str>,
+    impl_ctx: &ImplContext,
 ) -> Result<Vec<CodeEntity>> {
     let mut entities = Vec::new();
     let mut cursor = body_node.walk();
@@ -251,28 +245,16 @@ fn extract_impl_methods(
     for child in body_node.children(&mut cursor) {
         match child.kind() {
             node_kinds::FUNCTION_ITEM => {
-                if let Ok(method) = extract_method(
-                    child,
-                    source,
-                    file_path,
-                    repository_id,
-                    impl_qualified_name,
-                    for_type,
-                    trait_name,
-                ) {
+                if let Ok(method) =
+                    extract_method(child, source, file_path, repository_id, impl_ctx)
+                {
                     entities.push(method);
                 }
             }
             "const_item" => {
-                if let Ok(constant) = extract_associated_constant(
-                    child,
-                    source,
-                    file_path,
-                    repository_id,
-                    impl_qualified_name,
-                    for_type,
-                    trait_name,
-                ) {
+                if let Ok(constant) =
+                    extract_associated_constant(child, source, file_path, repository_id, impl_ctx)
+                {
                     entities.push(constant);
                 }
             }
@@ -281,6 +263,21 @@ fn extract_impl_methods(
     }
 
     Ok(entities)
+}
+
+/// Context information about the impl block containing a method or constant
+///
+/// This struct groups impl-block-specific information to avoid passing
+/// too many parameters to entity extraction functions.
+struct ImplContext<'a> {
+    /// The qualified name of the impl block itself
+    qualified_name: &'a str,
+    /// The type being implemented for (e.g., "Container<T>")
+    for_type: &'a str,
+    /// Optional trait name for trait implementations
+    trait_name: Option<&'a str>,
+    /// The line number where the impl block starts (for unique entity IDs)
+    line: usize,
 }
 
 /// Components for building impl block member entities (methods, associated constants)
@@ -378,9 +375,7 @@ fn extract_associated_constant(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    impl_qualified_name: &str,
-    for_type: &str,
-    trait_name: Option<&str>,
+    impl_ctx: &ImplContext,
 ) -> Result<CodeEntity> {
     // Extract constant name
     let name = const_node
@@ -388,11 +383,17 @@ fn extract_associated_constant(
         .and_then(|n| node_to_text(n, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type
-    let qualified_name = if let Some(trait_name) = trait_name {
-        format!("<{for_type} as {trait_name}>::{name}")
+    // Build qualified name based on impl type, including impl line for uniqueness
+    let qualified_name = if let Some(trait_name) = impl_ctx.trait_name {
+        format!(
+            "<{} as {trait_name}>::{name} (impl at line {})",
+            impl_ctx.for_type, impl_ctx.line
+        )
     } else {
-        format!("{for_type}::{name}")
+        format!(
+            "{}::{name} (impl at line {})",
+            impl_ctx.for_type, impl_ctx.line
+        )
     };
 
     // Extract visibility
@@ -432,7 +433,7 @@ fn extract_associated_constant(
         source,
         file_path,
         repository_id,
-        impl_qualified_name,
+        impl_ctx.qualified_name,
         ImplEntityComponents {
             name,
             qualified_name,
@@ -462,19 +463,23 @@ fn extract_method(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    impl_qualified_name: &str,
-    for_type: &str,
-    trait_name: Option<&str>,
+    impl_ctx: &ImplContext,
 ) -> Result<CodeEntity> {
     // Extract method name
     let name = find_method_name(method_node, source)
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type
-    let qualified_name = if let Some(trait_name) = trait_name {
-        format!("<{for_type} as {trait_name}>::{name}")
+    // Build qualified name based on impl type, including impl line for uniqueness
+    let qualified_name = if let Some(trait_name) = impl_ctx.trait_name {
+        format!(
+            "<{} as {trait_name}>::{name} (impl at line {})",
+            impl_ctx.for_type, impl_ctx.line
+        )
     } else {
-        format!("{for_type}::{name}")
+        format!(
+            "{}::{name} (impl at line {})",
+            impl_ctx.for_type, impl_ctx.line
+        )
     };
 
     // Extract visibility
@@ -536,7 +541,7 @@ fn extract_method(
         source,
         file_path,
         repository_id,
-        impl_qualified_name,
+        impl_ctx.qualified_name,
         ImplEntityComponents {
             name,
             qualified_name,

@@ -12,7 +12,7 @@ use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 use twox_hash::XxHash3_128;
 use uuid::Uuid;
 
@@ -150,16 +150,26 @@ pub async fn process_entity_batch(
     let original_count = entities.len();
     let mut unique_entities = HashMap::new();
     for entity in entities {
-        if let Some(previous) = unique_entities.insert(entity.entity_id.clone(), entity) {
-            debug!(
-                "Duplicate entity_id detected in batch: {} in file {} (qualified_name: {})",
+        if let Some(previous) = unique_entities.insert(entity.entity_id.clone(), entity.clone()) {
+            warn!(
+                "Duplicate entity_id in batch (will keep last): {}\n\
+                 - First: {} (line {}-{}, type: {:?})\n\
+                 - Second: {} (line {}-{}, type: {:?})\n\
+                 File: {}",
                 previous.entity_id,
-                previous.file_path.display(),
-                previous.qualified_name
+                previous.qualified_name,
+                previous.location.start_line,
+                previous.location.end_line,
+                previous.entity_type,
+                entity.qualified_name,
+                entity.location.start_line,
+                entity.location.end_line,
+                entity.entity_type,
+                entity.file_path.display()
             );
         }
     }
-    let entities: Vec<CodeEntity> = unique_entities.into_values().collect();
+    let mut entities: Vec<CodeEntity> = unique_entities.into_values().collect();
 
     if entities.len() < original_count {
         info!(
@@ -168,6 +178,36 @@ pub async fn process_entity_batch(
             entities.len(),
             original_count - entities.len()
         );
+    }
+
+    // Sort by entity_id for deterministic ordering
+    entities.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
+
+    // Final safety check: validate no duplicates remain after deduplication
+    // This catches bugs in entity ID generation
+    let mut seen_ids: HashMap<&str, &CodeEntity> = HashMap::new();
+    for entity in &entities {
+        if let Some(existing) = seen_ids.insert(&entity.entity_id, entity) {
+            error!(
+                "CRITICAL BUG: Duplicate entity_id {} detected after deduplication!\n\
+                 Entity 1: {} in {} (type: {:?}, line: {})\n\
+                 Entity 2: {} in {} (type: {:?}, line: {})\n\
+                 This is a bug in entity ID generation - entity IDs must be unique.",
+                entity.entity_id,
+                existing.qualified_name,
+                existing.file_path.display(),
+                existing.entity_type,
+                existing.location.start_line,
+                entity.qualified_name,
+                entity.file_path.display(),
+                entity.entity_type,
+                entity.location.start_line
+            );
+            return Err(Error::entity_extraction(format!(
+                "Duplicate entity_id {} found after deduplication. This is a critical bug in entity extraction.",
+                entity.entity_id
+            )));
+        }
     }
 
     // collection_name is now passed as parameter

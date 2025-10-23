@@ -53,6 +53,7 @@ pub async fn initialize_collection(
     manager: &dyn CollectionManager,
     collection_name: &str,
     dense_dimensions: usize,
+    force: bool,
 ) -> Result<()> {
     // Check if collection already exists
     let exists = manager
@@ -60,23 +61,48 @@ pub async fn initialize_collection(
         .await
         .context("Failed to check if collection exists")?;
 
-    if exists {
+    if force && exists {
+        // Force mode: drop existing collection and recreate
         info!(
-            "Collection '{}' already exists, verifying configuration...",
+            "Force mode enabled: dropping existing collection '{}'...",
             collection_name
         );
-    } else {
+        manager
+            .delete_collection(collection_name)
+            .await
+            .context("Failed to delete existing collection")?;
+        info!("Existing collection dropped");
+
+        // Create new collection
         info!(
             "Creating new collection '{}' with {} dense dimensions...",
             collection_name, dense_dimensions
         );
+        manager
+            .ensure_collection(collection_name, dense_dimensions)
+            .await
+            .context("Failed to create collection")?;
+    } else if exists {
+        // Normal mode: verify existing collection
+        info!(
+            "Collection '{}' already exists, verifying configuration...",
+            collection_name
+        );
+        manager
+            .ensure_collection(collection_name, dense_dimensions)
+            .await
+            .context("Failed to ensure collection")?;
+    } else {
+        // Collection doesn't exist: create it
+        info!(
+            "Creating new collection '{}' with {} dense dimensions...",
+            collection_name, dense_dimensions
+        );
+        manager
+            .ensure_collection(collection_name, dense_dimensions)
+            .await
+            .context("Failed to create collection")?;
     }
-
-    // Ensure collection with proper dimensions
-    manager
-        .ensure_collection(collection_name, dense_dimensions)
-        .await
-        .context("Failed to ensure collection")?;
 
     info!("Collection '{}' is ready", collection_name);
     Ok(())

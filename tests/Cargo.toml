@@ -27,3 +27,4 @@ sqlx = { workspace = true }
 glob = { workspace = true }
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
+chrono = "0.4"

@@ -5,6 +5,30 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Convert sparse embedding from Vec<(u32, f32)> to flattened REAL[] format
+/// Format: [index, value, index, value, ...]
+/// Example: [(42, 0.5), (137, 0.8)] → [42.0, 0.5, 137.0, 0.8]
+fn flatten_sparse_embedding(sparse: &[(u32, f32)]) -> Vec<f32> {
+    let mut flattened = Vec::with_capacity(sparse.len() * 2);
+    for (idx, val) in sparse {
+        flattened.push(*idx as f32);
+        flattened.push(*val);
+    }
+    flattened
+}
+
+/// Convert flattened REAL[] format back to Vec<(u32, f32)>
+/// Format: [index, value, index, value, ...] → [(index, value), ...]
+fn unflatten_sparse_embedding(flattened: &[f32]) -> Vec<(u32, f32)> {
+    flattened
+        .chunks_exact(2)
+        .map(|chunk| (chunk[0] as u32, chunk[1]))
+        .collect()
+}
+
+/// Type alias for embedding cache entry: (content_hash, dense_embedding, sparse_embedding)
+pub type EmbeddingCacheEntry = (String, Vec<f32>, Option<Vec<(u32, f32)>>);
+
 /// Operation type for outbox pattern
 ///
 /// Represents the type of operation to be performed on the target data store.
@@ -116,13 +140,12 @@ pub struct OutboxEntry {
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    i64, // embedding_id (dense)
+    i64, // embedding_id (now includes both dense and sparse in entity_embeddings table)
     OutboxOperation,
     Uuid, // qdrant_point_id
     TargetStore,
-    Option<String>,  // git_commit_hash
-    usize,           // bm25_token_count
-    Vec<(u32, f32)>, // sparse_embedding
+    Option<String>, // git_commit_hash
+    usize,          // bm25_token_count
 );
 
 pub struct PostgresClient {
@@ -1005,16 +1028,7 @@ impl PostgresClient {
         let validated_entities: Result<Vec<_>> = entities
             .iter()
             .map(
-                |(
-                    entity,
-                    embedding,
-                    op,
-                    point_id,
-                    target,
-                    git_commit,
-                    token_count,
-                    sparse_embedding,
-                )| {
+                |(entity, embedding, op, point_id, target, git_commit, token_count)| {
                     let entity_json = serde_json::to_value(entity)
                         .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
@@ -1031,7 +1045,6 @@ impl PostgresClient {
                         target,
                         git_commit,
                         token_count,
-                        sparse_embedding,
                         entity_json,
                         file_path_str,
                     ))
@@ -1061,7 +1074,6 @@ impl PostgresClient {
                 _target,
                 git_commit,
                 token_count,
-                _sparse_embedding,
                 entity_json,
                 file_path_str,
             )| {
@@ -1126,14 +1138,12 @@ impl PostgresClient {
                 target,
                 _git_commit,
                 _token_count,
-                sparse_embedding,
                 entity_json,
                 _file_path_str,
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
                     "qdrant_point_id": point_id.to_string(),
-                    "sparse_embedding": sparse_embedding
                 });
 
                 b.push_bind(repository_id)
@@ -1351,12 +1361,13 @@ impl PostgresClient {
         Ok(())
     }
 
-    /// Get embeddings by content hashes, returning (embedding_id, embedding) tuples
+    /// Get embeddings by content hashes, returning (embedding_id, dense_embedding, sparse_embedding) tuples
     pub async fn get_embeddings_by_content_hash(
         &self,
+        repository_id: Uuid,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         if content_hashes.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
@@ -1372,8 +1383,10 @@ impl PostgresClient {
 
         // Build query with IN clause
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "SELECT id, content_hash, embedding FROM entity_embeddings WHERE model_version = ",
+            "SELECT id, content_hash, embedding, sparse_embedding FROM entity_embeddings WHERE repository_id = ",
         );
+        query_builder.push_bind(repository_id);
+        query_builder.push(" AND model_version = ");
         query_builder.push_bind(model_version);
         query_builder.push(" AND content_hash IN (");
 
@@ -1402,8 +1415,13 @@ impl PostgresClient {
             let embedding: Vec<f32> = row
                 .try_get("embedding")
                 .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
+            let sparse_flat: Option<Vec<f32>> = row
+                .try_get("sparse_embedding")
+                .map_err(|e| Error::storage(format!("Failed to extract sparse_embedding: {e}")))?;
 
-            result.insert(content_hash, (id, embedding));
+            let sparse_embedding = sparse_flat.map(|flat| unflatten_sparse_embedding(&flat));
+
+            result.insert(content_hash, (id, embedding, sparse_embedding));
         }
 
         Ok(result)
@@ -1412,7 +1430,8 @@ impl PostgresClient {
     /// Store embeddings in entity_embeddings table, returning their IDs
     pub async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        repository_id: Uuid,
+        cache_entries: &[EmbeddingCacheEntry],
         model_version: &str,
         dimension: usize,
     ) -> Result<Vec<i64>> {
@@ -1437,18 +1456,26 @@ impl PostgresClient {
 
         // Build bulk INSERT with ON CONFLICT DO NOTHING
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_embeddings (content_hash, embedding, model_version, dimension, created_at) "
+            "INSERT INTO entity_embeddings (repository_id, content_hash, embedding, sparse_embedding, model_version, dimension, created_at) "
         );
 
-        query_builder.push_values(cache_entries, |mut b, (content_hash, embedding)| {
-            b.push_bind(content_hash)
-                .push_bind(embedding)
-                .push_bind(model_version)
-                .push_bind(dimension as i32)
-                .push("NOW()");
-        });
+        query_builder.push_values(
+            cache_entries,
+            |mut b, (content_hash, embedding, sparse_embedding)| {
+                let sparse_flat = sparse_embedding
+                    .as_ref()
+                    .map(|s| flatten_sparse_embedding(s));
+                b.push_bind(repository_id)
+                    .push_bind(content_hash)
+                    .push_bind(embedding)
+                    .push_bind(sparse_flat)
+                    .push_bind(model_version)
+                    .push_bind(dimension as i32)
+                    .push("NOW()");
+            },
+        );
 
-        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING RETURNING id");
+        query_builder.push(" ON CONFLICT (repository_id, content_hash) DO NOTHING RETURNING id");
 
         // Execute and get IDs for newly inserted rows
         let inserted_ids: Vec<i64> = query_builder
@@ -1464,13 +1491,15 @@ impl PostgresClient {
         } else {
             // Some entries already existed, need to fetch and order correctly
             let mut fetch_query: QueryBuilder<Postgres> = QueryBuilder::new(
-                "SELECT content_hash, id FROM entity_embeddings WHERE model_version = ",
+                "SELECT content_hash, id FROM entity_embeddings WHERE repository_id = ",
             );
+            fetch_query.push_bind(repository_id);
+            fetch_query.push(" AND model_version = ");
             fetch_query.push_bind(model_version);
             fetch_query.push(" AND content_hash IN (");
 
             let mut separated = fetch_query.separated(", ");
-            for (hash, _) in cache_entries {
+            for (hash, _, _) in cache_entries {
                 separated.push_bind(hash);
             }
             separated.push_unseparated(")");
@@ -1493,7 +1522,7 @@ impl PostgresClient {
 
             // Return IDs in the same order as input cache_entries
             let mut ordered_ids = Vec::with_capacity(cache_entries.len());
-            for (hash, _) in cache_entries {
+            for (hash, _, _) in cache_entries {
                 let id = hash_to_id.get(hash).ok_or_else(|| {
                     Error::storage(format!(
                         "Embedding ID not found for content_hash: {hash} (this should not happen)"
@@ -1522,6 +1551,25 @@ impl PostgresClient {
                 .map_err(|e| Error::storage(format!("Failed to get embedding by ID: {e}")))?;
 
         Ok(record.map(|(embedding,)| embedding))
+    }
+
+    /// Fetch both dense and sparse embeddings by ID from entity_embeddings table
+    pub async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        let record: Option<(Vec<f32>, Option<Vec<f32>>)> = sqlx::query_as(
+            "SELECT embedding, sparse_embedding FROM entity_embeddings WHERE id = $1",
+        )
+        .bind(embedding_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get embeddings by ID: {e}")))?;
+
+        Ok(record.map(|(dense, sparse_flat)| {
+            let sparse = sparse_flat.map(|flat| unflatten_sparse_embedding(&flat));
+            (dense, sparse)
+        }))
     }
 
     /// Get cache statistics
@@ -1798,25 +1846,34 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_embeddings_by_content_hash(
         &self,
+        repository_id: Uuid,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
-        self.get_embeddings_by_content_hash(content_hashes, model_version)
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        self.get_embeddings_by_content_hash(repository_id, content_hashes, model_version)
             .await
     }
 
     async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        repository_id: Uuid,
+        cache_entries: &[(String, Vec<f32>, Option<Vec<(u32, f32)>>)],
         model_version: &str,
         dimension: usize,
     ) -> Result<Vec<i64>> {
-        self.store_embeddings(cache_entries, model_version, dimension)
+        self.store_embeddings(repository_id, cache_entries, model_version, dimension)
             .await
     }
 
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
         self.get_embedding_by_id(embedding_id).await
+    }
+
+    async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        self.get_embedding_with_sparse_by_id(embedding_id).await
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {

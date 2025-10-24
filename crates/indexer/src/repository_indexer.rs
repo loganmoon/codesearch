@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
-use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
+use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -467,7 +467,7 @@ async fn stage_generate_embeddings(
         // Batch lookup cached embeddings
         let model_version = embedding_manager.model_version();
         let cached_embeddings = postgres_client
-            .get_embeddings_by_content_hash(&content_hashes, model_version)
+            .get_embeddings_by_content_hash(batch.repo_id, &content_hashes, model_version)
             .await
             .unwrap_or_else(|e| {
                 tracing::warn!(
@@ -487,7 +487,9 @@ async fn stage_generate_embeddings(
         let mut cache_miss_texts: Vec<String> = Vec::new();
 
         for (idx, (text, content_hash)) in texts.iter().zip(content_hashes.iter()).enumerate() {
-            if let Some((embedding_id, cached_embedding)) = cached_embeddings.get(content_hash) {
+            if let Some((embedding_id, cached_embedding, _sparse)) =
+                cached_embeddings.get(content_hash)
+            {
                 // Directly populate results for cache hits
                 all_embeddings[idx] = Some(cached_embedding.clone());
                 all_embedding_ids[idx] = Some(*embedding_id);
@@ -536,14 +538,14 @@ async fn stage_generate_embeddings(
                 }
             }
 
-            // Store newly generated embeddings in cache
-            let embeddings_to_store: Vec<(String, Vec<f32>)> = cache_miss_indices
+            // Store newly generated embeddings in cache (sparse embeddings generated later in pipeline)
+            let embeddings_to_store: Vec<EmbeddingCacheEntry> = cache_miss_indices
                 .iter()
                 .zip(new_embeddings.iter())
                 .filter_map(|(idx, emb_opt)| {
                     emb_opt
                         .as_ref()
-                        .map(|emb| (content_hashes[*idx].clone(), emb.clone()))
+                        .map(|emb| (content_hashes[*idx].clone(), emb.clone(), None))
                 })
                 .collect();
 
@@ -551,7 +553,12 @@ async fn stage_generate_embeddings(
                 let dimension = embeddings_to_store[0].1.len();
 
                 let new_embedding_ids = postgres_client
-                    .store_embeddings(&embeddings_to_store, model_version, dimension)
+                    .store_embeddings(
+                        batch.repo_id,
+                        &embeddings_to_store,
+                        model_version,
+                        dimension,
+                    )
                     .await
                     .storage_err("Failed to store embeddings")?;
 
@@ -728,7 +735,7 @@ async fn stage_store_entities(
             // Clone git_commit once for the chunk instead of per entity
             let git_commit = batch.git_commit.clone();
 
-            for (idx, (entity, embedding_id, sparse_embedding)) in
+            for (idx, (entity, embedding_id, _sparse_embedding)) in
                 deduplicated_chunk.iter().enumerate()
             {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
@@ -751,7 +758,6 @@ async fn stage_store_entities(
                     TargetStore::Qdrant,
                     git_commit.clone(),
                     token_counts[idx],
-                    sparse_embedding.clone(),
                 ));
             }
 

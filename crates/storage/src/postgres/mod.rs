@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 // Re-export client types
 pub use client::{
-    EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient, TargetStore,
+    EmbeddingCacheEntry, EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient,
+    TargetStore,
 };
 
 /// BM25 statistics for a repository
@@ -342,29 +343,37 @@ pub trait PostgresClientTrait: Send + Sync {
     /// This is a destructive operation that cannot be undone.
     async fn drop_all_data(&self) -> Result<()>;
 
-    /// Get embeddings by content hashes, returning both embedding_id and embedding vector
+    /// Get embeddings by content hashes, returning embedding_id, dense_embedding, and sparse_embedding
     ///
-    /// Returns a HashMap mapping content_hash to (embedding_id, embedding_vector).
+    /// Returns a HashMap mapping content_hash to (embedding_id, dense_embedding, sparse_embedding).
     /// This is used during indexing to check if embeddings already exist.
     async fn get_embeddings_by_content_hash(
         &self,
+        repository_id: Uuid,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>>;
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>>;
 
     /// Store embeddings in entity_embeddings table, returning their IDs
     ///
-    /// Inserts embeddings with content-based deduplication (ON CONFLICT DO NOTHING on content_hash).
+    /// Inserts embeddings with repository-aware deduplication (ON CONFLICT DO NOTHING on (repository_id, content_hash)).
     /// Returns the embedding_id for each entry (either newly inserted or existing).
     async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        repository_id: Uuid,
+        cache_entries: &[EmbeddingCacheEntry],
         model_version: &str,
         dimension: usize,
     ) -> Result<Vec<i64>>;
 
     /// Get an embedding by its ID (used by outbox processor)
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>>;
+
+    /// Fetch both dense and sparse embeddings by ID from entity_embeddings table
+    async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>>;
 
     /// Get entity embeddings statistics (total entries, size, etc.)
     async fn get_cache_stats(&self) -> Result<crate::CacheStats>;

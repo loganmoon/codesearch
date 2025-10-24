@@ -110,7 +110,12 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
         // Store embedding to get its ID
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
-            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                384,
+            )
             .await?;
         let embedding_id = embedding_ids[0];
 
@@ -121,8 +126,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -164,7 +168,8 @@ async fn test_store_entity_metadata_update() -> Result<()> {
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
             .store_embeddings(
-                &[(content_hash.clone(), embedding.clone())],
+                repository_id,
+                &[(content_hash.clone(), embedding.clone(), None)],
                 "test-model",
                 384,
             )
@@ -178,8 +183,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("abc123".to_string()),
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -189,7 +193,12 @@ async fn test_store_entity_metadata_update() -> Result<()> {
         // Store updated embedding to get its ID
         let content_hash2 = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids2 = client
-            .store_embeddings(&[(content_hash2, embedding)], "test-model", 384)
+            .store_embeddings(
+                repository_id,
+                &[(content_hash2, embedding, None)],
+                "test-model",
+                384,
+            )
             .await?;
         let embedding_id2 = embedding_ids2[0];
 
@@ -200,8 +209,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
             qdrant_point_id,
             TargetStore::Qdrant,
             Some("def456".to_string()),
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -261,10 +269,11 @@ async fn test_get_file_snapshot() -> Result<()> {
         let content_hash3 = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
             .store_embeddings(
+                repository_id,
                 &[
-                    (content_hash1, embedding.clone()),
-                    (content_hash2, embedding.clone()),
-                    (content_hash3, embedding),
+                    (content_hash1, embedding.clone(), None),
+                    (content_hash2, embedding.clone(), None),
+                    (content_hash3, embedding, None),
                 ],
                 "test-model",
                 384,
@@ -279,8 +288,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
             (
                 &entity2,
@@ -289,8 +297,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
             (
                 &entity3,
@@ -299,8 +306,7 @@ async fn test_get_file_snapshot() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
         ];
 
@@ -477,7 +483,12 @@ async fn test_mark_entities_deleted() -> Result<()> {
             // Store embedding to get its ID
             let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
             let embedding_ids = client
-                .store_embeddings(&[(content_hash, embedding.clone())], "test-model", 384)
+                .store_embeddings(
+                    repository_id,
+                    &[(content_hash, embedding.clone(), None)],
+                    "test-model",
+                    384,
+                )
                 .await?;
             let embedding_id = embedding_ids[0];
 
@@ -488,8 +499,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -594,7 +604,12 @@ async fn test_get_entities_by_ids() -> Result<()> {
             // Store embedding to get its ID
             let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
             let embedding_ids = client
-                .store_embeddings(&[(content_hash, embedding.clone())], "test-model", 384)
+                .store_embeddings(
+                    repository_id,
+                    &[(content_hash, embedding.clone(), None)],
+                    "test-model",
+                    384,
+                )
                 .await?;
             let embedding_id = embedding_ids[0];
 
@@ -605,8 +620,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             )];
             client
                 .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
@@ -685,10 +699,11 @@ async fn test_outbox_write_and_read() -> Result<()> {
         let content_hash3 = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
             .store_embeddings(
+                repository_id,
                 &[
-                    (content_hash1, embedding.clone()),
-                    (content_hash2, embedding.clone()),
-                    (content_hash3, embedding),
+                    (content_hash1, embedding.clone(), None),
+                    (content_hash2, embedding.clone(), None),
+                    (content_hash3, embedding, None),
                 ],
                 "test-model",
                 384,
@@ -703,8 +718,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
             (
                 &entity2,
@@ -713,8 +727,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
             (
                 &entity3,
@@ -723,8 +736,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
                 Uuid::new_v4(),
                 TargetStore::Qdrant,
                 None,
-                50,     // token_count
-                vec![], // sparse_embedding
+                50, // token_count
             ),
         ];
 
@@ -770,7 +782,12 @@ async fn test_outbox_mark_processed() -> Result<()> {
         // Store embedding to get its ID
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
-            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                384,
+            )
             .await?;
         let embedding_id = embedding_ids[0];
 
@@ -781,8 +798,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
 
         let outbox_ids = client
@@ -825,7 +841,12 @@ async fn test_outbox_record_failure() -> Result<()> {
         // Store embedding to get its ID
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
-            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                384,
+            )
             .await?;
         let embedding_id = embedding_ids[0];
 
@@ -836,8 +857,7 @@ async fn test_outbox_record_failure() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
 
         let outbox_ids = client
@@ -909,7 +929,12 @@ async fn test_transaction_rollback() -> Result<()> {
         // Store embedding to get its ID
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = client
-            .store_embeddings(&[(content_hash, embedding)], "test-model", 384)
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                384,
+            )
             .await?;
         let embedding_id = embedding_ids[0];
 
@@ -920,8 +945,7 @@ async fn test_transaction_rollback() -> Result<()> {
             Uuid::new_v4(),
             TargetStore::Qdrant,
             None,
-            50,     // token_count
-            vec![], // sparse_embedding
+            50, // token_count
         )];
         client
             .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)

@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 // Re-export only the trait
 pub use collection_manager::CollectionManager;
-pub use postgres::{BM25Statistics, OutboxOperation, PostgresClientTrait};
+pub use postgres::{BM25Statistics, EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait};
 
 // Re-export types needed by outbox-processor
 pub use postgres::{OutboxEntry, TargetStore};

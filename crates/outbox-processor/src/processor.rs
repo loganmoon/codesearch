@@ -346,20 +346,26 @@ impl OutboxProcessor {
         )
         .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
 
-        // Fetch dense embedding by ID from entity_embeddings table
+        // Fetch both dense and sparse embeddings by ID from entity_embeddings table
         let embedding_id = entry
             .embedding_id
             .ok_or_else(|| Error::storage("Missing embedding_id in outbox entry"))?;
 
-        let dense_embedding = self
+        let (dense_embedding, sparse_embedding) = self
             .postgres_client
-            .get_embedding_by_id(embedding_id)
+            .get_embedding_with_sparse_by_id(embedding_id)
             .await?
             .ok_or_else(|| {
                 Error::storage(format!(
                     "Embedding ID {embedding_id} not found in entity_embeddings table"
                 ))
             })?;
+
+        let sparse_embedding = sparse_embedding.ok_or_else(|| {
+            Error::storage(format!(
+                "Sparse embedding not found for embedding ID {embedding_id}"
+            ))
+        })?;
 
         let qdrant_point_id: String = serde_json::from_value(
             entry
@@ -394,16 +400,6 @@ impl OutboxProcessor {
                 entity.entity_id, entry.repository_id
             ))
         })?;
-
-        // Read precomputed sparse embedding from payload
-        let sparse_embedding: Vec<(u32, f32)> = serde_json::from_value(
-            entry
-                .payload
-                .get("sparse_embedding")
-                .ok_or_else(|| Error::storage("Missing sparse_embedding in payload"))?
-                .clone(),
-        )
-        .map_err(|e| Error::storage(format!("Failed to deserialize sparse_embedding: {e}")))?;
 
         Ok(EmbeddedEntity {
             entity,

@@ -540,7 +540,6 @@ impl PostgresClientTrait for MockPostgresClient {
             target_store,
             git_commit_hash,
             _token_count,
-            sparse_embedding,
         ) in entities
         {
             // Store entity metadata
@@ -559,7 +558,6 @@ impl PostgresClientTrait for MockPostgresClient {
             let payload = serde_json::json!({
                 "entity": entity,
                 "qdrant_point_id": point_id.to_string(),
-                "sparse_embedding": sparse_embedding
             });
 
             data.outbox.push(MockOutboxEntry {
@@ -654,15 +652,16 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn get_embeddings_by_content_hash(
         &self,
+        _repository_id: Uuid,
         content_hashes: &[String],
         _model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         let data = self.data.lock().unwrap();
         let mut result = std::collections::HashMap::new();
 
         for hash in content_hashes {
             if let Some((embedding_id, embedding)) = data.embedding_cache.get(hash) {
-                result.insert(hash.clone(), (*embedding_id, embedding.clone()));
+                result.insert(hash.clone(), (*embedding_id, embedding.clone(), None));
             }
         }
 
@@ -671,14 +670,15 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        _repository_id: Uuid,
+        cache_entries: &[super::EmbeddingCacheEntry],
         _model_version: &str,
         _dimension: usize,
     ) -> Result<Vec<i64>> {
         let mut data = self.data.lock().unwrap();
         let mut embedding_ids = Vec::with_capacity(cache_entries.len());
 
-        for (hash, embedding) in cache_entries {
+        for (hash, embedding, _sparse) in cache_entries {
             // Check if this content_hash already exists (deduplication)
             let embedding_id = if let Some((existing_id, _)) = data.embedding_cache.get(hash) {
                 *existing_id
@@ -704,6 +704,17 @@ impl PostgresClientTrait for MockPostgresClient {
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
         let data = self.data.lock().unwrap();
         Ok(data.embedding_by_id.get(&embedding_id).cloned())
+    }
+
+    async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        let data = self.data.lock().unwrap();
+        Ok(data
+            .embedding_by_id
+            .get(&embedding_id)
+            .map(|emb| (emb.clone(), None)))
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {

@@ -12,7 +12,7 @@ use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 use twox_hash::XxHash3_128;
 use uuid::Uuid;
 
@@ -150,16 +150,26 @@ pub async fn process_entity_batch(
     let original_count = entities.len();
     let mut unique_entities = HashMap::new();
     for entity in entities {
-        if let Some(previous) = unique_entities.insert(entity.entity_id.clone(), entity) {
-            debug!(
-                "Duplicate entity_id detected in batch: {} in file {} (qualified_name: {})",
+        if let Some(previous) = unique_entities.insert(entity.entity_id.clone(), entity.clone()) {
+            warn!(
+                "Duplicate entity_id in batch (will keep last): {}\n\
+                 - First: {} (line {}-{}, type: {:?})\n\
+                 - Second: {} (line {}-{}, type: {:?})\n\
+                 File: {}",
                 previous.entity_id,
-                previous.file_path.display(),
-                previous.qualified_name
+                previous.qualified_name,
+                previous.location.start_line,
+                previous.location.end_line,
+                previous.entity_type,
+                entity.qualified_name,
+                entity.location.start_line,
+                entity.location.end_line,
+                entity.entity_type,
+                entity.file_path.display()
             );
         }
     }
-    let entities: Vec<CodeEntity> = unique_entities.into_values().collect();
+    let mut entities: Vec<CodeEntity> = unique_entities.into_values().collect();
 
     if entities.len() < original_count {
         info!(
@@ -168,6 +178,36 @@ pub async fn process_entity_batch(
             entities.len(),
             original_count - entities.len()
         );
+    }
+
+    // Sort by entity_id for deterministic ordering
+    entities.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
+
+    // Final safety check: validate no duplicates remain after deduplication
+    // This catches bugs in entity ID generation
+    let mut seen_ids: HashMap<&str, &CodeEntity> = HashMap::new();
+    for entity in &entities {
+        if let Some(existing) = seen_ids.insert(&entity.entity_id, entity) {
+            error!(
+                "CRITICAL BUG: Duplicate entity_id {} detected after deduplication!\n\
+                 Entity 1: {} in {} (type: {:?}, line: {})\n\
+                 Entity 2: {} in {} (type: {:?}, line: {})\n\
+                 This is a bug in entity ID generation - entity IDs must be unique.",
+                entity.entity_id,
+                existing.qualified_name,
+                existing.file_path.display(),
+                existing.entity_type,
+                existing.location.start_line,
+                entity.qualified_name,
+                entity.file_path.display(),
+                entity.entity_type,
+                entity.location.start_line
+            );
+            return Err(Error::entity_extraction(format!(
+                "Duplicate entity_id {} found after deduplication. This is a critical bug in entity extraction.",
+                entity.entity_id
+            )));
+        }
     }
 
     // collection_name is now passed as parameter
@@ -604,4 +644,219 @@ pub async fn mark_file_entities_deleted(
 
     info!("Marked {} entities as deleted and updated avgdl", count);
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codesearch_core::{
+        CodeEntity, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+    };
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn create_sample_function_entity() -> CodeEntity {
+        CodeEntity {
+            entity_id: Uuid::new_v4().to_string(),
+            repository_id: Uuid::new_v4().to_string(),
+            entity_type: EntityType::Function,
+            name: "handle_request".to_string(),
+            qualified_name: "my_crate::handlers::handle_request".to_string(),
+            parent_scope: None,
+            dependencies: vec![],
+            file_path: PathBuf::from("src/handlers.rs"),
+            location: SourceLocation {
+                start_line: 10,
+                end_line: 25,
+                start_column: 1,
+                end_column: 1,
+            },
+            visibility: Visibility::Public,
+            language: Language::Rust,
+            signature: Some(FunctionSignature {
+                parameters: vec![
+                    ("req".to_string(), Some("HttpRequest".to_string())),
+                    ("ctx".to_string(), Some("Context".to_string())),
+                ],
+                return_type: Some("Result<Response>".to_string()),
+                is_async: false,
+                generics: vec![],
+            }),
+            documentation_summary: Some(
+                "Handles incoming HTTP requests and returns responses".to_string(),
+            ),
+            content: Some("fn handle_request(req: HttpRequest, ctx: Context) -> Result<Response> {\n    // Implementation\n    Ok(Response::new())\n}".to_string()),
+            metadata: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_extracted_content_quality() {
+        let entity = create_sample_function_entity();
+        let content = extract_embedding_content(&entity);
+
+        // Verify all key components are present
+        assert!(
+            content.contains(&entity.name),
+            "Content should contain entity name"
+        );
+        assert!(
+            content.contains(&entity.qualified_name),
+            "Content should contain qualified name"
+        );
+        if let Some(doc) = entity.documentation_summary.as_ref() {
+            assert!(
+                content.contains(doc),
+                "Content should contain documentation"
+            );
+        }
+
+        // Verify signature components
+        assert!(
+            content.contains("req"),
+            "Content should contain parameter names"
+        );
+        assert!(
+            content.contains("HttpRequest"),
+            "Content should contain parameter types"
+        );
+        assert!(
+            content.contains("-> Result<Response>"),
+            "Content should contain return type"
+        );
+
+        // Verify entity content
+        assert!(
+            content.contains("fn handle_request"),
+            "Content should contain the actual code"
+        );
+
+        // Verify reasonable length (not empty, not excessively long)
+        assert!(content.len() > 50, "Content should be substantial");
+        assert!(
+            content.len() < 100_000,
+            "Content should not be excessively long"
+        );
+    }
+
+    #[test]
+    fn test_extracted_content_no_instruction_prefix() {
+        let entity = create_sample_function_entity();
+        let content = extract_embedding_content(&entity);
+
+        // Verify documents DO NOT use BGE instruction prefix
+        assert!(
+            !content.starts_with("<instruct>"),
+            "Documents should not have <instruct> prefix"
+        );
+        assert!(
+            !content.contains("<query>"),
+            "Documents should not have <query> prefix"
+        );
+
+        // Should start with entity type
+        assert!(
+            content.starts_with("Function "),
+            "Content should start with entity type"
+        );
+    }
+
+    #[test]
+    fn test_extracted_content_minimal_entity() {
+        let minimal_entity = CodeEntity {
+            entity_id: Uuid::new_v4().to_string(),
+            repository_id: Uuid::new_v4().to_string(),
+            entity_type: EntityType::Struct,
+            name: "Point".to_string(),
+            qualified_name: "geometry::Point".to_string(),
+            parent_scope: None,
+            dependencies: vec![],
+            file_path: PathBuf::from("src/geometry.rs"),
+            location: SourceLocation {
+                start_line: 5,
+                end_line: 8,
+                start_column: 1,
+                end_column: 1,
+            },
+            visibility: Visibility::Public,
+            language: Language::Rust,
+            signature: None,
+            documentation_summary: None,
+            content: None,
+            metadata: Default::default(),
+        };
+
+        let content = extract_embedding_content(&minimal_entity);
+
+        // Should still have basic structure
+        assert!(content.contains("Point"), "Content should contain name");
+        assert!(
+            content.contains("geometry::Point"),
+            "Content should contain qualified name"
+        );
+        assert!(
+            !content.is_empty(),
+            "Content should not be empty even for minimal entity"
+        );
+        assert!(
+            content.len() > 10,
+            "Content should have reasonable minimum length"
+        );
+    }
+
+    #[test]
+    fn test_extracted_content_with_special_characters() {
+        let entity = CodeEntity {
+            entity_id: Uuid::new_v4().to_string(),
+            repository_id: Uuid::new_v4().to_string(),
+            entity_type: EntityType::Function,
+            name: "test<T>".to_string(),
+            qualified_name: "crate::utils::test<T>".to_string(),
+            parent_scope: None,
+            dependencies: vec![],
+            file_path: PathBuf::from("src/utils.rs"),
+            location: SourceLocation {
+                start_line: 1,
+                end_line: 5,
+                start_column: 1,
+                end_column: 1,
+            },
+            visibility: Visibility::Public,
+            language: Language::Rust,
+            signature: None,
+            documentation_summary: Some("Test with \"quotes\" and\nnewlines".to_string()),
+            content: Some("fn test<T>() -> Result<T> { /* ... */ }".to_string()),
+            metadata: Default::default(),
+        };
+
+        let content = extract_embedding_content(&entity);
+
+        // Special characters should be preserved
+        assert!(
+            content.contains("<T>"),
+            "Content should preserve generic type parameters"
+        );
+        assert!(
+            content.contains("\"quotes\""),
+            "Content should preserve quotes"
+        );
+        assert!(
+            content.contains("newlines"),
+            "Content should preserve text across newlines"
+        );
+    }
+
+    #[test]
+    fn test_extracted_content_consistency() {
+        let entity = create_sample_function_entity();
+
+        // Extract multiple times to verify consistency
+        let content1 = extract_embedding_content(&entity);
+        let content2 = extract_embedding_content(&entity);
+
+        assert_eq!(
+            content1, content2,
+            "Content extraction should be deterministic"
+        );
+    }
 }

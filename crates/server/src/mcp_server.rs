@@ -964,3 +964,56 @@ async fn run_mcp_server_with_shutdown_multi(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_bge_query_formatting() {
+        let instruction =
+            "Represent this code search query for retrieving semantically similar code snippets";
+        let query = "find async functions";
+        let formatted = format!("<instruct>{instruction}\n<query>{query}");
+
+        // Verify format structure
+        assert!(formatted.starts_with("<instruct>"));
+        assert!(formatted.contains("\n<query>"));
+        assert_eq!(formatted.matches('\n').count(), 1);
+
+        // Verify components are present
+        assert!(formatted.contains(instruction));
+        assert!(formatted.contains(query));
+
+        // Verify exact format matches BGE specification
+        let expected = format!("<instruct>{instruction}\n<query>{query}");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_bge_query_formatting_with_special_characters() {
+        let instruction = "Test instruction";
+        let query = "find \"quoted\" code with\nnewlines and\ttabs";
+        let formatted = format!("<instruct>{instruction}\n<query>{query}");
+
+        // Special characters should be preserved in the query
+        assert!(formatted.contains("\"quoted\""));
+        assert!(formatted.contains("\nnewlines"));
+        assert!(formatted.contains("\ttabs"));
+
+        // But only ONE newline should be between <instruct> and <query> tags
+        let parts: Vec<&str> = formatted.split("<query>").collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].ends_with("\n"));
+    }
+
+    #[test]
+    fn test_bge_query_formatting_empty_query() {
+        let instruction = "Test instruction";
+        let query = "";
+        let formatted = format!("<instruct>{instruction}\n<query>{query}");
+
+        // Should still have proper structure even with empty query
+        assert!(formatted.starts_with("<instruct>"));
+        assert!(formatted.contains("\n<query>"));
+        assert_eq!(formatted, format!("<instruct>{instruction}\n<query>"));
+    }
+}

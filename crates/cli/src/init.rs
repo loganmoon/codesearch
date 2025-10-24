@@ -32,12 +32,13 @@ pub fn get_api_base_url_if_local_api(config: &Config) -> Option<&str> {
 /// 5. Generates collection name from repository path
 /// 6. Registers repository in Postgres or verifies existing registration
 /// 7. Creates embedding manager
-/// 8. Initializes Qdrant collection
+/// 8. Initializes Qdrant collection (or drops and recreates if force=true)
 ///
 /// Returns (Config, collection_name) tuple
 pub async fn ensure_storage_initialized(
     repo_root: &Path,
     config_path: Option<&Path>,
+    force: bool,
 ) -> Result<(Config, String)> {
     let current_dir = env::current_dir()?;
 
@@ -145,6 +146,55 @@ pub async fn ensure_storage_initialized(
         }
     };
 
+    // If force mode, delete all repository data to ensure clean rebuild
+    if force {
+        info!("Force mode enabled: deleting existing repository data...");
+
+        // Delete file snapshots
+        let deleted_snapshots =
+            sqlx::query("DELETE FROM file_entity_snapshots WHERE repository_id = $1")
+                .bind(repository_id)
+                .execute(postgres_client.get_pool())
+                .await
+                .context("Failed to delete file snapshots")?
+                .rows_affected();
+
+        info!("Deleted {} file snapshots", deleted_snapshots);
+
+        // Delete entities and related data
+        let deleted_entities = sqlx::query("DELETE FROM entity_metadata WHERE repository_id = $1")
+            .bind(repository_id)
+            .execute(postgres_client.get_pool())
+            .await
+            .context("Failed to delete entities")?
+            .rows_affected();
+
+        info!("Deleted {} entities", deleted_entities);
+
+        // Delete outbox entries for this repository
+        let deleted_outbox = sqlx::query("DELETE FROM entity_outbox WHERE collection_name = $1")
+            .bind(&collection_name)
+            .execute(postgres_client.get_pool())
+            .await
+            .context("Failed to delete outbox entries")?
+            .rows_affected();
+
+        info!("Deleted {} outbox entries", deleted_outbox);
+
+        // Reset BM25 statistics to defaults
+        sqlx::query(
+            "UPDATE repositories
+             SET bm25_avgdl = 50.0, bm25_total_tokens = 0, bm25_entity_count = 0, last_indexed_commit = NULL
+             WHERE repository_id = $1"
+        )
+        .bind(repository_id)
+        .execute(postgres_client.get_pool())
+        .await
+        .context("Failed to reset BM25 statistics")?;
+
+        info!("Reset BM25 statistics to defaults");
+    }
+
     // Create embedding manager to get dimensions
     let embedding_manager = crate::create_embedding_manager(&config).await?;
     let dimensions = embedding_manager.provider().embedding_dimension();
@@ -155,9 +205,14 @@ pub async fn ensure_storage_initialized(
         .await
         .context("Failed to create collection manager")?;
 
-    storage_init::initialize_collection(collection_manager.as_ref(), &collection_name, dimensions)
-        .await
-        .context("Failed to initialize collection")?;
+    storage_init::initialize_collection(
+        collection_manager.as_ref(),
+        &collection_name,
+        dimensions,
+        force,
+    )
+    .await
+    .context("Failed to initialize collection")?;
 
     // Perform health check
     storage_init::verify_storage_health(collection_manager.as_ref())

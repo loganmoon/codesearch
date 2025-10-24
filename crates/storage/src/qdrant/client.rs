@@ -176,8 +176,17 @@ impl StorageClient for QdrantStorageClient {
                 let entity_id = embedded.entity.entity_id.clone();
 
                 // Convert sparse vector format from Vec<(u32, f32)> to separate indices and values
+                // Defensive deduplication: Remove any duplicate indices that might have slipped through
+                use std::collections::HashSet;
+                let mut seen = HashSet::new();
+                let deduplicated: Vec<(u32, f32)> = embedded
+                    .sparse_embedding
+                    .into_iter()
+                    .filter(|(idx, _)| seen.insert(*idx))
+                    .collect();
+
                 let (sparse_indices, sparse_values): (Vec<u32>, Vec<f32>) =
-                    embedded.sparse_embedding.into_iter().unzip();
+                    deduplicated.into_iter().unzip();
 
                 // Build named vectors map
                 let mut vectors_map = std::collections::HashMap::new();

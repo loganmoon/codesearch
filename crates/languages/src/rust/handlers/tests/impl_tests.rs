@@ -433,3 +433,65 @@ impl Public {
     assert!(!public_methods.is_empty(), "Should have public methods");
     assert!(!private_methods.is_empty(), "Should have private methods");
 }
+
+#[test]
+fn test_multiple_impls_same_methods_unique_ids() {
+    let source = r#"
+struct Container<T> {
+    value: T,
+}
+
+impl<T> Container<T> {
+    fn new(value: T) -> Self {
+        Self { value }
+    }
+
+    fn get(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: Clone> Container<T> {
+    fn new(value: T) -> Self {  // Same name as line 6!
+        Self { value }
+    }
+
+    fn clone_value(&self) -> T {
+        self.value.clone()
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+        .expect("Failed to extract impl blocks");
+
+    // Find all 'new' methods
+    let new_methods: Vec<&CodeEntity> = entities
+        .iter()
+        .filter(|e| e.name == "new" && matches!(e.entity_type, EntityType::Method))
+        .collect();
+
+    assert_eq!(new_methods.len(), 2, "Should have 2 'new' methods");
+
+    // CRITICAL: Entity IDs must be different!
+    assert_ne!(
+        new_methods[0].entity_id,
+        new_methods[1].entity_id,
+        "Methods with same name in different impl blocks must have unique IDs.\n\
+         Method 1: {} (impl at line {})\n\
+         Method 2: {} (impl at line {})",
+        new_methods[0].qualified_name,
+        new_methods[0].location.start_line,
+        new_methods[1].qualified_name,
+        new_methods[1].location.start_line
+    );
+
+    // Qualified names should include impl line number
+    assert!(
+        new_methods[0].qualified_name.contains("impl at line")
+            || new_methods[1].qualified_name.contains("impl at line"),
+        "Qualified names should include impl block line number for uniqueness. Got: {} and {}",
+        new_methods[0].qualified_name,
+        new_methods[1].qualified_name
+    );
+}

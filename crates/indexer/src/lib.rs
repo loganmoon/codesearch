@@ -4,8 +4,8 @@
 //! for processing source code repositories.
 
 #![deny(warnings)]
-#![deny(clippy::unwrap_used)]
-#![deny(clippy::expect_used)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

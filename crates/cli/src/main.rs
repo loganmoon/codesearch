@@ -222,15 +222,12 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 }
 
 /// Index the repository
-async fn index_repository(
-    repo_root: &Path,
-    config_path: Option<&Path>,
-    _force: bool,
-) -> Result<()> {
+async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: bool) -> Result<()> {
     info!("Starting repository indexing");
 
     // Ensure storage is initialized (creates config, collection, runs migrations if needed)
-    let (config, collection_name) = ensure_storage_initialized(repo_root, config_path).await?;
+    let (config, collection_name) =
+        ensure_storage_initialized(repo_root, config_path, force).await?;
 
     // Create embedding manager
     let embedding_manager = create_embedding_manager(&config).await?;

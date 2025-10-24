@@ -76,7 +76,7 @@ async fn test_creates_config_file_if_missing() -> Result<()> {
     assert!(!config_path.exists(), "Config should not exist initially");
 
     // Call ensure_storage_initialized - this will auto-start infrastructure
-    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
+    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;
 
     assert!(
         result.is_ok(),
@@ -124,7 +124,7 @@ async fn test_generates_collection_name() -> Result<()> {
     config.save(&config_path)?;
 
     // Call ensure_storage_initialized - should generate collection_name
-    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
+    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;
     assert!(
         result.is_ok(),
         "Should successfully initialize: {:?}",
@@ -167,7 +167,7 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
     config.save(&config_path)?;
 
     // Call ensure_storage_initialized and verify it returns an error
-    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
+    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;
 
     assert!(
         result.is_err(),
@@ -213,7 +213,7 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
     config.save(&config_path)?;
 
     // This test will auto-start infrastructure (Qdrant), but Postgres connection will fail
-    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
+    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;
 
     assert!(
         result.is_err(),
@@ -251,7 +251,7 @@ async fn test_repository_registration_success() -> Result<()> {
         .output()?;
 
     // Call ensure_storage_initialized - full happy path
-    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path)).await;
+    let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;
 
     assert!(
         result.is_ok(),

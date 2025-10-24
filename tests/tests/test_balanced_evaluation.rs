@@ -373,7 +373,7 @@ async fn test_balanced_evaluation() -> Result<()> {
         .context("clap-eval repository not found")?;
 
     println!("Repository: {}", repo_path.display());
-    println!("Collection: {}\n", collection_name);
+    println!("Collection: {collection_name}\n");
 
     // Create clients
     let storage_client = create_storage_client(&config.storage, &collection_name).await?;
@@ -425,7 +425,7 @@ async fn test_balanced_evaluation() -> Result<()> {
         } else {
             query.bge_instruction.clone()
         };
-        println!("  Instruction: {}", instruction_preview);
+        println!("  Instruction: {instruction_preview}");
 
         // Run dense search (with embedding generation)
         let dense_start = Instant::now();
@@ -780,10 +780,10 @@ async fn test_balanced_evaluation() -> Result<()> {
             entity_type_coverage_dense_rerank: entity_coverage_dense_rerank,
             entity_type_coverage_hybrid: entity_coverage_hybrid,
             entity_type_coverage_hybrid_rerank: entity_coverage_hybrid_rerank,
-            concept_coverage_dense: concept_coverage_dense,
-            concept_coverage_dense_rerank: concept_coverage_dense_rerank,
-            concept_coverage_hybrid: concept_coverage_hybrid,
-            concept_coverage_hybrid_rerank: concept_coverage_hybrid_rerank,
+            concept_coverage_dense,
+            concept_coverage_dense_rerank,
+            concept_coverage_hybrid,
+            concept_coverage_hybrid_rerank,
         };
 
         if query.query_type == "semantic" {
@@ -1014,7 +1014,7 @@ async fn test_balanced_evaluation() -> Result<()> {
     println!("ANALYSIS:");
 
     // Find best configuration for semantic queries
-    let semantic_configs = vec![
+    let semantic_configs = [
         ("DENSE", report.semantic_avg_entity_coverage_dense),
         (
             "DENSE+RERANK",
@@ -1033,7 +1033,7 @@ async fn test_balanced_evaluation() -> Result<()> {
     println!("  Semantic queries benefit from: {}", best_semantic.0);
 
     // Find best configuration for keyword queries
-    let keyword_configs = vec![
+    let keyword_configs = [
         ("DENSE", report.keyword_avg_entity_coverage_dense),
         (
             "DENSE+RERANK",

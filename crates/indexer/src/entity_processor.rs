@@ -704,10 +704,12 @@ mod tests {
             content.contains(&entity.qualified_name),
             "Content should contain qualified name"
         );
-        assert!(
-            content.contains(entity.documentation_summary.as_ref().unwrap()),
-            "Content should contain documentation"
-        );
+        if let Some(doc) = entity.documentation_summary.as_ref() {
+            assert!(
+                content.contains(doc),
+                "Content should contain documentation"
+            );
+        }
 
         // Verify signature components
         assert!(

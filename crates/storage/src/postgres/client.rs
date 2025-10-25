@@ -55,6 +55,9 @@ pub type EmbeddingCacheEntry = (String, Vec<f32>, Option<Vec<(u32, f32)>>);
 /// Type alias for sparse embedding database row: (dense, sparse_indices, sparse_values)
 type SparseEmbeddingRow = (Vec<f32>, Option<Vec<i64>>, Option<Vec<f32>>);
 
+/// Type alias for validated sparse embedding arrays: (sparse_indices, sparse_values)
+type ValidatedSparseArrays = (Option<Vec<i64>>, Option<Vec<f32>>);
+
 /// Operation type for outbox pattern
 ///
 /// Represents the type of operation to be performed on the target data store.
@@ -1504,7 +1507,7 @@ impl PostgresClient {
         }
 
         // Validate and convert all sparse embeddings upfront
-        let validated_sparse: Result<Vec<(Option<Vec<i64>>, Option<Vec<f32>>)>> = cache_entries
+        let validated_sparse: Result<Vec<ValidatedSparseArrays>> = cache_entries
             .iter()
             .map(|(_, _, sparse_embedding)| {
                 sparse_embedding

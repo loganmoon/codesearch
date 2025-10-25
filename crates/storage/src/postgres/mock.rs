@@ -14,6 +14,12 @@ use super::{
     EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClientTrait, TargetStore,
 };
 
+/// Type alias for cached embedding entry: (embedding_id, dense, sparse)
+type CachedEmbedding = (i64, Vec<f32>, Option<Vec<(u32, f32)>>);
+
+/// Type alias for embedding data: (dense, sparse)
+type EmbeddingData = (Vec<f32>, Option<Vec<(u32, f32)>>);
+
 /// In-memory entity metadata
 #[derive(Debug, Clone)]
 struct EntityMetadata {
@@ -66,9 +72,9 @@ struct MockData {
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
-    embedding_cache: HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>, // content_hash -> (embedding_id, dense, sparse)
-    embedding_by_id: HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>, // embedding_id -> (dense, sparse)
-    embedding_id_counter: i64, // Auto-increment counter for embedding IDs
+    embedding_cache: HashMap<String, CachedEmbedding>, // content_hash -> (embedding_id, dense, sparse)
+    embedding_by_id: HashMap<i64, EmbeddingData>,      // embedding_id -> (dense, sparse)
+    embedding_id_counter: i64,                         // Auto-increment counter for embedding IDs
 }
 
 /// Mock PostgreSQL client for testing

@@ -294,6 +294,37 @@ impl PostgresClientTrait for MockPostgresClient {
             .collect())
     }
 
+    async fn drop_repository(&self, repository_id: Uuid) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+
+        // Check if repository exists
+        let repo_data = data.repositories.get(&repository_id).ok_or_else(|| {
+            codesearch_core::error::Error::storage(format!("Repository {repository_id} not found"))
+        })?;
+
+        let collection_name = repo_data.2.clone();
+
+        // Remove repository from maps
+        data.repositories.remove(&repository_id);
+        data.collection_to_repo.remove(&collection_name);
+
+        // Remove all entities for this repository
+        data.entities
+            .retain(|(repo_id, _), _| *repo_id != repository_id);
+
+        // Remove all snapshots for this repository
+        data.snapshots
+            .retain(|(repo_id, _), _| *repo_id != repository_id);
+
+        // Remove all outbox entries for this repository
+        data.outbox
+            .retain(|entry| entry.repository_id != repository_id);
+
+        tracing::info!("Deleted repository {repository_id} and all associated data");
+
+        Ok(())
+    }
+
     async fn get_bm25_statistics(&self, _repository_id: Uuid) -> Result<super::BM25Statistics> {
         Ok(super::BM25Statistics {
             avgdl: 50.0,

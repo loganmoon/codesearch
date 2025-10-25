@@ -12,11 +12,13 @@ use codesearch::{docker, infrastructure};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use codesearch_core::config::{Config, StorageConfig};
+use codesearch_core::config::Config;
 use codesearch_indexer::{Indexer, RepositoryIndexer};
+use dialoguer::{Confirm, Select};
 use std::env;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
+use uuid::Uuid;
 
 // Re-use create_embedding_manager from lib
 use codesearch::create_embedding_manager;
@@ -320,37 +322,82 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
     Ok(())
 }
 
-/// Drop all indexed data from storage
-async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
-    info!("Preparing to drop all indexed data");
+/// Repository selection result from TUI
+enum RepositorySelection {
+    /// Single repository selected by index
+    Single(usize),
+    /// All repositories selected
+    All,
+}
 
-    // Load configuration (doesn't need collection_name anymore)
-    let (config, _sources) = Config::load_layered(config_path)?;
-    config.validate()?;
-
-    // Generate collection name from repository path
-    let collection_name = StorageConfig::generate_collection_name(repo_root)?;
-
-    // Display warning
-    println!("\nWARNING: This will permanently delete all indexed data from:");
-    println!("  - Qdrant collection: {collection_name}");
-    let postgres_db = &config.storage.postgres_database;
-    println!("  - PostgreSQL database: {postgres_db}");
-    println!("\nThis action cannot be undone.");
-    print!("\nType 'yes' to confirm: ");
-
-    // Flush stdout and read confirmation
-    use std::io::{self, Write};
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    if input.trim() != "yes" {
-        println!("Operation cancelled.");
-        return Ok(());
+/// Display interactive repository selector
+///
+/// Returns the user's selection or error if interaction fails
+fn display_repository_selector(
+    repos: &[(Uuid, String, std::path::PathBuf)],
+) -> Result<RepositorySelection> {
+    if repos.is_empty() {
+        anyhow::bail!("No repositories available for selection");
     }
 
-    info!("User confirmed drop operation, proceeding...");
+    // Build display items: repository name and path
+    let mut items: Vec<String> = repos
+        .iter()
+        .map(|(_, name, path)| format!("{name} ({})", path.display()))
+        .collect();
+
+    // Add "All repositories" option at the end
+    items.push("All repositories".to_string());
+
+    // Display interactive selector
+    let selection = Select::new()
+        .with_prompt("Select repository to drop")
+        .items(&items)
+        .default(0)
+        .interact()
+        .map_err(|e| anyhow!("Failed to display selector: {e}"))?;
+
+    // Check if user selected "All repositories"
+    if selection == items.len() - 1 {
+        Ok(RepositorySelection::All)
+    } else {
+        Ok(RepositorySelection::Single(selection))
+    }
+}
+
+/// Display deletion warning for selected repositories
+fn display_deletion_warning(repos_to_delete: &[(Uuid, String, std::path::PathBuf)]) {
+    println!("\nWARNING: This will permanently delete the following:");
+    println!();
+
+    for (_, collection_name, repo_path) in repos_to_delete {
+        println!("  Repository: {}", repo_path.display());
+        println!("  Qdrant collection: {collection_name}");
+        println!("  PostgreSQL data: All entities, snapshots, and embeddings");
+        println!();
+    }
+
+    println!("This action cannot be undone.");
+}
+
+/// Confirm deletion with user
+///
+/// Returns true if user confirms, false if cancelled
+fn confirm_deletion() -> Result<bool> {
+    Confirm::new()
+        .with_prompt("Type 'yes' to confirm deletion")
+        .default(false)
+        .interact()
+        .map_err(|e| anyhow!("Failed to read confirmation: {e}"))
+}
+
+/// Drop indexed data with repository selection
+async fn drop_data(_repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
+    info!("Preparing to drop indexed data");
+
+    // Load configuration
+    let (config, _sources) = Config::load_layered(config_path)?;
+    config.validate()?;
 
     // Ensure dependencies are running
     if config.storage.auto_start_deps {
@@ -359,42 +406,93 @@ async fn drop_data(repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
 
-    // Create collection manager and delete collection if it exists
+    // Connect to storage backends
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to create PostgreSQL client")?;
     let collection_manager = codesearch_storage::create_collection_manager(&config.storage)
         .await
         .context("Failed to create collection manager")?;
 
-    if collection_manager
-        .collection_exists(&collection_name)
-        .await?
-    {
-        info!("Deleting Qdrant collection...");
-        collection_manager
-            .delete_collection(&collection_name)
-            .await
-            .context("Failed to delete Qdrant collection")?;
-        info!("Qdrant collection deleted successfully");
-    } else {
-        info!(
-            "Qdrant collection '{}' does not exist, skipping",
-            collection_name
-        );
+    // List all repositories
+    let all_repos = postgres_client
+        .list_all_repositories()
+        .await
+        .context("Failed to list repositories")?;
+
+    if all_repos.is_empty() {
+        println!("No indexed repositories found.");
+        return Ok(());
     }
 
-    // Drop PostgreSQL data
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to create PostgreSQL client")?;
+    // Display repository selector
+    let selection = display_repository_selector(&all_repos)?;
 
-    info!("Dropping PostgreSQL data...");
-    postgres_client
-        .drop_all_data()
-        .await
-        .context("Failed to drop PostgreSQL data")?;
-    info!("PostgreSQL data dropped successfully");
+    // Determine which repositories to delete based on selection
+    let repos_to_delete: Vec<_> = match selection {
+        RepositorySelection::All => all_repos,
+        RepositorySelection::Single(index) => vec![all_repos[index].clone()],
+    };
 
-    println!("\nAll indexed data has been successfully removed.");
-    println!("You can re-index the repository using 'codesearch index'.");
+    // Display warning with specifics
+    display_deletion_warning(&repos_to_delete);
+
+    // Confirm deletion
+    if !confirm_deletion()? {
+        println!("Operation cancelled.");
+        return Ok(());
+    }
+
+    info!("User confirmed drop operation, proceeding...");
+
+    // Delete selected repositories
+    for (repo_id, collection_name, repo_path) in &repos_to_delete {
+        info!(
+            "Deleting repository: {} (collection: {collection_name})",
+            repo_path.display()
+        );
+
+        // Delete from Qdrant first
+        if collection_manager
+            .collection_exists(collection_name)
+            .await?
+        {
+            collection_manager
+                .delete_collection(collection_name)
+                .await
+                .context(format!(
+                    "Failed to delete Qdrant collection {collection_name}"
+                ))?;
+            info!("Deleted Qdrant collection: {collection_name}");
+        } else {
+            // Warn but continue - Qdrant might be temporarily down or collection already deleted
+            warn!(
+                "Qdrant collection '{}' does not exist, skipping Qdrant deletion",
+                collection_name
+            );
+            println!(
+                "  Warning: Qdrant collection '{collection_name}' not found (may already be deleted)"
+            );
+        }
+
+        // Delete from Postgres (cascades to all child tables)
+        postgres_client
+            .drop_repository(*repo_id)
+            .await
+            .context(format!(
+                "Failed to delete repository data from PostgreSQL: {}",
+                repo_path.display()
+            ))?;
+        info!("Deleted repository {repo_id} from PostgreSQL");
+
+        println!("  Deleted: {}", repo_path.display());
+    }
+
+    println!(
+        "\nSuccessfully deleted {} repository(ies)",
+        repos_to_delete.len()
+    );
+    println!("You can re-index any repository using 'codesearch index'.");
 
     Ok(())
 }

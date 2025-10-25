@@ -22,6 +22,10 @@ codesearch-indexer = { path = "../indexer" }
 
 # CLI framework
 clap = { workspace = true }
+dialoguer = "0.11.0"
+
+# UUID
+uuid = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }

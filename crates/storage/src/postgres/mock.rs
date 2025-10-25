@@ -14,6 +14,12 @@ use super::{
     EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClientTrait, TargetStore,
 };
 
+/// Type alias for cached embedding entry: (embedding_id, dense, sparse)
+type CachedEmbedding = (i64, Vec<f32>, Option<Vec<(u32, f32)>>);
+
+/// Type alias for embedding data: (dense, sparse)
+type EmbeddingData = (Vec<f32>, Option<Vec<(u32, f32)>>);
+
 /// In-memory entity metadata
 #[derive(Debug, Clone)]
 struct EntityMetadata {
@@ -66,8 +72,8 @@ struct MockData {
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
-    embedding_cache: HashMap<String, (i64, Vec<f32>)>, // content_hash -> (embedding_id, embedding)
-    embedding_by_id: HashMap<i64, Vec<f32>>,           // embedding_id -> embedding
+    embedding_cache: HashMap<String, CachedEmbedding>, // content_hash -> (embedding_id, dense, sparse)
+    embedding_by_id: HashMap<i64, EmbeddingData>,      // embedding_id -> (dense, sparse)
     embedding_id_counter: i64,                         // Auto-increment counter for embedding IDs
 }
 
@@ -460,6 +466,7 @@ impl PostgresClientTrait for MockPostgresClient {
         repository_id: Uuid,
         _collection_name: &str,
         entity_ids: &[String],
+        _token_counts: &[usize],
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
@@ -540,7 +547,6 @@ impl PostgresClientTrait for MockPostgresClient {
             target_store,
             git_commit_hash,
             _token_count,
-            sparse_embedding,
         ) in entities
         {
             // Store entity metadata
@@ -559,7 +565,6 @@ impl PostgresClientTrait for MockPostgresClient {
             let payload = serde_json::json!({
                 "entity": entity,
                 "qdrant_point_id": point_id.to_string(),
-                "sparse_embedding": sparse_embedding
             });
 
             data.outbox.push(MockOutboxEntry {
@@ -654,15 +659,19 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn get_embeddings_by_content_hash(
         &self,
+        _repository_id: Uuid,
         content_hashes: &[String],
         _model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         let data = self.data.lock().unwrap();
         let mut result = std::collections::HashMap::new();
 
         for hash in content_hashes {
-            if let Some((embedding_id, embedding)) = data.embedding_cache.get(hash) {
-                result.insert(hash.clone(), (*embedding_id, embedding.clone()));
+            if let Some((embedding_id, embedding, sparse)) = data.embedding_cache.get(hash) {
+                result.insert(
+                    hash.clone(),
+                    (*embedding_id, embedding.clone(), sparse.clone()),
+                );
             }
         }
 
@@ -671,26 +680,28 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        _repository_id: Uuid,
+        cache_entries: &[super::EmbeddingCacheEntry],
         _model_version: &str,
         _dimension: usize,
     ) -> Result<Vec<i64>> {
         let mut data = self.data.lock().unwrap();
         let mut embedding_ids = Vec::with_capacity(cache_entries.len());
 
-        for (hash, embedding) in cache_entries {
+        for (hash, embedding, sparse) in cache_entries {
             // Check if this content_hash already exists (deduplication)
-            let embedding_id = if let Some((existing_id, _)) = data.embedding_cache.get(hash) {
+            let embedding_id = if let Some((existing_id, _, _)) = data.embedding_cache.get(hash) {
                 *existing_id
             } else {
                 // Generate new auto-increment ID
                 data.embedding_id_counter += 1;
                 let new_id = data.embedding_id_counter;
 
-                // Store in both maps
+                // Store in both maps with sparse embeddings
                 data.embedding_cache
-                    .insert(hash.clone(), (new_id, embedding.clone()));
-                data.embedding_by_id.insert(new_id, embedding.clone());
+                    .insert(hash.clone(), (new_id, embedding.clone(), sparse.clone()));
+                data.embedding_by_id
+                    .insert(new_id, (embedding.clone(), sparse.clone()));
 
                 new_id
             };
@@ -702,6 +713,17 @@ impl PostgresClientTrait for MockPostgresClient {
     }
 
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
+        let data = self.data.lock().unwrap();
+        Ok(data
+            .embedding_by_id
+            .get(&embedding_id)
+            .map(|(dense, _sparse)| dense.clone()))
+    }
+
+    async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         let data = self.data.lock().unwrap();
         Ok(data.embedding_by_id.get(&embedding_id).cloned())
     }
@@ -904,6 +926,7 @@ mod tests {
                 repo_id,
                 "test_collection",
                 &[entity.entity_id.clone()],
+                &[42], // token count
             )
             .await
             .unwrap();
@@ -969,6 +992,7 @@ mod tests {
                 repo_id,
                 "test_collection",
                 &[entity.entity_id.clone()],
+                &[42], // token count
             )
             .await
             .unwrap();

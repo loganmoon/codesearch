@@ -123,7 +123,12 @@ async fn test_outbox_entries_can_be_created_and_queried() {
     // Store embedding in cache to get its ID
     let content_hash = format!("{:032x}", 123456u128); // Dummy hash for test
     let embedding_ids = postgres_client
-        .store_embeddings(&[(content_hash, embedding)], "test-model", 1536)
+        .store_embeddings(
+            repo_id,
+            &[(content_hash, embedding, None)],
+            "test-model",
+            1536,
+        )
         .await
         .expect("Failed to store embedding");
     let embedding_id = embedding_ids[0];
@@ -136,8 +141,7 @@ async fn test_outbox_entries_can_be_created_and_queried() {
         point_id,
         TargetStore::Qdrant,
         None,
-        50,     // token_count
-        vec![], // sparse_embedding
+        50, // token_count
     )];
 
     postgres_client

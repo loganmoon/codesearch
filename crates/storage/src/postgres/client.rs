@@ -5,6 +5,59 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Maximum sparse embedding size to prevent memory exhaustion attacks
+const MAX_SPARSE_EMBEDDING_SIZE: usize = 100_000;
+
+/// Convert sparse embedding to separate indices and values arrays for PostgreSQL storage
+/// PostgreSQL BIGINT[] can safely store all u32 values (0 to 4,294,967,295)
+/// Returns an error if the sparse embedding exceeds MAX_SPARSE_EMBEDDING_SIZE
+fn sparse_embedding_to_arrays(sparse: &[(u32, f32)]) -> Result<(Vec<i64>, Vec<f32>)> {
+    if sparse.len() > MAX_SPARSE_EMBEDDING_SIZE {
+        return Err(Error::storage(format!(
+            "Sparse embedding size {} exceeds maximum allowed size {MAX_SPARSE_EMBEDDING_SIZE}",
+            sparse.len()
+        )));
+    }
+
+    let (indices, values): (Vec<u32>, Vec<f32>) = sparse.iter().copied().unzip();
+    let indices_i64: Vec<i64> = indices.into_iter().map(|idx| idx as i64).collect();
+    Ok((indices_i64, values))
+}
+
+/// Convert separate indices and values arrays from PostgreSQL back to sparse embedding
+/// Returns an error if the arrays have mismatched lengths or exceed MAX_SPARSE_EMBEDDING_SIZE
+fn arrays_to_sparse_embedding(indices: Vec<i64>, values: Vec<f32>) -> Result<Vec<(u32, f32)>> {
+    if indices.len() != values.len() {
+        return Err(Error::storage(format!(
+            "Sparse embedding indices length {} does not match values length {}",
+            indices.len(),
+            values.len()
+        )));
+    }
+
+    if indices.len() > MAX_SPARSE_EMBEDDING_SIZE {
+        return Err(Error::storage(format!(
+            "Sparse embedding size {} exceeds maximum allowed size {MAX_SPARSE_EMBEDDING_SIZE}",
+            indices.len()
+        )));
+    }
+
+    Ok(indices
+        .into_iter()
+        .zip(values)
+        .map(|(idx, val)| (idx as u32, val))
+        .collect())
+}
+
+/// Type alias for embedding cache entry: (content_hash, dense_embedding, sparse_embedding)
+pub type EmbeddingCacheEntry = (String, Vec<f32>, Option<Vec<(u32, f32)>>);
+
+/// Type alias for sparse embedding database row: (dense, sparse_indices, sparse_values)
+type SparseEmbeddingRow = (Vec<f32>, Option<Vec<i64>>, Option<Vec<f32>>);
+
+/// Type alias for validated sparse embedding arrays: (sparse_indices, sparse_values)
+type ValidatedSparseArrays = (Option<Vec<i64>>, Option<Vec<f32>>);
+
 /// Operation type for outbox pattern
 ///
 /// Represents the type of operation to be performed on the target data store.
@@ -116,13 +169,12 @@ pub struct OutboxEntry {
 /// Type alias for a single entity batch entry with outbox data
 pub type EntityOutboxBatchEntry<'a> = (
     &'a CodeEntity,
-    i64, // embedding_id (dense)
+    i64, // embedding_id (now includes both dense and sparse in entity_embeddings table)
     OutboxOperation,
     Uuid, // qdrant_point_id
     TargetStore,
-    Option<String>,  // git_commit_hash
-    usize,           // bm25_token_count
-    Vec<(u32, f32)>, // sparse_embedding
+    Option<String>, // git_commit_hash
+    usize,          // bm25_token_count
 );
 
 pub struct PostgresClient {
@@ -867,11 +919,15 @@ impl PostgresClient {
     }
 
     /// Mark entities as deleted and create outbox entries in a single transaction
+    ///
+    /// Token counts are stored in the outbox payload for later BM25 statistics update
+    /// by the outbox processor.
     pub async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
         collection_name: &str,
         entity_ids: &[String],
+        token_counts: &[usize],
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
@@ -883,6 +939,15 @@ impl PostgresClient {
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
                 self.max_entity_batch_size
+            )));
+        }
+
+        // Validate token_counts length matches entity_ids
+        if token_counts.len() != entity_ids.len() {
+            return Err(Error::storage(format!(
+                "Token counts length {} does not match entity_ids length {}",
+                token_counts.len(),
+                entity_ids.len()
             )));
         }
 
@@ -937,13 +1002,23 @@ impl PostgresClient {
                 .collect();
 
             if !existing_entity_ids.is_empty() {
+                // Build entity_id to token_count map for looking up token counts
+                let token_count_map: std::collections::HashMap<&String, usize> = entity_ids
+                    .iter()
+                    .zip(token_counts.iter())
+                    .map(|(id, &count)| (id, count))
+                    .collect();
+
                 let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
                     "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
                 );
 
                 outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    // Look up token count for this entity_id
+                    let token_count = token_count_map.get(entity_id).copied().unwrap_or(0);
                     let payload = serde_json::json!({
                         "entity_ids": [entity_id],
+                        "token_counts": [token_count],
                         "reason": "file_change"
                     });
                     b.push_bind(repository_id)
@@ -968,7 +1043,7 @@ impl PostgresClient {
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
         tracing::info!(
-            "Marked {} entities as deleted with outbox entries",
+            "Marked {} entities as deleted with outbox entries (token counts stored in payload)",
             update_result.rows_affected()
         );
 
@@ -1005,16 +1080,7 @@ impl PostgresClient {
         let validated_entities: Result<Vec<_>> = entities
             .iter()
             .map(
-                |(
-                    entity,
-                    embedding,
-                    op,
-                    point_id,
-                    target,
-                    git_commit,
-                    token_count,
-                    sparse_embedding,
-                )| {
+                |(entity, embedding, op, point_id, target, git_commit, token_count)| {
                     let entity_json = serde_json::to_value(entity)
                         .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
@@ -1031,7 +1097,6 @@ impl PostgresClient {
                         target,
                         git_commit,
                         token_count,
-                        sparse_embedding,
                         entity_json,
                         file_path_str,
                     ))
@@ -1061,7 +1126,6 @@ impl PostgresClient {
                 _target,
                 git_commit,
                 token_count,
-                _sparse_embedding,
                 entity_json,
                 file_path_str,
             )| {
@@ -1126,14 +1190,12 @@ impl PostgresClient {
                 target,
                 _git_commit,
                 _token_count,
-                sparse_embedding,
                 entity_json,
                 _file_path_str,
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
                     "qdrant_point_id": point_id.to_string(),
-                    "sparse_embedding": sparse_embedding
                 });
 
                 b.push_bind(repository_id)
@@ -1351,12 +1413,13 @@ impl PostgresClient {
         Ok(())
     }
 
-    /// Get embeddings by content hashes, returning (embedding_id, embedding) tuples
+    /// Get embeddings by content hashes, returning (embedding_id, dense_embedding, sparse_embedding) tuples
     pub async fn get_embeddings_by_content_hash(
         &self,
+        repository_id: Uuid,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         if content_hashes.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
@@ -1372,8 +1435,10 @@ impl PostgresClient {
 
         // Build query with IN clause
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "SELECT id, content_hash, embedding FROM entity_embeddings WHERE model_version = ",
+            "SELECT id, content_hash, embedding, sparse_indices, sparse_values FROM entity_embeddings WHERE repository_id = ",
         );
+        query_builder.push_bind(repository_id);
+        query_builder.push(" AND model_version = ");
         query_builder.push_bind(model_version);
         query_builder.push(" AND content_hash IN (");
 
@@ -1402,8 +1467,19 @@ impl PostgresClient {
             let embedding: Vec<f32> = row
                 .try_get("embedding")
                 .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
+            let sparse_indices: Option<Vec<i64>> = row
+                .try_get("sparse_indices")
+                .map_err(|e| Error::storage(format!("Failed to extract sparse_indices: {e}")))?;
+            let sparse_values: Option<Vec<f32>> = row
+                .try_get("sparse_values")
+                .map_err(|e| Error::storage(format!("Failed to extract sparse_values: {e}")))?;
 
-            result.insert(content_hash, (id, embedding));
+            let sparse_embedding = match (sparse_indices, sparse_values) {
+                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)?),
+                _ => None,
+            };
+
+            result.insert(content_hash, (id, embedding, sparse_embedding));
         }
 
         Ok(result)
@@ -1412,7 +1488,8 @@ impl PostgresClient {
     /// Store embeddings in entity_embeddings table, returning their IDs
     pub async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        repository_id: Uuid,
+        cache_entries: &[EmbeddingCacheEntry],
         model_version: &str,
         dimension: usize,
     ) -> Result<Vec<i64>> {
@@ -1429,6 +1506,19 @@ impl PostgresClient {
             )));
         }
 
+        // Validate and convert all sparse embeddings upfront
+        let validated_sparse: Result<Vec<ValidatedSparseArrays>> = cache_entries
+            .iter()
+            .map(|(_, _, sparse_embedding)| {
+                sparse_embedding
+                    .as_ref()
+                    .map(|s| sparse_embedding_to_arrays(s).map(|(i, v)| (Some(i), Some(v))))
+                    .transpose()
+                    .map(|opt| opt.unwrap_or((None, None)))
+            })
+            .collect();
+        let validated_sparse = validated_sparse?;
+
         let mut tx = self
             .pool
             .begin()
@@ -1437,18 +1527,24 @@ impl PostgresClient {
 
         // Build bulk INSERT with ON CONFLICT DO NOTHING
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_embeddings (content_hash, embedding, model_version, dimension, created_at) "
+            "INSERT INTO entity_embeddings (repository_id, content_hash, embedding, sparse_indices, sparse_values, model_version, dimension, created_at) "
         );
 
-        query_builder.push_values(cache_entries, |mut b, (content_hash, embedding)| {
-            b.push_bind(content_hash)
-                .push_bind(embedding)
-                .push_bind(model_version)
-                .push_bind(dimension as i32)
-                .push("NOW()");
-        });
+        query_builder.push_values(
+            cache_entries.iter().zip(validated_sparse.iter()),
+            |mut b, ((content_hash, embedding, _), (sparse_indices, sparse_values))| {
+                b.push_bind(repository_id)
+                    .push_bind(content_hash)
+                    .push_bind(embedding)
+                    .push_bind(sparse_indices)
+                    .push_bind(sparse_values)
+                    .push_bind(model_version)
+                    .push_bind(dimension as i32)
+                    .push("NOW()");
+            },
+        );
 
-        query_builder.push(" ON CONFLICT (content_hash) DO NOTHING RETURNING id");
+        query_builder.push(" ON CONFLICT (repository_id, content_hash) DO NOTHING RETURNING id");
 
         // Execute and get IDs for newly inserted rows
         let inserted_ids: Vec<i64> = query_builder
@@ -1464,13 +1560,15 @@ impl PostgresClient {
         } else {
             // Some entries already existed, need to fetch and order correctly
             let mut fetch_query: QueryBuilder<Postgres> = QueryBuilder::new(
-                "SELECT content_hash, id FROM entity_embeddings WHERE model_version = ",
+                "SELECT content_hash, id FROM entity_embeddings WHERE repository_id = ",
             );
+            fetch_query.push_bind(repository_id);
+            fetch_query.push(" AND model_version = ");
             fetch_query.push_bind(model_version);
             fetch_query.push(" AND content_hash IN (");
 
             let mut separated = fetch_query.separated(", ");
-            for (hash, _) in cache_entries {
+            for (hash, _, _) in cache_entries {
                 separated.push_bind(hash);
             }
             separated.push_unseparated(")");
@@ -1493,7 +1591,7 @@ impl PostgresClient {
 
             // Return IDs in the same order as input cache_entries
             let mut ordered_ids = Vec::with_capacity(cache_entries.len());
-            for (hash, _) in cache_entries {
+            for (hash, _, _) in cache_entries {
                 let id = hash_to_id.get(hash).ok_or_else(|| {
                     Error::storage(format!(
                         "Embedding ID not found for content_hash: {hash} (this should not happen)"
@@ -1522,6 +1620,32 @@ impl PostgresClient {
                 .map_err(|e| Error::storage(format!("Failed to get embedding by ID: {e}")))?;
 
         Ok(record.map(|(embedding,)| embedding))
+    }
+
+    /// Fetch both dense and sparse embeddings by ID from entity_embeddings table
+    pub async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        let record: Option<SparseEmbeddingRow> = sqlx::query_as(
+            "SELECT embedding, sparse_indices, sparse_values FROM entity_embeddings WHERE id = $1",
+        )
+        .bind(embedding_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get embeddings by ID: {e}")))?;
+
+        record
+            .map(|(dense, sparse_indices, sparse_values)| {
+                let sparse = match (sparse_indices, sparse_values) {
+                    (Some(indices), Some(values)) => {
+                        Some(arrays_to_sparse_embedding(indices, values)?)
+                    }
+                    _ => None,
+                };
+                Ok((dense, sparse))
+            })
+            .transpose()
     }
 
     /// Get cache statistics
@@ -1751,9 +1875,15 @@ impl super::PostgresClientTrait for PostgresClient {
         repository_id: Uuid,
         collection_name: &str,
         entity_ids: &[String],
+        token_counts: &[usize],
     ) -> Result<()> {
-        self.mark_entities_deleted_with_outbox(repository_id, collection_name, entity_ids)
-            .await
+        self.mark_entities_deleted_with_outbox(
+            repository_id,
+            collection_name,
+            entity_ids,
+            token_counts,
+        )
+        .await
     }
 
     async fn store_entities_with_outbox_batch(
@@ -1798,25 +1928,34 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_embeddings_by_content_hash(
         &self,
+        repository_id: Uuid,
         content_hashes: &[String],
         model_version: &str,
-    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>)>> {
-        self.get_embeddings_by_content_hash(content_hashes, model_version)
+    ) -> Result<std::collections::HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        self.get_embeddings_by_content_hash(repository_id, content_hashes, model_version)
             .await
     }
 
     async fn store_embeddings(
         &self,
-        cache_entries: &[(String, Vec<f32>)],
+        repository_id: Uuid,
+        cache_entries: &[(String, Vec<f32>, Option<Vec<(u32, f32)>>)],
         model_version: &str,
         dimension: usize,
     ) -> Result<Vec<i64>> {
-        self.store_embeddings(cache_entries, model_version, dimension)
+        self.store_embeddings(repository_id, cache_entries, model_version, dimension)
             .await
     }
 
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
         self.get_embedding_by_id(embedding_id).await
+    }
+
+    async fn get_embedding_with_sparse_by_id(
+        &self,
+        embedding_id: i64,
+    ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        self.get_embedding_with_sparse_by_id(embedding_id).await
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
@@ -1825,5 +1964,107 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
         self.clear_cache(model_version).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_empty() {
+        let sparse: Vec<(u32, f32)> = vec![];
+        let result = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(result.0.len(), 0);
+        assert_eq!(result.1.len(), 0);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_simple() {
+        let sparse = vec![(0, 1.0), (5, 2.5), (100, 0.5)];
+        let (indices, values) = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(indices, vec![0, 5, 100]);
+        assert_eq!(values, vec![1.0, 2.5, 0.5]);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_large_indices() {
+        let sparse = vec![(u32::MAX, 1.0), (u32::MAX - 1, 2.0)];
+        let (indices, values) = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(indices, vec![u32::MAX as i64, (u32::MAX - 1) as i64]);
+        assert_eq!(values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_exceeds_max_size() {
+        let sparse: Vec<(u32, f32)> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1)
+            .map(|i| (i as u32, 1.0))
+            .collect();
+        let result = sparse_embedding_to_arrays(&sparse);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("exceeds maximum allowed size"));
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_empty() {
+        let indices: Vec<i64> = vec![];
+        let values: Vec<f32> = vec![];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_simple() {
+        let indices = vec![0, 5, 100];
+        let values = vec![1.0, 2.5, 0.5];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result, vec![(0, 1.0), (5, 2.5), (100, 0.5)]);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_large_indices() {
+        let indices = vec![u32::MAX as i64, (u32::MAX - 1) as i64];
+        let values = vec![1.0, 2.0];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result, vec![(u32::MAX, 1.0), (u32::MAX - 1, 2.0)]);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_mismatched_lengths() {
+        let indices = vec![0, 1, 2];
+        let values = vec![1.0, 2.0]; // One less value
+        let result = arrays_to_sparse_embedding(indices, values);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("does not match"));
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_exceeds_max_size() {
+        let indices: Vec<i64> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1)
+            .map(|i| i as i64)
+            .collect();
+        let values: Vec<f32> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1).map(|_| 1.0).collect();
+        let result = arrays_to_sparse_embedding(indices, values);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("exceeds maximum allowed size"));
+    }
+
+    #[test]
+    fn test_round_trip_conversion() {
+        let original = vec![(0, 1.0), (42, 2.5), (1000, 0.1), (u32::MAX, 3.0)];
+        let (indices, values) = sparse_embedding_to_arrays(&original).unwrap();
+        let recovered = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn test_round_trip_conversion_empty() {
+        let original: Vec<(u32, f32)> = vec![];
+        let (indices, values) = sparse_embedding_to_arrays(&original).unwrap();
+        let recovered = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(original, recovered);
     }
 }

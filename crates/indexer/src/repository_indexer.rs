@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
-use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
+use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -467,7 +467,7 @@ async fn stage_generate_embeddings(
         // Batch lookup cached embeddings
         let model_version = embedding_manager.model_version();
         let cached_embeddings = postgres_client
-            .get_embeddings_by_content_hash(&content_hashes, model_version)
+            .get_embeddings_by_content_hash(batch.repo_id, &content_hashes, model_version)
             .await
             .unwrap_or_else(|e| {
                 tracing::warn!(
@@ -480,6 +480,7 @@ async fn stage_generate_embeddings(
         // Initialize result vectors
         let mut all_embeddings: Vec<Option<Vec<f32>>> = vec![None; texts.len()];
         let mut all_embedding_ids: Vec<Option<i64>> = vec![None; texts.len()];
+        let mut all_sparse_embeddings: Vec<Option<Vec<(u32, f32)>>> = vec![None; texts.len()];
 
         // Separate cache hits from misses, populating results directly
         let mut cache_hit_count = 0;
@@ -487,10 +488,13 @@ async fn stage_generate_embeddings(
         let mut cache_miss_texts: Vec<String> = Vec::new();
 
         for (idx, (text, content_hash)) in texts.iter().zip(content_hashes.iter()).enumerate() {
-            if let Some((embedding_id, cached_embedding)) = cached_embeddings.get(content_hash) {
+            if let Some((embedding_id, cached_embedding, cached_sparse)) =
+                cached_embeddings.get(content_hash)
+            {
                 // Directly populate results for cache hits
                 all_embeddings[idx] = Some(cached_embedding.clone());
                 all_embedding_ids[idx] = Some(*embedding_id);
+                all_sparse_embeddings[idx] = cached_sparse.clone();
                 cache_hit_count += 1;
             } else {
                 cache_miss_indices.push(idx);
@@ -518,7 +522,7 @@ async fn stage_generate_embeddings(
             );
 
             let new_embeddings = embedding_manager
-                .embed(cache_miss_texts)
+                .embed(cache_miss_texts.clone())
                 .await
                 .map_err(|e| {
                     error!(
@@ -529,21 +533,53 @@ async fn stage_generate_embeddings(
                 })
                 .storage_err("Failed to generate embeddings")?;
 
-            // Fill in newly generated embeddings
+            // Fill in newly generated dense embeddings
             for (miss_idx, emb_opt) in cache_miss_indices.iter().zip(new_embeddings.iter()) {
                 if let Some(embedding) = emb_opt {
                     all_embeddings[*miss_idx] = Some(embedding.clone());
                 }
             }
 
-            // Store newly generated embeddings in cache
-            let embeddings_to_store: Vec<(String, Vec<f32>)> = cache_miss_indices
+            // Generate sparse embeddings for cache misses only
+            info!(
+                "Stage 3: Generating {} sparse embeddings for cache misses",
+                cache_miss_count
+            );
+
+            let bm25_stats = postgres_client
+                .get_bm25_statistics(batch.repo_id)
+                .await
+                .storage_err("Failed to get BM25 statistics")?;
+
+            let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
+                .storage_err("Failed to create sparse embedding manager")?;
+
+            let new_sparse_embeddings = sparse_manager
+                .embed_sparse(cache_miss_texts.iter().map(|s| s.as_str()).collect())
+                .await
+                .storage_err("Failed to generate sparse embeddings for cache misses")?;
+
+            // Fill in newly generated sparse embeddings
+            for (miss_idx, sparse_opt) in
+                cache_miss_indices.iter().zip(new_sparse_embeddings.iter())
+            {
+                if let Some(sparse) = sparse_opt {
+                    all_sparse_embeddings[*miss_idx] = Some(sparse.clone());
+                }
+            }
+
+            // Store both dense and sparse embeddings in cache
+            let embeddings_to_store: Vec<EmbeddingCacheEntry> = cache_miss_indices
                 .iter()
-                .zip(new_embeddings.iter())
-                .filter_map(|(idx, emb_opt)| {
-                    emb_opt
-                        .as_ref()
-                        .map(|emb| (content_hashes[*idx].clone(), emb.clone()))
+                .zip(new_embeddings.iter().zip(new_sparse_embeddings.iter()))
+                .filter_map(|(idx, (emb_opt, sparse_opt))| {
+                    emb_opt.as_ref().map(|emb| {
+                        (
+                            content_hashes[*idx].clone(),
+                            emb.clone(),
+                            sparse_opt.clone(),
+                        )
+                    })
                 })
                 .collect();
 
@@ -551,7 +587,12 @@ async fn stage_generate_embeddings(
                 let dimension = embeddings_to_store[0].1.len();
 
                 let new_embedding_ids = postgres_client
-                    .store_embeddings(&embeddings_to_store, model_version, dimension)
+                    .store_embeddings(
+                        batch.repo_id,
+                        &embeddings_to_store,
+                        model_version,
+                        dimension,
+                    )
                     .await
                     .storage_err("Failed to store embeddings")?;
 
@@ -573,29 +614,14 @@ async fn stage_generate_embeddings(
         }
 
         let successful_embeddings = all_embeddings.iter().filter(|e| e.is_some()).count();
+        let successful_sparse = all_sparse_embeddings.iter().filter(|e| e.is_some()).count();
         info!(
-            "Stage 3: Successfully obtained {} embeddings ({} skipped)",
+            "Stage 3: Successfully obtained {} embeddings and {} sparse embeddings ({} dense skipped, {} sparse skipped)",
             successful_embeddings,
-            texts.len() - successful_embeddings
+            successful_sparse,
+            texts.len() - successful_embeddings,
+            texts.len() - successful_sparse
         );
-
-        // Generate sparse embeddings for BM25
-        info!("Stage 3: Generating {} sparse embeddings", texts.len());
-
-        // Get current avgdl for sparse embedding generation
-        let bm25_stats = postgres_client
-            .get_bm25_statistics(batch.repo_id)
-            .await
-            .storage_err("Failed to get BM25 statistics")?;
-
-        // Create sparse embedding manager with current avgdl
-        let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
-            .storage_err("Failed to create sparse embedding manager")?;
-
-        let sparse_embeddings = sparse_manager
-            .embed_sparse(texts.iter().map(|s| s.as_str()).collect())
-            .await
-            .storage_err("Failed to generate sparse embeddings")?;
 
         // Create triples of (entity, embedding_id, sparse_embedding), tracking which indices survived
         let mut triples = Vec::new();
@@ -608,7 +634,7 @@ async fn stage_generate_embeddings(
                 all_embeddings
                     .into_iter()
                     .zip(all_embedding_ids.into_iter())
-                    .zip(sparse_embeddings.into_iter()),
+                    .zip(all_sparse_embeddings.into_iter()),
             )
             .enumerate()
         {
@@ -728,7 +754,7 @@ async fn stage_store_entities(
             // Clone git_commit once for the chunk instead of per entity
             let git_commit = batch.git_commit.clone();
 
-            for (idx, (entity, embedding_id, sparse_embedding)) in
+            for (idx, (entity, embedding_id, _sparse_embedding)) in
                 deduplicated_chunk.iter().enumerate()
             {
                 let (point_id, operation) = if let Some((existing_point_id, deleted_at)) =
@@ -751,7 +777,6 @@ async fn stage_store_entities(
                     TargetStore::Qdrant,
                     git_commit.clone(),
                     token_counts[idx],
-                    sparse_embedding.clone(),
                 ));
             }
 
@@ -932,8 +957,25 @@ async fn stage_update_snapshots(
             "Stage 5: Marking {} total stale entities as deleted",
             all_stale_ids.len()
         );
+
+        // Fetch token counts for stale entities before deletion
+        let entity_refs: Vec<(Uuid, String)> = all_stale_ids
+            .iter()
+            .map(|entity_id| (repo_id, entity_id.clone()))
+            .collect();
+
+        let token_counts = postgres_client
+            .get_entity_token_counts(&entity_refs)
+            .await
+            .storage_err("Failed to get entity token counts")?;
+
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, &collection_name, &all_stale_ids)
+            .mark_entities_deleted_with_outbox(
+                repo_id,
+                &collection_name,
+                &all_stale_ids,
+                &token_counts,
+            )
             .await
             .storage_err("Failed to mark entities as deleted")?;
     }

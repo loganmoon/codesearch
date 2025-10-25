@@ -136,6 +136,9 @@ impl OutboxProcessor {
     /// 3. On Qdrant failure, entire batch rolls back
     /// 4. Entries exceeding retry limits are marked processed
     /// 5. Global ordering by created_at ensures fairness across collections
+    /// 6. BM25 statistics are updated atomically with Qdrant writes:
+    ///    - INSERT/UPDATE: Stats incremented after successful Qdrant write
+    ///    - DELETE: Stats decremented after successful Qdrant deletion
     ///
     /// # Error Handling
     /// - Qdrant failures: Rollback transaction, record failures separately
@@ -288,6 +291,24 @@ impl OutboxProcessor {
 
             // Process DELETE operations
             if !delete_entries.is_empty() {
+                // Extract token counts from DELETE payloads for BM25 stats update
+                let mut repo_token_counts: std::collections::HashMap<Uuid, Vec<usize>> =
+                    std::collections::HashMap::new();
+                for entry in &delete_entries {
+                    if let Some(token_counts_json) = entry.payload.get("token_counts") {
+                        if let Ok(token_counts) =
+                            serde_json::from_value::<Vec<usize>>(token_counts_json.clone())
+                        {
+                            for token_count in token_counts {
+                                repo_token_counts
+                                    .entry(entry.repository_id)
+                                    .or_default()
+                                    .push(token_count);
+                            }
+                        }
+                    }
+                }
+
                 if let Err(e) = self
                     .write_to_qdrant_delete(&storage_client, &delete_entries)
                     .await
@@ -300,6 +321,55 @@ impl OutboxProcessor {
                         first_entity_id: delete_entries.first().map(|e| e.entity_id.as_str()),
                     };
                     return self.handle_qdrant_write_failure(tx, ids, e, context).await;
+                }
+
+                // Update BM25 statistics after successful deletion (subtract token counts)
+                for (repo_id, token_counts) in repo_token_counts {
+                    // Convert usize to i64 for statistics calculation
+                    let removed_total: i64 =
+                        token_counts.iter().try_fold(0i64, |acc, &count| {
+                            let count_i64 = i64::try_from(count)
+                                .map_err(|_| Error::storage("Token count too large for i64"))?;
+                            acc.checked_add(count_i64).ok_or_else(|| {
+                                Error::storage("Token count overflow during aggregation")
+                            })
+                        })?;
+                    let removed_count: i64 = i64::try_from(token_counts.len())
+                        .map_err(|_| Error::storage("Entity count too large for i64"))?;
+
+                    // Get current stats with lock
+                    let stats = self
+                        .postgres_client
+                        .get_bm25_statistics_in_tx(&mut tx, repo_id)
+                        .await?;
+
+                    let updated_total = (stats.total_tokens - removed_total).max(0);
+                    let updated_count = (stats.entity_count - removed_count).max(0);
+
+                    let updated_avgdl = if updated_count > 0 {
+                        updated_total as f32 / updated_count as f32
+                    } else {
+                        // Preserve last known avgdl when count becomes 0
+                        if stats.avgdl > 0.0 {
+                            stats.avgdl
+                        } else {
+                            50.0
+                        }
+                    };
+
+                    // Update repository statistics
+                    sqlx::query(
+                        "UPDATE repositories
+                         SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
+                         WHERE repository_id = $4",
+                    )
+                    .bind(updated_avgdl)
+                    .bind(updated_total)
+                    .bind(updated_count)
+                    .bind(repo_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| Error::storage(format!("Failed to update BM25 statistics after deletion: {e}")))?;
                 }
 
                 // Mark as processed
@@ -346,20 +416,26 @@ impl OutboxProcessor {
         )
         .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
 
-        // Fetch dense embedding by ID from entity_embeddings table
+        // Fetch both dense and sparse embeddings by ID from entity_embeddings table
         let embedding_id = entry
             .embedding_id
             .ok_or_else(|| Error::storage("Missing embedding_id in outbox entry"))?;
 
-        let dense_embedding = self
+        let (dense_embedding, sparse_embedding) = self
             .postgres_client
-            .get_embedding_by_id(embedding_id)
+            .get_embedding_with_sparse_by_id(embedding_id)
             .await?
             .ok_or_else(|| {
                 Error::storage(format!(
                     "Embedding ID {embedding_id} not found in entity_embeddings table"
                 ))
             })?;
+
+        let sparse_embedding = sparse_embedding.ok_or_else(|| {
+            Error::storage(format!(
+                "Sparse embedding not found for embedding ID {embedding_id}"
+            ))
+        })?;
 
         let qdrant_point_id: String = serde_json::from_value(
             entry
@@ -394,16 +470,6 @@ impl OutboxProcessor {
                 entity.entity_id, entry.repository_id
             ))
         })?;
-
-        // Read precomputed sparse embedding from payload
-        let sparse_embedding: Vec<(u32, f32)> = serde_json::from_value(
-            entry
-                .payload
-                .get("sparse_embedding")
-                .ok_or_else(|| Error::storage("Missing sparse_embedding in payload"))?
-                .clone(),
-        )
-        .map_err(|e| Error::storage(format!("Failed to deserialize sparse_embedding: {e}")))?;
 
         Ok(EmbeddedEntity {
             entity,

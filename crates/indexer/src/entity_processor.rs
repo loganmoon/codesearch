@@ -8,7 +8,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_languages::create_extractor;
-use codesearch_storage::{OutboxOperation, PostgresClientTrait, TargetStore};
+use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -281,7 +281,7 @@ async fn process_entity_chunk(
     info!("Generating embeddings for {} entities", entities.len());
 
     // Calculate token counts for all entities (will be used for storage)
-    // Note: BM25 statistics are updated by the outbox processor within its transaction
+    // Note: BM25 statistics for INSERT/UPDATE are updated by the outbox processor within its transaction
     let token_counts = calculate_token_counts(&entities)?;
 
     // Get current avgdl for sparse embedding generation
@@ -312,7 +312,7 @@ async fn process_entity_chunk(
 
     let model_version = embedding_manager.model_version();
     let cached_embeddings = postgres_client
-        .get_embeddings_by_content_hash(&content_hashes, model_version)
+        .get_embeddings_by_content_hash(repo_id, &content_hashes, model_version)
         .await
         .unwrap_or_else(|e| {
             tracing::warn!("Cache lookup failed, will generate all embeddings: {}", e);
@@ -325,7 +325,8 @@ async fn process_entity_chunk(
     let mut cache_miss_texts = Vec::new();
 
     for (idx, (content, content_hash)) in entity_contents_and_hashes.iter().enumerate() {
-        if let Some((embedding_id, cached_embedding)) = cached_embeddings.get(content_hash) {
+        if let Some((embedding_id, cached_embedding, _sparse)) = cached_embeddings.get(content_hash)
+        {
             cache_hits.push((idx, *embedding_id, cached_embedding.clone()));
         } else {
             cache_misses.push((idx, content_hash.clone()));
@@ -353,6 +354,18 @@ async fn process_entity_chunk(
         all_embeddings[idx] = Some(embedding);
         all_embedding_ids[idx] = Some(embedding_id);
     }
+
+    // Generate sparse embeddings for ALL entities (locally generated, will be stored with cache entries)
+    info!("Generating {} sparse embeddings locally", entities.len());
+    let all_entity_contents: Vec<&str> = entity_contents_and_hashes
+        .iter()
+        .map(|(content, _)| content.as_str())
+        .collect();
+
+    let all_sparse_embeddings = sparse_manager
+        .embed_sparse(all_entity_contents)
+        .await
+        .storage_err("Failed to generate sparse embeddings")?;
 
     // Generate embeddings for cache misses only
     if !cache_miss_texts.is_empty() {
@@ -387,14 +400,17 @@ async fn process_entity_chunk(
         if !cache_entries_to_store.is_empty() {
             let dimension = cache_entries_to_store[0].1.len();
 
-            // Extract just the (content_hash, embedding) pairs for storage
-            let entries_for_storage: Vec<(String, Vec<f32>)> = cache_entries_to_store
+            // Extract (content_hash, embedding, sparse_embedding) tuples for storage
+            let entries_for_storage: Vec<EmbeddingCacheEntry> = cache_entries_to_store
                 .iter()
-                .map(|((_, content_hash), embedding)| (content_hash.clone(), embedding.clone()))
+                .map(|((idx, content_hash), embedding)| {
+                    let sparse_embedding = all_sparse_embeddings[*idx].clone();
+                    (content_hash.clone(), embedding.clone(), sparse_embedding)
+                })
                 .collect();
 
             let new_embedding_ids = postgres_client
-                .store_embeddings(&entries_for_storage, model_version, dimension)
+                .store_embeddings(repo_id, &entries_for_storage, model_version, dimension)
                 .await
                 .storage_err("Failed to store embeddings in cache")?;
 
@@ -413,18 +429,6 @@ async fn process_entity_chunk(
             );
         }
     }
-
-    // Generate sparse embeddings for ALL entities (locally generated, not cached)
-    info!("Generating {} sparse embeddings locally", entities.len());
-    let all_entity_contents: Vec<&str> = entity_contents_and_hashes
-        .iter()
-        .map(|(content, _)| content.as_str())
-        .collect();
-
-    let all_sparse_embeddings = sparse_manager
-        .embed_sparse(all_entity_contents)
-        .await
-        .storage_err("Failed to generate sparse embeddings")?;
 
     // Filter entities with valid embedding IDs and sparse embeddings
     type EntityEmbeddingPair = (CodeEntity, i64, Vec<(u32, f32)>);
@@ -482,7 +486,7 @@ async fn process_entity_chunk(
     // Prepare batch data directly as references (no intermediate cloning)
     let mut batch_refs = Vec::with_capacity(entity_embedding_id_pairs.len());
 
-    for (idx, (entity, embedding_id, sparse_embedding)) in
+    for (idx, (entity, embedding_id, _sparse_embedding)) in
         entity_embedding_id_pairs.iter().enumerate()
     {
         let existing_metadata = metadata_map.get(&entity.entity_id);
@@ -516,7 +520,6 @@ async fn process_entity_chunk(
             TargetStore::Qdrant,
             git_commit.clone(),
             token_counts[idx],
-            sparse_embedding.clone(),
         ));
     }
 
@@ -563,6 +566,7 @@ pub async fn update_file_snapshot_and_mark_stale(
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
         // Fetch token counts for stale entities before deletion
+        // These will be included in the outbox payload for BM25 stats update
         let entity_refs: Vec<(Uuid, String)> = stale_ids
             .iter()
             .map(|entity_id| (repo_id, entity_id.clone()))
@@ -573,19 +577,12 @@ pub async fn update_file_snapshot_and_mark_stale(
             .await
             .storage_err("Failed to get entity token counts")?;
 
-        // Mark entities as deleted
+        // Mark entities as deleted with outbox entries
+        // Token counts are included in payload for later BM25 stats update
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids, &token_counts)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
-
-        // Update avgdl statistics after deletion
-        if !token_counts.is_empty() {
-            postgres_client
-                .update_bm25_statistics_after_deletion(repo_id, &token_counts)
-                .await
-                .storage_err("Failed to update BM25 statistics after deletion")?;
-        }
     }
 
     postgres_client
@@ -618,6 +615,7 @@ pub async fn mark_file_entities_deleted(
     let count = entity_ids.len();
 
     // Fetch token counts for entities before deletion
+    // These will be included in the outbox payload for BM25 stats update
     let entity_refs: Vec<(Uuid, String)> = entity_ids
         .iter()
         .map(|entity_id| (repo_id, entity_id.clone()))
@@ -628,21 +626,17 @@ pub async fn mark_file_entities_deleted(
         .await
         .storage_err("Failed to get entity token counts")?;
 
-    // Mark entities as deleted
+    // Mark entities as deleted with outbox entries
+    // Token counts are included in payload for later BM25 stats update
     postgres_client
-        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids, &token_counts)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 
-    // Update avgdl statistics after deletion
-    if !token_counts.is_empty() {
-        postgres_client
-            .update_bm25_statistics_after_deletion(repo_id, &token_counts)
-            .await
-            .storage_err("Failed to update BM25 statistics after deletion")?;
-    }
-
-    info!("Marked {} entities as deleted and updated avgdl", count);
+    info!(
+        "Marked {} entities as deleted (BM25 stats will be updated by outbox processor)",
+        count
+    );
     Ok(count)
 }
 

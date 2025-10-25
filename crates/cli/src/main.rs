@@ -84,11 +84,7 @@ async fn main() -> Result<()> {
             let repo_root = find_repository_root()?;
             index_repository(&repo_root, cli.config.as_deref(), force).await
         }
-        Some(Commands::Drop) => {
-            // Find repository root
-            let repo_root = find_repository_root()?;
-            drop_data(&repo_root, cli.config.as_deref()).await
-        }
+        Some(Commands::Drop) => drop_data(cli.config.as_deref()).await,
         Some(Commands::Cache(cache_cmd)) => {
             handle_cache_command(cache_cmd, cli.config.as_deref()).await
         }
@@ -323,6 +319,7 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
 }
 
 /// Repository selection result from TUI
+#[derive(Debug)]
 enum RepositorySelection {
     /// Single repository selected by index
     Single(usize),
@@ -365,7 +362,10 @@ fn display_repository_selector(
     }
 }
 
-/// Display deletion warning for selected repositories
+/// Display warning message for repositories about to be deleted
+///
+/// Shows repository path, Qdrant collection name, and PostgreSQL data
+/// that will be permanently removed.
 fn display_deletion_warning(repos_to_delete: &[(Uuid, String, std::path::PathBuf)]) {
     println!("\nWARNING: This will permanently delete the following:");
     println!();
@@ -392,7 +392,14 @@ fn confirm_deletion() -> Result<bool> {
 }
 
 /// Drop indexed data with repository selection
-async fn drop_data(_repo_root: &Path, config_path: Option<&Path>) -> Result<()> {
+///
+/// Displays an interactive selector to choose which repository to drop (or all).
+/// Confirms deletion with user before proceeding.
+///
+/// Deletion is performed in this order:
+/// 1. Qdrant collection (if it exists - warns but continues if missing)
+/// 2. PostgreSQL repository data (cascades to all child tables)
+async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to drop indexed data");
 
     // Load configuration
@@ -422,6 +429,7 @@ async fn drop_data(_repo_root: &Path, config_path: Option<&Path>) -> Result<()> 
 
     if all_repos.is_empty() {
         println!("No indexed repositories found.");
+        println!("Run 'codesearch index' from a git repository to create an index.");
         return Ok(());
     }
 
@@ -583,4 +591,81 @@ async fn clear_cache(
     println!("Done! Removed {rows_deleted} entries.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repository_selection_enum() {
+        // Test that RepositorySelection enum variants work correctly
+        match RepositorySelection::Single(0) {
+            RepositorySelection::Single(idx) => assert_eq!(idx, 0),
+            RepositorySelection::All => panic!("Expected Single variant"),
+        }
+
+        match RepositorySelection::All {
+            RepositorySelection::All => {} // Expected
+            RepositorySelection::Single(_) => panic!("Expected All variant"),
+        }
+    }
+
+    #[test]
+    fn test_display_deletion_warning_output() {
+        // Test that display_deletion_warning doesn't panic
+        // We can't easily capture stdout in unit tests, but we can verify it runs
+        use std::path::PathBuf;
+
+        let repos = vec![(
+            Uuid::new_v4(),
+            "test-collection".to_string(),
+            PathBuf::from("/tmp/test"),
+        )];
+
+        // This should not panic
+        display_deletion_warning(&repos);
+    }
+
+    #[test]
+    fn test_display_deletion_warning_multiple_repos() {
+        use std::path::PathBuf;
+
+        let repos = vec![
+            (
+                Uuid::new_v4(),
+                "collection1".to_string(),
+                PathBuf::from("/tmp/repo1"),
+            ),
+            (
+                Uuid::new_v4(),
+                "collection2".to_string(),
+                PathBuf::from("/tmp/repo2"),
+            ),
+            (
+                Uuid::new_v4(),
+                "collection3".to_string(),
+                PathBuf::from("/tmp/repo3"),
+            ),
+        ];
+
+        // This should not panic with multiple repositories
+        display_deletion_warning(&repos);
+    }
+
+    #[test]
+    fn test_display_repository_selector_empty_list() {
+        // Test that empty list returns error
+        let repos: Vec<(Uuid, String, std::path::PathBuf)> = vec![];
+
+        let result = display_repository_selector(&repos);
+        assert!(
+            result.is_err(),
+            "Empty repository list should return an error"
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No repositories available"));
+    }
 }

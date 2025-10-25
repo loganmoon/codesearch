@@ -480,6 +480,7 @@ async fn stage_generate_embeddings(
         // Initialize result vectors
         let mut all_embeddings: Vec<Option<Vec<f32>>> = vec![None; texts.len()];
         let mut all_embedding_ids: Vec<Option<i64>> = vec![None; texts.len()];
+        let mut all_sparse_embeddings: Vec<Option<Vec<(u32, f32)>>> = vec![None; texts.len()];
 
         // Separate cache hits from misses, populating results directly
         let mut cache_hit_count = 0;
@@ -487,12 +488,13 @@ async fn stage_generate_embeddings(
         let mut cache_miss_texts: Vec<String> = Vec::new();
 
         for (idx, (text, content_hash)) in texts.iter().zip(content_hashes.iter()).enumerate() {
-            if let Some((embedding_id, cached_embedding, _sparse)) =
+            if let Some((embedding_id, cached_embedding, cached_sparse)) =
                 cached_embeddings.get(content_hash)
             {
                 // Directly populate results for cache hits
                 all_embeddings[idx] = Some(cached_embedding.clone());
                 all_embedding_ids[idx] = Some(*embedding_id);
+                all_sparse_embeddings[idx] = cached_sparse.clone();
                 cache_hit_count += 1;
             } else {
                 cache_miss_indices.push(idx);
@@ -520,7 +522,7 @@ async fn stage_generate_embeddings(
             );
 
             let new_embeddings = embedding_manager
-                .embed(cache_miss_texts)
+                .embed(cache_miss_texts.clone())
                 .await
                 .map_err(|e| {
                     error!(
@@ -531,21 +533,53 @@ async fn stage_generate_embeddings(
                 })
                 .storage_err("Failed to generate embeddings")?;
 
-            // Fill in newly generated embeddings
+            // Fill in newly generated dense embeddings
             for (miss_idx, emb_opt) in cache_miss_indices.iter().zip(new_embeddings.iter()) {
                 if let Some(embedding) = emb_opt {
                     all_embeddings[*miss_idx] = Some(embedding.clone());
                 }
             }
 
-            // Store newly generated embeddings in cache (sparse embeddings generated later in pipeline)
+            // Generate sparse embeddings for cache misses only
+            info!(
+                "Stage 3: Generating {} sparse embeddings for cache misses",
+                cache_miss_count
+            );
+
+            let bm25_stats = postgres_client
+                .get_bm25_statistics(batch.repo_id)
+                .await
+                .storage_err("Failed to get BM25 statistics")?;
+
+            let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
+                .storage_err("Failed to create sparse embedding manager")?;
+
+            let new_sparse_embeddings = sparse_manager
+                .embed_sparse(cache_miss_texts.iter().map(|s| s.as_str()).collect())
+                .await
+                .storage_err("Failed to generate sparse embeddings for cache misses")?;
+
+            // Fill in newly generated sparse embeddings
+            for (miss_idx, sparse_opt) in
+                cache_miss_indices.iter().zip(new_sparse_embeddings.iter())
+            {
+                if let Some(sparse) = sparse_opt {
+                    all_sparse_embeddings[*miss_idx] = Some(sparse.clone());
+                }
+            }
+
+            // Store both dense and sparse embeddings in cache
             let embeddings_to_store: Vec<EmbeddingCacheEntry> = cache_miss_indices
                 .iter()
-                .zip(new_embeddings.iter())
-                .filter_map(|(idx, emb_opt)| {
-                    emb_opt
-                        .as_ref()
-                        .map(|emb| (content_hashes[*idx].clone(), emb.clone(), None))
+                .zip(new_embeddings.iter().zip(new_sparse_embeddings.iter()))
+                .filter_map(|(idx, (emb_opt, sparse_opt))| {
+                    emb_opt.as_ref().map(|emb| {
+                        (
+                            content_hashes[*idx].clone(),
+                            emb.clone(),
+                            sparse_opt.clone(),
+                        )
+                    })
                 })
                 .collect();
 
@@ -580,29 +614,14 @@ async fn stage_generate_embeddings(
         }
 
         let successful_embeddings = all_embeddings.iter().filter(|e| e.is_some()).count();
+        let successful_sparse = all_sparse_embeddings.iter().filter(|e| e.is_some()).count();
         info!(
-            "Stage 3: Successfully obtained {} embeddings ({} skipped)",
+            "Stage 3: Successfully obtained {} embeddings and {} sparse embeddings ({} dense skipped, {} sparse skipped)",
             successful_embeddings,
-            texts.len() - successful_embeddings
+            successful_sparse,
+            texts.len() - successful_embeddings,
+            texts.len() - successful_sparse
         );
-
-        // Generate sparse embeddings for BM25
-        info!("Stage 3: Generating {} sparse embeddings", texts.len());
-
-        // Get current avgdl for sparse embedding generation
-        let bm25_stats = postgres_client
-            .get_bm25_statistics(batch.repo_id)
-            .await
-            .storage_err("Failed to get BM25 statistics")?;
-
-        // Create sparse embedding manager with current avgdl
-        let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
-            .storage_err("Failed to create sparse embedding manager")?;
-
-        let sparse_embeddings = sparse_manager
-            .embed_sparse(texts.iter().map(|s| s.as_str()).collect())
-            .await
-            .storage_err("Failed to generate sparse embeddings")?;
 
         // Create triples of (entity, embedding_id, sparse_embedding), tracking which indices survived
         let mut triples = Vec::new();
@@ -615,7 +634,7 @@ async fn stage_generate_embeddings(
                 all_embeddings
                     .into_iter()
                     .zip(all_embedding_ids.into_iter())
-                    .zip(sparse_embeddings.into_iter()),
+                    .zip(all_sparse_embeddings.into_iter()),
             )
             .enumerate()
         {

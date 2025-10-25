@@ -5,21 +5,48 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
 
+/// Maximum sparse embedding size to prevent memory exhaustion attacks
+const MAX_SPARSE_EMBEDDING_SIZE: usize = 100_000;
+
 /// Convert sparse embedding to separate indices and values arrays for PostgreSQL storage
 /// PostgreSQL BIGINT[] can safely store all u32 values (0 to 4,294,967,295)
-fn sparse_embedding_to_arrays(sparse: &[(u32, f32)]) -> (Vec<i64>, Vec<f32>) {
+/// Returns an error if the sparse embedding exceeds MAX_SPARSE_EMBEDDING_SIZE
+fn sparse_embedding_to_arrays(sparse: &[(u32, f32)]) -> Result<(Vec<i64>, Vec<f32>)> {
+    if sparse.len() > MAX_SPARSE_EMBEDDING_SIZE {
+        return Err(Error::storage(format!(
+            "Sparse embedding size {} exceeds maximum allowed size {MAX_SPARSE_EMBEDDING_SIZE}",
+            sparse.len()
+        )));
+    }
+
     let (indices, values): (Vec<u32>, Vec<f32>) = sparse.iter().copied().unzip();
     let indices_i64: Vec<i64> = indices.into_iter().map(|idx| idx as i64).collect();
-    (indices_i64, values)
+    Ok((indices_i64, values))
 }
 
 /// Convert separate indices and values arrays from PostgreSQL back to sparse embedding
-fn arrays_to_sparse_embedding(indices: Vec<i64>, values: Vec<f32>) -> Vec<(u32, f32)> {
-    indices
+/// Returns an error if the arrays have mismatched lengths or exceed MAX_SPARSE_EMBEDDING_SIZE
+fn arrays_to_sparse_embedding(indices: Vec<i64>, values: Vec<f32>) -> Result<Vec<(u32, f32)>> {
+    if indices.len() != values.len() {
+        return Err(Error::storage(format!(
+            "Sparse embedding indices length {} does not match values length {}",
+            indices.len(),
+            values.len()
+        )));
+    }
+
+    if indices.len() > MAX_SPARSE_EMBEDDING_SIZE {
+        return Err(Error::storage(format!(
+            "Sparse embedding size {} exceeds maximum allowed size {MAX_SPARSE_EMBEDDING_SIZE}",
+            indices.len()
+        )));
+    }
+
+    Ok(indices
         .into_iter()
         .zip(values)
         .map(|(idx, val)| (idx as u32, val))
-        .collect()
+        .collect())
 }
 
 /// Type alias for embedding cache entry: (content_hash, dense_embedding, sparse_embedding)
@@ -1445,7 +1472,7 @@ impl PostgresClient {
                 .map_err(|e| Error::storage(format!("Failed to extract sparse_values: {e}")))?;
 
             let sparse_embedding = match (sparse_indices, sparse_values) {
-                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)),
+                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)?),
                 _ => None,
             };
 
@@ -1476,6 +1503,19 @@ impl PostgresClient {
             )));
         }
 
+        // Validate and convert all sparse embeddings upfront
+        let validated_sparse: Result<Vec<(Option<Vec<i64>>, Option<Vec<f32>>)>> = cache_entries
+            .iter()
+            .map(|(_, _, sparse_embedding)| {
+                sparse_embedding
+                    .as_ref()
+                    .map(|s| sparse_embedding_to_arrays(s).map(|(i, v)| (Some(i), Some(v))))
+                    .transpose()
+                    .map(|opt| opt.unwrap_or((None, None)))
+            })
+            .collect();
+        let validated_sparse = validated_sparse?;
+
         let mut tx = self
             .pool
             .begin()
@@ -1488,16 +1528,8 @@ impl PostgresClient {
         );
 
         query_builder.push_values(
-            cache_entries,
-            |mut b, (content_hash, embedding, sparse_embedding)| {
-                let (sparse_indices, sparse_values) = sparse_embedding
-                    .as_ref()
-                    .map(|s| {
-                        let (indices, values) = sparse_embedding_to_arrays(s);
-                        (Some(indices), Some(values))
-                    })
-                    .unwrap_or((None, None));
-
+            cache_entries.iter().zip(validated_sparse.iter()),
+            |mut b, ((content_hash, embedding, _), (sparse_indices, sparse_values))| {
                 b.push_bind(repository_id)
                     .push_bind(content_hash)
                     .push_bind(embedding)
@@ -1600,13 +1632,17 @@ impl PostgresClient {
         .await
         .map_err(|e| Error::storage(format!("Failed to get embeddings by ID: {e}")))?;
 
-        Ok(record.map(|(dense, sparse_indices, sparse_values)| {
-            let sparse = match (sparse_indices, sparse_values) {
-                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)),
-                _ => None,
-            };
-            (dense, sparse)
-        }))
+        record
+            .map(|(dense, sparse_indices, sparse_values)| {
+                let sparse = match (sparse_indices, sparse_values) {
+                    (Some(indices), Some(values)) => {
+                        Some(arrays_to_sparse_embedding(indices, values)?)
+                    }
+                    _ => None,
+                };
+                Ok((dense, sparse))
+            })
+            .transpose()
     }
 
     /// Get cache statistics
@@ -1925,5 +1961,107 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
         self.clear_cache(model_version).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_empty() {
+        let sparse: Vec<(u32, f32)> = vec![];
+        let result = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(result.0.len(), 0);
+        assert_eq!(result.1.len(), 0);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_simple() {
+        let sparse = vec![(0, 1.0), (5, 2.5), (100, 0.5)];
+        let (indices, values) = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(indices, vec![0, 5, 100]);
+        assert_eq!(values, vec![1.0, 2.5, 0.5]);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_large_indices() {
+        let sparse = vec![(u32::MAX, 1.0), (u32::MAX - 1, 2.0)];
+        let (indices, values) = sparse_embedding_to_arrays(&sparse).unwrap();
+        assert_eq!(indices, vec![u32::MAX as i64, (u32::MAX - 1) as i64]);
+        assert_eq!(values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_sparse_embedding_to_arrays_exceeds_max_size() {
+        let sparse: Vec<(u32, f32)> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1)
+            .map(|i| (i as u32, 1.0))
+            .collect();
+        let result = sparse_embedding_to_arrays(&sparse);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("exceeds maximum allowed size"));
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_empty() {
+        let indices: Vec<i64> = vec![];
+        let values: Vec<f32> = vec![];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_simple() {
+        let indices = vec![0, 5, 100];
+        let values = vec![1.0, 2.5, 0.5];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result, vec![(0, 1.0), (5, 2.5), (100, 0.5)]);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_large_indices() {
+        let indices = vec![u32::MAX as i64, (u32::MAX - 1) as i64];
+        let values = vec![1.0, 2.0];
+        let result = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(result, vec![(u32::MAX, 1.0), (u32::MAX - 1, 2.0)]);
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_mismatched_lengths() {
+        let indices = vec![0, 1, 2];
+        let values = vec![1.0, 2.0]; // One less value
+        let result = arrays_to_sparse_embedding(indices, values);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("does not match"));
+    }
+
+    #[test]
+    fn test_arrays_to_sparse_embedding_exceeds_max_size() {
+        let indices: Vec<i64> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1)
+            .map(|i| i as i64)
+            .collect();
+        let values: Vec<f32> = (0..MAX_SPARSE_EMBEDDING_SIZE + 1).map(|_| 1.0).collect();
+        let result = arrays_to_sparse_embedding(indices, values);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("exceeds maximum allowed size"));
+    }
+
+    #[test]
+    fn test_round_trip_conversion() {
+        let original = vec![(0, 1.0), (42, 2.5), (1000, 0.1), (u32::MAX, 3.0)];
+        let (indices, values) = sparse_embedding_to_arrays(&original).unwrap();
+        let recovered = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn test_round_trip_conversion_empty() {
+        let original: Vec<(u32, f32)> = vec![];
+        let (indices, values) = sparse_embedding_to_arrays(&original).unwrap();
+        let recovered = arrays_to_sparse_embedding(indices, values).unwrap();
+        assert_eq!(original, recovered);
     }
 }

@@ -66,9 +66,9 @@ struct MockData {
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
-    embedding_cache: HashMap<String, (i64, Vec<f32>)>, // content_hash -> (embedding_id, embedding)
-    embedding_by_id: HashMap<i64, Vec<f32>>,           // embedding_id -> embedding
-    embedding_id_counter: i64,                         // Auto-increment counter for embedding IDs
+    embedding_cache: HashMap<String, (i64, Vec<f32>, Option<Vec<(u32, f32)>>)>, // content_hash -> (embedding_id, dense, sparse)
+    embedding_by_id: HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>, // embedding_id -> (dense, sparse)
+    embedding_id_counter: i64, // Auto-increment counter for embedding IDs
 }
 
 /// Mock PostgreSQL client for testing
@@ -661,8 +661,11 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut result = std::collections::HashMap::new();
 
         for hash in content_hashes {
-            if let Some((embedding_id, embedding)) = data.embedding_cache.get(hash) {
-                result.insert(hash.clone(), (*embedding_id, embedding.clone(), None));
+            if let Some((embedding_id, embedding, sparse)) = data.embedding_cache.get(hash) {
+                result.insert(
+                    hash.clone(),
+                    (*embedding_id, embedding.clone(), sparse.clone()),
+                );
             }
         }
 
@@ -679,19 +682,20 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut data = self.data.lock().unwrap();
         let mut embedding_ids = Vec::with_capacity(cache_entries.len());
 
-        for (hash, embedding, _sparse) in cache_entries {
+        for (hash, embedding, sparse) in cache_entries {
             // Check if this content_hash already exists (deduplication)
-            let embedding_id = if let Some((existing_id, _)) = data.embedding_cache.get(hash) {
+            let embedding_id = if let Some((existing_id, _, _)) = data.embedding_cache.get(hash) {
                 *existing_id
             } else {
                 // Generate new auto-increment ID
                 data.embedding_id_counter += 1;
                 let new_id = data.embedding_id_counter;
 
-                // Store in both maps
+                // Store in both maps with sparse embeddings
                 data.embedding_cache
-                    .insert(hash.clone(), (new_id, embedding.clone()));
-                data.embedding_by_id.insert(new_id, embedding.clone());
+                    .insert(hash.clone(), (new_id, embedding.clone(), sparse.clone()));
+                data.embedding_by_id
+                    .insert(new_id, (embedding.clone(), sparse.clone()));
 
                 new_id
             };
@@ -704,7 +708,10 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn get_embedding_by_id(&self, embedding_id: i64) -> Result<Option<Vec<f32>>> {
         let data = self.data.lock().unwrap();
-        Ok(data.embedding_by_id.get(&embedding_id).cloned())
+        Ok(data
+            .embedding_by_id
+            .get(&embedding_id)
+            .map(|(dense, _sparse)| dense.clone()))
     }
 
     async fn get_embedding_with_sparse_by_id(
@@ -712,10 +719,7 @@ impl PostgresClientTrait for MockPostgresClient {
         embedding_id: i64,
     ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
         let data = self.data.lock().unwrap();
-        Ok(data
-            .embedding_by_id
-            .get(&embedding_id)
-            .map(|emb| (emb.clone(), None)))
+        Ok(data.embedding_by_id.get(&embedding_id).cloned())
     }
 
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {

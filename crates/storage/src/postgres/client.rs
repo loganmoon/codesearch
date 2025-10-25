@@ -5,29 +5,28 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
 
-/// Convert sparse embedding from Vec<(u32, f32)> to flattened REAL[] format
-/// Format: [index, value, index, value, ...]
-/// Example: [(42, 0.5), (137, 0.8)] → [42.0, 0.5, 137.0, 0.8]
-fn flatten_sparse_embedding(sparse: &[(u32, f32)]) -> Vec<f32> {
-    let mut flattened = Vec::with_capacity(sparse.len() * 2);
-    for (idx, val) in sparse {
-        flattened.push(*idx as f32);
-        flattened.push(*val);
-    }
-    flattened
+/// Convert sparse embedding to separate indices and values arrays for PostgreSQL storage
+/// PostgreSQL BIGINT[] can safely store all u32 values (0 to 4,294,967,295)
+fn sparse_embedding_to_arrays(sparse: &[(u32, f32)]) -> (Vec<i64>, Vec<f32>) {
+    let (indices, values): (Vec<u32>, Vec<f32>) = sparse.iter().copied().unzip();
+    let indices_i64: Vec<i64> = indices.into_iter().map(|idx| idx as i64).collect();
+    (indices_i64, values)
 }
 
-/// Convert flattened REAL[] format back to Vec<(u32, f32)>
-/// Format: [index, value, index, value, ...] → [(index, value), ...]
-fn unflatten_sparse_embedding(flattened: &[f32]) -> Vec<(u32, f32)> {
-    flattened
-        .chunks_exact(2)
-        .map(|chunk| (chunk[0] as u32, chunk[1]))
+/// Convert separate indices and values arrays from PostgreSQL back to sparse embedding
+fn arrays_to_sparse_embedding(indices: Vec<i64>, values: Vec<f32>) -> Vec<(u32, f32)> {
+    indices
+        .into_iter()
+        .zip(values)
+        .map(|(idx, val)| (idx as u32, val))
         .collect()
 }
 
 /// Type alias for embedding cache entry: (content_hash, dense_embedding, sparse_embedding)
 pub type EmbeddingCacheEntry = (String, Vec<f32>, Option<Vec<(u32, f32)>>);
+
+/// Type alias for sparse embedding database row: (dense, sparse_indices, sparse_values)
+type SparseEmbeddingRow = (Vec<f32>, Option<Vec<i64>>, Option<Vec<f32>>);
 
 /// Operation type for outbox pattern
 ///
@@ -1406,7 +1405,7 @@ impl PostgresClient {
 
         // Build query with IN clause
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "SELECT id, content_hash, embedding, sparse_embedding FROM entity_embeddings WHERE repository_id = ",
+            "SELECT id, content_hash, embedding, sparse_indices, sparse_values FROM entity_embeddings WHERE repository_id = ",
         );
         query_builder.push_bind(repository_id);
         query_builder.push(" AND model_version = ");
@@ -1438,11 +1437,17 @@ impl PostgresClient {
             let embedding: Vec<f32> = row
                 .try_get("embedding")
                 .map_err(|e| Error::storage(format!("Failed to extract embedding: {e}")))?;
-            let sparse_flat: Option<Vec<f32>> = row
-                .try_get("sparse_embedding")
-                .map_err(|e| Error::storage(format!("Failed to extract sparse_embedding: {e}")))?;
+            let sparse_indices: Option<Vec<i64>> = row
+                .try_get("sparse_indices")
+                .map_err(|e| Error::storage(format!("Failed to extract sparse_indices: {e}")))?;
+            let sparse_values: Option<Vec<f32>> = row
+                .try_get("sparse_values")
+                .map_err(|e| Error::storage(format!("Failed to extract sparse_values: {e}")))?;
 
-            let sparse_embedding = sparse_flat.map(|flat| unflatten_sparse_embedding(&flat));
+            let sparse_embedding = match (sparse_indices, sparse_values) {
+                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)),
+                _ => None,
+            };
 
             result.insert(content_hash, (id, embedding, sparse_embedding));
         }
@@ -1479,19 +1484,25 @@ impl PostgresClient {
 
         // Build bulk INSERT with ON CONFLICT DO NOTHING
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO entity_embeddings (repository_id, content_hash, embedding, sparse_embedding, model_version, dimension, created_at) "
+            "INSERT INTO entity_embeddings (repository_id, content_hash, embedding, sparse_indices, sparse_values, model_version, dimension, created_at) "
         );
 
         query_builder.push_values(
             cache_entries,
             |mut b, (content_hash, embedding, sparse_embedding)| {
-                let sparse_flat = sparse_embedding
+                let (sparse_indices, sparse_values) = sparse_embedding
                     .as_ref()
-                    .map(|s| flatten_sparse_embedding(s));
+                    .map(|s| {
+                        let (indices, values) = sparse_embedding_to_arrays(s);
+                        (Some(indices), Some(values))
+                    })
+                    .unwrap_or((None, None));
+
                 b.push_bind(repository_id)
                     .push_bind(content_hash)
                     .push_bind(embedding)
-                    .push_bind(sparse_flat)
+                    .push_bind(sparse_indices)
+                    .push_bind(sparse_values)
                     .push_bind(model_version)
                     .push_bind(dimension as i32)
                     .push("NOW()");
@@ -1581,16 +1592,19 @@ impl PostgresClient {
         &self,
         embedding_id: i64,
     ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>> {
-        let record: Option<(Vec<f32>, Option<Vec<f32>>)> = sqlx::query_as(
-            "SELECT embedding, sparse_embedding FROM entity_embeddings WHERE id = $1",
+        let record: Option<SparseEmbeddingRow> = sqlx::query_as(
+            "SELECT embedding, sparse_indices, sparse_values FROM entity_embeddings WHERE id = $1",
         )
         .bind(embedding_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to get embeddings by ID: {e}")))?;
 
-        Ok(record.map(|(dense, sparse_flat)| {
-            let sparse = sparse_flat.map(|flat| unflatten_sparse_embedding(&flat));
+        Ok(record.map(|(dense, sparse_indices, sparse_values)| {
+            let sparse = match (sparse_indices, sparse_values) {
+                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)),
+                _ => None,
+            };
             (dense, sparse)
         }))
     }

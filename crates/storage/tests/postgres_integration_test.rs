@@ -1254,3 +1254,80 @@ async fn test_bm25_statistics_over_deletion() -> Result<()> {
     })
     .await
 }
+
+#[tokio::test]
+async fn test_drop_single_repository() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        // Create two test repositories
+        let repo1_path = Path::new("/tmp/test-repo-drop-1");
+        let collection1 = format!("drop_test_1_{}", Uuid::new_v4());
+        let repo1_id = client
+            .ensure_repository(repo1_path, &collection1, Some("test-repo-1"))
+            .await?;
+
+        let repo2_path = Path::new("/tmp/test-repo-drop-2");
+        let collection2 = format!("drop_test_2_{}", Uuid::new_v4());
+        let repo2_id = client
+            .ensure_repository(repo2_path, &collection2, Some("test-repo-2"))
+            .await?;
+
+        // Verify both repositories exist
+        let repos = client.list_all_repositories().await?;
+        assert_eq!(repos.len(), 2, "Should have two repositories");
+
+        // Drop repo1 only
+        client.drop_repository(repo1_id).await?;
+
+        // Verify repo1 is gone and repo2 remains
+        let repos = client.list_all_repositories().await?;
+        assert_eq!(repos.len(), 1, "Should have exactly one repository left");
+        assert_eq!(repos[0].0, repo2_id, "Remaining repository should be repo2");
+        assert_eq!(
+            repos[0].1, collection2,
+            "Collection name should match repo2"
+        );
+
+        // Verify repo2 is still accessible
+        let repo2_lookup = client.get_repository_by_collection(&collection2).await?;
+        assert!(
+            repo2_lookup.is_some(),
+            "Repo2 should still be accessible by collection name"
+        );
+
+        // Clean up repo2
+        client.drop_repository(repo2_id).await?;
+
+        let repos = client.list_all_repositories().await?;
+        assert_eq!(repos.len(), 0, "Should have no repositories after cleanup");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_drop_nonexistent_repository() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        // Try to drop a repository that doesn't exist
+        let fake_id = Uuid::new_v4();
+        let result = client.drop_repository(fake_id).await;
+
+        assert!(
+            result.is_err(),
+            "Dropping nonexistent repository should fail"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("not found"),
+            "Error message should indicate repository not found"
+        );
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}

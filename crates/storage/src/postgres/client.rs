@@ -337,6 +337,31 @@ impl PostgresClient {
             .collect())
     }
 
+    /// Delete a single repository and all its associated data
+    ///
+    /// Relies on ON DELETE CASCADE constraints to automatically remove:
+    /// - entity_metadata
+    /// - file_entity_snapshots
+    /// - entity_outbox
+    /// - entity_embeddings
+    pub async fn drop_repository(&self, repository_id: Uuid) -> Result<()> {
+        let result = sqlx::query("DELETE FROM repositories WHERE repository_id = $1")
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to delete repository: {e}")))?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::storage(format!(
+                "Repository {repository_id} not found"
+            )));
+        }
+
+        tracing::info!("Deleted repository {repository_id} and all associated data");
+
+        Ok(())
+    }
+
     /// Get BM25 statistics for a repository
     pub async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {
         let row = sqlx::query_as::<_, (Option<f32>, Option<i64>, Option<i64>)>(
@@ -1768,6 +1793,10 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>> {
         self.list_all_repositories().await
+    }
+
+    async fn drop_repository(&self, repository_id: Uuid) -> Result<()> {
+        self.drop_repository(repository_id).await
     }
 
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<super::BM25Statistics> {

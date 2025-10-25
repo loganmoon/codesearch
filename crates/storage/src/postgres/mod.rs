@@ -107,6 +107,23 @@ pub trait PostgresClientTrait: Send + Sync {
     /// A vector of `(repository_id, collection_name, repository_path)` tuples
     async fn list_all_repositories(&self) -> Result<Vec<(Uuid, String, std::path::PathBuf)>>;
 
+    /// Delete a single repository and all its associated data
+    ///
+    /// Uses cascading deletes to automatically remove:
+    /// - entity_metadata (via FK to repositories)
+    /// - file_entity_snapshots (via FK to repositories)
+    /// - entity_outbox (via FK to entity_metadata)
+    /// - entity_embeddings (via FK to repositories)
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The UUID of the repository to delete
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(()) on success, Error if repository doesn't exist or deletion fails
+    async fn drop_repository(&self, repository_id: Uuid) -> Result<()>;
+
     /// Get BM25 statistics for a repository
     ///
     /// Returns the current average document length (avgdl) and related statistics

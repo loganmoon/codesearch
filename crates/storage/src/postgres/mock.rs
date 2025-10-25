@@ -460,6 +460,7 @@ impl PostgresClientTrait for MockPostgresClient {
         repository_id: Uuid,
         _collection_name: &str,
         entity_ids: &[String],
+        _token_counts: &[usize],
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
@@ -915,6 +916,7 @@ mod tests {
                 repo_id,
                 "test_collection",
                 &[entity.entity_id.clone()],
+                &[42], // token count
             )
             .await
             .unwrap();
@@ -980,6 +982,7 @@ mod tests {
                 repo_id,
                 "test_collection",
                 &[entity.entity_id.clone()],
+                &[42], // token count
             )
             .await
             .unwrap();

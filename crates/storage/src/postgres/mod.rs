@@ -301,11 +301,15 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///
     /// Maximum batch size is 1000 entity IDs.
+    ///
+    /// Token counts must be provided for BM25 statistics updates. The outbox processor
+    /// will use these counts to update repository statistics after successful deletion from Qdrant.
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
         collection_name: &str,
         entity_ids: &[String],
+        token_counts: &[usize],
     ) -> Result<()>;
 
     /// Store entities with outbox entries in a single transaction (batch operation)

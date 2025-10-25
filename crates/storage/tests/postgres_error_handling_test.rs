@@ -302,8 +302,14 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
             Uuid::new_v4().to_string(),
         ];
 
+        let token_counts = vec![0; non_existent_ids.len()];
         let result = client
-            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &non_existent_ids)
+            .mark_entities_deleted_with_outbox(
+                repository_id,
+                &collection_name,
+                &non_existent_ids,
+                &token_counts,
+            )
             .await;
 
         // Should succeed with 0 rows affected (no error)

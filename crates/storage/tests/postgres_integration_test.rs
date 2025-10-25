@@ -507,8 +507,14 @@ async fn test_mark_entities_deleted() -> Result<()> {
         }
 
         let to_delete = vec![entities[0].entity_id.clone(), entities[1].entity_id.clone()];
+        let token_counts = vec![50, 50]; // Match the token counts used when storing
         client
-            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &to_delete)
+            .mark_entities_deleted_with_outbox(
+                repository_id,
+                &collection_name,
+                &to_delete,
+                &token_counts,
+            )
             .await?;
 
         // Use batch method to get metadata
@@ -561,9 +567,15 @@ async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
             .await?;
 
         let entity_ids: Vec<String> = (0..1001).map(|i| format!("entity_{i}")).collect();
+        let token_counts = vec![50; entity_ids.len()];
 
         let result = client
-            .mark_entities_deleted_with_outbox(repository_id, &collection_name, &entity_ids)
+            .mark_entities_deleted_with_outbox(
+                repository_id,
+                &collection_name,
+                &entity_ids,
+                &token_counts,
+            )
             .await;
 
         assert!(result.is_err(), "Should return error for batch size > 1000");

@@ -890,11 +890,15 @@ impl PostgresClient {
     }
 
     /// Mark entities as deleted and create outbox entries in a single transaction
+    ///
+    /// Token counts are stored in the outbox payload for later BM25 statistics update
+    /// by the outbox processor.
     pub async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
         collection_name: &str,
         entity_ids: &[String],
+        token_counts: &[usize],
     ) -> Result<()> {
         if entity_ids.is_empty() {
             return Ok(());
@@ -906,6 +910,15 @@ impl PostgresClient {
                 "Batch size {} exceeds maximum allowed size of {}",
                 entity_ids.len(),
                 self.max_entity_batch_size
+            )));
+        }
+
+        // Validate token_counts length matches entity_ids
+        if token_counts.len() != entity_ids.len() {
+            return Err(Error::storage(format!(
+                "Token counts length {} does not match entity_ids length {}",
+                token_counts.len(),
+                entity_ids.len()
             )));
         }
 
@@ -960,13 +973,23 @@ impl PostgresClient {
                 .collect();
 
             if !existing_entity_ids.is_empty() {
+                // Build entity_id to token_count map for looking up token counts
+                let token_count_map: std::collections::HashMap<&String, usize> = entity_ids
+                    .iter()
+                    .zip(token_counts.iter())
+                    .map(|(id, &count)| (id, count))
+                    .collect();
+
                 let mut outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
                     "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
                 );
 
                 outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    // Look up token count for this entity_id
+                    let token_count = token_count_map.get(entity_id).copied().unwrap_or(0);
                     let payload = serde_json::json!({
                         "entity_ids": [entity_id],
+                        "token_counts": [token_count],
                         "reason": "file_change"
                     });
                     b.push_bind(repository_id)
@@ -991,7 +1014,7 @@ impl PostgresClient {
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
 
         tracing::info!(
-            "Marked {} entities as deleted with outbox entries",
+            "Marked {} entities as deleted with outbox entries (token counts stored in payload)",
             update_result.rows_affected()
         );
 
@@ -1799,9 +1822,15 @@ impl super::PostgresClientTrait for PostgresClient {
         repository_id: Uuid,
         collection_name: &str,
         entity_ids: &[String],
+        token_counts: &[usize],
     ) -> Result<()> {
-        self.mark_entities_deleted_with_outbox(repository_id, collection_name, entity_ids)
-            .await
+        self.mark_entities_deleted_with_outbox(
+            repository_id,
+            collection_name,
+            entity_ids,
+            token_counts,
+        )
+        .await
     }
 
     async fn store_entities_with_outbox_batch(

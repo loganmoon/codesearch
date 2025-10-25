@@ -281,7 +281,7 @@ async fn process_entity_chunk(
     info!("Generating embeddings for {} entities", entities.len());
 
     // Calculate token counts for all entities (will be used for storage)
-    // Note: BM25 statistics are updated by the outbox processor within its transaction
+    // Note: BM25 statistics for INSERT/UPDATE are updated by the outbox processor within its transaction
     let token_counts = calculate_token_counts(&entities)?;
 
     // Get current avgdl for sparse embedding generation
@@ -566,6 +566,7 @@ pub async fn update_file_snapshot_and_mark_stale(
         info!("Found {} stale entities in {}", stale_ids.len(), file_path);
 
         // Fetch token counts for stale entities before deletion
+        // These will be included in the outbox payload for BM25 stats update
         let entity_refs: Vec<(Uuid, String)> = stale_ids
             .iter()
             .map(|entity_id| (repo_id, entity_id.clone()))
@@ -576,19 +577,12 @@ pub async fn update_file_snapshot_and_mark_stale(
             .await
             .storage_err("Failed to get entity token counts")?;
 
-        // Mark entities as deleted
+        // Mark entities as deleted with outbox entries
+        // Token counts are included in payload for later BM25 stats update
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids)
+            .mark_entities_deleted_with_outbox(repo_id, collection_name, &stale_ids, &token_counts)
             .await
             .storage_err("Failed to mark entities as deleted with outbox")?;
-
-        // Update avgdl statistics after deletion
-        if !token_counts.is_empty() {
-            postgres_client
-                .update_bm25_statistics_after_deletion(repo_id, &token_counts)
-                .await
-                .storage_err("Failed to update BM25 statistics after deletion")?;
-        }
     }
 
     postgres_client
@@ -621,6 +615,7 @@ pub async fn mark_file_entities_deleted(
     let count = entity_ids.len();
 
     // Fetch token counts for entities before deletion
+    // These will be included in the outbox payload for BM25 stats update
     let entity_refs: Vec<(Uuid, String)> = entity_ids
         .iter()
         .map(|entity_id| (repo_id, entity_id.clone()))
@@ -631,21 +626,17 @@ pub async fn mark_file_entities_deleted(
         .await
         .storage_err("Failed to get entity token counts")?;
 
-    // Mark entities as deleted
+    // Mark entities as deleted with outbox entries
+    // Token counts are included in payload for later BM25 stats update
     postgres_client
-        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids)
+        .mark_entities_deleted_with_outbox(repo_id, collection_name, &entity_ids, &token_counts)
         .await
         .storage_err("Failed to mark entities as deleted with outbox")?;
 
-    // Update avgdl statistics after deletion
-    if !token_counts.is_empty() {
-        postgres_client
-            .update_bm25_statistics_after_deletion(repo_id, &token_counts)
-            .await
-            .storage_err("Failed to update BM25 statistics after deletion")?;
-    }
-
-    info!("Marked {} entities as deleted and updated avgdl", count);
+    info!(
+        "Marked {} entities as deleted (BM25 stats will be updated by outbox processor)",
+        count
+    );
     Ok(count)
 }
 

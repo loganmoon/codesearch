@@ -938,8 +938,25 @@ async fn stage_update_snapshots(
             "Stage 5: Marking {} total stale entities as deleted",
             all_stale_ids.len()
         );
+
+        // Fetch token counts for stale entities before deletion
+        let entity_refs: Vec<(Uuid, String)> = all_stale_ids
+            .iter()
+            .map(|entity_id| (repo_id, entity_id.clone()))
+            .collect();
+
+        let token_counts = postgres_client
+            .get_entity_token_counts(&entity_refs)
+            .await
+            .storage_err("Failed to get entity token counts")?;
+
         postgres_client
-            .mark_entities_deleted_with_outbox(repo_id, &collection_name, &all_stale_ids)
+            .mark_entities_deleted_with_outbox(
+                repo_id,
+                &collection_name,
+                &all_stale_ids,
+                &token_counts,
+            )
             .await
             .storage_err("Failed to mark entities as deleted")?;
     }

@@ -1,6 +1,6 @@
 # Shared Infrastructure for Codesearch Multi-Repository Setup
 #
-# This provides PostgreSQL, Qdrant, vLLM embeddings, vLLM reranker, and outbox-processor services
+# This provides PostgreSQL, Qdrant, vLLM embeddings, and vLLM reranker services
 # that multiple repositories can connect to.
 #
 # This file is automatically managed by the codesearch CLI.
@@ -136,30 +136,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    networks:
-      - codesearch
-    restart: unless-stopped
-
-  outbox-processor:
-    image: codesearch-outbox-processor:latest
-    container_name: codesearch-outbox-processor
-    depends_on:
-      postgres:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      vllm-embeddings:
-        condition: service_healthy
-    environment:
-      - POSTGRES_HOST=codesearch-postgres  # Use container name
-      - POSTGRES_PORT=5432
-      - POSTGRES_DATABASE=codesearch
-      - POSTGRES_USER=codesearch
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-codesearch}
-      - QDRANT_HOST=codesearch-qdrant  # Use container name
-      - QDRANT_PORT=6334
-      - QDRANT_REST_PORT=6333
-      - RUST_LOG=${RUST_LOG:-info}
     networks:
       - codesearch
     restart: unless-stopped

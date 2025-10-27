@@ -40,6 +40,9 @@ pub trait PostgresClientTrait: Send + Sync {
     /// This method inserts a new repository record or returns the existing repository_id
     /// if a repository with the given path and collection_name already exists.
     ///
+    /// The repository_id is computed deterministically from the repository_path using
+    /// `StorageConfig::generate_repository_id()`, ensuring stable IDs across re-indexing.
+    ///
     /// # Parameters
     ///
     /// * `repository_path` - Absolute filesystem path to the repository

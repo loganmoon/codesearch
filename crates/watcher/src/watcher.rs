@@ -45,8 +45,11 @@ pub struct FileWatcher {
 }
 
 impl FileWatcher {
-    /// Create a new file watcher
+    /// Create a new file watcher without a base path
+    /// The base path will be set when `watch()` is called
     pub fn new(config: WatcherConfig) -> Result<Self> {
+        // Create ignore filter without base path initially
+        // It will be updated when watch() is called with the actual path
         let ignore_filter = IgnoreFilter::builder()
             .patterns(config.ignore_patterns.clone())
             .follow_symlinks(config.follow_symlinks)
@@ -94,6 +97,16 @@ impl FileWatcher {
         if self.git_repo.is_none() {
             self.init_git(&path).await?;
         }
+
+        // Recreate ignore filter with the base path for proper relative pattern matching
+        let ignore_filter = IgnoreFilter::builder()
+            .patterns(self.config.ignore_patterns.clone())
+            .follow_symlinks(self.config.follow_symlinks)
+            .max_file_size(self.config.max_file_size)
+            .base_path(path.clone())
+            .build()
+            .map_err(|e| Error::watcher(format!("Failed to create ignore filter: {e}")))?;
+        self.ignore_filter = Arc::new(ignore_filter);
 
         // Create channels
         let (notify_tx, notify_rx) = mpsc::channel(self.config.max_queued_events);
@@ -166,11 +179,41 @@ impl FileWatcher {
             .with_compare_contents(false);
 
         let tx_clone = tx.clone();
+        let ignore_filter = Arc::clone(&self.ignore_filter);
+        let git_repo = self.git_repo.clone();
+
         let watcher = RecommendedWatcher::new(
             move |res: std::result::Result<NotifyEvent, notify::Error>| match res {
                 Ok(event) => {
-                    if let Err(e) = tx_clone.try_send(event) {
-                        error!("Failed to send notify event: {}", e);
+                    // Filter events BEFORE sending to channel to prevent overwhelming it
+                    let should_process = event.paths.iter().any(|path| {
+                        // Check ignore filter
+                        if ignore_filter.should_ignore(path) {
+                            trace!("Notify callback: ignoring path from filter: {path:?}");
+                            return false;
+                        }
+
+                        // Check Git ignore if available
+                        if let Some(repo) = git_repo.as_ref() {
+                            if repo.should_ignore(path) {
+                                trace!("Notify callback: ignoring path from git: {path:?}");
+                                return false;
+                            }
+                        }
+
+                        true
+                    });
+
+                    if should_process {
+                        if let Err(e) = tx_clone.try_send(event.clone()) {
+                            // Log the first path from the event for debugging
+                            let path_info = event
+                                .paths
+                                .first()
+                                .map(|p| format!(" (path: {})", p.display()))
+                                .unwrap_or_default();
+                            error!("Failed to send notify event{}: {}", path_info, e);
+                        }
                     }
                 }
                 Err(e) => {

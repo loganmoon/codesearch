@@ -208,12 +208,18 @@ impl PostgresClient {
     }
 
     /// Ensure repository exists, return repository_id
+    ///
+    /// Computes a deterministic repository_id from the repository_path using
+    /// `StorageConfig::generate_repository_id()`.
     pub async fn ensure_repository(
         &self,
         repository_path: &std::path::Path,
         collection_name: &str,
         repository_name: Option<&str>,
     ) -> Result<Uuid> {
+        // Generate deterministic repository ID from path
+        let repository_id =
+            codesearch_core::config::StorageConfig::generate_repository_id(repository_path)?;
         let repo_path_str = repository_path
             .to_str()
             .ok_or_else(|| Error::storage("Invalid repository path"))?;
@@ -226,29 +232,29 @@ impl PostgresClient {
                 .await
                 .map_err(|e| Error::storage(format!("Failed to query repository: {e}")))?;
 
-        if let Some((repository_id,)) = existing {
+        if let Some((existing_id,)) = existing {
             tracing::debug!(
-                repository_id = %repository_id,
+                repository_id = %existing_id,
                 collection_name = %collection_name,
                 "Found existing repository"
             );
-            return Ok(repository_id);
+            return Ok(existing_id);
         }
 
-        // Create new repository
+        // Create new repository with the provided deterministic UUID
         let repo_name = repository_name
             .or_else(|| repository_path.file_name()?.to_str())
             .unwrap_or("unknown");
 
-        let (repository_id,): (Uuid,) = sqlx::query_as(
-            "INSERT INTO repositories (repository_path, repository_name, collection_name, bm25_avgdl, bm25_total_tokens, bm25_entity_count, created_at, updated_at)
-             VALUES ($1, $2, $3, 50.0, 0, 0, NOW(), NOW())
-             RETURNING repository_id",
+        sqlx::query(
+            "INSERT INTO repositories (repository_id, repository_path, repository_name, collection_name, bm25_avgdl, bm25_total_tokens, bm25_entity_count, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 50.0, 0, 0, NOW(), NOW())",
         )
+        .bind(repository_id)
         .bind(repo_path_str)
         .bind(repo_name)
         .bind(collection_name)
-        .fetch_one(&self.pool)
+        .execute(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to insert repository: {e}")))?;
 
@@ -256,7 +262,7 @@ impl PostgresClient {
             repository_id = %repository_id,
             collection_name = %collection_name,
             repository_path = %repository_path.display(),
-            "Created new repository"
+            "Created new repository with deterministic UUID"
         );
 
         Ok(repository_id)

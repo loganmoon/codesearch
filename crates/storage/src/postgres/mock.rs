@@ -208,8 +208,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(*repo_id);
         }
 
-        // Create new repository
-        let repository_id = Uuid::new_v4();
+        // Generate deterministic repository ID from path
+        let repository_id =
+            codesearch_core::config::StorageConfig::generate_repository_id(repository_path)?;
+
+        // Create new repository with the generated deterministic UUID
         let path_str = repository_path
             .to_str()
             .ok_or_else(|| codesearch_core::error::Error::storage("Invalid path"))?

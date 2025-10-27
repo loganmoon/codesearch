@@ -16,6 +16,7 @@ toml = { workspace = true }
 config = { workspace = true }
 tracing = { workspace = true }
 dirs = "5.0"
+uuid = { workspace = true }
 
 # For immutable data structures
 im = { version = "15.1", features = ["serde"] }

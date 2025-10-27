@@ -17,7 +17,7 @@ use codesearch_indexer::{Indexer, RepositoryIndexer};
 use dialoguer::{Confirm, Select};
 use std::env;
 use std::path::{Path, PathBuf};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 // Re-use create_embedding_manager from lib
@@ -161,6 +161,14 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Failed to connect to Postgres")?;
 
+    // Run migrations ONCE before starting services
+    info!("Running database migrations");
+    postgres_client
+        .run_migrations()
+        .await
+        .context("Failed to run database migrations")?;
+    info!("Database migrations completed successfully");
+
     // Load ALL indexed repositories from database
     let all_repos = postgres_client
         .list_all_repositories()
@@ -208,15 +216,60 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
         );
     }
 
+    // Create Qdrant config for outbox processor
+    let qdrant_config = codesearch_storage::QdrantConfig {
+        host: config.storage.qdrant_host.clone(),
+        port: config.storage.qdrant_port,
+        rest_port: config.storage.qdrant_rest_port,
+    };
+
+    // Create outbox processor shutdown channel
+    let (outbox_shutdown_tx, outbox_shutdown_rx) = tokio::sync::oneshot::channel();
+
+    // Spawn outbox processor as background task
+    let postgres_client_clone = postgres_client.clone();
+    let outbox_config = config.outbox.clone();
+    let outbox_handle = tokio::spawn(async move {
+        if let Err(e) = codesearch_outbox_processor::start_outbox_processor(
+            postgres_client_clone,
+            &qdrant_config,
+            &outbox_config,
+            outbox_shutdown_rx,
+        )
+        .await
+        {
+            error!("Outbox processor task failed: {e}");
+        }
+    });
+
+    info!("Outbox processor started successfully");
+
     info!(
         "Starting multi-repository MCP server with {} valid repositories",
         valid_repos.len()
     );
 
     // Delegate to multi-repository server
-    codesearch_server::run_multi_repo_server(config, valid_repos, postgres_client)
-        .await
-        .map_err(|e| anyhow!("MCP server error: {e}"))
+    let server_result =
+        codesearch_server::run_multi_repo_server(config, valid_repos, postgres_client)
+            .await
+            .map_err(|e| anyhow!("MCP server error: {e}"));
+
+    // Always perform graceful shutdown of outbox processor, regardless of server result
+    // This ensures proper cleanup even if the server failed
+    info!("Shutting down outbox processor...");
+    let _ = outbox_shutdown_tx.send(());
+
+    // Wait for outbox task to complete (with timeout)
+    // This wait happens before returning, ensuring cleanup completes
+    match tokio::time::timeout(std::time::Duration::from_secs(5), outbox_handle).await {
+        Ok(Ok(())) => info!("Outbox processor stopped successfully"),
+        Ok(Err(e)) => warn!("Outbox processor task panicked: {e}"),
+        Err(_) => warn!("Outbox processor shutdown timed out after 5 seconds"),
+    }
+
+    // Return server result after cleanup is complete
+    server_result
 }
 
 /// Index the repository

@@ -3,7 +3,7 @@ use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
 use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
-use dashmap::DashMap;
+use moka::future::Cache;
 use sqlx::{Postgres, QueryBuilder};
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +26,7 @@ pub struct OutboxProcessor {
     batch_size: i64,
     max_retries: i32,
     max_embedding_dim: usize,
-    client_cache: Arc<DashMap<String, Arc<dyn StorageClient>>>,
+    client_cache: Cache<String, Arc<dyn StorageClient>>,
 }
 
 impl OutboxProcessor {
@@ -40,6 +40,7 @@ impl OutboxProcessor {
         batch_size: i64,
         max_retries: i32,
         max_embedding_dim: usize,
+        max_cached_collections: u64,
     ) -> Self {
         Self {
             postgres_client,
@@ -48,27 +49,33 @@ impl OutboxProcessor {
             batch_size,
             max_retries,
             max_embedding_dim,
-            client_cache: Arc::new(DashMap::new()),
+            client_cache: Cache::builder()
+                .max_capacity(max_cached_collections)
+                .build(),
         }
     }
 
     /// Get or create a StorageClient for a specific collection (with caching)
     ///
     /// Clients are cached per collection to avoid recreating them on every poll cycle.
+    /// The cache is bounded (default 200 collections) using LRU eviction.
     async fn get_or_create_client_for_collection(
         &self,
         collection_name: &str,
     ) -> Result<Arc<dyn StorageClient>> {
-        // Check cache first
-        if let Some(client) = self.client_cache.get(collection_name) {
-            return Ok(Arc::clone(client.value()));
+        // Try to get from cache (non-blocking)
+        if let Some(client) = self.client_cache.get(collection_name).await {
+            return Ok(client);
         }
 
-        // Create new client and cache it
+        // Create new client
         let client =
             create_storage_client_from_config(&self.qdrant_config, collection_name).await?;
+
+        // Insert into cache (LRU will evict oldest entry if at capacity)
         self.client_cache
-            .insert(collection_name.to_string(), Arc::clone(&client));
+            .insert(collection_name.to_string(), Arc::clone(&client))
+            .await;
 
         Ok(client)
     }
@@ -144,7 +151,7 @@ impl OutboxProcessor {
     /// - Qdrant failures: Rollback transaction, record failures separately
     /// - Entry preparation failures: Fail entire batch (all-or-nothing)
     /// - Max retry entries: Mark processed without Qdrant write
-    async fn process_batch(&self) -> Result<()> {
+    pub async fn process_batch(&self) -> Result<()> {
         // Step 1: Begin single transaction for entire batch
         let mut tx = self
             .postgres_client
@@ -251,12 +258,13 @@ impl OutboxProcessor {
 
             // Process INSERT/UPDATE operations
             if !insert_update_entries.is_empty() {
-                let repo_token_counts = match self
+                let (repo_token_counts, prep_failed_entries) = match self
                     .write_to_qdrant_insert_update(&storage_client, &insert_update_entries)
                     .await
                 {
-                    Ok(counts) => counts,
+                    Ok(result) => result,
                     Err(e) => {
+                        // Only Qdrant write failures reach here (not preparation failures)
                         let ids: Vec<Uuid> =
                             insert_update_entries.iter().map(|e| e.outbox_id).collect();
                         let context = FailureContext {
@@ -270,6 +278,19 @@ impl OutboxProcessor {
                         return self.handle_qdrant_write_failure(tx, ids, e, context).await;
                     }
                 };
+
+                // Record preparation failures (per-entry retry)
+                if !prep_failed_entries.is_empty() {
+                    warn!(
+                        collection = %collection_name,
+                        failed_count = prep_failed_entries.len(),
+                        "Recording preparation failures for retry"
+                    );
+                    for (outbox_id, error_message) in prep_failed_entries {
+                        self.bulk_record_failures_in_tx(&mut tx, &[outbox_id], &error_message)
+                            .await?;
+                    }
+                }
 
                 // Update BM25 statistics within transaction
                 use std::collections::HashMap;
@@ -576,11 +597,13 @@ impl OutboxProcessor {
         &self,
         storage_client: &Arc<dyn StorageClient>,
         entries: &[&OutboxEntry],
-    ) -> Result<Vec<(Uuid, usize)>> {
+    ) -> Result<(Vec<(Uuid, usize)>, Vec<(Uuid, String)>)> {
         let mut embedded_entities = Vec::with_capacity(entries.len());
         let mut repo_token_counts = Vec::with_capacity(entries.len());
+        let mut failed_entries: Vec<(Uuid, String)> = Vec::new();
 
         // Prepare entities (fetches embeddings from database)
+        // Per-entry failure handling: collect failures instead of failing entire batch
         for entry in entries {
             match self.prepare_embedded_entity(entry).await {
                 Ok(embedded) => {
@@ -591,25 +614,25 @@ impl OutboxProcessor {
                     error!(
                         outbox_id = %entry.outbox_id,
                         error = %e,
-                        "Failed to prepare entry"
+                        "Failed to prepare entry, will retry"
                     );
-                    // If ANY entry fails preparation, fail the entire batch
-                    // This ensures transactional all-or-nothing behavior
-                    return Err(Error::storage(format!(
-                        "Failed to prepare entry {}: {e}",
-                        entry.outbox_id
-                    )));
+                    // Record failure for retry, continue processing other entries
+                    failed_entries.push((entry.outbox_id, e.to_string()));
                 }
             }
         }
 
-        // Bulk load to Qdrant
+        // Bulk load successful entries to Qdrant
         if !embedded_entities.is_empty() {
             storage_client.bulk_load_entities(embedded_entities).await?;
-            debug!("Successfully wrote {} entities to Qdrant", entries.len());
+            debug!(
+                "Successfully wrote {} entities to Qdrant ({} failed preparation)",
+                repo_token_counts.len(),
+                failed_entries.len()
+            );
         }
 
-        Ok(repo_token_counts)
+        Ok((repo_token_counts, failed_entries))
     }
 
     /// Delete entries from Qdrant (without DB marking)

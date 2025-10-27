@@ -80,6 +80,10 @@ pub struct Config {
     /// Hybrid search configuration
     #[serde(default)]
     pub hybrid_search: HybridSearchConfig,
+
+    /// Outbox processor configuration
+    #[serde(default)]
+    pub outbox: OutboxConfig,
 }
 
 /// Configuration for embeddings generation
@@ -275,6 +279,30 @@ pub struct HybridSearchConfig {
     pub prefetch_multiplier: usize,
 }
 
+/// Configuration for outbox processor
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutboxConfig {
+    /// Outbox polling interval in milliseconds
+    #[serde(default = "default_outbox_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+
+    /// Number of outbox entries to fetch per poll
+    #[serde(default = "default_outbox_entries_per_poll")]
+    pub entries_per_poll: i64,
+
+    /// Maximum retry attempts for failed operations
+    #[serde(default = "default_outbox_max_retries")]
+    pub max_retries: i32,
+
+    /// Maximum embedding dimension size (safety limit)
+    #[serde(default = "default_outbox_max_embedding_dim")]
+    pub max_embedding_dim: usize,
+
+    /// Maximum number of Qdrant client connections to cache
+    #[serde(default = "default_outbox_max_cached_collections")]
+    pub max_cached_collections: usize,
+}
+
 // Default constants
 const DEFAULT_DEVICE: &str = "cpu";
 const DEFAULT_PROVIDER: &str = "localapi";
@@ -432,6 +460,26 @@ fn default_prefetch_multiplier() -> usize {
     5
 }
 
+fn default_outbox_poll_interval_ms() -> u64 {
+    1000
+}
+
+fn default_outbox_entries_per_poll() -> i64 {
+    100
+}
+
+fn default_outbox_max_retries() -> i32 {
+    3
+}
+
+fn default_outbox_max_embedding_dim() -> usize {
+    100_000
+}
+
+fn default_outbox_max_cached_collections() -> usize {
+    200
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -491,6 +539,18 @@ impl Default for HybridSearchConfig {
     fn default() -> Self {
         Self {
             prefetch_multiplier: default_prefetch_multiplier(),
+        }
+    }
+}
+
+impl Default for OutboxConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: default_outbox_poll_interval_ms(),
+            entries_per_poll: default_outbox_entries_per_poll(),
+            max_retries: default_outbox_max_retries(),
+            max_embedding_dim: default_outbox_max_embedding_dim(),
+            max_cached_collections: default_outbox_max_cached_collections(),
         }
     }
 }
@@ -769,6 +829,9 @@ impl Config {
             .api_base_url
             .or(self.reranking.api_base_url.clone());
         self.reranking.api_key = other.reranking.api_key.or(self.reranking.api_key.clone());
+
+        // Merge outbox config
+        self.outbox = other.outbox;
     }
 
     /// Load configuration with layered precedence (git-style)
@@ -805,6 +868,7 @@ impl Config {
             languages: LanguagesConfig::default(),
             reranking: RerankingConfig::default(),
             hybrid_search: HybridSearchConfig::default(),
+            outbox: OutboxConfig::default(),
         };
 
         // Try to load global config
@@ -973,6 +1037,51 @@ impl Config {
             return Err(Error::config(format!(
                 "hybrid_search.prefetch_multiplier too large (max 100, got {})",
                 self.hybrid_search.prefetch_multiplier
+            )));
+        }
+
+        // Validate outbox configuration
+        if self.outbox.poll_interval_ms == 0 {
+            return Err(Error::config(
+                "outbox.poll_interval_ms must be greater than 0".to_string(),
+            ));
+        }
+        if self.outbox.poll_interval_ms > 60_000 {
+            return Err(Error::config(format!(
+                "outbox.poll_interval_ms too large (max 60000ms, got {})",
+                self.outbox.poll_interval_ms
+            )));
+        }
+        if self.outbox.entries_per_poll <= 0 {
+            return Err(Error::config(
+                "outbox.entries_per_poll must be greater than 0".to_string(),
+            ));
+        }
+        if self.outbox.entries_per_poll > 1000 {
+            return Err(Error::config(format!(
+                "outbox.entries_per_poll too large (max 1000, got {})",
+                self.outbox.entries_per_poll
+            )));
+        }
+        if self.outbox.max_retries < 0 {
+            return Err(Error::config(
+                "outbox.max_retries must be non-negative".to_string(),
+            ));
+        }
+        if self.outbox.max_embedding_dim == 0 {
+            return Err(Error::config(
+                "outbox.max_embedding_dim must be greater than 0".to_string(),
+            ));
+        }
+        if self.outbox.max_cached_collections == 0 {
+            return Err(Error::config(
+                "outbox.max_cached_collections must be greater than 0".to_string(),
+            ));
+        }
+        if self.outbox.max_cached_collections > 1000 {
+            return Err(Error::config(format!(
+                "outbox.max_cached_collections too large (max 1000, got {})",
+                self.outbox.max_cached_collections
             )));
         }
 
@@ -1497,6 +1606,214 @@ mod tests {
         // Should pass validation because reranking is disabled
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_outbox_validation_poll_interval_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("poll_interval_ms must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_poll_interval_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 60001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("poll_interval_ms too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_negative() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = -1
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = 1001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_retries_negative() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_retries = -1
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_retries must be non-negative"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_embedding_dim_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_embedding_dim = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_embedding_dim must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_cached_collections_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_cached_collections = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_cached_collections must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_cached_collections_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_cached_collections = 1001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_cached_collections too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_valid_config() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 1000
+            entries_per_poll = 100
+            max_retries = 3
+            max_embedding_dim = 100000
+            max_cached_collections = 200
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_outbox_validation_defaults() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_ok());
+        assert_eq!(config.outbox.poll_interval_ms, 1000);
+        assert_eq!(config.outbox.entries_per_poll, 100);
+        assert_eq!(config.outbox.max_retries, 3);
+        assert_eq!(config.outbox.max_embedding_dim, 100_000);
+        assert_eq!(config.outbox.max_cached_collections, 200);
+    }
 }
 
 /// Builder for Config with fluent API
@@ -1510,6 +1827,7 @@ pub struct ConfigBuilder {
     languages: LanguagesConfig,
     reranking: RerankingConfig,
     hybrid_search: HybridSearchConfig,
+    outbox: OutboxConfig,
 }
 
 impl ConfigBuilder {
@@ -1524,6 +1842,7 @@ impl ConfigBuilder {
             languages: LanguagesConfig::default(),
             reranking: RerankingConfig::default(),
             hybrid_search: HybridSearchConfig::default(),
+            outbox: OutboxConfig::default(),
         }
     }
 
@@ -1557,6 +1876,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the outbox processor configuration
+    pub fn outbox(mut self, outbox: OutboxConfig) -> Self {
+        self.outbox = outbox;
+        self
+    }
+
     /// Build the Config
     pub fn build(self) -> Config {
         Config {
@@ -1568,6 +1893,7 @@ impl ConfigBuilder {
             languages: self.languages,
             reranking: self.reranking,
             hybrid_search: self.hybrid_search,
+            outbox: self.outbox,
         }
     }
 }

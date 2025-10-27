@@ -19,6 +19,7 @@ codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
 codesearch-server = { path = "../server" }
 codesearch-indexer = { path = "../indexer" }
+codesearch-outbox-processor = { path = "../outbox-processor" }
 
 # CLI framework
 clap = { workspace = true }

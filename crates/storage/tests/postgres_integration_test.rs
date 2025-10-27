@@ -47,12 +47,7 @@ async fn test_ensure_repository_creates_new() -> Result<()> {
         let collection_name = format!("test_{}", Uuid::new_v4());
 
         let repository_id = client
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                repo_path,
-                &collection_name,
-                Some("test-repo"),
-            )
+            .ensure_repository(repo_path, &collection_name, Some("test-repo"))
             .await?;
 
         assert!(!repository_id.is_nil(), "Repository ID should not be nil");
@@ -79,20 +74,10 @@ async fn test_ensure_repository_idempotent() -> Result<()> {
         let collection_name = format!("test_{}", Uuid::new_v4());
 
         let id1 = client
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                repo_path,
-                &collection_name,
-                Some("test-repo"),
-            )
+            .ensure_repository(repo_path, &collection_name, Some("test-repo"))
             .await?;
         let id2 = client
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                repo_path,
-                &collection_name,
-                Some("test-repo"),
-            )
+            .ensure_repository(repo_path, &collection_name, Some("test-repo"))
             .await?;
 
         assert_eq!(id1, id2, "Should return same UUID both times");
@@ -111,7 +96,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity = create_test_entity(
@@ -168,7 +153,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let mut entity = create_test_entity(
@@ -254,7 +239,7 @@ async fn test_get_file_snapshot() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity1 = create_test_entity_with_file(
@@ -394,7 +379,7 @@ async fn test_file_snapshot_create_and_retrieve() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity_ids = vec![
@@ -431,7 +416,7 @@ async fn test_file_snapshot_update() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let initial_ids = vec!["entity1".to_string(), "entity2".to_string()];
@@ -480,7 +465,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entities: Vec<_> = (0..5)
@@ -578,7 +563,7 @@ async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity_ids: Vec<String> = (0..1001).map(|i| format!("entity_{i}")).collect();
@@ -613,7 +598,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entities: Vec<_> = (0..5)
@@ -709,7 +694,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity1 =
@@ -800,7 +785,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity =
@@ -859,7 +844,7 @@ async fn test_outbox_record_failure() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity =
@@ -943,7 +928,7 @@ async fn test_transaction_rollback() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let entity = create_test_entity(
@@ -1000,7 +985,7 @@ async fn test_bm25_statistics_initialization() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         let stats = client.get_bm25_statistics(repository_id).await?;
@@ -1026,7 +1011,7 @@ async fn test_bm25_statistics_incremental_update() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add entities with known token counts: 10, 20, 30
@@ -1085,7 +1070,7 @@ async fn test_bm25_statistics_after_deletion() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add initial entities with token counts: 10, 20, 30, 40, 50
@@ -1134,7 +1119,7 @@ async fn test_bm25_statistics_delete_all_entities() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add entities
@@ -1173,7 +1158,7 @@ async fn test_bm25_statistics_single_entity() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add single entity with 42 tokens
@@ -1204,7 +1189,7 @@ async fn test_bm25_statistics_empty_batch() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add entities first
@@ -1241,7 +1226,7 @@ async fn test_bm25_statistics_over_deletion() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
+            .ensure_repository(repo_path, &collection_name, None)
             .await?;
 
         // Add entities with total 50 tokens, 2 entities
@@ -1279,23 +1264,13 @@ async fn test_drop_single_repository() -> Result<()> {
         let repo1_path = Path::new("/tmp/test-repo-drop-1");
         let collection1 = format!("drop_test_1_{}", Uuid::new_v4());
         let repo1_id = client
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                repo1_path,
-                &collection1,
-                Some("test-repo-1"),
-            )
+            .ensure_repository(repo1_path, &collection1, Some("test-repo-1"))
             .await?;
 
         let repo2_path = Path::new("/tmp/test-repo-drop-2");
         let collection2 = format!("drop_test_2_{}", Uuid::new_v4());
         let repo2_id = client
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                repo2_path,
-                &collection2,
-                Some("test-repo-2"),
-            )
+            .ensure_repository(repo2_path, &collection2, Some("test-repo-2"))
             .await?;
 
         // Verify both repositories exist

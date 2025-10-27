@@ -22,23 +22,13 @@ async fn test_mock_storage_list_repositories() -> Result<()> {
     let repo1_path = PathBuf::from("/tmp/test-repo-1");
     let collection1 = "test-collection-1";
     postgres
-        .ensure_repository(
-            uuid::Uuid::new_v4(),
-            &repo1_path,
-            collection1,
-            Some("test-repo-1"),
-        )
+        .ensure_repository(&repo1_path, collection1, Some("test-repo-1"))
         .await?;
 
     let repo2_path = PathBuf::from("/tmp/test-repo-2");
     let collection2 = "test-collection-2";
     postgres
-        .ensure_repository(
-            uuid::Uuid::new_v4(),
-            &repo2_path,
-            collection2,
-            Some("test-repo-2"),
-        )
+        .ensure_repository(&repo2_path, collection2, Some("test-repo-2"))
         .await?;
 
     // List all repositories
@@ -61,23 +51,13 @@ async fn test_drop_single_repository_with_mock() -> Result<()> {
     let repo1_path = PathBuf::from("/tmp/test-repo-drop-1");
     let collection1 = "drop_test_1";
     let repo1_id = postgres
-        .ensure_repository(
-            uuid::Uuid::new_v4(),
-            &repo1_path,
-            collection1,
-            Some("test-repo-1"),
-        )
+        .ensure_repository(&repo1_path, collection1, Some("test-repo-1"))
         .await?;
 
     let repo2_path = PathBuf::from("/tmp/test-repo-drop-2");
     let collection2 = "drop_test_2";
     let repo2_id = postgres
-        .ensure_repository(
-            uuid::Uuid::new_v4(),
-            &repo2_path,
-            collection2,
-            Some("test-repo-2"),
-        )
+        .ensure_repository(&repo2_path, collection2, Some("test-repo-2"))
         .await?;
 
     // Verify both exist
@@ -111,12 +91,7 @@ async fn test_drop_all_repositories_with_mock() -> Result<()> {
     let mut repo_ids = Vec::new();
     for (path, collection, name) in repos_to_create {
         let id = postgres
-            .ensure_repository(
-                uuid::Uuid::new_v4(),
-                &PathBuf::from(path),
-                collection,
-                Some(name),
-            )
+            .ensure_repository(&PathBuf::from(path), collection, Some(name))
             .await?;
         repo_ids.push(id);
     }

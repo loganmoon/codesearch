@@ -197,7 +197,6 @@ impl PostgresClientTrait for MockPostgresClient {
 
     async fn ensure_repository(
         &self,
-        repository_id: Uuid,
         repository_path: &std::path::Path,
         collection_name: &str,
         repository_name: Option<&str>,
@@ -209,7 +208,11 @@ impl PostgresClientTrait for MockPostgresClient {
             return Ok(*repo_id);
         }
 
-        // Create new repository with the provided deterministic UUID
+        // Generate deterministic repository ID from path
+        let repository_id =
+            codesearch_core::config::StorageConfig::generate_repository_id(repository_path)?;
+
+        // Create new repository with the generated deterministic UUID
         let path_str = repository_path
             .to_str()
             .ok_or_else(|| codesearch_core::error::Error::storage("Invalid path"))?
@@ -889,10 +892,8 @@ mod tests {
     async fn test_mock_ensure_repository() {
         let client = MockPostgresClient::new();
 
-        let test_uuid = Uuid::new_v4();
         let repo_id1 = client
             .ensure_repository(
-                test_uuid,
                 std::path::Path::new("/test/repo"),
                 "test_collection",
                 Some("test_repo"),
@@ -903,7 +904,6 @@ mod tests {
         // Calling again with same collection should return same ID
         let repo_id2 = client
             .ensure_repository(
-                test_uuid,
                 std::path::Path::new("/test/repo"),
                 "test_collection",
                 Some("test_repo"),

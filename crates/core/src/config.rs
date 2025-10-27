@@ -636,8 +636,59 @@ impl StorageConfig {
 
     /// Generate a deterministic repository ID from repository path
     ///
-    /// Uses UUID v5 (name-based) to ensure the same repository path always
-    /// produces the same UUID. This makes entity IDs stable across re-indexing.
+    /// Creates a deterministic UUID v5 from a repository path, ensuring the same path
+    /// always generates the same UUID. This makes entity IDs stable across re-indexing,
+    /// even if the repository is dropped and re-indexed.
+    ///
+    /// # UUID v5 Generation
+    ///
+    /// Uses UUID v5 (name-based, SHA-1) as defined in RFC 4122. The UUID is generated
+    /// from the normalized repository path using `NAMESPACE_DNS` as the namespace UUID.
+    /// While DNS namespace is typically used for domain names, it's a standard, well-known
+    /// namespace suitable for generating deterministic UUIDs from filesystem paths.
+    ///
+    /// # Path Normalization
+    ///
+    /// The function normalizes paths to ensure consistent UUID generation:
+    ///
+    /// 1. **Relative paths**: Converted to absolute paths using the current working directory
+    /// 2. **Symlinks**: Resolved to their target path via `std::fs::canonicalize`
+    /// 3. **Path components**: Normalized (`.` and `..` are resolved)
+    ///
+    /// If canonicalization fails (e.g., permission errors, I/O errors), the function falls
+    /// back to the absolute (but non-canonical) path. A warning is logged for non-NotFound
+    /// errors to help diagnose cases where different path representations might generate
+    /// different UUIDs.
+    ///
+    /// # Idempotency and Thread Safety
+    ///
+    /// - **Idempotent**: Calling this function multiple times with the same path always
+    ///   returns the same UUID
+    /// - **Thread-safe**: This function has no mutable state and can be called safely
+    ///   from multiple threads
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The current directory cannot be determined (for relative paths)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use codesearch_core::config::StorageConfig;
+    /// use std::path::Path;
+    ///
+    /// // Absolute path
+    /// let id1 = StorageConfig::generate_repository_id(Path::new("/home/user/repo")).unwrap();
+    ///
+    /// // Same path should produce same UUID
+    /// let id2 = StorageConfig::generate_repository_id(Path::new("/home/user/repo")).unwrap();
+    /// assert_eq!(id1, id2);
+    ///
+    /// // Different paths produce different UUIDs
+    /// let id3 = StorageConfig::generate_repository_id(Path::new("/home/user/other")).unwrap();
+    /// assert_ne!(id1, id3);
+    /// ```
     pub fn generate_repository_id(repo_path: &Path) -> Result<uuid::Uuid> {
         // Get the absolute path without requiring it to exist
         let absolute_path = if repo_path.is_absolute() {
@@ -649,9 +700,22 @@ impl StorageConfig {
         };
 
         // Canonicalize the path to resolve symlinks and normalize
-        // If the path doesn't exist, fall back to the absolute path
-        let normalized_path =
-            std::fs::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
+        // If canonicalization fails, fall back to the absolute path and log a warning
+        let normalized_path = match std::fs::canonicalize(&absolute_path) {
+            Ok(canonical) => canonical,
+            Err(e) => {
+                // Log warning for non-NotFound errors (permissions, I/O, etc.)
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(
+                        path = %absolute_path.display(),
+                        error = %e,
+                        "Failed to canonicalize repository path, using absolute path. \
+                         Different path representations may generate different repository IDs."
+                    );
+                }
+                absolute_path.clone()
+            }
+        };
 
         // Generate deterministic UUID v5 from the normalized path
         // Using DNS namespace as it's a standard namespace for name-based UUIDs
@@ -1527,6 +1591,137 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no valid filename component"));
+    }
+
+    #[test]
+    fn test_generate_repository_id_deterministic() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let id1 = StorageConfig::generate_repository_id(temp_dir.path())
+            .expect("Failed to generate repository ID");
+        let id2 = StorageConfig::generate_repository_id(temp_dir.path())
+            .expect("Failed to generate repository ID");
+
+        // Same path should generate same UUID
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_repository_id_different_paths() {
+        let temp_dir1 = tempfile::tempdir().expect("Failed to create temp dir 1");
+        let temp_dir2 = tempfile::tempdir().expect("Failed to create temp dir 2");
+
+        let id1 = StorageConfig::generate_repository_id(temp_dir1.path())
+            .expect("Failed to generate repository ID 1");
+        let id2 = StorageConfig::generate_repository_id(temp_dir2.path())
+            .expect("Failed to generate repository ID 2");
+
+        // Different paths should generate different UUIDs
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_repository_id_relative_vs_absolute() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Get absolute path
+        let absolute_id = StorageConfig::generate_repository_id(temp_dir.path())
+            .expect("Failed to generate ID from absolute path");
+
+        // Change to parent directory and use relative path
+        let original_dir = std::env::current_dir().expect("Failed to get current dir");
+        let parent = temp_dir.path().parent().expect("No parent directory");
+        let dir_name = temp_dir.path().file_name().expect("No file name");
+
+        std::env::set_current_dir(parent).expect("Failed to change directory");
+        let relative_id =
+            StorageConfig::generate_repository_id(&std::path::PathBuf::from(dir_name))
+                .expect("Failed to generate ID from relative path");
+        std::env::set_current_dir(original_dir).expect("Failed to restore directory");
+
+        // Relative and absolute paths should generate same UUID
+        assert_eq!(absolute_id, relative_id);
+    }
+
+    #[test]
+    fn test_generate_repository_id_symlink_resolution() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let real_path = temp_dir.path().join("real_repo");
+        let symlink_path = temp_dir.path().join("symlink_repo");
+
+        std::fs::create_dir(&real_path).expect("Failed to create real directory");
+        symlink(&real_path, &symlink_path).expect("Failed to create symlink");
+
+        let real_id = StorageConfig::generate_repository_id(&real_path)
+            .expect("Failed to generate ID from real path");
+        let symlink_id = StorageConfig::generate_repository_id(&symlink_path)
+            .expect("Failed to generate ID from symlink");
+
+        // Symlink should resolve to same UUID as real path
+        assert_eq!(real_id, symlink_id);
+    }
+
+    #[test]
+    fn test_generate_repository_id_path_normalization() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        // Create subdirectory and sibling
+        let subdir = temp_dir.path().join("subdir");
+        let other = temp_dir.path().join("other");
+        std::fs::create_dir(&subdir).expect("Failed to create subdirectory");
+        std::fs::create_dir(&other).expect("Failed to create other directory");
+
+        // Generate ID from clean path
+        let clean_id = StorageConfig::generate_repository_id(&subdir)
+            .expect("Failed to generate ID from clean path");
+
+        // Generate ID from path with .. (e.g., /tmp/foo/other/../subdir)
+        // This path exists and will canonicalize to /tmp/foo/subdir
+        let with_parent = other.join("..").join("subdir");
+        let normalized_id = StorageConfig::generate_repository_id(&with_parent)
+            .expect("Failed to generate ID from path with ..");
+
+        // Both should generate same UUID (after canonicalization)
+        assert_eq!(clean_id, normalized_id);
+    }
+
+    #[test]
+    fn test_generate_repository_id_uuid_v5_format() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+        let id = StorageConfig::generate_repository_id(temp_dir.path())
+            .expect("Failed to generate repository ID");
+
+        // UUID v5 has version bits set to 0101 (5) in the time_hi_and_version field
+        // The variant should be 10xx (RFC 4122)
+        let bytes = id.as_bytes();
+
+        // Check version (bits 4-7 of byte 6 should be 0101 = 5)
+        assert_eq!((bytes[6] >> 4) & 0x0F, 5, "UUID should be version 5");
+
+        // Check variant (bits 6-7 of byte 8 should be 10)
+        assert_eq!(
+            (bytes[8] >> 6) & 0x03,
+            2,
+            "UUID should have RFC 4122 variant"
+        );
+    }
+
+    #[test]
+    fn test_generate_repository_id_nonexistent_path() {
+        // Non-existent paths should work (no canonicalization required for generation)
+        let nonexistent = std::path::PathBuf::from("/tmp/this_path_does_not_exist_test_12345");
+
+        let result = StorageConfig::generate_repository_id(&nonexistent);
+        assert!(result.is_ok(), "Should handle non-existent paths");
+
+        // Should be deterministic even for non-existent paths
+        let id1 = result.expect("Failed to generate ID");
+        let id2 = StorageConfig::generate_repository_id(&nonexistent)
+            .expect("Failed to generate ID second time");
+        assert_eq!(id1, id2, "Non-existent paths should still be deterministic");
     }
 
     #[test]

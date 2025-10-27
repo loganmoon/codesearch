@@ -209,15 +209,17 @@ impl PostgresClient {
 
     /// Ensure repository exists, return repository_id
     ///
-    /// The repository_id parameter must be a deterministic UUID generated from the
-    /// repository path using `StorageConfig::generate_repository_id()`.
+    /// Computes a deterministic repository_id from the repository_path using
+    /// `StorageConfig::generate_repository_id()`.
     pub async fn ensure_repository(
         &self,
-        repository_id: Uuid,
         repository_path: &std::path::Path,
         collection_name: &str,
         repository_name: Option<&str>,
     ) -> Result<Uuid> {
+        // Generate deterministic repository ID from path
+        let repository_id =
+            codesearch_core::config::StorageConfig::generate_repository_id(repository_path)?;
         let repo_path_str = repository_path
             .to_str()
             .ok_or_else(|| Error::storage("Invalid repository path"))?;
@@ -1765,18 +1767,12 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn ensure_repository(
         &self,
-        repository_id: Uuid,
         repository_path: &std::path::Path,
         collection_name: &str,
         repository_name: Option<&str>,
     ) -> Result<Uuid> {
-        self.ensure_repository(
-            repository_id,
-            repository_path,
-            collection_name,
-            repository_name,
-        )
-        .await
+        self.ensure_repository(repository_path, collection_name, repository_name)
+            .await
     }
 
     async fn get_repository_id(&self, collection_name: &str) -> Result<Option<Uuid>> {

@@ -1192,14 +1192,8 @@ mod tests {
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
 
         // Register repository with mock and get the repo UUID
-        let test_uuid = uuid::Uuid::new_v4();
         let repo_uuid = postgres
-            .ensure_repository(
-                test_uuid,
-                std::path::Path::new("/test/repo"),
-                "test_collection",
-                None,
-            )
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
             .await
             .unwrap();
         let repo_id = repo_uuid.to_string();
@@ -1274,14 +1268,8 @@ mod tests {
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
 
         // Register repository with mock and get the repo UUID
-        let test_uuid = uuid::Uuid::new_v4();
         let repo_uuid = postgres
-            .ensure_repository(
-                test_uuid,
-                std::path::Path::new("/test/repo"),
-                "test_collection",
-                None,
-            )
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
             .await
             .unwrap();
         let repo_id = repo_uuid.to_string();
@@ -1375,14 +1363,8 @@ mod tests {
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
 
         // Register repository with mock and get the repo UUID
-        let test_uuid = uuid::Uuid::new_v4();
         let repo_uuid = postgres
-            .ensure_repository(
-                test_uuid,
-                std::path::Path::new("/test/repo"),
-                "test_collection",
-                None,
-            )
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
             .await
             .unwrap();
         let repo_id = repo_uuid.to_string();
@@ -1541,14 +1523,8 @@ mod tests {
         let postgres = std::sync::Arc::new(MockPostgresClient::new());
 
         // Register repository with mock and get the repo UUID
-        let test_uuid = uuid::Uuid::new_v4();
         let repo_uuid = postgres
-            .ensure_repository(
-                test_uuid,
-                std::path::Path::new("/test/repo"),
-                "test_collection",
-                None,
-            )
+            .ensure_repository(std::path::Path::new("/test/repo"), "test_collection", None)
             .await
             .unwrap();
 

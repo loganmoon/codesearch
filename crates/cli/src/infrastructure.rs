@@ -149,7 +149,6 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         "qdrant",
         "vllm-embeddings",
         "vllm-reranker",
-        "outbox-processor",
     ]);
 
     let output = Command::new(cmd)

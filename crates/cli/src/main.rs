@@ -255,17 +255,20 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
             .await
             .map_err(|e| anyhow!("MCP server error: {e}"));
 
-    // Gracefully shutdown outbox processor
+    // Always perform graceful shutdown of outbox processor, regardless of server result
+    // This ensures proper cleanup even if the server failed
     info!("Shutting down outbox processor...");
     let _ = outbox_shutdown_tx.send(());
 
     // Wait for outbox task to complete (with timeout)
+    // This wait happens before returning, ensuring cleanup completes
     match tokio::time::timeout(std::time::Duration::from_secs(5), outbox_handle).await {
         Ok(Ok(())) => info!("Outbox processor stopped successfully"),
         Ok(Err(e)) => warn!("Outbox processor task panicked: {e}"),
         Err(_) => warn!("Outbox processor shutdown timed out after 5 seconds"),
     }
 
+    // Return server result after cleanup is complete
     server_result
 }
 

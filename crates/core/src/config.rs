@@ -297,6 +297,10 @@ pub struct OutboxConfig {
     /// Maximum embedding dimension size (safety limit)
     #[serde(default = "default_outbox_max_embedding_dim")]
     pub max_embedding_dim: usize,
+
+    /// Maximum number of Qdrant client connections to cache
+    #[serde(default = "default_outbox_max_cached_collections")]
+    pub max_cached_collections: usize,
 }
 
 // Default constants
@@ -472,6 +476,10 @@ fn default_outbox_max_embedding_dim() -> usize {
     100_000
 }
 
+fn default_outbox_max_cached_collections() -> usize {
+    200
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -542,6 +550,7 @@ impl Default for OutboxConfig {
             entries_per_poll: default_outbox_entries_per_poll(),
             max_retries: default_outbox_max_retries(),
             max_embedding_dim: default_outbox_max_embedding_dim(),
+            max_cached_collections: default_outbox_max_cached_collections(),
         }
     }
 }
@@ -1064,6 +1073,17 @@ impl Config {
                 "outbox.max_embedding_dim must be greater than 0".to_string(),
             ));
         }
+        if self.outbox.max_cached_collections == 0 {
+            return Err(Error::config(
+                "outbox.max_cached_collections must be greater than 0".to_string(),
+            ));
+        }
+        if self.outbox.max_cached_collections > 1000 {
+            return Err(Error::config(format!(
+                "outbox.max_cached_collections too large (max 1000, got {})",
+                self.outbox.max_cached_collections
+            )));
+        }
 
         Ok(())
     }
@@ -1585,6 +1605,214 @@ mod tests {
 
         // Should pass validation because reranking is disabled
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_outbox_validation_poll_interval_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("poll_interval_ms must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_poll_interval_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 60001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("poll_interval_ms too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_negative() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = -1
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_entries_per_poll_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            entries_per_poll = 1001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("entries_per_poll too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_retries_negative() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_retries = -1
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_retries must be non-negative"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_embedding_dim_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_embedding_dim = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_embedding_dim must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_cached_collections_zero() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_cached_collections = 0
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_cached_collections must be greater than 0"));
+    }
+
+    #[test]
+    fn test_outbox_validation_max_cached_collections_too_large() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            max_cached_collections = 1001
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("max_cached_collections too large"));
+    }
+
+    #[test]
+    fn test_outbox_validation_valid_config() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+            [outbox]
+            poll_interval_ms = 1000
+            entries_per_poll = 100
+            max_retries = 3
+            max_embedding_dim = 100000
+            max_cached_collections = 200
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_outbox_validation_defaults() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+        "#;
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+        assert!(result.is_ok());
+        assert_eq!(config.outbox.poll_interval_ms, 1000);
+        assert_eq!(config.outbox.entries_per_poll, 100);
+        assert_eq!(config.outbox.max_retries, 3);
+        assert_eq!(config.outbox.max_embedding_dim, 100_000);
+        assert_eq!(config.outbox.max_cached_collections, 200);
     }
 }
 

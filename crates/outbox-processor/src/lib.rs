@@ -28,8 +28,12 @@ pub use processor::OutboxProcessor;
 ///
 /// # Graceful Shutdown
 /// When the shutdown signal is received via `shutdown_rx`, the processor will:
-/// 1. Complete any in-flight batch processing
-/// 2. Return Ok(()) to indicate clean shutdown
+/// 1. Complete the current in-flight batch processing (if any)
+/// 2. Check the shutdown flag before starting the next batch
+/// 3. Return Ok(()) to indicate clean shutdown
+///
+/// The shutdown is graceful in the sense that it will not interrupt an ongoing
+/// batch operation, but will exit cleanly after the current batch completes.
 ///
 /// # Error Handling
 /// Processing errors are logged but do not stop the processor. Only shutdown signals
@@ -38,7 +42,7 @@ pub async fn start_outbox_processor(
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: &QdrantConfig,
     config: &OutboxConfig,
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     let processor = OutboxProcessor::new(
         postgres_client,
@@ -47,24 +51,41 @@ pub async fn start_outbox_processor(
         config.entries_per_poll,
         config.max_retries,
         config.max_embedding_dim,
+        config.max_cached_collections as u64,
     );
 
     info!("Outbox processor started");
 
+    // Use a watch channel to allow graceful shutdown that completes current batch
+    let (shutdown_flag_tx, mut shutdown_flag_rx) = tokio::sync::watch::channel(false);
+
+    // Spawn task to listen for shutdown signal and set the flag
+    tokio::spawn(async move {
+        let _ = shutdown_rx.await;
+        let _ = shutdown_flag_tx.send(true);
+    });
+
     loop {
+        // Check shutdown flag before starting next batch
+        if *shutdown_flag_rx.borrow() {
+            info!("Outbox processor shutting down gracefully");
+            return Ok(());
+        }
+
+        // Process batch (will complete even if shutdown signal arrives during processing)
+        if let Err(e) = processor.process_batch().await {
+            error!("Outbox batch processing error: {e}");
+            // Continue processing despite errors
+        }
+
+        // Use select for the sleep to allow early exit on shutdown
         tokio::select! {
-            result = processor.process_batch() => {
-                if let Err(e) = result {
-                    error!("Outbox batch processing error: {e}");
-                    // Continue processing despite errors
-                }
-            },
-            _ = &mut shutdown_rx => {
+            _ = sleep(Duration::from_millis(config.poll_interval_ms)) => {},
+            _ = shutdown_flag_rx.changed() => {
+                // Shutdown signal received during sleep, exit after current batch completed
                 info!("Outbox processor shutting down gracefully");
                 return Ok(());
             }
         }
-
-        sleep(Duration::from_millis(config.poll_interval_ms)).await;
     }
 }

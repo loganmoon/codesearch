@@ -20,7 +20,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
 async-trait = "0.1"
 chrono = "0.4"
-dashmap = "6.1.0"
+moka = { version = "0.12", features = ["future"] }
 
 [dev-dependencies]
 testcontainers = "0.23"

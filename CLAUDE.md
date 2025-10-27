@@ -89,7 +89,7 @@ codesearch index                          # Automatically rebuilds image if sour
 **Docker Infrastructure Management:**
 
 The codesearch CLI uses shared Docker infrastructure located at `~/.codesearch/infrastructure/`.
-All repositories connect to the same Postgres, Qdrant, vLLM, and outbox-processor containers.
+All repositories connect to the same Postgres, Qdrant, and vLLM containers. The outbox processor runs embedded within the `codesearch serve` process.
 
 Starting infrastructure (automatic on first `codesearch index`):
 ```bash
@@ -114,11 +114,11 @@ Troubleshooting:
 # View logs for a specific service
 docker logs codesearch-postgres
 docker logs codesearch-qdrant
-docker logs codesearch-vllm
-docker logs codesearch-outbox-processor
+docker logs codesearch-vllm-embeddings
+docker logs codesearch-vllm-reranker
 
 # Manually clean up stale containers (usually not needed, CLI auto-cleans)
-docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm codesearch-outbox-processor
+docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker
 
 # Nuclear option: remove all stopped containers
 docker container prune -f

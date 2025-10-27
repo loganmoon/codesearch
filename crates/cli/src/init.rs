@@ -112,6 +112,13 @@ pub async fn ensure_storage_initialized(
     let collection_name = StorageConfig::generate_collection_name(repo_root)?;
     info!("Generated collection name: {}", collection_name);
 
+    // Generate deterministic repository ID from repository path
+    let deterministic_repo_id = StorageConfig::generate_repository_id(repo_root)?;
+    info!(
+        "Generated deterministic repository ID: {}",
+        deterministic_repo_id
+    );
+
     // Check if repository exists in database
     let repository_info = postgres_client
         .get_repository_by_path(repo_root)
@@ -137,10 +144,10 @@ pub async fn ensure_storage_initialized(
             repo_id
         }
         None => {
-            // Register new repository in database
+            // Register new repository in database with deterministic UUID
             info!("Registering new repository in database...");
             postgres_client
-                .ensure_repository(repo_root, &collection_name, None)
+                .ensure_repository(deterministic_repo_id, repo_root, &collection_name, None)
                 .await
                 .context("Failed to register repository")?
         }

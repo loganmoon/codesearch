@@ -5,7 +5,7 @@
 
 use glob::{Pattern, PatternError};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, trace};
 
@@ -26,6 +26,8 @@ pub struct IgnoreFilter {
     follow_symlinks: bool,
     /// Maximum file size to consider (bytes)
     max_file_size: u64,
+    /// Base path for resolving relative patterns (typically repository root)
+    base_path: Option<Arc<PathBuf>>,
 }
 
 impl Default for IgnoreFilter {
@@ -43,6 +45,7 @@ impl IgnoreFilter {
             exclude_extensions: Arc::new(HashSet::new()),
             follow_symlinks: true,
             max_file_size: u64::MAX,
+            base_path: None,
         }
     }
 
@@ -60,6 +63,7 @@ impl IgnoreFilter {
             exclude_extensions: Arc::new(HashSet::new()),
             follow_symlinks: true,
             max_file_size: u64::MAX,
+            base_path: None,
         })
     }
 
@@ -70,12 +74,13 @@ impl IgnoreFilter {
 
     /// Check if a path should be ignored
     pub fn should_ignore(&self, path: &Path) -> bool {
-        // Check if it's in an ignored directory
-        if let Some(file_name) = path.file_name() {
-            let name = file_name.to_string_lossy();
-            if self.ignored_dirs.contains(name.as_ref()) {
-                trace!("Ignoring directory: {:?}", path);
-                return true;
+        // Check if any component in the path is an ignored directory
+        for component in path.components() {
+            if let Some(name) = component.as_os_str().to_str() {
+                if self.ignored_dirs.contains(name) {
+                    trace!("Ignoring path in ignored directory {name}: {path:?}");
+                    return true;
+                }
             }
         }
 
@@ -89,7 +94,18 @@ impl IgnoreFilter {
         }
 
         // Check glob patterns
-        let path_str = path.to_string_lossy();
+        // Convert absolute paths to relative paths for pattern matching
+        let path_for_matching = if path.is_absolute() {
+            if let Some(base) = &self.base_path {
+                path.strip_prefix(base.as_ref()).unwrap_or(path)
+            } else {
+                path
+            }
+        } else {
+            path
+        };
+
+        let path_str = path_for_matching.to_string_lossy();
         for pattern in self.patterns.iter() {
             if pattern.matches(&path_str) {
                 debug!("Path {:?} matches ignore pattern", path);
@@ -119,6 +135,7 @@ pub struct IgnoreFilterBuilder {
     ignored_dirs: Option<HashSet<String>>,
     follow_symlinks: bool,
     max_file_size: u64,
+    base_path: Option<PathBuf>,
 }
 
 impl Default for IgnoreFilterBuilder {
@@ -129,6 +146,7 @@ impl Default for IgnoreFilterBuilder {
             ignored_dirs: None,
             follow_symlinks: true,
             max_file_size: u64::MAX, // No limit by default
+            base_path: None,
         }
     }
 }
@@ -174,6 +192,12 @@ impl IgnoreFilterBuilder {
         self
     }
 
+    /// Set base path for resolving relative patterns
+    pub fn base_path(mut self, path: PathBuf) -> Self {
+        self.base_path = Some(path);
+        self
+    }
+
     /// Build the ignore filter
     pub fn build(self) -> Result<IgnoreFilter, PatternError> {
         let compiled_patterns = self
@@ -188,6 +212,7 @@ impl IgnoreFilterBuilder {
             exclude_extensions: Arc::new(self.exclude_extensions.unwrap_or_default()),
             follow_symlinks: self.follow_symlinks,
             max_file_size: self.max_file_size,
+            base_path: self.base_path.map(Arc::new),
         })
     }
 }
@@ -481,5 +506,58 @@ mod tests {
         assert!(is_likely_binary(Path::new("app.jar")));
         assert!(!is_likely_binary(Path::new("main.rs")));
         assert!(!is_likely_binary(Path::new("script.py")));
+    }
+
+    #[test]
+    fn test_ignore_filter_with_base_path() {
+        use std::path::PathBuf;
+
+        let base_path = PathBuf::from("/home/user/project");
+
+        let filter = IgnoreFilter::builder()
+            .add_pattern("target/**".to_string())
+            .add_pattern("node_modules/**".to_string())
+            .base_path(base_path.clone())
+            .build()
+            .expect("test setup failed");
+
+        // Absolute paths should be converted to relative and match
+        assert!(filter.should_ignore(Path::new("/home/user/project/target/debug/app")));
+        assert!(filter.should_ignore(Path::new("/home/user/project/target/release/lib.so")));
+        assert!(filter.should_ignore(Path::new(
+            "/home/user/project/node_modules/package/index.js"
+        )));
+
+        // Paths not matching the pattern should not be ignored
+        assert!(!filter.should_ignore(Path::new("/home/user/project/src/main.rs")));
+        assert!(!filter.should_ignore(Path::new("/home/user/project/Cargo.toml")));
+
+        // Relative paths should also work
+        assert!(filter.should_ignore(Path::new("target/debug/app")));
+        assert!(!filter.should_ignore(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn test_ignore_filter_directory_component_check() {
+        let filter = IgnoreFilter::builder()
+            .ignored_dirs(
+                vec!["target".to_string(), "node_modules".to_string()]
+                    .into_iter()
+                    .collect(),
+            )
+            .build()
+            .expect("test setup failed");
+
+        // Should ignore if any path component matches ignored directory name
+        assert!(filter.should_ignore(Path::new("target")));
+        assert!(filter.should_ignore(Path::new("target/debug")));
+        assert!(filter.should_ignore(Path::new("project/target/debug/app")));
+        assert!(filter.should_ignore(Path::new("/home/user/project/target/debug/app")));
+        assert!(filter.should_ignore(Path::new("node_modules")));
+        assert!(filter.should_ignore(Path::new("project/node_modules/pkg")));
+
+        // Should not ignore paths that don't contain these directories
+        assert!(!filter.should_ignore(Path::new("src")));
+        assert!(!filter.should_ignore(Path::new("src/main.rs")));
     }
 }

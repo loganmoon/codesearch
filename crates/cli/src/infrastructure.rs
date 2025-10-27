@@ -7,7 +7,6 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tokio::time::sleep;
 use tracing::info;
 
 use crate::docker;
@@ -163,14 +162,15 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         let help_msg = if stderr.contains("already in use") {
             "\n\nHint: Some containers may still be running. Try:\n  \
              docker ps -a --filter \"name=codesearch\"\n  \
-             docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm codesearch-outbox-processor"
+             docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker"
         } else if stderr.contains("Cannot connect to the Docker daemon") {
             "\n\nHint: Docker daemon is not running. Start Docker Desktop or run: sudo systemctl start docker"
         } else {
             "\n\nCheck container logs:\n  \
              docker logs codesearch-postgres\n  \
              docker logs codesearch-qdrant\n  \
-             docker logs codesearch-vllm"
+             docker logs codesearch-vllm-embeddings\n  \
+             docker logs codesearch-vllm-reranker"
         };
 
         return Err(anyhow!(
@@ -199,10 +199,6 @@ async fn wait_for_all_services(config: &StorageConfig) -> Result<()> {
     // Wait for vLLM reranker
     let reranker_api_url = "http://localhost:8001";
     docker::wait_for_vllm(reranker_api_url, Duration::from_secs(60)).await?;
-
-    // Outbox processor doesn't have health endpoint - just wait a bit
-    info!("Waiting for outbox processor to start...");
-    sleep(Duration::from_secs(2)).await;
 
     info!("All infrastructure services are healthy");
     Ok(())

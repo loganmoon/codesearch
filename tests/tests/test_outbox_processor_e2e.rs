@@ -98,7 +98,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     // Create repository
     let repo_path = std::path::Path::new("/test/repo");
     let repo_id = postgres_client
-        .ensure_repository(repo_path, &collection_name, None)
+        .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
         .await?;
 
     // Initialize storage (create collection)
@@ -212,7 +212,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
     // Create repository
     let repo_path = std::path::Path::new("/test/repo");
     let repo_id = postgres_client
-        .ensure_repository(repo_path, &collection_name, None)
+        .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
         .await?;
 
     // Initialize storage
@@ -339,7 +339,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
     // Create repository
     let repo_path = std::path::Path::new("/test/repo");
     let repo_id = postgres_client
-        .ensure_repository(repo_path, &collection_name, None)
+        .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
         .await?;
 
     // Initialize storage
@@ -465,7 +465,7 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
     // Create repository
     let repo_path = std::path::Path::new("/test/repo");
     let repo_id = postgres_client
-        .ensure_repository(repo_path, &collection_name, None)
+        .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
         .await?;
 
     // Initialize storage

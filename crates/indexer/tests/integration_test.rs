@@ -191,8 +191,9 @@ async fn test_full_indexing_pipeline() {
     let postgres_client = Arc::new(MockPostgresClient::new());
 
     // Register repository with mock client
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(&repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, &repo_path, "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -261,8 +262,9 @@ pub fn function_{i}() -> i32 {{
 
     // Create indexer with small batch size to ensure multiple batches
     let postgres_client = Arc::new(MockPostgresClient::new());
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(base, "test_collection", None)
+        .ensure_repository(test_uuid, base, "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -345,8 +347,9 @@ fn large_function() {{
     let postgres_client = Arc::new(MockPostgresClient::new());
 
     // Register repository with mock client
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, repo_path, "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -377,8 +380,9 @@ async fn test_indexer_with_empty_repository() {
     let postgres_client = Arc::new(MockPostgresClient::new());
 
     // Register repository with mock client
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(temp_dir.path(), "test_collection", None)
+        .ensure_repository(test_uuid, temp_dir.path(), "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -469,8 +473,9 @@ pub fn test_function_{i}() -> i32 {{
 
     // Create indexer with batch_size=10
     let postgres_client = Arc::new(MockPostgresClient::new());
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, repo_path, "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -575,8 +580,9 @@ async fn test_walker_error_resilience() {
 
     // Create indexer
     let postgres_client = Arc::new(MockPostgresClient::new());
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, repo_path, "test_collection", None)
         .await
         .unwrap()
         .to_string();
@@ -679,8 +685,9 @@ async fn test_symlink_exclusion() {
 
     // Create indexer
     let postgres_client = Arc::new(MockPostgresClient::new());
+    let test_uuid = uuid::Uuid::new_v4();
     let repository_id = postgres_client
-        .ensure_repository(repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, repo_path, "test_collection", None)
         .await
         .unwrap()
         .to_string();

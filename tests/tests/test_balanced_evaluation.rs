@@ -151,6 +151,64 @@ struct BalancedEvaluationReport {
     keyword_avg_concept_coverage_dense_rerank: f64,
     keyword_avg_concept_coverage_hybrid: f64,
     keyword_avg_concept_coverage_hybrid_rerank: f64,
+
+    // Aggregate metrics - IR Metrics (NDCG@10)
+    semantic_avg_ndcg_dense: Option<f64>,
+    semantic_avg_ndcg_dense_rerank: Option<f64>,
+    semantic_avg_ndcg_hybrid: Option<f64>,
+    semantic_avg_ndcg_hybrid_rerank: Option<f64>,
+    keyword_avg_ndcg_dense: Option<f64>,
+    keyword_avg_ndcg_dense_rerank: Option<f64>,
+    keyword_avg_ndcg_hybrid: Option<f64>,
+    keyword_avg_ndcg_hybrid_rerank: Option<f64>,
+
+    // Aggregate metrics - IR Metrics (Precision@10)
+    semantic_avg_precision_dense: Option<f64>,
+    semantic_avg_precision_dense_rerank: Option<f64>,
+    semantic_avg_precision_hybrid: Option<f64>,
+    semantic_avg_precision_hybrid_rerank: Option<f64>,
+    keyword_avg_precision_dense: Option<f64>,
+    keyword_avg_precision_dense_rerank: Option<f64>,
+    keyword_avg_precision_hybrid: Option<f64>,
+    keyword_avg_precision_hybrid_rerank: Option<f64>,
+
+    // Aggregate metrics - IR Metrics (Recall@10)
+    semantic_avg_recall_dense: Option<f64>,
+    semantic_avg_recall_dense_rerank: Option<f64>,
+    semantic_avg_recall_hybrid: Option<f64>,
+    semantic_avg_recall_hybrid_rerank: Option<f64>,
+    keyword_avg_recall_dense: Option<f64>,
+    keyword_avg_recall_dense_rerank: Option<f64>,
+    keyword_avg_recall_hybrid: Option<f64>,
+    keyword_avg_recall_hybrid_rerank: Option<f64>,
+
+    // Aggregate metrics - IR Metrics (MRR)
+    semantic_avg_mrr_dense: Option<f64>,
+    semantic_avg_mrr_dense_rerank: Option<f64>,
+    semantic_avg_mrr_hybrid: Option<f64>,
+    semantic_avg_mrr_hybrid_rerank: Option<f64>,
+    keyword_avg_mrr_dense: Option<f64>,
+    keyword_avg_mrr_dense_rerank: Option<f64>,
+    keyword_avg_mrr_hybrid: Option<f64>,
+    keyword_avg_mrr_hybrid_rerank: Option<f64>,
+}
+
+fn calculate_avg_optional<F>(results: &[QueryResult], extractor: F) -> Option<f64>
+where
+    F: Fn(&QueryResult) -> Option<f64>,
+{
+    let values: Vec<f64> = results.iter().filter_map(extractor).collect();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f64>() / values.len() as f64)
+    }
+}
+
+fn format_optional_metric(value: Option<f64>) -> String {
+    value
+        .map(|v| format!("{v:.3}"))
+        .unwrap_or_else(|| "N/A".to_string())
 }
 
 fn calculate_entity_type_coverage(entities: &[EntityInfo], expected_types: &[String]) -> f64 {
@@ -922,6 +980,66 @@ async fn test_balanced_evaluation() -> Result<()> {
         .sum::<f64>()
         / keyword_results.len() as f64;
 
+    // Calculate aggregate metrics - IR Metrics (NDCG@10)
+    let semantic_avg_ndcg_dense = calculate_avg_optional(&semantic_results, |r| r.ndcg_dense);
+    let semantic_avg_ndcg_dense_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.ndcg_dense_rerank);
+    let semantic_avg_ndcg_hybrid = calculate_avg_optional(&semantic_results, |r| r.ndcg_hybrid);
+    let semantic_avg_ndcg_hybrid_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.ndcg_hybrid_rerank);
+    let keyword_avg_ndcg_dense = calculate_avg_optional(&keyword_results, |r| r.ndcg_dense);
+    let keyword_avg_ndcg_dense_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.ndcg_dense_rerank);
+    let keyword_avg_ndcg_hybrid = calculate_avg_optional(&keyword_results, |r| r.ndcg_hybrid);
+    let keyword_avg_ndcg_hybrid_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.ndcg_hybrid_rerank);
+
+    // Calculate aggregate metrics - IR Metrics (Precision@10)
+    let semantic_avg_precision_dense =
+        calculate_avg_optional(&semantic_results, |r| r.precision_dense);
+    let semantic_avg_precision_dense_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.precision_dense_rerank);
+    let semantic_avg_precision_hybrid =
+        calculate_avg_optional(&semantic_results, |r| r.precision_hybrid);
+    let semantic_avg_precision_hybrid_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.precision_hybrid_rerank);
+    let keyword_avg_precision_dense =
+        calculate_avg_optional(&keyword_results, |r| r.precision_dense);
+    let keyword_avg_precision_dense_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.precision_dense_rerank);
+    let keyword_avg_precision_hybrid =
+        calculate_avg_optional(&keyword_results, |r| r.precision_hybrid);
+    let keyword_avg_precision_hybrid_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.precision_hybrid_rerank);
+
+    // Calculate aggregate metrics - IR Metrics (Recall@10)
+    let semantic_avg_recall_dense = calculate_avg_optional(&semantic_results, |r| r.recall_dense);
+    let semantic_avg_recall_dense_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.recall_dense_rerank);
+    let semantic_avg_recall_hybrid = calculate_avg_optional(&semantic_results, |r| r.recall_hybrid);
+    let semantic_avg_recall_hybrid_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.recall_hybrid_rerank);
+    let keyword_avg_recall_dense = calculate_avg_optional(&keyword_results, |r| r.recall_dense);
+    let keyword_avg_recall_dense_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.recall_dense_rerank);
+    let keyword_avg_recall_hybrid = calculate_avg_optional(&keyword_results, |r| r.recall_hybrid);
+    let keyword_avg_recall_hybrid_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.recall_hybrid_rerank);
+
+    // Calculate aggregate metrics - IR Metrics (MRR)
+    let semantic_avg_mrr_dense = calculate_avg_optional(&semantic_results, |r| r.mrr_dense);
+    let semantic_avg_mrr_dense_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.mrr_dense_rerank);
+    let semantic_avg_mrr_hybrid = calculate_avg_optional(&semantic_results, |r| r.mrr_hybrid);
+    let semantic_avg_mrr_hybrid_rerank =
+        calculate_avg_optional(&semantic_results, |r| r.mrr_hybrid_rerank);
+    let keyword_avg_mrr_dense = calculate_avg_optional(&keyword_results, |r| r.mrr_dense);
+    let keyword_avg_mrr_dense_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.mrr_dense_rerank);
+    let keyword_avg_mrr_hybrid = calculate_avg_optional(&keyword_results, |r| r.mrr_hybrid);
+    let keyword_avg_mrr_hybrid_rerank =
+        calculate_avg_optional(&keyword_results, |r| r.mrr_hybrid_rerank);
+
     let report = BalancedEvaluationReport {
         semantic_queries: semantic_results,
         keyword_queries: keyword_results,
@@ -949,6 +1067,38 @@ async fn test_balanced_evaluation() -> Result<()> {
         keyword_avg_concept_coverage_dense_rerank,
         keyword_avg_concept_coverage_hybrid,
         keyword_avg_concept_coverage_hybrid_rerank,
+        semantic_avg_ndcg_dense,
+        semantic_avg_ndcg_dense_rerank,
+        semantic_avg_ndcg_hybrid,
+        semantic_avg_ndcg_hybrid_rerank,
+        keyword_avg_ndcg_dense,
+        keyword_avg_ndcg_dense_rerank,
+        keyword_avg_ndcg_hybrid,
+        keyword_avg_ndcg_hybrid_rerank,
+        semantic_avg_precision_dense,
+        semantic_avg_precision_dense_rerank,
+        semantic_avg_precision_hybrid,
+        semantic_avg_precision_hybrid_rerank,
+        keyword_avg_precision_dense,
+        keyword_avg_precision_dense_rerank,
+        keyword_avg_precision_hybrid,
+        keyword_avg_precision_hybrid_rerank,
+        semantic_avg_recall_dense,
+        semantic_avg_recall_dense_rerank,
+        semantic_avg_recall_hybrid,
+        semantic_avg_recall_hybrid_rerank,
+        keyword_avg_recall_dense,
+        keyword_avg_recall_dense_rerank,
+        keyword_avg_recall_hybrid,
+        keyword_avg_recall_hybrid_rerank,
+        semantic_avg_mrr_dense,
+        semantic_avg_mrr_dense_rerank,
+        semantic_avg_mrr_hybrid,
+        semantic_avg_mrr_hybrid_rerank,
+        keyword_avg_mrr_dense,
+        keyword_avg_mrr_dense_rerank,
+        keyword_avg_mrr_hybrid,
+        keyword_avg_mrr_hybrid_rerank,
     };
 
     // Print report
@@ -959,26 +1109,42 @@ async fn test_balanced_evaluation() -> Result<()> {
 
     println!("SEMANTIC QUERIES (n={}):", report.semantic_queries.len());
     println!(
-        "  Dense:   Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Dense:   Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.semantic_avg_dense_latency,
+        format_optional_metric(report.semantic_avg_ndcg_dense),
+        format_optional_metric(report.semantic_avg_precision_dense),
+        format_optional_metric(report.semantic_avg_recall_dense),
+        format_optional_metric(report.semantic_avg_mrr_dense),
         report.semantic_avg_entity_coverage_dense * 100.0,
         report.semantic_avg_concept_coverage_dense * 100.0
     );
     println!(
-        "  Dense+R: Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Dense+R: Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.semantic_avg_dense_rerank_latency,
+        format_optional_metric(report.semantic_avg_ndcg_dense_rerank),
+        format_optional_metric(report.semantic_avg_precision_dense_rerank),
+        format_optional_metric(report.semantic_avg_recall_dense_rerank),
+        format_optional_metric(report.semantic_avg_mrr_dense_rerank),
         report.semantic_avg_entity_coverage_dense_rerank * 100.0,
         report.semantic_avg_concept_coverage_dense_rerank * 100.0
     );
     println!(
-        "  Hybrid:  Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Hybrid:  Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.semantic_avg_hybrid_latency,
+        format_optional_metric(report.semantic_avg_ndcg_hybrid),
+        format_optional_metric(report.semantic_avg_precision_hybrid),
+        format_optional_metric(report.semantic_avg_recall_hybrid),
+        format_optional_metric(report.semantic_avg_mrr_hybrid),
         report.semantic_avg_entity_coverage_hybrid * 100.0,
         report.semantic_avg_concept_coverage_hybrid * 100.0
     );
     println!(
-        "  Hybrid+R: Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Hybrid+R: Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.semantic_avg_hybrid_rerank_latency,
+        format_optional_metric(report.semantic_avg_ndcg_hybrid_rerank),
+        format_optional_metric(report.semantic_avg_precision_hybrid_rerank),
+        format_optional_metric(report.semantic_avg_recall_hybrid_rerank),
+        format_optional_metric(report.semantic_avg_mrr_hybrid_rerank),
         report.semantic_avg_entity_coverage_hybrid_rerank * 100.0,
         report.semantic_avg_concept_coverage_hybrid_rerank * 100.0
     );
@@ -986,26 +1152,42 @@ async fn test_balanced_evaluation() -> Result<()> {
 
     println!("KEYWORD QUERIES (n={}):", report.keyword_queries.len());
     println!(
-        "  Dense:   Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Dense:   Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.keyword_avg_dense_latency,
+        format_optional_metric(report.keyword_avg_ndcg_dense),
+        format_optional_metric(report.keyword_avg_precision_dense),
+        format_optional_metric(report.keyword_avg_recall_dense),
+        format_optional_metric(report.keyword_avg_mrr_dense),
         report.keyword_avg_entity_coverage_dense * 100.0,
         report.keyword_avg_concept_coverage_dense * 100.0
     );
     println!(
-        "  Dense+R: Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Dense+R: Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.keyword_avg_dense_rerank_latency,
+        format_optional_metric(report.keyword_avg_ndcg_dense_rerank),
+        format_optional_metric(report.keyword_avg_precision_dense_rerank),
+        format_optional_metric(report.keyword_avg_recall_dense_rerank),
+        format_optional_metric(report.keyword_avg_mrr_dense_rerank),
         report.keyword_avg_entity_coverage_dense_rerank * 100.0,
         report.keyword_avg_concept_coverage_dense_rerank * 100.0
     );
     println!(
-        "  Hybrid:  Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Hybrid:  Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.keyword_avg_hybrid_latency,
+        format_optional_metric(report.keyword_avg_ndcg_hybrid),
+        format_optional_metric(report.keyword_avg_precision_hybrid),
+        format_optional_metric(report.keyword_avg_recall_hybrid),
+        format_optional_metric(report.keyword_avg_mrr_hybrid),
         report.keyword_avg_entity_coverage_hybrid * 100.0,
         report.keyword_avg_concept_coverage_hybrid * 100.0
     );
     println!(
-        "  Hybrid+R: Avg Latency={:.0}ms, EntityCov={:.0}%, ConceptCov={:.0}%",
+        "  Hybrid+R: Latency={:.0}ms | NDCG={} P@10={} R@10={} MRR={} | EntityCov={:.0}% ConceptCov={:.0}%",
         report.keyword_avg_hybrid_rerank_latency,
+        format_optional_metric(report.keyword_avg_ndcg_hybrid_rerank),
+        format_optional_metric(report.keyword_avg_precision_hybrid_rerank),
+        format_optional_metric(report.keyword_avg_recall_hybrid_rerank),
+        format_optional_metric(report.keyword_avg_mrr_hybrid_rerank),
         report.keyword_avg_entity_coverage_hybrid_rerank * 100.0,
         report.keyword_avg_concept_coverage_hybrid_rerank * 100.0
     );
@@ -1013,43 +1195,57 @@ async fn test_balanced_evaluation() -> Result<()> {
 
     println!("ANALYSIS:");
 
-    // Find best configuration for semantic queries
-    let semantic_configs = [
-        ("DENSE", report.semantic_avg_entity_coverage_dense),
-        (
-            "DENSE+RERANK",
-            report.semantic_avg_entity_coverage_dense_rerank,
-        ),
-        ("HYBRID", report.semantic_avg_entity_coverage_hybrid),
-        (
-            "HYBRID+RERANK",
-            report.semantic_avg_entity_coverage_hybrid_rerank,
-        ),
-    ];
-    let best_semantic = semantic_configs
-        .iter()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap();
-    println!("  Semantic queries benefit from: {}", best_semantic.0);
+    // Find best configuration for semantic queries (using NDCG@10)
+    if report.semantic_avg_ndcg_dense.is_some() {
+        let semantic_configs = [
+            ("DENSE", report.semantic_avg_ndcg_dense.unwrap_or(0.0)),
+            (
+                "DENSE+RERANK",
+                report.semantic_avg_ndcg_dense_rerank.unwrap_or(0.0),
+            ),
+            ("HYBRID", report.semantic_avg_ndcg_hybrid.unwrap_or(0.0)),
+            (
+                "HYBRID+RERANK",
+                report.semantic_avg_ndcg_hybrid_rerank.unwrap_or(0.0),
+            ),
+        ];
+        let best_semantic = semantic_configs
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .unwrap();
+        println!(
+            "  Semantic queries: {} performs best (NDCG@10: {:.3})",
+            best_semantic.0, best_semantic.1
+        );
+    } else {
+        println!("  Semantic queries: No ground truth labels available for NDCG comparison");
+    }
 
-    // Find best configuration for keyword queries
-    let keyword_configs = [
-        ("DENSE", report.keyword_avg_entity_coverage_dense),
-        (
-            "DENSE+RERANK",
-            report.keyword_avg_entity_coverage_dense_rerank,
-        ),
-        ("HYBRID", report.keyword_avg_entity_coverage_hybrid),
-        (
-            "HYBRID+RERANK",
-            report.keyword_avg_entity_coverage_hybrid_rerank,
-        ),
-    ];
-    let best_keyword = keyword_configs
-        .iter()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap();
-    println!("  Keyword queries benefit from: {}", best_keyword.0);
+    // Find best configuration for keyword queries (using NDCG@10)
+    if report.keyword_avg_ndcg_dense.is_some() {
+        let keyword_configs = [
+            ("DENSE", report.keyword_avg_ndcg_dense.unwrap_or(0.0)),
+            (
+                "DENSE+RERANK",
+                report.keyword_avg_ndcg_dense_rerank.unwrap_or(0.0),
+            ),
+            ("HYBRID", report.keyword_avg_ndcg_hybrid.unwrap_or(0.0)),
+            (
+                "HYBRID+RERANK",
+                report.keyword_avg_ndcg_hybrid_rerank.unwrap_or(0.0),
+            ),
+        ];
+        let best_keyword = keyword_configs
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .unwrap();
+        println!(
+            "  Keyword queries: {} performs best (NDCG@10: {:.3})",
+            best_keyword.0, best_keyword.1
+        );
+    } else {
+        println!("  Keyword queries: No ground truth labels available for NDCG comparison");
+    }
     println!();
 
     // Save report

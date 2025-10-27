@@ -106,8 +106,9 @@ async fn test_outbox_entries_can_be_created_and_queried() {
 
     // Create test repository
     let repo_path = std::path::Path::new("/test/repo");
+    let test_uuid = uuid::Uuid::new_v4();
     let repo_id = postgres_client
-        .ensure_repository(repo_path, "test_collection", None)
+        .ensure_repository(test_uuid, repo_path, "test_collection", None)
         .await
         .expect("Failed to create repository");
 

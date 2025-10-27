@@ -46,7 +46,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         // Note: Connection pool exhaustion testing is difficult without low-level pool access
@@ -128,7 +128,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         let entity_id = format!("concurrent_entity_{}", Uuid::new_v4());
@@ -242,7 +242,7 @@ async fn test_concurrent_snapshot_updates() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         // Spawn concurrent snapshot updates for the same file
@@ -292,7 +292,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         // Try to delete non-existent entities
@@ -332,7 +332,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         let entities: Vec<_> = (0..3)
@@ -406,7 +406,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         // Spawn 10 concurrent entity batch writes (each with size 1)
@@ -481,7 +481,7 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         let entity =
@@ -553,7 +553,7 @@ async fn test_migration_already_applied() -> Result<()> {
         let repo_path = Path::new("/tmp/test-repo");
         let collection_name = format!("test_{}", Uuid::new_v4());
         let repository_id = client
-            .ensure_repository(repo_path, &collection_name, None)
+            .ensure_repository(uuid::Uuid::new_v4(), repo_path, &collection_name, None)
             .await?;
 
         assert!(!repository_id.is_nil(), "Schema should still be functional");

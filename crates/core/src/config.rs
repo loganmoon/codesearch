@@ -633,6 +633,33 @@ impl StorageConfig {
         // Format: <repo_name>_<hash>
         Ok(format!("{sanitized_name}_{hash:032x}"))
     }
+
+    /// Generate a deterministic repository ID from repository path
+    ///
+    /// Uses UUID v5 (name-based) to ensure the same repository path always
+    /// produces the same UUID. This makes entity IDs stable across re-indexing.
+    pub fn generate_repository_id(repo_path: &Path) -> Result<uuid::Uuid> {
+        // Get the absolute path without requiring it to exist
+        let absolute_path = if repo_path.is_absolute() {
+            repo_path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
+                .join(repo_path)
+        };
+
+        // Canonicalize the path to resolve symlinks and normalize
+        // If the path doesn't exist, fall back to the absolute path
+        let normalized_path =
+            std::fs::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
+
+        // Generate deterministic UUID v5 from the normalized path
+        // Using DNS namespace as it's a standard namespace for name-based UUIDs
+        let path_str = normalized_path.to_string_lossy();
+        let repository_id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, path_str.as_bytes());
+
+        Ok(repository_id)
+    }
 }
 
 impl Config {

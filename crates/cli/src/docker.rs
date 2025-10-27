@@ -46,11 +46,6 @@ pub fn is_postgres_running() -> Result<bool> {
     is_container_running("codesearch-postgres")
 }
 
-/// Check if Outbox Processor container is running
-pub fn is_outbox_processor_running() -> Result<bool> {
-    is_container_running("codesearch-outbox-processor")
-}
-
 /// Check if a container exists (running or stopped)
 fn container_exists(container_name: &str) -> Result<bool> {
     let filter_arg = format!("name=^{container_name}$");
@@ -90,7 +85,6 @@ pub fn get_stopped_infrastructure_containers() -> Result<Vec<String>> {
         "codesearch-qdrant",
         "codesearch-vllm",
         "codesearch-vllm-reranker",
-        "codesearch-outbox-processor",
     ];
 
     let mut stopped = Vec::new();
@@ -367,7 +361,6 @@ pub async fn ensure_dependencies_running(
 ) -> Result<()> {
     let qdrant_healthy = check_qdrant_health(config).await;
     let postgres_healthy = check_postgres_health(config).await;
-    let outbox_running = is_outbox_processor_running()?;
     let vllm_healthy = if let Some(url) = api_base_url {
         check_vllm_health(url).await
     } else {
@@ -375,7 +368,7 @@ pub async fn ensure_dependencies_running(
     };
 
     // If all are healthy, we're done
-    if qdrant_healthy && postgres_healthy && outbox_running && vllm_healthy {
+    if qdrant_healthy && postgres_healthy && vllm_healthy {
         info!("All dependencies are already running and healthy");
         return Ok(());
     }
@@ -388,9 +381,6 @@ pub async fn ensure_dependencies_running(
     }
     if !qdrant_healthy {
         msg.push_str("  - Qdrant is not responding\n");
-    }
-    if !outbox_running {
-        msg.push_str("  - Outbox Processor is not running\n");
     }
     if !vllm_healthy {
         msg.push_str("  - vLLM is not responding\n");

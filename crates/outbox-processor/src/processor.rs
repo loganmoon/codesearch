@@ -144,7 +144,7 @@ impl OutboxProcessor {
     /// - Qdrant failures: Rollback transaction, record failures separately
     /// - Entry preparation failures: Fail entire batch (all-or-nothing)
     /// - Max retry entries: Mark processed without Qdrant write
-    async fn process_batch(&self) -> Result<()> {
+    pub async fn process_batch(&self) -> Result<()> {
         // Step 1: Begin single transaction for entire batch
         let mut tx = self
             .postgres_client

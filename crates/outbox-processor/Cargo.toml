@@ -6,10 +6,6 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "outbox-processor"
-path = "src/main.rs"
-
 [dependencies]
 codesearch-core = { path = "../core" }
 codesearch-storage = { path = "../storage" }

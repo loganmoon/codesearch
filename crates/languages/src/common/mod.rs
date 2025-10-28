@@ -2,6 +2,8 @@
 //!
 //! These utilities work across all languages using tree-sitter.
 
+pub mod js_ts_common;
+
 use codesearch_core::error::{Error, Result};
 use tree_sitter::{Node, Query, QueryMatch};
 

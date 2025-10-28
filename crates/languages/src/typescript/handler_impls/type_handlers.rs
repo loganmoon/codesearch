@@ -1,6 +1,6 @@
 //! TypeScript type entity handler implementations
 
-use crate::common::{node_to_text, require_capture_node};
+use crate::common::{js_ts_common::extract_jsdoc_comments, node_to_text, require_capture_node};
 use codesearch_core::{
     entities::{
         CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
@@ -361,39 +361,4 @@ fn extract_enum_members_from_node(enum_node: Node, source: &str) -> Result<Vec<S
     }
 
     Ok(members)
-}
-
-/// Extract JSDoc comments preceding a node
-fn extract_jsdoc_comments(node: Node, source: &str) -> Option<String> {
-    let mut doc_lines = Vec::new();
-    let mut current = node.prev_sibling();
-
-    while let Some(sibling) = current {
-        if sibling.kind() == "comment" {
-            if let Ok(text) = node_to_text(sibling, source) {
-                if text.starts_with("/**") && text.ends_with("*/") {
-                    // Extract JSDoc content
-                    let content = text
-                        .trim_start_matches("/**")
-                        .trim_end_matches("*/")
-                        .lines()
-                        .map(|line| line.trim().trim_start_matches('*').trim())
-                        .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    doc_lines.push(content);
-                    break;
-                }
-            }
-        } else if sibling.kind() != "expression_statement" {
-            break;
-        }
-        current = sibling.prev_sibling();
-    }
-
-    if doc_lines.is_empty() {
-        None
-    } else {
-        Some(doc_lines.join("\n"))
-    }
 }

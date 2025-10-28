@@ -131,7 +131,7 @@ fn test_extract_class() {
         .expect("Failed to extract entities");
 
     // Should extract class and method
-    assert!(entities.len() >= 1);
+    assert!(!entities.is_empty());
 
     // Find the class entity
     let class_entity = entities

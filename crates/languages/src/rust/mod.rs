@@ -85,3 +85,12 @@ impl Extractor for RustExtractor {
         extractor.extract(source, file_path)
     }
 }
+
+// Register Rust language with inventory
+inventory::submit! {
+    crate::LanguageDescriptor {
+        name: "rust",
+        extensions: &["rs"],
+        factory: |repo_id| Ok(Box::new(RustExtractor::new(repo_id.to_string())?)),
+    }
+}

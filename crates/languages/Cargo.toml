@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 codesearch-core = { path = "../core" }
+codesearch-languages-macros = { path = "../languages-macros" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,6 +22,7 @@ tree-sitter-rust = { workspace = true }
 tree-sitter-go = { workspace = true }
 im = { version = "15.1", features = ["serde"] }
 streaming-iterator = "0.1"
+inventory = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true }

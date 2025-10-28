@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/languages",
+    "crates/languages-macros",
     "crates/embeddings",
     "crates/watcher",
     "crates/cli",
@@ -10,7 +11,7 @@ members = [
     "crates/storage",
     "crates/server",
     "crates/outbox-processor",
-    "tests",
+    "crates/e2e-tests",
 ]
 
 [workspace.metadata]

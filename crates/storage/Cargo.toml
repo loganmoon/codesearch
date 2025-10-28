@@ -18,5 +18,5 @@ chrono = "0.4"
 tracing = { workspace = true }
 
 [dev-dependencies]
-codesearch-e2e-tests = { path = "../../tests" }
+codesearch-e2e-tests = { path = "../e2e-tests" }
 tokio = { version = "1", features = ["full", "test-util"] }

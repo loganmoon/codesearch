@@ -3,6 +3,7 @@
 use crate::common::{find_capture_node, node_to_text};
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
+use tracing::debug;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Handle regular function declarations with TypeScript type annotations
@@ -22,10 +23,9 @@ pub fn handle_function_impl(
         repository_id,
     )?;
 
-    // Enhance with TypeScript type information
-    if let Some(entity) = entities.first_mut() {
+    // Enhance with TypeScript type information and update language for all entities
+    for entity in &mut entities {
         enhance_with_type_annotations(entity, query_match, query, source)?;
-        // Update language to TypeScript
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -49,10 +49,9 @@ pub fn handle_arrow_function_impl(
         repository_id,
     )?;
 
-    // Enhance with TypeScript type information
-    if let Some(entity) = entities.first_mut() {
+    // Enhance with TypeScript type information and update language for all entities
+    for entity in &mut entities {
         enhance_with_type_annotations(entity, query_match, query, source)?;
-        // Update language to TypeScript
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -126,6 +125,10 @@ fn extract_typescript_parameters(
                 let name = if let Some(pattern) = child.child_by_field_name("pattern") {
                     node_to_text(pattern, source)?
                 } else {
+                    debug!(
+                        "Parameter at line {} has no 'pattern' field, skipping",
+                        child.start_position().row + 1
+                    );
                     continue;
                 };
 

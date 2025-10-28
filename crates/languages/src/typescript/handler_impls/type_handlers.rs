@@ -112,7 +112,7 @@ pub fn handle_interface_impl(
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
-        .qualified_name(full_qualified_name.clone())
+        .qualified_name(full_qualified_name)
         .parent_scope(if qualified_name.is_empty() {
             None
         } else {
@@ -195,7 +195,7 @@ pub fn handle_type_alias_impl(
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
-        .qualified_name(full_qualified_name.clone())
+        .qualified_name(full_qualified_name)
         .parent_scope(if qualified_name.is_empty() {
             None
         } else {
@@ -275,7 +275,7 @@ pub fn handle_enum_impl(
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
-        .qualified_name(full_qualified_name.clone())
+        .qualified_name(full_qualified_name)
         .parent_scope(if qualified_name.is_empty() {
             None
         } else {

@@ -176,6 +176,10 @@ impl<'a> GenericExtractor<'a> {
         let mut all_entities = Vec::new();
         let mut cursor = QueryCursor::new();
 
+        // Set resource limits to prevent excessive CPU consumption
+        cursor.set_timeout_micros(5_000_000); // 5 second timeout
+        cursor.set_match_limit(10_000); // Limit number of matches
+
         // Execute the combined query
         let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
 

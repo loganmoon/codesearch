@@ -78,7 +78,7 @@ pub fn handle_function_impl(
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
-        .qualified_name(full_qualified_name.clone())
+        .qualified_name(full_qualified_name)
         .parent_scope(if qualified_name.is_empty() {
             None
         } else {
@@ -162,7 +162,7 @@ pub fn handle_arrow_function_impl(
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
         .name(name)
-        .qualified_name(full_qualified_name.clone())
+        .qualified_name(full_qualified_name)
         .parent_scope(if qualified_name.is_empty() {
             None
         } else {
@@ -213,23 +213,45 @@ fn extract_arrow_function_parameters(
     Ok(Vec::new())
 }
 
-/// Extract name from arrow function by finding parent variable_declarator
+/// Extract name from arrow function by finding parent context
 fn extract_arrow_function_name(arrow_function_node: Node, source: &str) -> Result<String> {
-    // Walk up to find variable_declarator
     let mut current = arrow_function_node.parent();
     while let Some(node) = current {
-        if node.kind() == "variable_declarator" {
-            // Find the name child (identifier)
-            for child in node.named_children(&mut node.walk()) {
-                if child.kind() == "identifier" {
-                    return node_to_text(child, source);
+        match node.kind() {
+            // Handle variable declarations: const foo = () => {}
+            "variable_declarator" => {
+                for child in node.named_children(&mut node.walk()) {
+                    if child.kind() == "identifier" {
+                        return node_to_text(child, source);
+                    }
                 }
             }
+            // Handle object properties: { handler: () => {} }
+            "pair" => {
+                if let Some(key) = node.child_by_field_name("key") {
+                    return node_to_text(key, source);
+                }
+            }
+            // Handle class fields: class Foo { handler = () => {} }
+            "public_field_definition" | "field_definition" => {
+                if let Some(property) = node.child_by_field_name("property") {
+                    return node_to_text(property, source);
+                }
+            }
+            // Handle export defaults: export default () => {}
+            "export_statement" => {
+                if let Some(declaration) = node.child_by_field_name("declaration") {
+                    if declaration.id() == arrow_function_node.id() {
+                        return Ok("default".to_string());
+                    }
+                }
+            }
+            _ => {}
         }
         current = node.parent();
     }
 
     Err(codesearch_core::error::Error::entity_extraction(
-        "Could not find variable name for arrow function".to_string(),
+        "Could not find name for arrow function".to_string(),
     ))
 }

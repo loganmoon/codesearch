@@ -51,7 +51,6 @@ fn test_extract_simple_function() {
 }
 
 #[test]
-#[ignore] // Arrow function extraction needs query refinement
 fn test_extract_arrow_function() {
     let source = r#"
         const add = (a, b) => a + b;
@@ -64,6 +63,11 @@ fn test_extract_arrow_function() {
     let entities = extractor
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
+
+    eprintln!("Extracted {} entities", entities.len());
+    for (i, entity) in entities.iter().enumerate() {
+        eprintln!("Entity {}: {} ({})", i, entity.name, entity.entity_type);
+    }
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
@@ -178,7 +182,6 @@ fn test_extract_function_with_jsdoc() {
 }
 
 #[test]
-#[ignore] // Multiple entity extraction needs query refinement
 fn test_extract_multiple_entities() {
     let source = r#"
         function foo() {}

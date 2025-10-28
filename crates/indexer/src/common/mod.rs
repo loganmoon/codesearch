@@ -109,10 +109,12 @@ mod tests {
         assert!(has_supported_extension(Path::new("app.js")));
         assert!(has_supported_extension(Path::new("component.jsx")));
 
-        // Other languages not yet implemented (Phase 4+ pending)
+        // TypeScript is now implemented (Phase 4 complete)
+        assert!(has_supported_extension(Path::new("module.ts")));
+        assert!(has_supported_extension(Path::new("component.tsx")));
+
+        // Other languages not yet implemented (Phase 5+ pending)
         assert!(!has_supported_extension(Path::new("lib.py")));
-        assert!(!has_supported_extension(Path::new("module.ts")));
-        assert!(!has_supported_extension(Path::new("component.tsx")));
         assert!(!has_supported_extension(Path::new("main.go")));
 
         // Non-code files should never be supported

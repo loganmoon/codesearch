@@ -11,12 +11,7 @@ pub const FUNCTION_QUERY: &str = r#"
 
 /// Query for arrow functions assigned to variables
 pub const ARROW_FUNCTION_QUERY: &str = r#"
-(lexical_declaration
-  (variable_declarator
-    name: (identifier) @name
-    value: (arrow_function) @arrow_function
-  )
-)
+(arrow_function) @arrow_function
 "#;
 
 /// Query for class declarations

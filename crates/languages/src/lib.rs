@@ -9,6 +9,7 @@ use std::path::Path;
 mod extraction_framework;
 mod javascript;
 mod rust;
+mod typescript;
 
 #[cfg(test)]
 mod test_language;

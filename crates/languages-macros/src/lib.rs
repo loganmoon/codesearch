@@ -184,7 +184,11 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
         .entities
         .iter()
         .map(|entity| {
+            // Strip the "r#" prefix if present (for raw identifiers like r#enum)
             let entity_name_str = entity.entity_name.to_string();
+            let entity_name_str = entity_name_str
+                .strip_prefix("r#")
+                .unwrap_or(&entity_name_str);
             let query = &entity.query;
             let handler_name = quote::format_ident!("handle_{}", entity.entity_name);
 

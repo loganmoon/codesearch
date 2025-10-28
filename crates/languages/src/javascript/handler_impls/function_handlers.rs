@@ -109,9 +109,8 @@ pub fn handle_arrow_function_impl(
 ) -> Result<Vec<CodeEntity>> {
     let arrow_function_node = require_capture_node(query_match, query, "arrow_function")?;
 
-    // Extract name from variable declarator
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
+    // Extract name from parent variable_declarator
+    let name = extract_arrow_function_name(arrow_function_node, source)?;
 
     // Build qualified name
     let qualified_name = crate::qualified_name::build_qualified_name_from_ast(
@@ -244,6 +243,27 @@ fn extract_arrow_function_parameters(
 
     // No parameters found (e.g., () => ...)
     Ok(Vec::new())
+}
+
+/// Extract name from arrow function by finding parent variable_declarator
+fn extract_arrow_function_name(arrow_function_node: Node, source: &str) -> Result<String> {
+    // Walk up to find variable_declarator
+    let mut current = arrow_function_node.parent();
+    while let Some(node) = current {
+        if node.kind() == "variable_declarator" {
+            // Find the name child (identifier)
+            for child in node.named_children(&mut node.walk()) {
+                if child.kind() == "identifier" {
+                    return node_to_text(child, source);
+                }
+            }
+        }
+        current = node.parent();
+    }
+
+    Err(codesearch_core::error::Error::entity_extraction(
+        "Could not find variable name for arrow function".to_string(),
+    ))
 }
 
 /// Extract JSDoc comments preceding a node

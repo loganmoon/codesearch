@@ -194,8 +194,7 @@ impl<'a> GenericExtractor<'a> {
                     // Extract the extractor name
                     let extractor_name = capture_name
                         .strip_prefix("__extractor_")
-                        .unwrap_or_default()
-                        .replace('_', "-");
+                        .unwrap_or_default();
 
                     // Find the corresponding extractor
                     if let Some(extractor) = self

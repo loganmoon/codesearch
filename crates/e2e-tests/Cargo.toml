@@ -6,12 +6,12 @@ publish = false
 
 [dependencies]
 # Workspace crates
-codesearch-core = { path = "../crates/core" }
-codesearch-storage = { path = "../crates/storage" }
-codesearch-indexer = { path = "../crates/indexer" }
-codesearch-embeddings = { path = "../crates/embeddings" }
-codesearch-watcher = { path = "../crates/watcher" }
-codesearch-outbox-processor = { path = "../crates/outbox-processor" }
+codesearch-core = { path = "../core" }
+codesearch-storage = { path = "../storage" }
+codesearch-indexer = { path = "../indexer" }
+codesearch-embeddings = { path = "../embeddings" }
+codesearch-watcher = { path = "../watcher" }
+codesearch-outbox-processor = { path = "../outbox-processor" }
 
 # Test dependencies
 tokio = { workspace = true }

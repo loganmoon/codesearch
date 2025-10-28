@@ -7,9 +7,14 @@ use std::path::Path;
 
 // All internal modules are private
 mod extraction_framework;
+mod javascript;
 mod rust;
 
-// Public module for qualified name building
+#[cfg(test)]
+mod test_language;
+
+// Public modules
+pub mod common;
 pub mod qualified_name;
 
 /// Trait for extracting code entities from source files
@@ -17,6 +22,15 @@ pub trait Extractor: Send + Sync {
     /// Extract entities from source code
     fn extract(&self, source: &str, file_path: &Path) -> Result<Vec<CodeEntity>>;
 }
+
+/// Language descriptor for automatic registration
+pub struct LanguageDescriptor {
+    pub name: &'static str,
+    pub extensions: &'static [&'static str],
+    pub factory: fn(&str) -> Result<Box<dyn Extractor>>,
+}
+
+inventory::collect!(LanguageDescriptor);
 
 /// Create an appropriate extractor for a file based on its extension
 ///
@@ -29,17 +43,16 @@ pub fn create_extractor(
         return Ok(None);
     };
 
-    match extension.to_lowercase().as_str() {
-        "rs" => Ok(Some(Box::new(rust::RustExtractor::new(
-            repository_id.to_string(),
-        )?))),
-        // Future language support can be added here:
-        // "py" => create_python_extractor(repository_id),
-        // "js" | "jsx" => create_javascript_extractor(repository_id),
-        // "ts" | "tsx" => create_typescript_extractor(repository_id),
-        // "go" => create_go_extractor(repository_id),
-        _ => Ok(None),
+    let ext_lower = extension.to_lowercase();
+
+    // Find matching language descriptor
+    for descriptor in inventory::iter::<LanguageDescriptor> {
+        if descriptor.extensions.contains(&ext_lower.as_str()) {
+            return Ok(Some((descriptor.factory)(repository_id)?));
+        }
     }
+
+    Ok(None)
 }
 
 /// Get the language identifier from a file path
@@ -47,13 +60,13 @@ pub fn create_extractor(
 /// This is a utility function for determining language from file extension
 pub fn detect_language(file_path: &Path) -> Option<&'static str> {
     let extension = file_path.extension()?.to_str()?;
+    let ext_lower = extension.to_lowercase();
 
-    match extension.to_lowercase().as_str() {
-        "rs" => Some("rust"),
-        "py" => Some("python"),
-        "js" | "jsx" => Some("javascript"),
-        "ts" | "tsx" => Some("typescript"),
-        "go" => Some("go"),
-        _ => None,
+    for descriptor in inventory::iter::<LanguageDescriptor> {
+        if descriptor.extensions.contains(&ext_lower.as_str()) {
+            return Some(descriptor.name);
+        }
     }
+
+    None
 }

@@ -37,24 +37,9 @@ impl<T, E: std::fmt::Display> ResultExt<T> for std::result::Result<T, E> {
     }
 }
 
-/// Supported file extensions for indexing
-/// Note: Only Rust is fully implemented. Python, JS/TS, and Go have partial infrastructure.
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "rs",  // Rust (fully implemented)
-    "py",  // Python (partial infrastructure, no parsing)
-    "js",  // JavaScript (partial infrastructure, no parsing)
-    "jsx", // React JavaScript (partial infrastructure, no parsing)
-    "ts",  // TypeScript (partial infrastructure, no parsing)
-    "tsx", // React TypeScript (partial infrastructure, no parsing)
-    "go",  // Go (partial infrastructure, no parsing)
-];
-
 /// Check if a file has a supported extension
 pub fn has_supported_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext))
-        .unwrap_or(false)
+    codesearch_languages::detect_language(path).is_some()
 }
 
 /// Check if a file should be included in indexing
@@ -117,13 +102,20 @@ mod tests {
 
     #[test]
     fn test_has_supported_extension() {
+        // Rust is fully implemented and registered
         assert!(has_supported_extension(Path::new("main.rs")));
-        assert!(has_supported_extension(Path::new("lib.py")));
+
+        // JavaScript is now implemented (Phase 3 complete)
         assert!(has_supported_extension(Path::new("app.js")));
         assert!(has_supported_extension(Path::new("component.jsx")));
-        assert!(has_supported_extension(Path::new("module.ts")));
-        assert!(has_supported_extension(Path::new("component.tsx")));
-        assert!(has_supported_extension(Path::new("main.go")));
+
+        // Other languages not yet implemented (Phase 4+ pending)
+        assert!(!has_supported_extension(Path::new("lib.py")));
+        assert!(!has_supported_extension(Path::new("module.ts")));
+        assert!(!has_supported_extension(Path::new("component.tsx")));
+        assert!(!has_supported_extension(Path::new("main.go")));
+
+        // Non-code files should never be supported
         assert!(!has_supported_extension(Path::new("README.md")));
         assert!(!has_supported_extension(Path::new("Cargo.toml")));
         assert!(!has_supported_extension(Path::new("file.txt")));

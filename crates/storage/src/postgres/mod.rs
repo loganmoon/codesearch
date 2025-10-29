@@ -340,6 +340,12 @@ pub trait PostgresClientTrait: Send + Sync {
         entity_type: codesearch_core::entities::EntityType,
     ) -> Result<Vec<CodeEntity>>;
 
+    /// Get all type entities (structs, enums, classes, interfaces, type aliases) in a repository
+    ///
+    /// Returns all non-deleted entities that represent types.
+    /// This is used during USES relationship resolution.
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>>;
+
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///
     /// Maximum batch size is 1000 entity IDs.

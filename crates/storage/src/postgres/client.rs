@@ -765,6 +765,28 @@ impl PostgresClient {
         Ok(entities)
     }
 
+    /// Get all type entities (structs, enums, classes, interfaces, type aliases) in a repository
+    pub async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT entity_data
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND entity_type IN ('struct', 'enum', 'class', 'interface', 'type_alias')
+               AND deleted_at IS NULL",
+        )
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get type entities: {e}")))?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .collect();
+
+        Ok(entities)
+    }
+
     /// Get file snapshot (list of entity IDs in file)
     pub async fn get_file_snapshot(
         &self,
@@ -1956,6 +1978,9 @@ impl PostgresClient {
         // Extract INHERITS_FROM relationships
         relationships.extend(crate::neo4j::build_inherits_from_relationship_json(entity));
 
+        // Extract USES relationships (field type dependencies)
+        relationships.extend(crate::neo4j::build_uses_relationship_json(entity));
+
         Ok(serde_json::json!({
             "entity": entity,
             "node": properties,
@@ -2142,6 +2167,10 @@ impl super::PostgresClientTrait for PostgresClient {
         entity_type: EntityType,
     ) -> Result<Vec<CodeEntity>> {
         self.get_entities_by_type(repository_id, entity_type).await
+    }
+
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        self.get_all_type_entities(repository_id).await
     }
 
     async fn mark_entities_deleted_with_outbox(

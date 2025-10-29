@@ -543,6 +543,32 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(entities)
     }
 
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        use codesearch_core::entities::EntityType;
+        let data = self.data.lock().unwrap();
+
+        let entities: Vec<CodeEntity> = data
+            .entities
+            .iter()
+            .filter_map(|((repo_id, _entity_id), metadata)| {
+                if *repo_id == repository_id && metadata.deleted_at.is_none() {
+                    match metadata.entity.entity_type {
+                        EntityType::Struct
+                        | EntityType::Enum
+                        | EntityType::Class
+                        | EntityType::Interface
+                        | EntityType::TypeAlias => Some(metadata.entity.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,

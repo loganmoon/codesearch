@@ -392,6 +392,10 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .await
         .context("Failed to resolve class inheritance")?;
 
+    resolve_type_usage(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve type usage relationships")?;
+
     // Mark graph as ready
     postgres_client
         .set_graph_ready(repository_id, true)
@@ -652,6 +656,82 @@ async fn resolve_class_inheritance(
     }
 
     info!("Resolved {} INHERITS_FROM relationships", inherits_count);
+
+    Ok(())
+}
+
+async fn resolve_type_usage(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    use codesearch_core::entities::EntityType;
+    use std::collections::HashMap;
+
+    info!("Resolving type usage relationships...");
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Get all structs
+    let structs = postgres
+        .get_entities_by_type(repository_id, EntityType::Struct)
+        .await
+        .context("Failed to get structs")?;
+
+    // Get all type entities (structs, enums, classes, interfaces, type aliases)
+    let all_types = postgres
+        .get_all_type_entities(repository_id)
+        .await
+        .context("Failed to get type entities")?;
+
+    // Build type name -> entity_id map
+    let type_map: HashMap<String, String> = all_types
+        .iter()
+        .map(|t| (t.name.clone(), t.entity_id.clone()))
+        .collect();
+
+    let mut uses_count = 0;
+
+    for struct_entity in structs {
+        if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
+            // Parse fields as JSON array
+            if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
+                for field in fields {
+                    if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
+                        if let Some(field_name) = field.get("name").and_then(|v| v.as_str()) {
+                            // Strip generics: "Vec<String>" -> "Vec"
+                            let type_name =
+                                field_type.split('<').next().unwrap_or(field_type).trim();
+
+                            // Try to resolve type
+                            if let Some(type_id) = type_map.get(type_name) {
+                                let mut props = HashMap::new();
+                                props.insert("context".to_string(), "field".to_string());
+                                props.insert("field_name".to_string(), field_name.to_string());
+
+                                neo4j
+                                    .create_relationship(
+                                        &struct_entity.entity_id,
+                                        type_id,
+                                        "USES",
+                                        &props,
+                                    )
+                                    .await
+                                    .context("Failed to create USES relationship")?;
+                                uses_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Resolved {} USES relationships", uses_count);
 
     Ok(())
 }

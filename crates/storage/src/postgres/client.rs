@@ -1331,6 +1331,12 @@ impl PostgresClient {
             .map(|(entity, ..)| (**entity).clone())
             .collect();
 
+        // Build qualified_name -> entity_id map for O(1) relationship resolution
+        let name_to_id: std::collections::HashMap<&str, &str> = entities_in_batch
+            .iter()
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .collect();
+
         let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
                 repository_id, entity_id, operation, target_store, payload, collection_name
@@ -1352,7 +1358,7 @@ impl PostgresClient {
                 _file_path_str,
             )| {
                 let neo4j_payload = self
-                    .build_neo4j_payload(entity, &entities_in_batch)
+                    .build_neo4j_payload(entity, &name_to_id)
                     .unwrap_or_else(|_| {
                         serde_json::json!({
                             "node": {},
@@ -1933,7 +1939,7 @@ impl PostgresClient {
     fn build_neo4j_payload(
         &self,
         entity: &CodeEntity,
-        entities_in_batch: &[CodeEntity],
+        name_to_id: &std::collections::HashMap<&str, &str>,
     ) -> Result<serde_json::Value> {
         // Extract core properties
         let properties = serde_json::json!({
@@ -1968,9 +1974,8 @@ impl PostgresClient {
             EntityType::Impl => vec!["ImplBlock"],
         };
 
-        // Extract CONTAINS relationships
-        let mut relationships =
-            crate::neo4j::build_contains_relationship_json(entity, entities_in_batch);
+        // Extract CONTAINS relationships using O(1) HashMap lookup
+        let mut relationships = crate::neo4j::build_contains_relationship_json(entity, name_to_id);
 
         // Extract IMPLEMENTS and EXTENDS_INTERFACE relationships
         relationships.extend(crate::neo4j::build_trait_relationship_json(entity));

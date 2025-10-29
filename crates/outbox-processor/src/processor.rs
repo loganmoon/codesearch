@@ -770,6 +770,7 @@ impl OutboxProcessor {
             // Process each entry
             let mut processed_ids = Vec::new();
             let mut failed_ids = Vec::new();
+            let mut resolved_relationships: Vec<(String, String, String)> = Vec::new();
 
             for entry in repo_entries {
                 match entry.operation.as_str() {
@@ -870,7 +871,7 @@ impl OutboxProcessor {
                                     }
 
                                     if resolved {
-                                        // Resolved relationship: create edge immediately
+                                        // Resolved relationship: collect for batch creation
                                         let from_id = match rel["from_id"].as_str() {
                                             Some(id) if !id.is_empty() => id,
                                             _ => {
@@ -892,18 +893,12 @@ impl OutboxProcessor {
                                             }
                                         };
 
-                                        // Use parameterized query (relationship type is validated above)
-                                        let edge_query = format!(
-                                            "MATCH (from {{id: $from_id}}), (to {{id: $to_id}})
-                                             MERGE (from)-[:{rel_type}]->(to)"
-                                        );
-
-                                        let query = Neo4jQuery::new(edge_query)
-                                            .param("from_id", from_id)
-                                            .param("to_id", to_id);
-                                        if let Err(e) = neo4j_client.graph().run(query).await {
-                                            debug!("Failed to create {rel_type} edge: {e}");
-                                        }
+                                        // Collect relationship for batch creation after all nodes are processed
+                                        resolved_relationships.push((
+                                            from_id.to_string(),
+                                            to_id.to_string(),
+                                            rel_type.to_string(),
+                                        ));
                                     } else {
                                         // Unresolved relationship: store as node property for later resolution
                                         let to_id = match rel["to_id"].as_str() {
@@ -932,10 +927,10 @@ impl OutboxProcessor {
                                             "unresolved_{}_parent",
                                             rel_type.to_lowercase()
                                         );
-                                        // Use parameterized query for values
+                                        // Use parameterized query for values, backticks for property name safety
                                         let prop_query = format!(
                                             "MATCH (n {{id: $to_id}})
-                                             SET n.{prop_name} = $from_qname"
+                                             SET n.`{prop_name}` = $from_qname"
                                         );
 
                                         let query = Neo4jQuery::new(prop_query)
@@ -975,6 +970,20 @@ impl OutboxProcessor {
                         error!("Unknown operation type: {}", entry.operation);
                         failed_ids.push(entry.outbox_id);
                     }
+                }
+            }
+
+            // Batch create all resolved relationships (reduces network round-trips)
+            if !resolved_relationships.is_empty() {
+                if let Err(e) = neo4j_client
+                    .batch_create_relationships(&resolved_relationships)
+                    .await
+                {
+                    warn!(
+                        "Failed to batch create {} relationships: {}",
+                        resolved_relationships.len(),
+                        e
+                    );
                 }
             }
 

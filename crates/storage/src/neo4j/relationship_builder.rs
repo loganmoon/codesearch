@@ -49,16 +49,15 @@ pub fn extract_contains_relationships(entities: &[CodeEntity]) -> Vec<Relationsh
 /// Build relationship JSON for outbox payload
 pub fn build_contains_relationship_json(
     entity: &CodeEntity,
-    entities_in_batch: &[CodeEntity],
+    name_to_id: &HashMap<&str, &str>,
 ) -> Vec<serde_json::Value> {
     let mut relationships = Vec::new();
 
     if let Some(parent_qname) = &entity.parent_scope {
-        // Try to resolve parent within current batch
-        let parent_id = entities_in_batch
-            .iter()
-            .find(|e| e.qualified_name == *parent_qname)
-            .map(|e| e.entity_id.clone());
+        // Try to resolve parent using the provided name_to_id map (O(1) lookup)
+        let parent_id = name_to_id
+            .get(parent_qname.as_str())
+            .map(|&id| id.to_string());
 
         if let Some(parent_id) = parent_id {
             // Parent exists in batch, create resolved relationship
@@ -487,8 +486,14 @@ mod tests {
             Some("test::Parent".to_string()),
         );
 
-        let relationships =
-            build_contains_relationship_json(&child, &[parent.clone(), child.clone()]);
+        // Build name_to_id map
+        let entities = vec![parent.clone(), child.clone()];
+        let name_to_id: HashMap<&str, &str> = entities
+            .iter()
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .collect();
+
+        let relationships = build_contains_relationship_json(&child, &name_to_id);
 
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0]["type"], "CONTAINS");
@@ -507,7 +512,14 @@ mod tests {
             Some("test::Parent".to_string()),
         );
 
-        let relationships = build_contains_relationship_json(&child, &[child.clone()]);
+        // Build name_to_id map (parent not in map, so relationship will be unresolved)
+        let entities = vec![child.clone()];
+        let name_to_id: HashMap<&str, &str> = entities
+            .iter()
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .collect();
+
+        let relationships = build_contains_relationship_json(&child, &name_to_id);
 
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0]["type"], "CONTAINS");

@@ -323,9 +323,9 @@ neo4j_password = "codesearch"  # Local-only, no security concern
 
 ### Infrastructure Requirements
 
-Neo4j runs as a Docker container in the shared infrastructure at `~/.codesearch/infrastructure/`. The infrastructure is automatically started when you run `codesearch index`.
+**Note:** Neo4j integration is currently experimental. The shared infrastructure at `~/.codesearch/infrastructure/` does not include Neo4j by default. To enable graph-based queries, you must manually add Neo4j to your `docker-compose.yml`.
 
-To configure Neo4j in your `~/.codesearch/infrastructure/docker-compose.yml`:
+To add Neo4j to your `~/.codesearch/infrastructure/docker-compose.yml`:
 
 ```yaml
 neo4j:
@@ -339,12 +339,14 @@ neo4j:
     - neo4j_logs:/logs
   environment:
     - NEO4J_AUTH=neo4j/codesearch
-    - NEO4J_PLUGINS=["apoc"]
+    - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
     - NEO4J_dbms_memory_heap_initial__size=512M
     - NEO4J_dbms_memory_heap_max__size=2G
     - NEO4J_dbms_memory_pagecache_size=512M
+    - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    - NEO4J_dbms_security_procedures_allowlist=apoc.*
   healthcheck:
-    test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+    test: ["CMD-SHELL", "cypher-shell -u neo4j -p codesearch 'RETURN 1' || exit 1"]
     interval: 10s
     timeout: 5s
     retries: 5
@@ -353,7 +355,7 @@ neo4j:
     - codesearch
   restart: unless-stopped
 
-# Don't forget to add the volumes:
+# Add to the volumes section:
 volumes:
   neo4j_data:
     driver: local
@@ -364,10 +366,11 @@ volumes:
 **Configuration Notes:**
 - `container_name`: Required for CLI container detection
 - `127.0.0.1` binding: Prevents network exposure (local-only access)
+- `NEO4J_ACCEPT_LICENSE_AGREEMENT`: Required for Neo4j 5.x
 - Memory limits: Prevents Neo4j from consuming excessive resources
-- Healthcheck: Ensures service is ready before accepting connections
+- Healthcheck: Uses cypher-shell to verify Neo4j is accepting connections
+- APOC security settings: Properly configures APOC procedures access
 - Logs volume: Aids troubleshooting
-- APOC plugins: Provides additional graph algorithms (optional)
 
 ### Architecture Details
 

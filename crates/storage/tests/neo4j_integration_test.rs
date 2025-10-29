@@ -204,6 +204,124 @@ async fn test_relationship_resolution() -> Result<()> {
     Ok(())
 }
 
+/// Test the end-to-end relationship resolution workflow
+#[tokio::test]
+#[ignore] // Requires Neo4j to be running
+async fn test_relationship_resolution_workflow() -> Result<()> {
+    let config = create_storage_config(6334, 6333, 5432, "test_db");
+    let neo4j_client = Neo4jClient::new(&config).await?;
+
+    // Create test database
+    let db_name = format!("test_{}", Uuid::new_v4().simple());
+    neo4j_client.create_database(&db_name).await?;
+    neo4j_client.use_database(&db_name).await?;
+
+    // Step 1: Create a child entity that references a parent that doesn't exist yet
+    let child = create_test_entity_with_name("child", "child", EntityType::Function);
+    neo4j_client.create_entity_node(&child).await?;
+
+    // Step 2: Store unresolved CONTAINS relationship as node property
+    // (Simulates what the outbox processor does when parent doesn't exist)
+    let store_unresolved_query = "MATCH (n {id: $child_id})
+                                   SET n.`unresolved_contains_parent` = $parent_qname"
+        .to_string();
+    neo4j_client
+        .graph()
+        .run(
+            neo4rs::Query::new(store_unresolved_query)
+                .param("child_id", child.entity_id.as_str())
+                .param("parent_qname", "test::Parent"),
+        )
+        .await?;
+
+    // Step 3: Verify the unresolved property was stored
+    let verify_unresolved_query = "MATCH (n {id: $child_id})
+                                    RETURN n.`unresolved_contains_parent` as parent_qname"
+        .to_string();
+    let mut result = neo4j_client
+        .graph()
+        .execute(
+            neo4rs::Query::new(verify_unresolved_query).param("child_id", child.entity_id.as_str()),
+        )
+        .await?;
+
+    let row = result
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("No row returned"))?;
+    let parent_qname: String = row.get("parent_qname")?;
+    assert_eq!(parent_qname, "test::Parent");
+
+    // Step 4: Create the parent entity (simulates parent being indexed later)
+    let parent = create_test_entity_with_name("parent", "Parent", EntityType::Module);
+    neo4j_client.create_entity_node(&parent).await?;
+
+    // Step 5: Resolve the relationship - create edge and remove property
+    // (Simulates what the outbox processor does after parent is indexed)
+    let relationships = vec![(
+        parent.entity_id.clone(),
+        child.entity_id.clone(),
+        "CONTAINS".to_string(),
+    )];
+    neo4j_client
+        .batch_create_relationships(&relationships)
+        .await?;
+
+    // Step 6: Clean up the unresolved property
+    let cleanup_query = "MATCH (n {id: $child_id})
+                         REMOVE n.`unresolved_contains_parent`"
+        .to_string();
+    neo4j_client
+        .graph()
+        .run(neo4rs::Query::new(cleanup_query).param("child_id", child.entity_id.as_str()))
+        .await?;
+
+    // Step 7: Verify relationship exists and property was removed
+    let verify_relationship_query =
+        "MATCH (parent {id: $parent_id})-[:CONTAINS]->(child {id: $child_id})
+                                     RETURN parent.id as parent_id, child.id as child_id"
+            .to_string();
+    let mut rel_result = neo4j_client
+        .graph()
+        .execute(
+            neo4rs::Query::new(verify_relationship_query)
+                .param("parent_id", parent.entity_id.as_str())
+                .param("child_id", child.entity_id.as_str()),
+        )
+        .await?;
+
+    let rel_row = rel_result
+        .next()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Relationship not found"))?;
+    let found_parent_id: String = rel_row.get("parent_id")?;
+    let found_child_id: String = rel_row.get("child_id")?;
+    assert_eq!(found_parent_id, parent.entity_id);
+    assert_eq!(found_child_id, child.entity_id);
+
+    // Verify property was removed
+    let verify_no_property_query = "MATCH (n {id: $child_id})
+                                    RETURN n.`unresolved_contains_parent` as prop"
+        .to_string();
+    let mut prop_result = neo4j_client
+        .graph()
+        .execute(
+            neo4rs::Query::new(verify_no_property_query)
+                .param("child_id", child.entity_id.as_str()),
+        )
+        .await?;
+
+    if let Some(prop_row) = prop_result.next().await? {
+        let prop: Option<String> = prop_row.get("prop").ok();
+        assert!(prop.is_none(), "Unresolved property should be removed");
+    }
+
+    // Cleanup
+    neo4j_client.drop_database(&db_name).await?;
+
+    Ok(())
+}
+
 /// Helper function to create a test entity
 fn create_test_entity(id_suffix: &str, entity_type: EntityType) -> CodeEntity {
     create_test_entity_with_name(id_suffix, id_suffix, entity_type)

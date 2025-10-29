@@ -1981,6 +1981,12 @@ impl PostgresClient {
         // Extract USES relationships (field type dependencies)
         relationships.extend(crate::neo4j::build_uses_relationship_json(entity));
 
+        // Extract CALLS relationships (function calls)
+        relationships.extend(crate::neo4j::build_calls_relationship_json(entity));
+
+        // Extract IMPORTS relationships (module imports)
+        relationships.extend(crate::neo4j::build_imports_relationship_json(entity));
+
         Ok(serde_json::json!({
             "entity": entity,
             "node": properties,

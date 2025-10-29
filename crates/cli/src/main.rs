@@ -396,6 +396,14 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .await
         .context("Failed to resolve type usage relationships")?;
 
+    resolve_call_graph(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve call graph relationships")?;
+
+    resolve_imports(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve import relationships")?;
+
     // Mark graph as ready
     postgres_client
         .set_graph_ready(repository_id, true)
@@ -732,6 +740,130 @@ async fn resolve_type_usage(
     }
 
     info!("Resolved {} USES relationships", uses_count);
+
+    Ok(())
+}
+
+/// Resolve call graph relationships after indexing completes
+async fn resolve_call_graph(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    use codesearch_core::entities::EntityType;
+    use std::collections::HashMap;
+
+    info!("Resolving call graph relationships...");
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Get all functions and methods
+    let functions = postgres
+        .get_entities_by_type(repository_id, EntityType::Function)
+        .await
+        .context("Failed to get functions")?;
+    let methods = postgres
+        .get_entities_by_type(repository_id, EntityType::Method)
+        .await
+        .context("Failed to get methods")?;
+
+    let all_callables: Vec<_> = functions.into_iter().chain(methods).collect();
+
+    // Build function name -> entity_id map (simple name matching)
+    let mut callable_map: HashMap<String, String> = HashMap::new();
+    for callable in &all_callables {
+        // Map both simple name and qualified name
+        callable_map.insert(callable.name.clone(), callable.entity_id.clone());
+        callable_map.insert(callable.qualified_name.clone(), callable.entity_id.clone());
+    }
+
+    let mut edge_count = 0;
+
+    for caller in all_callables {
+        if let Some(calls_json) = caller.metadata.attributes.get("calls") {
+            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
+                for callee_name in calls {
+                    // Try to resolve callee
+                    if let Some(callee_id) = callable_map.get(&callee_name) {
+                        neo4j
+                            .create_relationship(
+                                &caller.entity_id,
+                                callee_id,
+                                "CALLS",
+                                &HashMap::new(),
+                            )
+                            .await
+                            .context("Failed to create CALLS relationship")?;
+
+                        edge_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Created {} CALLS edges", edge_count);
+
+    Ok(())
+}
+
+/// Resolve import relationships after indexing completes
+async fn resolve_imports(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    use codesearch_core::entities::EntityType;
+    use std::collections::HashMap;
+
+    info!("Resolving import relationships...");
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Get all modules
+    let modules = postgres
+        .get_entities_by_type(repository_id, EntityType::Module)
+        .await
+        .context("Failed to get modules")?;
+
+    // Build module path -> entity_id map
+    let module_map: HashMap<String, String> = modules
+        .iter()
+        .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
+        .collect();
+
+    let mut edge_count = 0;
+
+    for module in modules {
+        if let Some(imports_str) = module.metadata.attributes.get("imports") {
+            for import_path in imports_str.split(',') {
+                let import_path = import_path.trim();
+
+                // Resolve import path to module entity
+                if let Some(imported_id) = module_map.get(import_path) {
+                    let mut props = HashMap::new();
+                    props.insert("import_type".to_string(), "use".to_string());
+
+                    neo4j
+                        .create_relationship(&module.entity_id, imported_id, "IMPORTS", &props)
+                        .await
+                        .context("Failed to create IMPORTS relationship")?;
+
+                    edge_count += 1;
+                }
+            }
+        }
+    }
+
+    info!("Created {} IMPORTS edges", edge_count);
 
     Ok(())
 }

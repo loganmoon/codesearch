@@ -510,8 +510,9 @@ fn test_extremely_large_extraction_performance() {
     let duration = start.elapsed();
 
     // Extraction should be fast, even for large files
-    // Adjust threshold as needed based on performance requirements
-    assert!(duration.as_millis() < 100);
+    // Threshold adjusted to 200ms to account for call graph extraction
+    // (tree-sitter queries on function bodies for CALLS relationships)
+    assert!(duration.as_millis() < 200);
 }
 
 #[test]

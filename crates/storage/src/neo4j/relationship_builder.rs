@@ -293,3 +293,84 @@ pub fn build_uses_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Valu
 
     relationships
 }
+
+/// Extract CALLS relationships from function metadata
+pub fn extract_calls_relationships(entity: &CodeEntity) -> Vec<Relationship> {
+    let mut relationships = Vec::new();
+
+    if matches!(
+        entity.entity_type,
+        EntityType::Function | EntityType::Method
+    ) {
+        if let Some(calls_json) = entity.metadata.attributes.get("calls") {
+            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
+                for callee_name in calls {
+                    relationships.push(Relationship {
+                        rel_type: "CALLS".to_string(),
+                        from_id: entity.entity_id.clone(),
+                        to_id: None,
+                        to_name: Some(callee_name),
+                        properties: HashMap::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    relationships
+}
+
+/// Extract IMPORTS relationships from module metadata
+pub fn extract_imports_relationships(entity: &CodeEntity) -> Vec<Relationship> {
+    let mut relationships = Vec::new();
+
+    if entity.entity_type == EntityType::Module {
+        if let Some(imports_str) = entity.metadata.attributes.get("imports") {
+            for import_path in imports_str.split(',') {
+                let import_path = import_path.trim();
+
+                relationships.push(Relationship {
+                    rel_type: "IMPORTS".to_string(),
+                    from_id: entity.entity_id.clone(),
+                    to_id: None,
+                    to_name: Some(import_path.to_string()),
+                    properties: HashMap::new(),
+                });
+            }
+        }
+    }
+
+    relationships
+}
+
+/// Build CALLS relationship JSON for outbox payload
+pub fn build_calls_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
+    let mut relationships = Vec::new();
+
+    for rel in extract_calls_relationships(entity) {
+        relationships.push(json!({
+            "type": rel.rel_type,
+            "from_id": rel.from_id,
+            "to_name": rel.to_name,
+            "resolved": false
+        }));
+    }
+
+    relationships
+}
+
+/// Build IMPORTS relationship JSON for outbox payload
+pub fn build_imports_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
+    let mut relationships = Vec::new();
+
+    for rel in extract_imports_relationships(entity) {
+        relationships.push(json!({
+            "type": rel.rel_type,
+            "from_id": rel.from_id,
+            "to_name": rel.to_name,
+            "resolved": false
+        }));
+    }
+
+    relationships
+}

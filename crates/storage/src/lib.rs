@@ -37,8 +37,9 @@ pub use postgres::PostgresClient;
 // Re-export mock for testing
 pub use postgres::mock::MockPostgresClient;
 
-// Re-export Neo4j client
+// Re-export Neo4j client and Query type
 pub use neo4j::Neo4jClient;
+pub use neo4rs::Query;
 
 pub use uuid::Uuid;
 

@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 // All modules are private
+mod graph_queries;
 mod mcp_server;
 mod storage_init;
 

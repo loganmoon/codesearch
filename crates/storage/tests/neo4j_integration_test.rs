@@ -322,6 +322,286 @@ async fn test_relationship_resolution_workflow() -> Result<()> {
     Ok(())
 }
 
+/// Test property key validation (Cypher injection protection)
+#[tokio::test]
+#[ignore] // Requires Neo4j to be running
+async fn test_property_key_validation() -> Result<()> {
+    let config = create_storage_config(6334, 6333, 5432, "test_db");
+    let neo4j_client = Neo4jClient::new(&config).await?;
+
+    // Create test database
+    let db_name = format!("test_{}", Uuid::new_v4().simple());
+    neo4j_client.create_database(&db_name).await?;
+    neo4j_client.use_database(&db_name).await?;
+
+    // Create two test entities
+    let entity1 = create_test_entity("entity1", EntityType::Function);
+    let entity2 = create_test_entity("entity2", EntityType::Function);
+
+    neo4j_client.create_entity_node(&entity1).await?;
+    neo4j_client.create_entity_node(&entity2).await?;
+
+    // Attempt injection via property key
+    let mut malicious_props = HashMap::new();
+    malicious_props.insert("x; DROP DATABASE test; //".to_string(), "value".to_string());
+
+    let result = neo4j_client
+        .create_relationship(
+            &entity1.entity_id,
+            &entity2.entity_id,
+            "CALLS",
+            &malicious_props,
+        )
+        .await;
+
+    // Should fail with validation error
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Invalid property key"));
+
+    // Test empty property key
+    let mut empty_key_props = HashMap::new();
+    empty_key_props.insert("".to_string(), "value".to_string());
+
+    let result2 = neo4j_client
+        .create_relationship(
+            &entity1.entity_id,
+            &entity2.entity_id,
+            "CALLS",
+            &empty_key_props,
+        )
+        .await;
+
+    assert!(result2.is_err());
+    assert!(result2
+        .unwrap_err()
+        .to_string()
+        .contains("Property key cannot be empty"));
+
+    // Test valid property keys
+    let mut valid_props = HashMap::new();
+    valid_props.insert("valid_key_123".to_string(), "value".to_string());
+    valid_props.insert("AnotherKey".to_string(), "value2".to_string());
+
+    let result3 = neo4j_client
+        .create_relationship(
+            &entity1.entity_id,
+            &entity2.entity_id,
+            "CALLS",
+            &valid_props,
+        )
+        .await;
+
+    assert!(result3.is_ok(), "Valid property keys should be accepted");
+
+    // Cleanup
+    neo4j_client.drop_database(&db_name).await?;
+
+    Ok(())
+}
+
+/// Test batch CONTAINS relationship resolution
+#[tokio::test]
+#[ignore] // Requires Neo4j to be running
+async fn test_batch_contains_resolution() -> Result<()> {
+    let config = create_storage_config(6334, 6333, 5432, "test_db");
+    let neo4j_client = Neo4jClient::new(&config).await?;
+
+    // Create test database
+    let db_name = format!("test_{}", Uuid::new_v4().simple());
+    neo4j_client.create_database(&db_name).await?;
+    neo4j_client.use_database(&db_name).await?;
+
+    // Create parent entities
+    let parent1 = create_test_entity_with_name("parent1", "Parent1", EntityType::Module);
+    let parent2 = create_test_entity_with_name("parent2", "Parent2", EntityType::Module);
+    let parent3 = create_test_entity_with_name("parent3", "Parent3", EntityType::Module);
+
+    // Create child entities
+    let child1 = create_test_entity_with_name("child1", "child1", EntityType::Function);
+    let child2 = create_test_entity_with_name("child2", "child2", EntityType::Function);
+    let child3 = create_test_entity_with_name("child3", "child3", EntityType::Function);
+    let child4 = create_test_entity_with_name("child4", "child4", EntityType::Function);
+
+    // Create all entities
+    neo4j_client
+        .batch_create_nodes(&vec![
+            parent1.clone(),
+            parent2.clone(),
+            parent3.clone(),
+            child1.clone(),
+            child2.clone(),
+            child3.clone(),
+            child4.clone(),
+        ])
+        .await?;
+
+    // Prepare batch resolution data: 3 valid + 1 with non-existent parent
+    let unresolved_nodes = vec![
+        (child1.entity_id.clone(), parent1.qualified_name.clone()),
+        (child2.entity_id.clone(), parent2.qualified_name.clone()),
+        (child3.entity_id.clone(), parent3.qualified_name.clone()),
+        (
+            child4.entity_id.clone(),
+            "test::NonExistentParent".to_string(),
+        ),
+    ];
+
+    // Batch resolve
+    let resolved_count = neo4j_client
+        .resolve_contains_relationships_batch(&unresolved_nodes)
+        .await?;
+
+    // Should resolve 3 out of 4 (fourth parent doesn't exist)
+    assert_eq!(resolved_count, 3);
+
+    // Verify relationships were created
+    for (child_id, parent_qname) in &unresolved_nodes[0..3] {
+        let verify_query =
+            "MATCH (parent {qualified_name: $parent_qname})-[:CONTAINS]->(child {id: $child_id})
+             RETURN count(*) as count"
+                .to_string();
+        let mut result = neo4j_client
+            .graph()
+            .execute(
+                neo4rs::Query::new(verify_query)
+                    .param("parent_qname", parent_qname.as_str())
+                    .param("child_id", child_id.as_str()),
+            )
+            .await?;
+
+        if let Some(row) = result.next().await? {
+            let count: i64 = row.get("count")?;
+            assert_eq!(count, 1, "CONTAINS relationship should exist");
+        }
+    }
+
+    // Cleanup
+    neo4j_client.drop_database(&db_name).await?;
+
+    Ok(())
+}
+
+/// Test handling of duplicate relationships
+#[tokio::test]
+#[ignore] // Requires Neo4j to be running
+async fn test_duplicate_relationships() -> Result<()> {
+    let config = create_storage_config(6334, 6333, 5432, "test_db");
+    let neo4j_client = Neo4jClient::new(&config).await?;
+
+    // Create test database
+    let db_name = format!("test_{}", Uuid::new_v4().simple());
+    neo4j_client.create_database(&db_name).await?;
+    neo4j_client.use_database(&db_name).await?;
+
+    // Create test entities
+    let entity1 = create_test_entity("entity1", EntityType::Function);
+    let entity2 = create_test_entity("entity2", EntityType::Function);
+
+    neo4j_client
+        .batch_create_nodes(&vec![entity1.clone(), entity2.clone()])
+        .await?;
+
+    // Create same relationship twice
+    let relationships = vec![
+        (
+            entity1.entity_id.clone(),
+            entity2.entity_id.clone(),
+            "CALLS".to_string(),
+        ),
+        (
+            entity1.entity_id.clone(),
+            entity2.entity_id.clone(),
+            "CALLS".to_string(),
+        ),
+    ];
+
+    // Should succeed without error (MERGE handles duplicates)
+    let result = neo4j_client
+        .batch_create_relationships(&relationships)
+        .await;
+    assert!(result.is_ok());
+
+    // Verify only one relationship exists
+    let verify_query =
+        "MATCH (a {id: $from_id})-[r:CALLS]->(b {id: $to_id}) RETURN count(r) as count".to_string();
+    let mut query_result = neo4j_client
+        .graph()
+        .execute(
+            neo4rs::Query::new(verify_query)
+                .param("from_id", entity1.entity_id.as_str())
+                .param("to_id", entity2.entity_id.as_str()),
+        )
+        .await?;
+
+    if let Some(row) = query_result.next().await? {
+        let count: i64 = row.get("count")?;
+        assert_eq!(
+            count, 1,
+            "Should have exactly one relationship due to MERGE"
+        );
+    }
+
+    // Cleanup
+    neo4j_client.drop_database(&db_name).await?;
+
+    Ok(())
+}
+
+/// Test handling of missing entities during relationship creation
+#[tokio::test]
+#[ignore] // Requires Neo4j to be running
+async fn test_missing_entity_in_relationship() -> Result<()> {
+    let config = create_storage_config(6334, 6333, 5432, "test_db");
+    let neo4j_client = Neo4jClient::new(&config).await?;
+
+    // Create test database
+    let db_name = format!("test_{}", Uuid::new_v4().simple());
+    neo4j_client.create_database(&db_name).await?;
+    neo4j_client.use_database(&db_name).await?;
+
+    // Create only one entity
+    let entity1 = create_test_entity("entity1", EntityType::Function);
+    neo4j_client.create_entity_node(&entity1).await?;
+
+    // Try to create relationship to non-existent entity
+    let relationships = vec![(
+        entity1.entity_id.clone(),
+        "non_existent_id".to_string(),
+        "CALLS".to_string(),
+    )];
+
+    // Batch creation should complete without error
+    // (MATCH will simply not find the missing entity, no relationship created)
+    let result = neo4j_client
+        .batch_create_relationships(&relationships)
+        .await;
+    assert!(result.is_ok());
+
+    // Verify no relationship was created
+    let verify_query =
+        "MATCH (a {id: $from_id})-[r:CALLS]->() RETURN count(r) as count".to_string();
+    let mut query_result = neo4j_client
+        .graph()
+        .execute(neo4rs::Query::new(verify_query).param("from_id", entity1.entity_id.as_str()))
+        .await?;
+
+    if let Some(row) = query_result.next().await? {
+        let count: i64 = row.get("count")?;
+        assert_eq!(
+            count, 0,
+            "No relationship should be created for missing entity"
+        );
+    }
+
+    // Cleanup
+    neo4j_client.drop_database(&db_name).await?;
+
+    Ok(())
+}
+
 /// Helper function to create a test entity
 fn create_test_entity(id_suffix: &str, entity_type: EntityType) -> CodeEntity {
     create_test_entity_with_name(id_suffix, id_suffix, entity_type)

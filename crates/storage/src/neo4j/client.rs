@@ -18,6 +18,30 @@ pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
     "IMPORTS",
 ];
 
+/// Validates that a property key is safe to use in Cypher queries
+///
+/// Property keys must consist only of ASCII alphanumeric characters and underscores
+/// to prevent Cypher injection attacks.
+///
+/// # Arguments
+/// * `key` - The property key to validate
+///
+/// # Returns
+/// * `Result<()>` - Ok if valid, Err with descriptive message if invalid
+fn validate_property_key(key: &str) -> Result<()> {
+    if key.is_empty() {
+        return Err(anyhow!("Property key cannot be empty"));
+    }
+
+    if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(anyhow!(
+            "Invalid property key '{key}'. Keys must contain only ASCII alphanumeric characters and underscores"
+        ));
+    }
+
+    Ok(())
+}
+
 /// Neo4j client for graph database operations
 pub struct Neo4jClient {
     graph: Arc<Graph>,
@@ -486,8 +510,67 @@ impl Neo4jClient {
         Ok(nodes)
     }
 
+    /// Batch resolve CONTAINS relationships using UNWIND for performance
+    ///
+    /// This method resolves multiple unresolved CONTAINS relationships in just 2 queries
+    /// instead of 3N queries, providing significant performance improvement for large repositories.
+    ///
+    /// # Arguments
+    /// * `unresolved_nodes` - Vec of (child_id, parent_qualified_name) pairs
+    ///
+    /// # Returns
+    /// * `Result<usize>` - Number of relationships successfully created
+    pub async fn resolve_contains_relationships_batch(
+        &self,
+        unresolved_nodes: &[(String, String)],
+    ) -> Result<usize> {
+        let _db = self.get_current_database().await?;
+
+        if unresolved_nodes.is_empty() {
+            return Ok(0);
+        }
+
+        // Convert to format Neo4j expects: Vec<HashMap<String, String>>
+        let nodes_data: Vec<std::collections::HashMap<String, String>> = unresolved_nodes
+            .iter()
+            .map(|(child_id, parent_qname)| {
+                let mut map = std::collections::HashMap::new();
+                map.insert("child_id".to_string(), child_id.clone());
+                map.insert("parent_qname".to_string(), parent_qname.clone());
+                map
+            })
+            .collect();
+
+        // Query 1: Batch lookup parents, create relationships, and cleanup in one query
+        // Using UNWIND for maximum efficiency
+        let batch_query = Query::new(
+            "UNWIND $nodes AS node
+             MATCH (parent {qualified_name: node.parent_qname})
+             MATCH (child {id: node.child_id})
+             MERGE (parent)-[:CONTAINS]->(child)
+             REMOVE child.unresolved_contains_parent
+             RETURN count(*) AS resolved_count"
+                .to_string(),
+        )
+        .param("nodes", nodes_data);
+
+        let mut result = self.graph.execute(batch_query).await?;
+
+        let resolved_count = if let Some(row) = result.next().await? {
+            let count: i64 = row.get("resolved_count")?;
+            count as usize
+        } else {
+            0
+        };
+
+        Ok(resolved_count)
+    }
+
     /// Resolve a CONTAINS relationship by creating the edge and removing the unresolved property
     /// Returns Ok(true) if successful, Ok(false) if parent not found
+    ///
+    /// # Deprecated
+    /// This method makes 3 queries per relationship. Use `resolve_contains_relationships_batch` instead.
     pub async fn resolve_contains_relationship(
         &self,
         child_id: &str,
@@ -585,6 +668,11 @@ impl Neo4jClient {
             return Err(anyhow!(
                 "Invalid relationship type '{relationship_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
             ));
+        }
+
+        // Validate property keys to prevent Cypher injection
+        for key in properties.keys() {
+            validate_property_key(key)?;
         }
 
         // Build the relationship creation query

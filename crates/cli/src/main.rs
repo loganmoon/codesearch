@@ -17,7 +17,7 @@ use codesearch_indexer::{Indexer, RepositoryIndexer};
 use dialoguer::{Confirm, Select};
 use std::env;
 use std::path::{Path, PathBuf};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 // Re-use create_embedding_manager from lib
@@ -384,25 +384,45 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .await
         .context("Failed to resolve CONTAINS relationships")?;
 
-    resolve_trait_implementations(&postgres_client, &neo4j_client, repository_id)
-        .await
-        .context("Failed to resolve trait implementations")?;
+    resolve_relationships_generic(
+        &postgres_client,
+        &neo4j_client,
+        repository_id,
+        &TraitImplResolver,
+    )
+    .await?;
 
-    resolve_class_inheritance(&postgres_client, &neo4j_client, repository_id)
-        .await
-        .context("Failed to resolve class inheritance")?;
+    resolve_relationships_generic(
+        &postgres_client,
+        &neo4j_client,
+        repository_id,
+        &InheritanceResolver,
+    )
+    .await?;
 
-    resolve_type_usage(&postgres_client, &neo4j_client, repository_id)
-        .await
-        .context("Failed to resolve type usage relationships")?;
+    resolve_relationships_generic(
+        &postgres_client,
+        &neo4j_client,
+        repository_id,
+        &TypeUsageResolver,
+    )
+    .await?;
 
-    resolve_call_graph(&postgres_client, &neo4j_client, repository_id)
-        .await
-        .context("Failed to resolve call graph relationships")?;
+    resolve_relationships_generic(
+        &postgres_client,
+        &neo4j_client,
+        repository_id,
+        &CallGraphResolver,
+    )
+    .await?;
 
-    resolve_imports(&postgres_client, &neo4j_client, repository_id)
-        .await
-        .context("Failed to resolve import relationships")?;
+    resolve_relationships_generic(
+        &postgres_client,
+        &neo4j_client,
+        repository_id,
+        &ImportsResolver,
+    )
+    .await?;
 
     // Mark graph as ready
     postgres_client
@@ -413,6 +433,365 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
     info!("Graph relationships resolved successfully");
 
     Ok(())
+}
+
+/// Trait for resolving specific types of relationships
+///
+/// Implementors provide the complete logic for fetching entities and extracting relationships.
+/// The generic `resolve_relationships_generic` function handles database setup, batch creation, and logging.
+trait RelationshipResolver: Send + Sync {
+    /// Name of this resolver (for logging)
+    fn name(&self) -> &'static str;
+
+    /// Fetch entities and extract relationships
+    ///
+    /// Returns Vec<(from_id, to_id, relationship_type)>
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>>;
+}
+
+/// Generic function to resolve relationships using a resolver implementation
+async fn resolve_relationships_generic<R: RelationshipResolver>(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+    resolver: &R,
+) -> Result<()> {
+    use tracing::info;
+
+    info!("Resolving {} relationships...", resolver.name());
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Resolve relationships
+    let relationships = resolver.resolve(postgres, repository_id).await?;
+
+    // Batch create all relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .with_context(|| format!("Failed to batch create {} relationships", resolver.name()))?;
+
+    info!(
+        "Resolved {} {} relationships",
+        relationships.len(),
+        resolver.name()
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Relationship Resolver Implementations
+// ============================================================================
+
+/// Resolver for trait implementations (IMPLEMENTS and ASSOCIATES relationships)
+struct TraitImplResolver;
+
+impl RelationshipResolver for TraitImplResolver {
+    fn name(&self) -> &'static str {
+        "trait implementations"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use codesearch_core::entities::EntityType;
+        use std::collections::HashMap;
+
+        // Fetch all entity types in parallel for better performance
+        let (impls_result, traits_result, structs_result, enums_result, interfaces_result) = tokio::join!(
+            postgres.get_entities_by_type(repository_id, EntityType::Impl),
+            postgres.get_entities_by_type(repository_id, EntityType::Trait),
+            postgres.get_entities_by_type(repository_id, EntityType::Struct),
+            postgres.get_entities_by_type(repository_id, EntityType::Enum),
+            postgres.get_entities_by_type(repository_id, EntityType::Interface),
+        );
+
+        let impls = impls_result.context("Failed to get impl blocks")?;
+        let traits = traits_result.context("Failed to get traits")?;
+        let structs = structs_result.context("Failed to get structs")?;
+        let enums = enums_result.context("Failed to get enums")?;
+        let interfaces = interfaces_result.context("Failed to get interfaces")?;
+
+        // Build lookup maps
+        let trait_map: HashMap<String, String> = traits
+            .iter()
+            .map(|t| (t.name.clone(), t.entity_id.clone()))
+            .collect();
+
+        let mut type_map: HashMap<String, String> = HashMap::new();
+        type_map.extend(
+            structs
+                .iter()
+                .map(|s| (s.name.clone(), s.entity_id.clone())),
+        );
+        type_map.extend(enums.iter().map(|e| (e.name.clone(), e.entity_id.clone())));
+
+        let interface_map: HashMap<String, String> = interfaces
+            .iter()
+            .map(|i| (i.name.clone(), i.entity_id.clone()))
+            .collect();
+
+        // Extract relationships
+        let mut relationships = Vec::new();
+
+        for impl_entity in impls {
+            // IMPLEMENTS relationships
+            if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
+                if let Some(trait_id) = trait_map.get(trait_name) {
+                    relationships.push((
+                        impl_entity.entity_id.clone(),
+                        trait_id.clone(),
+                        "IMPLEMENTS".to_string(),
+                    ));
+                }
+            }
+
+            // ASSOCIATES relationships
+            if let Some(for_type) = impl_entity.metadata.attributes.get("for_type") {
+                let type_name = for_type.split('<').next().unwrap_or(for_type).trim();
+
+                if let Some(type_id) = type_map.get(type_name) {
+                    relationships.push((
+                        impl_entity.entity_id.clone(),
+                        type_id.clone(),
+                        "ASSOCIATES".to_string(),
+                    ));
+                }
+            }
+
+            // EXTENDS_INTERFACE relationships (TypeScript/JavaScript)
+            if let Some(extends) = impl_entity.metadata.attributes.get("extends") {
+                if let Some(interface_id) = interface_map.get(extends) {
+                    relationships.push((
+                        impl_entity.entity_id.clone(),
+                        interface_id.clone(),
+                        "EXTENDS_INTERFACE".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
+}
+
+/// Resolver for class inheritance (INHERITS_FROM relationships)
+struct InheritanceResolver;
+
+impl RelationshipResolver for InheritanceResolver {
+    fn name(&self) -> &'static str {
+        "class inheritance"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use codesearch_core::entities::EntityType;
+        use std::collections::HashMap;
+
+        let classes = postgres
+            .get_entities_by_type(repository_id, EntityType::Class)
+            .await
+            .context("Failed to get classes")?;
+
+        let class_map: HashMap<String, String> = classes
+            .iter()
+            .map(|c| (c.name.clone(), c.entity_id.clone()))
+            .collect();
+
+        let mut relationships = Vec::new();
+
+        for class_entity in classes {
+            if let Some(extends) = class_entity.metadata.attributes.get("extends") {
+                let parent_name = extends.split('<').next().unwrap_or(extends).trim();
+
+                if let Some(parent_id) = class_map.get(parent_name) {
+                    relationships.push((
+                        class_entity.entity_id.clone(),
+                        parent_id.clone(),
+                        "INHERITS_FROM".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
+}
+
+/// Resolver for type usage (USES relationships)
+struct TypeUsageResolver;
+
+impl RelationshipResolver for TypeUsageResolver {
+    fn name(&self) -> &'static str {
+        "type usage"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use codesearch_core::entities::EntityType;
+        use std::collections::HashMap;
+
+        // Fetch entity types in parallel
+        let (structs_result, all_types_result) = tokio::join!(
+            postgres.get_entities_by_type(repository_id, EntityType::Struct),
+            postgres.get_all_type_entities(repository_id),
+        );
+
+        let structs = structs_result.context("Failed to get structs")?;
+        let all_types = all_types_result.context("Failed to get type entities")?;
+
+        let type_map: HashMap<String, String> = all_types
+            .iter()
+            .map(|t| (t.name.clone(), t.entity_id.clone()))
+            .collect();
+
+        let mut relationships = Vec::new();
+
+        for struct_entity in structs {
+            if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
+                if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
+                    for field in fields {
+                        if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
+                            if field.get("name").and_then(|v| v.as_str()).is_some() {
+                                let type_name =
+                                    field_type.split('<').next().unwrap_or(field_type).trim();
+
+                                if let Some(type_id) = type_map.get(type_name) {
+                                    relationships.push((
+                                        struct_entity.entity_id.clone(),
+                                        type_id.clone(),
+                                        "USES".to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
+}
+
+/// Resolver for call graph (CALLS relationships)
+struct CallGraphResolver;
+
+impl RelationshipResolver for CallGraphResolver {
+    fn name(&self) -> &'static str {
+        "call graph"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use codesearch_core::entities::EntityType;
+        use std::collections::HashMap;
+
+        // Fetch entity types in parallel
+        let (functions_result, methods_result) = tokio::join!(
+            postgres.get_entities_by_type(repository_id, EntityType::Function),
+            postgres.get_entities_by_type(repository_id, EntityType::Method),
+        );
+
+        let functions = functions_result.context("Failed to get functions")?;
+        let methods = methods_result.context("Failed to get methods")?;
+
+        let all_callables: Vec<_> = functions.into_iter().chain(methods).collect();
+
+        let mut callable_map: HashMap<String, String> = HashMap::new();
+        for callable in &all_callables {
+            callable_map.insert(callable.name.clone(), callable.entity_id.clone());
+            callable_map.insert(callable.qualified_name.clone(), callable.entity_id.clone());
+        }
+
+        let mut relationships = Vec::new();
+
+        for caller in all_callables {
+            if let Some(calls_json) = caller.metadata.attributes.get("calls") {
+                if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
+                    for callee_name in calls {
+                        if let Some(callee_id) = callable_map.get(&callee_name) {
+                            relationships.push((
+                                caller.entity_id.clone(),
+                                callee_id.clone(),
+                                "CALLS".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
+}
+
+/// Resolver for imports (IMPORTS relationships)
+struct ImportsResolver;
+
+impl RelationshipResolver for ImportsResolver {
+    fn name(&self) -> &'static str {
+        "imports"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use codesearch_core::entities::EntityType;
+        use std::collections::HashMap;
+
+        let modules = postgres
+            .get_entities_by_type(repository_id, EntityType::Module)
+            .await
+            .context("Failed to get modules")?;
+
+        let module_map: HashMap<String, String> = modules
+            .iter()
+            .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
+            .collect();
+
+        let mut relationships = Vec::new();
+
+        for module_entity in modules {
+            if let Some(imports_json) = module_entity.metadata.attributes.get("imports") {
+                if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_json) {
+                    for import_path in imports {
+                        if let Some(imported_module_id) = module_map.get(&import_path) {
+                            relationships.push((
+                                module_entity.entity_id.clone(),
+                                imported_module_id.clone(),
+                                "IMPORTS".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
 }
 
 /// Resolve CONTAINS relationships after indexing completes
@@ -441,441 +820,26 @@ async fn resolve_contains_relationships(
         return Ok(());
     }
 
-    // Resolve each node
-    let mut resolved_count = 0;
-    let mut failed_count = 0;
+    // Batch resolve all nodes in a single operation for performance
+    let total_nodes = unresolved_nodes.len();
+    let resolved_count = neo4j
+        .resolve_contains_relationships_batch(&unresolved_nodes)
+        .await
+        .context("Failed to batch resolve CONTAINS relationships")?;
 
-    for (child_id, parent_qname) in unresolved_nodes {
-        match neo4j
-            .resolve_contains_relationship(&child_id, &parent_qname)
-            .await
-        {
-            Ok(true) => resolved_count += 1,
-            Ok(false) => {
-                warn!(
-                    "Parent '{}' not found for child '{}'",
-                    parent_qname, child_id
-                );
-                failed_count += 1;
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to resolve parent '{}' for child '{}': {}",
-                    parent_qname, child_id, e
-                );
-                failed_count += 1;
-            }
-        }
+    let failed_count = total_nodes - resolved_count;
+
+    if failed_count > 0 {
+        warn!(
+            "{} CONTAINS relationships could not be resolved (parents not found)",
+            failed_count
+        );
     }
 
     info!(
         "Resolved {} CONTAINS relationships ({} failed)",
         resolved_count, failed_count
     );
-
-    Ok(())
-}
-
-/// Resolve trait implementations and interface extensions after indexing completes
-async fn resolve_trait_implementations(
-    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
-    repository_id: Uuid,
-) -> Result<()> {
-    use codesearch_core::entities::EntityType;
-    use std::collections::HashMap;
-
-    info!("Resolving trait implementations...");
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
-
-    // Get all impl blocks
-    let impls = postgres
-        .get_entities_by_type(repository_id, EntityType::Impl)
-        .await
-        .context("Failed to get impl blocks")?;
-
-    // Build trait name -> entity_id map
-    let traits = postgres
-        .get_entities_by_type(repository_id, EntityType::Trait)
-        .await
-        .context("Failed to get traits")?;
-    let trait_map: HashMap<String, String> = traits
-        .iter()
-        .map(|t| (t.name.clone(), t.entity_id.clone()))
-        .collect();
-
-    // Build type name -> entity_id map (for ASSOCIATES)
-    let structs = postgres
-        .get_entities_by_type(repository_id, EntityType::Struct)
-        .await
-        .context("Failed to get structs")?;
-    let enums = postgres
-        .get_entities_by_type(repository_id, EntityType::Enum)
-        .await
-        .context("Failed to get enums")?;
-    let mut type_map: HashMap<String, String> = HashMap::new();
-    type_map.extend(
-        structs
-            .iter()
-            .map(|s| (s.name.clone(), s.entity_id.clone())),
-    );
-    type_map.extend(enums.iter().map(|e| (e.name.clone(), e.entity_id.clone())));
-
-    // Build interface name -> entity_id map (for TypeScript/JavaScript)
-    let interfaces = postgres
-        .get_entities_by_type(repository_id, EntityType::Interface)
-        .await
-        .context("Failed to get interfaces")?;
-    let interface_map: HashMap<String, String> = interfaces
-        .iter()
-        .map(|i| (i.name.clone(), i.entity_id.clone()))
-        .collect();
-
-    // Collect all relationships to create in batch
-    let mut relationships = Vec::new();
-
-    // Resolve IMPLEMENTS and ASSOCIATES relationships from impl blocks
-    for impl_entity in impls {
-        // Resolve IMPLEMENTS relationship
-        if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
-            if let Some(trait_id) = trait_map.get(trait_name) {
-                relationships.push((
-                    impl_entity.entity_id.clone(),
-                    trait_id.clone(),
-                    "IMPLEMENTS".to_string(),
-                ));
-            } else {
-                debug!("Trait '{trait_name}' not found in repository");
-            }
-        }
-
-        // Resolve ASSOCIATES relationship
-        if let Some(for_type) = impl_entity.metadata.attributes.get("for_type") {
-            // Strip generic parameters: "Container<T>" -> "Container"
-            let type_name = for_type.split('<').next().unwrap_or(for_type).trim();
-
-            if let Some(type_id) = type_map.get(type_name) {
-                relationships.push((
-                    impl_entity.entity_id.clone(),
-                    type_id.clone(),
-                    "ASSOCIATES".to_string(),
-                ));
-            } else {
-                debug!("Type '{type_name}' not found in repository");
-            }
-        }
-    }
-
-    // Resolve EXTENDS_INTERFACE relationships from interfaces
-    for interface_entity in interfaces {
-        if let Some(extends) = interface_entity.metadata.attributes.get("extends") {
-            // Parse comma-separated interface names: "Base, ICloneable"
-            for interface_name in extends.split(',').map(|s| s.trim()) {
-                if let Some(parent_id) = interface_map.get(interface_name) {
-                    relationships.push((
-                        interface_entity.entity_id.clone(),
-                        parent_id.clone(),
-                        "EXTENDS_INTERFACE".to_string(),
-                    ));
-                } else {
-                    debug!("Interface '{interface_name}' not found in repository");
-                }
-            }
-        }
-    }
-
-    // Batch create all relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to batch create relationships")?;
-
-    let implements_count = relationships
-        .iter()
-        .filter(|(_, _, t)| t == "IMPLEMENTS")
-        .count();
-    let associates_count = relationships
-        .iter()
-        .filter(|(_, _, t)| t == "ASSOCIATES")
-        .count();
-    let extends_count = relationships
-        .iter()
-        .filter(|(_, _, t)| t == "EXTENDS_INTERFACE")
-        .count();
-
-    info!(
-        "Resolved {} IMPLEMENTS, {} ASSOCIATES, {} EXTENDS_INTERFACE relationships",
-        implements_count, associates_count, extends_count
-    );
-
-    Ok(())
-}
-
-/// Resolve class inheritance after indexing completes
-async fn resolve_class_inheritance(
-    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
-    repository_id: Uuid,
-) -> Result<()> {
-    use codesearch_core::entities::EntityType;
-    use std::collections::HashMap;
-
-    info!("Resolving class inheritance...");
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
-
-    // Get all classes
-    let classes = postgres
-        .get_entities_by_type(repository_id, EntityType::Class)
-        .await
-        .context("Failed to get classes")?;
-
-    // Build class name -> entity_id map
-    let class_map: HashMap<String, String> = classes
-        .iter()
-        .map(|c| (c.name.clone(), c.entity_id.clone()))
-        .collect();
-
-    // Collect all relationships to create in batch
-    let mut relationships = Vec::new();
-
-    for class in classes {
-        if let Some(extends) = class.metadata.attributes.get("extends") {
-            if let Some(parent_id) = class_map.get(extends) {
-                relationships.push((
-                    class.entity_id.clone(),
-                    parent_id.clone(),
-                    "INHERITS_FROM".to_string(),
-                ));
-            } else {
-                debug!("Parent class '{extends}' not found in repository");
-            }
-        }
-    }
-
-    // Batch create all relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to batch create INHERITS_FROM relationships")?;
-
-    info!(
-        "Resolved {} INHERITS_FROM relationships",
-        relationships.len()
-    );
-
-    Ok(())
-}
-
-async fn resolve_type_usage(
-    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
-    repository_id: Uuid,
-) -> Result<()> {
-    use codesearch_core::entities::EntityType;
-    use std::collections::HashMap;
-
-    info!("Resolving type usage relationships...");
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
-
-    // Get all structs
-    let structs = postgres
-        .get_entities_by_type(repository_id, EntityType::Struct)
-        .await
-        .context("Failed to get structs")?;
-
-    // Get all type entities (structs, enums, classes, interfaces, type aliases)
-    let all_types = postgres
-        .get_all_type_entities(repository_id)
-        .await
-        .context("Failed to get type entities")?;
-
-    // Build type name -> entity_id map
-    let type_map: HashMap<String, String> = all_types
-        .iter()
-        .map(|t| (t.name.clone(), t.entity_id.clone()))
-        .collect();
-
-    // Collect all USES relationships for batch creation
-    let mut relationships = Vec::new();
-
-    for struct_entity in structs {
-        if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
-            // Parse fields as JSON array
-            if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
-                for field in fields {
-                    if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
-                        if field.get("name").and_then(|v| v.as_str()).is_some() {
-                            // Strip generics: "Vec<String>" -> "Vec"
-                            let type_name =
-                                field_type.split('<').next().unwrap_or(field_type).trim();
-
-                            // Try to resolve type
-                            if let Some(type_id) = type_map.get(type_name) {
-                                relationships.push((
-                                    struct_entity.entity_id.clone(),
-                                    type_id.clone(),
-                                    "USES".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Batch create all USES relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to batch create USES relationships")?;
-
-    let uses_count = relationships.len();
-
-    info!("Resolved {} USES relationships", uses_count);
-
-    Ok(())
-}
-
-/// Resolve call graph relationships after indexing completes
-async fn resolve_call_graph(
-    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
-    repository_id: Uuid,
-) -> Result<()> {
-    use codesearch_core::entities::EntityType;
-    use std::collections::HashMap;
-
-    info!("Resolving call graph relationships...");
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
-
-    // Get all functions and methods
-    let functions = postgres
-        .get_entities_by_type(repository_id, EntityType::Function)
-        .await
-        .context("Failed to get functions")?;
-    let methods = postgres
-        .get_entities_by_type(repository_id, EntityType::Method)
-        .await
-        .context("Failed to get methods")?;
-
-    let all_callables: Vec<_> = functions.into_iter().chain(methods).collect();
-
-    // Build function name -> entity_id map (simple name matching)
-    let mut callable_map: HashMap<String, String> = HashMap::new();
-    for callable in &all_callables {
-        // Map both simple name and qualified name
-        callable_map.insert(callable.name.clone(), callable.entity_id.clone());
-        callable_map.insert(callable.qualified_name.clone(), callable.entity_id.clone());
-    }
-
-    // Collect all relationships to create in batch
-    let mut relationships = Vec::new();
-
-    for caller in all_callables {
-        if let Some(calls_json) = caller.metadata.attributes.get("calls") {
-            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
-                for callee_name in calls {
-                    // Try to resolve callee
-                    if let Some(callee_id) = callable_map.get(&callee_name) {
-                        relationships.push((
-                            caller.entity_id.clone(),
-                            callee_id.clone(),
-                            "CALLS".to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    // Batch create all relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to batch create CALLS relationships")?;
-
-    info!("Created {} CALLS edges", relationships.len());
-
-    Ok(())
-}
-
-/// Resolve import relationships after indexing completes
-async fn resolve_imports(
-    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
-    repository_id: Uuid,
-) -> Result<()> {
-    use codesearch_core::entities::EntityType;
-    use std::collections::HashMap;
-
-    info!("Resolving import relationships...");
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
-
-    // Get all modules
-    let modules = postgres
-        .get_entities_by_type(repository_id, EntityType::Module)
-        .await
-        .context("Failed to get modules")?;
-
-    // Build module path -> entity_id map
-    let module_map: HashMap<String, String> = modules
-        .iter()
-        .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
-        .collect();
-
-    // Collect all IMPORTS relationships for batch creation
-    let mut relationships = Vec::new();
-
-    for module in modules {
-        if let Some(imports_str) = module.metadata.attributes.get("imports") {
-            for import_path in imports_str.split(',') {
-                let import_path = import_path.trim();
-
-                // Resolve import path to module entity
-                if let Some(imported_id) = module_map.get(import_path) {
-                    relationships.push((
-                        module.entity_id.clone(),
-                        imported_id.clone(),
-                        "IMPORTS".to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    // Batch create all IMPORTS relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to batch create IMPORTS relationships")?;
-
-    info!("Created {} IMPORTS edges", relationships.len());
 
     Ok(())
 }

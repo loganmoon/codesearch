@@ -323,54 +323,14 @@ neo4j_password = "codesearch"  # Local-only, no security concern
 
 ### Infrastructure Requirements
 
-**Note:** Neo4j integration is currently experimental. The shared infrastructure at `~/.codesearch/infrastructure/` does not include Neo4j by default. To enable graph-based queries, you must manually add Neo4j to your `docker-compose.yml`.
+Neo4j is included in the shared infrastructure at `~/.codesearch/infrastructure/` and will be automatically started when you run `codesearch index` or `codesearch serve`. The infrastructure includes Neo4j 5.28 with the following configuration:
 
-To add Neo4j to your `~/.codesearch/infrastructure/docker-compose.yml`:
-
-```yaml
-neo4j:
-  image: neo4j:5.28
-  container_name: codesearch-neo4j
-  ports:
-    - "127.0.0.1:7687:7687"  # Bolt protocol - localhost only for security
-    - "127.0.0.1:7474:7474"  # HTTP browser - localhost only for security
-  volumes:
-    - neo4j_data:/data
-    - neo4j_logs:/logs
-  environment:
-    - NEO4J_AUTH=neo4j/codesearch
-    - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
-    - NEO4J_dbms_memory_heap_initial__size=512M
-    - NEO4J_dbms_memory_heap_max__size=2G
-    - NEO4J_dbms_memory_pagecache_size=512M
-    - NEO4J_dbms_security_procedures_unrestricted=apoc.*
-    - NEO4J_dbms_security_procedures_allowlist=apoc.*
-  healthcheck:
-    test: ["CMD-SHELL", "cypher-shell -u neo4j -p codesearch 'RETURN 1' || exit 1"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-    start_period: 30s
-  networks:
-    - codesearch
-  restart: unless-stopped
-
-# Add to the volumes section:
-volumes:
-  neo4j_data:
-    driver: local
-  neo4j_logs:
-    driver: local
-```
-
-**Configuration Notes:**
-- `container_name`: Required for CLI container detection
-- `127.0.0.1` binding: Prevents network exposure (local-only access)
-- `NEO4J_ACCEPT_LICENSE_AGREEMENT`: Required for Neo4j 5.x
-- Memory limits: Prevents Neo4j from consuming excessive resources
-- Healthcheck: Uses cypher-shell to verify Neo4j is accepting connections
-- APOC security settings: Properly configures APOC procedures access
-- Logs volume: Aids troubleshooting
+- **Bolt protocol:** Port 7687 (localhost only)
+- **HTTP browser:** Port 7474 (localhost only)
+- **Authentication:** neo4j/codesearch (local-only, no security concern)
+- **Memory limits:** 512MB-2GB heap, 512MB page cache
+- **Volumes:** Persistent data and logs stored in `~/.codesearch/infrastructure/` volumes
+- **APOC procedures:** Enabled for advanced graph operations
 
 ### Architecture Details
 

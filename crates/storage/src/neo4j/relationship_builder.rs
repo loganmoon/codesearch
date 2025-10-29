@@ -1,6 +1,6 @@
 //! Extract relationships from entity metadata for Neo4j graph construction
 
-use codesearch_core::CodeEntity;
+use codesearch_core::{CodeEntity, EntityType, Language};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -77,6 +77,88 @@ pub fn build_contains_relationship_json(
                 "resolved": false
             }));
         }
+    }
+
+    relationships
+}
+
+/// Extract IMPLEMENTS relationships from Rust impl blocks
+pub fn extract_implements_relationships(entity: &CodeEntity) -> Vec<Relationship> {
+    let mut relationships = Vec::new();
+
+    if entity.entity_type == EntityType::Impl {
+        // Check for trait implementation
+        if let Some(trait_name) = entity.metadata.attributes.get("implements_trait") {
+            relationships.push(Relationship {
+                rel_type: "IMPLEMENTS".to_string(),
+                from_id: entity.entity_id.clone(),
+                to_id: None,
+                to_name: Some(trait_name.clone()),
+                properties: HashMap::new(),
+            });
+        }
+
+        // Check for type association (impl Foo or impl Trait for Foo)
+        if let Some(for_type) = entity.metadata.attributes.get("for_type") {
+            relationships.push(Relationship {
+                rel_type: "ASSOCIATES".to_string(),
+                from_id: entity.entity_id.clone(),
+                to_id: None,
+                to_name: Some(for_type.clone()),
+                properties: HashMap::new(),
+            });
+        }
+    }
+
+    relationships
+}
+
+/// Extract EXTENDS_INTERFACE relationships from TypeScript interfaces
+pub fn extract_extends_interface_relationships(entity: &CodeEntity) -> Vec<Relationship> {
+    let mut relationships = Vec::new();
+
+    if entity.entity_type == EntityType::Interface
+        && (entity.language == Language::TypeScript || entity.language == Language::JavaScript)
+    {
+        if let Some(extends) = entity.metadata.attributes.get("extends") {
+            // Parse comma-separated interface names: "Base, ICloneable"
+            for interface_name in extends.split(',').map(|s| s.trim()) {
+                relationships.push(Relationship {
+                    rel_type: "EXTENDS_INTERFACE".to_string(),
+                    from_id: entity.entity_id.clone(),
+                    to_id: None,
+                    to_name: Some(interface_name.to_string()),
+                    properties: HashMap::new(),
+                });
+            }
+        }
+    }
+
+    relationships
+}
+
+/// Build IMPLEMENTS and EXTENDS_INTERFACE relationship JSON for outbox payload
+pub fn build_trait_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
+    let mut relationships = Vec::new();
+
+    // Extract IMPLEMENTS relationships
+    for rel in extract_implements_relationships(entity) {
+        relationships.push(json!({
+            "type": rel.rel_type,
+            "from_id": rel.from_id,
+            "to_name": rel.to_name,
+            "resolved": false
+        }));
+    }
+
+    // Extract EXTENDS_INTERFACE relationships
+    for rel in extract_extends_interface_relationships(entity) {
+        relationships.push(json!({
+            "type": rel.rel_type,
+            "from_id": rel.from_id,
+            "to_name": rel.to_name,
+            "resolved": false
+        }));
     }
 
     relationships

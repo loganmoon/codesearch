@@ -17,7 +17,7 @@ use codesearch_indexer::{Indexer, RepositoryIndexer};
 use dialoguer::{Confirm, Select};
 use std::env;
 use std::path::{Path, PathBuf};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 // Re-use create_embedding_manager from lib
@@ -384,6 +384,10 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .await
         .context("Failed to resolve CONTAINS relationships")?;
 
+    resolve_trait_implementations(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve trait implementations")?;
+
     // Mark graph as ready
     postgres_client
         .set_graph_ready(repository_id, true)
@@ -451,6 +455,143 @@ async fn resolve_contains_relationships(
     info!(
         "Resolved {} CONTAINS relationships ({} failed)",
         resolved_count, failed_count
+    );
+
+    Ok(())
+}
+
+/// Resolve trait implementations and interface extensions after indexing completes
+async fn resolve_trait_implementations(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    use codesearch_core::entities::EntityType;
+    use std::collections::HashMap;
+
+    info!("Resolving trait implementations...");
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Get all impl blocks
+    let impls = postgres
+        .get_entities_by_type(repository_id, EntityType::Impl)
+        .await
+        .context("Failed to get impl blocks")?;
+
+    // Build trait name -> entity_id map
+    let traits = postgres
+        .get_entities_by_type(repository_id, EntityType::Trait)
+        .await
+        .context("Failed to get traits")?;
+    let trait_map: HashMap<String, String> = traits
+        .iter()
+        .map(|t| (t.name.clone(), t.entity_id.clone()))
+        .collect();
+
+    // Build type name -> entity_id map (for ASSOCIATES)
+    let structs = postgres
+        .get_entities_by_type(repository_id, EntityType::Struct)
+        .await
+        .context("Failed to get structs")?;
+    let enums = postgres
+        .get_entities_by_type(repository_id, EntityType::Enum)
+        .await
+        .context("Failed to get enums")?;
+    let mut type_map: HashMap<String, String> = HashMap::new();
+    type_map.extend(
+        structs
+            .iter()
+            .map(|s| (s.name.clone(), s.entity_id.clone())),
+    );
+    type_map.extend(enums.iter().map(|e| (e.name.clone(), e.entity_id.clone())));
+
+    // Build interface name -> entity_id map (for TypeScript/JavaScript)
+    let interfaces = postgres
+        .get_entities_by_type(repository_id, EntityType::Interface)
+        .await
+        .context("Failed to get interfaces")?;
+    let interface_map: HashMap<String, String> = interfaces
+        .iter()
+        .map(|i| (i.name.clone(), i.entity_id.clone()))
+        .collect();
+
+    let mut implements_count = 0;
+    let mut associates_count = 0;
+    let mut extends_count = 0;
+
+    // Resolve IMPLEMENTS and ASSOCIATES relationships from impl blocks
+    for impl_entity in impls {
+        // Resolve IMPLEMENTS relationship
+        if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
+            if let Some(trait_id) = trait_map.get(trait_name) {
+                neo4j
+                    .create_relationship(
+                        &impl_entity.entity_id,
+                        trait_id,
+                        "IMPLEMENTS",
+                        &HashMap::new(),
+                    )
+                    .await
+                    .context("Failed to create IMPLEMENTS relationship")?;
+                implements_count += 1;
+            } else {
+                debug!("Trait '{trait_name}' not found in repository");
+            }
+        }
+
+        // Resolve ASSOCIATES relationship
+        if let Some(for_type) = impl_entity.metadata.attributes.get("for_type") {
+            // Strip generic parameters: "Container<T>" -> "Container"
+            let type_name = for_type.split('<').next().unwrap_or(for_type).trim();
+
+            if let Some(type_id) = type_map.get(type_name) {
+                neo4j
+                    .create_relationship(
+                        &impl_entity.entity_id,
+                        type_id,
+                        "ASSOCIATES",
+                        &HashMap::new(),
+                    )
+                    .await
+                    .context("Failed to create ASSOCIATES relationship")?;
+                associates_count += 1;
+            } else {
+                debug!("Type '{type_name}' not found in repository");
+            }
+        }
+    }
+
+    // Resolve EXTENDS_INTERFACE relationships from interfaces
+    for interface_entity in interfaces {
+        if let Some(extends) = interface_entity.metadata.attributes.get("extends") {
+            // Parse comma-separated interface names: "Base, ICloneable"
+            for interface_name in extends.split(',').map(|s| s.trim()) {
+                if let Some(parent_id) = interface_map.get(interface_name) {
+                    neo4j
+                        .create_relationship(
+                            &interface_entity.entity_id,
+                            parent_id,
+                            "EXTENDS_INTERFACE",
+                            &HashMap::new(),
+                        )
+                        .await
+                        .context("Failed to create EXTENDS_INTERFACE relationship")?;
+                    extends_count += 1;
+                } else {
+                    debug!("Interface '{interface_name}' not found in repository");
+                }
+            }
+        }
+    }
+
+    info!(
+        "Resolved {} IMPLEMENTS, {} ASSOCIATES, {} EXTENDS_INTERFACE relationships",
+        implements_count, associates_count, extends_count
     );
 
     Ok(())

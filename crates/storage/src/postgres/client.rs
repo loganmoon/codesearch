@@ -736,6 +736,35 @@ impl PostgresClient {
         Ok(result)
     }
 
+    /// Get all entities of a specific type in a repository
+    pub async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: EntityType,
+    ) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT entity_data
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND entity_type = $2
+               AND deleted_at IS NULL",
+        )
+        .bind(repository_id)
+        .bind(entity_type.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!("Failed to get entities by type {entity_type}: {e}"))
+        })?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .collect();
+
+        Ok(entities)
+    }
+
     /// Get file snapshot (list of entity IDs in file)
     pub async fn get_file_snapshot(
         &self,
@@ -1918,8 +1947,11 @@ impl PostgresClient {
         };
 
         // Extract CONTAINS relationships
-        let relationships =
+        let mut relationships =
             crate::neo4j::build_contains_relationship_json(entity, entities_in_batch);
+
+        // Extract IMPLEMENTS and EXTENDS_INTERFACE relationships
+        relationships.extend(crate::neo4j::build_trait_relationship_json(entity));
 
         Ok(serde_json::json!({
             "entity": entity,
@@ -2099,6 +2131,14 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
         self.get_entities_by_ids(entity_refs).await
+    }
+
+    async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: EntityType,
+    ) -> Result<Vec<CodeEntity>> {
+        self.get_entities_by_type(repository_id, entity_type).await
     }
 
     async fn mark_entities_deleted_with_outbox(

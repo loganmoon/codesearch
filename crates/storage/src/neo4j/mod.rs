@@ -4,4 +4,8 @@ mod client;
 mod relationship_builder;
 
 pub use client::Neo4jClient;
-pub use relationship_builder::{build_contains_relationship_json, extract_contains_relationships};
+pub use relationship_builder::{
+    build_contains_relationship_json, build_trait_relationship_json,
+    extract_contains_relationships, extract_extends_interface_relationships,
+    extract_implements_relationships,
+};

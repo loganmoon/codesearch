@@ -293,7 +293,7 @@ impl Neo4jClient {
 
         let mut query = Query::new(query_str.to_string());
         for (key, value) in params {
-            query = query.param(*key, value.clone());
+            query = query.param(key, value.clone());
         }
 
         self.graph
@@ -375,6 +375,46 @@ impl Neo4jClient {
         self.graph.run(cleanup_query).await?;
 
         Ok(true)
+    }
+
+    /// Create a relationship between two entities
+    pub async fn create_relationship(
+        &self,
+        from_entity_id: &str,
+        to_entity_id: &str,
+        relationship_type: &str,
+        properties: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
+        let _db = self.get_current_database().await?;
+
+        // Build the relationship creation query
+        let mut query = format!(
+            "MATCH (from {{id: $from_id}}), (to {{id: $to_id}})
+             MERGE (from)-[r:{relationship_type}]->(to)"
+        );
+
+        // Add property setters if there are properties
+        if !properties.is_empty() {
+            query.push_str(" SET ");
+            let prop_setters: Vec<String> = properties
+                .keys()
+                .map(|key| format!("r.{key} = ${key}"))
+                .collect();
+            query.push_str(&prop_setters.join(", "));
+        }
+
+        let mut q = Query::new(query)
+            .param("from_id", from_entity_id)
+            .param("to_id", to_entity_id);
+
+        // Add property parameters
+        for (key, value) in properties {
+            q = q.param(key.as_str(), value.as_str());
+        }
+
+        self.graph.run(q).await?;
+
+        Ok(())
     }
 
     /// Get Neo4j labels for an entity type

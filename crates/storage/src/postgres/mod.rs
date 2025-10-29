@@ -330,6 +330,16 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Maximum batch size is 1000 entity references.
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>>;
 
+    /// Get all entities of a specific type in a repository
+    ///
+    /// Returns all non-deleted entities matching the specified EntityType.
+    /// This is used during graph relationship resolution.
+    async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: codesearch_core::entities::EntityType,
+    ) -> Result<Vec<CodeEntity>>;
+
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///
     /// Maximum batch size is 1000 entity IDs.

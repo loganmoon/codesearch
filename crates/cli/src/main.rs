@@ -388,6 +388,10 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .await
         .context("Failed to resolve trait implementations")?;
 
+    resolve_class_inheritance(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve class inheritance")?;
+
     // Mark graph as ready
     postgres_client
         .set_graph_ready(repository_id, true)
@@ -593,6 +597,61 @@ async fn resolve_trait_implementations(
         "Resolved {} IMPLEMENTS, {} ASSOCIATES, {} EXTENDS_INTERFACE relationships",
         implements_count, associates_count, extends_count
     );
+
+    Ok(())
+}
+
+/// Resolve class inheritance after indexing completes
+async fn resolve_class_inheritance(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    use codesearch_core::entities::EntityType;
+    use std::collections::HashMap;
+
+    info!("Resolving class inheritance...");
+
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Get all classes
+    let classes = postgres
+        .get_entities_by_type(repository_id, EntityType::Class)
+        .await
+        .context("Failed to get classes")?;
+
+    // Build class name -> entity_id map
+    let class_map: HashMap<String, String> = classes
+        .iter()
+        .map(|c| (c.name.clone(), c.entity_id.clone()))
+        .collect();
+
+    let mut inherits_count = 0;
+
+    for class in classes {
+        if let Some(extends) = class.metadata.attributes.get("extends") {
+            if let Some(parent_id) = class_map.get(extends) {
+                neo4j
+                    .create_relationship(
+                        &class.entity_id,
+                        parent_id,
+                        "INHERITS_FROM",
+                        &HashMap::new(),
+                    )
+                    .await
+                    .context("Failed to create INHERITS_FROM relationship")?;
+                inherits_count += 1;
+            } else {
+                debug!("Parent class '{extends}' not found in repository");
+            }
+        }
+    }
+
+    info!("Resolved {} INHERITS_FROM relationships", inherits_count);
 
     Ok(())
 }

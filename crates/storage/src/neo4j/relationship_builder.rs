@@ -137,6 +137,25 @@ pub fn extract_extends_interface_relationships(entity: &CodeEntity) -> Vec<Relat
     relationships
 }
 
+/// Extract INHERITS_FROM relationships from class declarations
+pub fn extract_inherits_from_relationships(entity: &CodeEntity) -> Vec<Relationship> {
+    let mut relationships = Vec::new();
+
+    if entity.entity_type == EntityType::Class {
+        if let Some(extends) = entity.metadata.attributes.get("extends") {
+            relationships.push(Relationship {
+                rel_type: "INHERITS_FROM".to_string(),
+                from_id: entity.entity_id.clone(),
+                to_id: None,
+                to_name: Some(extends.clone()),
+                properties: HashMap::new(),
+            });
+        }
+    }
+
+    relationships
+}
+
 /// Build IMPLEMENTS and EXTENDS_INTERFACE relationship JSON for outbox payload
 pub fn build_trait_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
     let mut relationships = Vec::new();
@@ -153,6 +172,22 @@ pub fn build_trait_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Val
 
     // Extract EXTENDS_INTERFACE relationships
     for rel in extract_extends_interface_relationships(entity) {
+        relationships.push(json!({
+            "type": rel.rel_type,
+            "from_id": rel.from_id,
+            "to_name": rel.to_name,
+            "resolved": false
+        }));
+    }
+
+    relationships
+}
+
+/// Build INHERITS_FROM relationship JSON for outbox payload
+pub fn build_inherits_from_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
+    let mut relationships = Vec::new();
+
+    for rel in extract_inherits_from_relationships(entity) {
         relationships.push(json!({
             "type": rel.rel_type,
             "from_id": rel.from_id,

@@ -1953,6 +1953,9 @@ impl PostgresClient {
         // Extract IMPLEMENTS and EXTENDS_INTERFACE relationships
         relationships.extend(crate::neo4j::build_trait_relationship_json(entity));
 
+        // Extract INHERITS_FROM relationships
+        relationships.extend(crate::neo4j::build_inherits_from_relationship_json(entity));
+
         Ok(serde_json::json!({
             "entity": entity,
             "node": properties,

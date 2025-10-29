@@ -140,6 +140,35 @@ services:
       - codesearch
     restart: unless-stopped
 
+  neo4j:
+    image: neo4j:5.28
+    container_name: codesearch-neo4j
+    ports:
+      - "127.0.0.1:7474:7474"  # HTTP (browser)
+      - "127.0.0.1:7687:7687"  # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/codesearch
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=1G
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      # Enable APOC procedures for advanced graph algorithms
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    healthcheck:
+      test: ["CMD-SHELL", "wget -O /dev/null -q http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codesearch
+    restart: unless-stopped
+
 networks:
   codesearch:
     name: codesearch-network
@@ -149,4 +178,8 @@ volumes:
   postgres_data:
     driver: local
   qdrant_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
     driver: local

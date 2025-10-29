@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod collection_manager;
+pub mod neo4j;
 mod postgres;
 mod qdrant;
 
@@ -403,4 +404,10 @@ pub async fn create_postgres_client_from_config(
         pool,
         config.max_entities_per_db_operation,
     )) as Arc<dyn postgres::PostgresClientTrait>)
+}
+
+/// Create Neo4j client from configuration
+pub async fn create_neo4j_client(config: &StorageConfig) -> Result<Arc<neo4j::Neo4jClient>> {
+    let client = neo4j::Neo4jClient::new(config).await?;
+    Ok(Arc::new(client))
 }

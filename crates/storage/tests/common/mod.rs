@@ -77,6 +77,11 @@ pub fn create_storage_config(
         postgres_database: postgres_database.to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
     }
 }

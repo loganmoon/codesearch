@@ -202,6 +202,26 @@ pub struct StorageConfig {
     /// Maximum entities allowed in a single Postgres batch operation (safety limit)
     #[serde(default = "default_max_entities_per_db_operation")]
     pub max_entities_per_db_operation: usize,
+
+    /// Neo4j host address
+    #[serde(default = "default_neo4j_host")]
+    pub neo4j_host: String,
+
+    /// Neo4j HTTP port (web interface)
+    #[serde(default = "default_neo4j_http_port")]
+    pub neo4j_http_port: u16,
+
+    /// Neo4j Bolt port (driver connection)
+    #[serde(default = "default_neo4j_bolt_port")]
+    pub neo4j_bolt_port: u16,
+
+    /// Neo4j username
+    #[serde(default = "default_neo4j_user")]
+    pub neo4j_user: String,
+
+    /// Neo4j password
+    #[serde(default = "default_neo4j_password")]
+    pub neo4j_password: String,
 }
 
 impl std::fmt::Debug for StorageConfig {
@@ -221,6 +241,11 @@ impl std::fmt::Debug for StorageConfig {
                 "max_entities_per_db_operation",
                 &self.max_entities_per_db_operation,
             )
+            .field("neo4j_host", &self.neo4j_host)
+            .field("neo4j_http_port", &self.neo4j_http_port)
+            .field("neo4j_bolt_port", &self.neo4j_bolt_port)
+            .field("neo4j_user", &self.neo4j_user)
+            .field("neo4j_password", &"***REDACTED***")
             .finish()
     }
 }
@@ -406,6 +431,26 @@ fn default_postgres_user() -> String {
 
 fn default_postgres_password() -> String {
     DEFAULT_POSTGRES_PASSWORD.to_string()
+}
+
+fn default_neo4j_host() -> String {
+    "localhost".to_string()
+}
+
+fn default_neo4j_http_port() -> u16 {
+    7474
+}
+
+fn default_neo4j_bolt_port() -> u16 {
+    7687
+}
+
+fn default_neo4j_user() -> String {
+    "neo4j".to_string()
+}
+
+fn default_neo4j_password() -> String {
+    "codesearch".to_string()
 }
 
 fn default_entities_per_embedding_batch() -> usize {
@@ -797,6 +842,25 @@ impl Config {
                 .map_err(|e| Error::config(format!("Failed to set POSTGRES_PASSWORD: {e}")))?;
         }
 
+        // Neo4j configuration
+        if let Ok(host) = std::env::var("NEO4J_HOST") {
+            builder = builder
+                .set_override("storage.neo4j_host", host)
+                .map_err(|e| Error::config(format!("Failed to set NEO4J_HOST: {e}")))?;
+        }
+        if let Ok(port) = std::env::var("NEO4J_BOLT_PORT") {
+            if let Ok(port_num) = port.parse::<u16>() {
+                builder = builder
+                    .set_override("storage.neo4j_bolt_port", port_num)
+                    .map_err(|e| Error::config(format!("Failed to set NEO4J_BOLT_PORT: {e}")))?;
+            }
+        }
+        if let Ok(password) = std::env::var("NEO4J_PASSWORD") {
+            builder = builder
+                .set_override("storage.neo4j_password", password)
+                .map_err(|e| Error::config(format!("Failed to set NEO4J_PASSWORD: {e}")))?;
+        }
+
         // Support indexer environment variables
         if let Ok(batch_size) = std::env::var("CODESEARCH_INDEXER__FILES_PER_DISCOVERY_BATCH") {
             if let Ok(size) = batch_size.parse::<i64>() {
@@ -954,6 +1018,11 @@ impl Config {
                 postgres_user: default_postgres_user(),
                 postgres_password: default_postgres_password(),
                 max_entities_per_db_operation: default_max_entities_per_db_operation(),
+                neo4j_host: default_neo4j_host(),
+                neo4j_http_port: default_neo4j_http_port(),
+                neo4j_bolt_port: default_neo4j_bolt_port(),
+                neo4j_user: default_neo4j_user(),
+                neo4j_password: default_neo4j_password(),
             },
             server: ServerConfig::default(),
             languages: LanguagesConfig::default(),

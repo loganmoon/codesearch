@@ -117,6 +117,11 @@ async fn test_generates_collection_name() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
     })
     .build();
@@ -160,6 +165,11 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
     })
     .build();
@@ -206,6 +216,11 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
         postgres_database: "codesearch".to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
     })
     .build();

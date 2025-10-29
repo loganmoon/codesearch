@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use codesearch_core::entities::CodeEntity;
+use codesearch_core::entities::{CodeEntity, EntityType};
 use codesearch_core::error::{Error, Result};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
@@ -1066,6 +1066,32 @@ impl PostgresClient {
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+
+                // Create Neo4j DELETE outbox entries
+                let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                    "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
+                );
+
+                neo4j_outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    let payload = serde_json::json!({
+                        "entity_id": entity_id,
+                    });
+                    b.push_bind(repository_id)
+                        .push_bind(entity_id)
+                        .push_bind(OutboxOperation::Delete.to_string())
+                        .push_bind("neo4j")
+                        .push_bind(payload)
+                        .push_bind(collection_name)
+                        .push("NOW()");
+                });
+
+                neo4j_outbox_query
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        Error::storage(format!("Failed to write Neo4j outbox entries: {e}"))
+                    })?;
             }
         }
 
@@ -1246,6 +1272,52 @@ impl PostgresClient {
             .fetch_all(&mut *tx)
             .await
             .map_err(|e| Error::storage(format!("Failed to bulk insert outbox entries: {e}")))?;
+
+        // Build bulk insert for Neo4j outbox entries
+        let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO entity_outbox (
+                repository_id, entity_id, operation, target_store, payload, collection_name
+            ) ",
+        );
+
+        neo4j_outbox_query.push_values(
+            &validated_entities,
+            |mut b,
+             (
+                entity,
+                _embedding_id,
+                op,
+                _point_id,
+                _target,
+                _git_commit,
+                _token_count,
+                _entity_json,
+                _file_path_str,
+            )| {
+                let neo4j_payload = self.build_neo4j_payload(entity).unwrap_or_else(|_| {
+                    serde_json::json!({
+                        "node": {},
+                        "labels": [],
+                        "relationships": []
+                    })
+                });
+
+                b.push_bind(repository_id)
+                    .push_bind(&entity.entity_id)
+                    .push_bind(op.to_string())
+                    .push_bind("neo4j")
+                    .push_bind(neo4j_payload)
+                    .push_bind(collection_name);
+            },
+        );
+
+        neo4j_outbox_query
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                Error::storage(format!("Failed to bulk insert Neo4j outbox entries: {e}"))
+            })?;
 
         tx.commit()
             .await
@@ -1748,6 +1820,97 @@ impl PostgresClient {
         tracing::info!("Cleared {} cache entries", rows_affected);
         Ok(rows_affected)
     }
+
+    /// Get Neo4j database name for a repository
+    pub async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT neo4j_database_name FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to get neo4j database name: {e}")))?;
+
+        Ok(row.and_then(|(name,)| name))
+    }
+
+    /// Set Neo4j database name for a repository
+    pub async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
+        sqlx::query("UPDATE repositories SET neo4j_database_name = $1 WHERE repository_id = $2")
+            .bind(db_name)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set neo4j database name: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Set graph_ready flag for repository
+    pub async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()> {
+        sqlx::query("UPDATE repositories SET graph_ready = $1 WHERE repository_id = $2")
+            .bind(ready)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set graph_ready: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Get graph_ready status
+    pub async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool> {
+        let row: (bool,) = sqlx::query_as(
+            "SELECT COALESCE(graph_ready, FALSE) FROM repositories WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get graph_ready status: {e}")))?;
+
+        Ok(row.0)
+    }
+
+    /// Build Neo4j payload from entity for outbox entry
+    fn build_neo4j_payload(&self, entity: &CodeEntity) -> Result<serde_json::Value> {
+        // Extract core properties
+        let properties = serde_json::json!({
+            "id": entity.entity_id,
+            "repository_id": entity.repository_id.to_string(),
+            "qualified_name": entity.qualified_name,
+            "name": entity.name,
+            "language": entity.language.to_string(),
+            "visibility": entity.visibility.to_string(),
+            "is_async": entity.metadata.is_async,
+            "is_generic": entity.metadata.is_generic,
+            "is_static": entity.metadata.is_static,
+            "is_abstract": entity.metadata.is_abstract,
+            "is_const": entity.metadata.is_const,
+        });
+
+        // Determine labels from entity type
+        let labels = match entity.entity_type {
+            EntityType::Function => vec!["Function"],
+            EntityType::Method => vec!["Method"],
+            EntityType::Class => vec!["Class"],
+            EntityType::Struct => vec!["Struct", "Class"],
+            EntityType::Interface => vec!["Interface"],
+            EntityType::Trait => vec!["Trait", "Interface"],
+            EntityType::Enum => vec!["Enum"],
+            EntityType::Module => vec!["Module"],
+            EntityType::Package => vec!["Package"],
+            EntityType::Constant => vec!["Constant"],
+            EntityType::Variable => vec!["Variable"],
+            EntityType::TypeAlias => vec!["TypeAlias"],
+            EntityType::Macro => vec!["Macro"],
+            EntityType::Impl => vec!["ImplBlock"],
+        };
+
+        Ok(serde_json::json!({
+            "node": properties,
+            "labels": labels,
+            "relationships": []
+        }))
+    }
 }
 
 // Trait implementation delegates to inherent methods for testability and flexibility
@@ -1781,6 +1944,14 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
         self.get_collection_name(repository_id).await
+    }
+
+    async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        self.get_neo4j_database_name(repository_id).await
+    }
+
+    async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
+        self.set_neo4j_database_name(repository_id, db_name).await
     }
 
     async fn get_repository_by_collection(

@@ -228,11 +228,13 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     // Spawn outbox processor as background task
     let postgres_client_clone = postgres_client.clone();
+    let storage_config = config.storage.clone();
     let outbox_config = config.outbox.clone();
     let outbox_handle = tokio::spawn(async move {
         if let Err(e) = codesearch_outbox_processor::start_outbox_processor(
             postgres_client_clone,
             &qdrant_config,
+            storage_config,
             &outbox_config,
             outbox_shutdown_rx,
         )

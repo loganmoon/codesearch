@@ -69,6 +69,7 @@ impl From<MockOutboxEntry> for OutboxEntry {
 struct MockData {
     repositories: HashMap<Uuid, (String, String, String)>, // (repository_id -> (path, name, collection))
     collection_to_repo: HashMap<String, Uuid>,             // collection_name -> repository_id
+    neo4j_databases: HashMap<Uuid, String>,                // repository_id -> neo4j_database_name
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
@@ -241,6 +242,18 @@ impl PostgresClientTrait for MockPostgresClient {
             .repositories
             .get(&repository_id)
             .map(|(_, _, collection_name)| collection_name.clone()))
+    }
+
+    async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let data = self.data.lock().unwrap();
+        Ok(data.neo4j_databases.get(&repository_id).cloned())
+    }
+
+    async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+        data.neo4j_databases
+            .insert(repository_id, db_name.to_string());
+        Ok(())
     }
 
     async fn get_repository_by_collection(

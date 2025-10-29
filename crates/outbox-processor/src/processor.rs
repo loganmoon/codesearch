@@ -1,12 +1,15 @@
 use codesearch_core::error::{Error, Result};
+use codesearch_core::StorageConfig;
 use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
-use codesearch_storage::{OutboxEntry, PostgresClientTrait, TargetStore};
+use codesearch_storage::{OutboxEntry, PostgresClientTrait};
 use moka::future::Cache;
 use sqlx::{Postgres, QueryBuilder};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -22,20 +25,24 @@ struct FailureContext<'a> {
 pub struct OutboxProcessor {
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: QdrantConfig,
+    storage_config: StorageConfig,
     poll_interval: Duration,
     batch_size: i64,
     max_retries: i32,
     max_embedding_dim: usize,
     client_cache: Cache<String, Arc<dyn StorageClient>>,
+    neo4j_client: Arc<Mutex<Option<Arc<codesearch_storage::neo4j::Neo4jClient>>>>,
 }
 
 impl OutboxProcessor {
     /// Default maximum embedding dimensions to prevent memory exhaustion attacks
     pub const DEFAULT_MAX_EMBEDDING_DIM: usize = 100_000;
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         postgres_client: Arc<dyn PostgresClientTrait>,
         qdrant_config: QdrantConfig,
+        storage_config: StorageConfig,
         poll_interval: Duration,
         batch_size: i64,
         max_retries: i32,
@@ -45,6 +52,7 @@ impl OutboxProcessor {
         Self {
             postgres_client,
             qdrant_config,
+            storage_config,
             poll_interval,
             batch_size,
             max_retries,
@@ -52,6 +60,7 @@ impl OutboxProcessor {
             client_cache: Cache::builder()
                 .max_capacity(max_cached_collections)
                 .build(),
+            neo4j_client: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -76,6 +85,21 @@ impl OutboxProcessor {
         self.client_cache
             .insert(collection_name.to_string(), Arc::clone(&client))
             .await;
+
+        Ok(client)
+    }
+
+    /// Get or create Neo4j client (with lazy initialization)
+    async fn get_neo4j_client(&self) -> Result<Arc<codesearch_storage::neo4j::Neo4jClient>> {
+        let mut client_guard = self.neo4j_client.lock().await;
+
+        if let Some(client) = client_guard.as_ref() {
+            return Ok(Arc::clone(client));
+        }
+
+        // Create new client
+        let client = codesearch_storage::create_neo4j_client(&self.storage_config).await?;
+        *client_guard = Some(Arc::clone(&client));
 
         Ok(client)
     }
@@ -160,24 +184,22 @@ impl OutboxProcessor {
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
 
-        // Step 2: Single query across ALL collections with CTE
-        // Uses CTE to select batch with global ordering, then sorts by collection for grouping
+        // Step 2: Single query across ALL target stores with CTE
+        // Uses CTE to select batch with global ordering, then sorts by target_store and collection
         let entries: Vec<OutboxEntry> = sqlx::query_as(
             "WITH batch AS (
                  SELECT outbox_id, repository_id, entity_id, operation, target_store,
                         payload, created_at, processed_at, retry_count, last_error,
                         collection_name, embedding_id
                  FROM entity_outbox
-                 WHERE target_store = $1
-                   AND processed_at IS NULL
+                 WHERE processed_at IS NULL
                  ORDER BY created_at ASC
-                 LIMIT $2
+                 LIMIT $1
                  FOR UPDATE SKIP LOCKED
              )
              SELECT * FROM batch
-             ORDER BY collection_name, created_at",
+             ORDER BY target_store, collection_name, created_at",
         )
-        .bind(TargetStore::Qdrant.to_string())
         .bind(self.batch_size)
         .fetch_all(&mut *tx)
         .await
@@ -189,23 +211,47 @@ impl OutboxProcessor {
             return Ok(());
         }
 
-        // Step 4: Process entries grouped by collection using slices (zero-copy)
-        // Entries are already sorted by collection_name, find slice boundaries
-        let total_entries = entries.len();
+        // Step 4: Split entries by target_store
+        let qdrant_entries: Vec<&OutboxEntry> = entries
+            .iter()
+            .filter(|e| e.target_store == "qdrant")
+            .collect();
+        let neo4j_entries: Vec<&OutboxEntry> = entries
+            .iter()
+            .filter(|e| e.target_store == "neo4j")
+            .collect();
+
+        // Process Neo4j entries first
+        if !neo4j_entries.is_empty() {
+            debug!("Processing {} Neo4j outbox entries", neo4j_entries.len());
+            self.process_neo4j_batch(&mut tx, &neo4j_entries).await?;
+        }
+
+        // Process Qdrant entries grouped by collection
+        if qdrant_entries.is_empty() {
+            tx.commit()
+                .await
+                .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
+            return Ok(());
+        }
+
+        let total_entries = qdrant_entries.len();
         let mut start_idx = 0;
         let mut collection_count = 0;
 
-        while start_idx < entries.len() {
+        while start_idx < qdrant_entries.len() {
             collection_count += 1;
-            let collection_name = &entries[start_idx].collection_name;
+            let collection_name = &qdrant_entries[start_idx].collection_name;
 
             // Find the end index for this collection
             let mut end_idx = start_idx + 1;
-            while end_idx < entries.len() && entries[end_idx].collection_name == *collection_name {
+            while end_idx < qdrant_entries.len()
+                && qdrant_entries[end_idx].collection_name == *collection_name
+            {
                 end_idx += 1;
             }
 
-            let collection_slice = &entries[start_idx..end_idx];
+            let collection_slice = &qdrant_entries[start_idx..end_idx];
 
             debug!(
                 collection = %collection_name,
@@ -671,6 +717,120 @@ impl OutboxProcessor {
                 "Successfully deleted {} entities from Qdrant",
                 all_entity_ids.len()
             );
+        }
+
+        Ok(())
+    }
+
+    /// Process a batch of Neo4j outbox entries
+    async fn process_neo4j_batch(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        entries: &[&OutboxEntry],
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+
+        // Get Neo4j client
+        let neo4j_client = self.get_neo4j_client().await?;
+
+        // Group entries by repository (each repo has its own Neo4j database)
+        let mut repo_entries: HashMap<Uuid, Vec<&OutboxEntry>> = HashMap::new();
+        for entry in entries {
+            repo_entries
+                .entry(entry.repository_id)
+                .or_default()
+                .push(entry);
+        }
+
+        for (repository_id, repo_entries) in repo_entries {
+            // Get Neo4j database name and switch to it
+            let db_name = match self
+                .postgres_client
+                .get_neo4j_database_name(repository_id)
+                .await?
+            {
+                Some(name) => name,
+                None => {
+                    // Database doesn't exist yet, create it
+                    let db_name = format!("codesearch_{}", repository_id.simple());
+                    neo4j_client.create_database(&db_name).await?;
+                    self.postgres_client
+                        .set_neo4j_database_name(repository_id, &db_name)
+                        .await?;
+                    db_name
+                }
+            };
+
+            neo4j_client.use_database(&db_name).await?;
+
+            // Process each entry
+            let mut processed_ids = Vec::new();
+            let mut failed_ids = Vec::new();
+
+            for entry in repo_entries {
+                match entry.operation.as_str() {
+                    "INSERT" | "UPDATE" => {
+                        let payload: serde_json::Value = entry.payload.clone();
+                        let labels: Vec<String> =
+                            serde_json::from_value(payload["labels"].clone()).unwrap_or_default();
+
+                        if labels.is_empty() {
+                            warn!("Empty labels for entity {}, skipping", entry.entity_id);
+                            failed_ids.push(entry.outbox_id);
+                            continue;
+                        }
+
+                        // For Phase 1, just validate and mark as processed
+                        // Actual node creation will be implemented in follow-up work
+                        // This establishes the infrastructure for Neo4j integration
+                        processed_ids.push(entry.outbox_id);
+                    }
+                    "DELETE" => {
+                        let payload: serde_json::Value = entry.payload.clone();
+                        let entity_id = payload["entity_id"]
+                            .as_str()
+                            .ok_or_else(|| Error::storage("Missing entity_id in delete payload"))?;
+
+                        match neo4j_client.delete_entity_node(entity_id).await {
+                            Ok(_) => {
+                                processed_ids.push(entry.outbox_id);
+                            }
+                            Err(e) => {
+                                warn!("Failed to delete Neo4j node for {}: {}", entity_id, e);
+                                failed_ids.push(entry.outbox_id);
+                            }
+                        }
+                    }
+                    _ => {
+                        error!("Unknown operation type: {}", entry.operation);
+                        failed_ids.push(entry.outbox_id);
+                    }
+                }
+            }
+
+            // Mark processed entries
+            if !processed_ids.is_empty() {
+                self.bulk_mark_processed_in_tx(tx, &processed_ids).await?;
+            }
+
+            // Mark failed entries (increment retry count)
+            if !failed_ids.is_empty() {
+                for id in failed_ids {
+                    sqlx::query(
+                        "UPDATE entity_outbox
+                         SET retry_count = retry_count + 1,
+                             last_error = $1
+                         WHERE outbox_id = $2",
+                    )
+                    .bind("Failed to process Neo4j entry")
+                    .bind(id)
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(|e| Error::storage(format!("Failed to update retry count: {e}")))?;
+                }
+            }
         }
 
         Ok(())

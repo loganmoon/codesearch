@@ -41,12 +41,14 @@ pub use processor::OutboxProcessor;
 pub async fn start_outbox_processor(
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: &QdrantConfig,
+    storage_config: codesearch_core::StorageConfig,
     config: &OutboxConfig,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     let processor = OutboxProcessor::new(
         postgres_client,
         qdrant_config.clone(),
+        storage_config,
         Duration::from_millis(config.poll_interval_ms),
         config.entries_per_poll,
         config.max_retries,

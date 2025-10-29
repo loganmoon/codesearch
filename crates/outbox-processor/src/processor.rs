@@ -825,13 +825,41 @@ impl OutboxProcessor {
                                         .unwrap_or_default();
 
                                 for rel in relationships {
-                                    let rel_type = rel["type"].as_str().unwrap_or("UNKNOWN");
+                                    // Extract required fields with proper error handling
+                                    let rel_type = match rel["type"].as_str() {
+                                        Some(t) => t,
+                                        None => {
+                                            warn!(
+                                                "Missing relationship type for entity {}, skipping relationship",
+                                                entry.entity_id
+                                            );
+                                            continue;
+                                        }
+                                    };
                                     let resolved = rel["resolved"].as_bool().unwrap_or(false);
 
                                     if resolved {
                                         // Resolved relationship: create edge immediately
-                                        let from_id = rel["from_id"].as_str().unwrap_or("");
-                                        let to_id = rel["to_id"].as_str().unwrap_or("");
+                                        let from_id = match rel["from_id"].as_str() {
+                                            Some(id) if !id.is_empty() => id,
+                                            _ => {
+                                                warn!(
+                                                    "Missing or empty from_id for {} relationship on entity {}, skipping",
+                                                    rel_type, entry.entity_id
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        let to_id = match rel["to_id"].as_str() {
+                                            Some(id) if !id.is_empty() => id,
+                                            _ => {
+                                                warn!(
+                                                    "Missing or empty to_id for {} relationship on entity {}, skipping",
+                                                    rel_type, entry.entity_id
+                                                );
+                                                continue;
+                                            }
+                                        };
 
                                         let edge_query = format!(
                                             "MATCH (from {{id: '{from_id}'}}), (to {{id: '{to_id}'}})
@@ -844,9 +872,26 @@ impl OutboxProcessor {
                                         }
                                     } else {
                                         // Unresolved relationship: store as node property for later resolution
-                                        let to_id = rel["to_id"].as_str().unwrap_or("");
-                                        let from_qname =
-                                            rel["from_qualified_name"].as_str().unwrap_or("");
+                                        let to_id = match rel["to_id"].as_str() {
+                                            Some(id) if !id.is_empty() => id,
+                                            _ => {
+                                                warn!(
+                                                    "Missing or empty to_id for unresolved {} relationship on entity {}, skipping",
+                                                    rel_type, entry.entity_id
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        let from_qname = match rel["from_qualified_name"].as_str() {
+                                            Some(qname) if !qname.is_empty() => qname,
+                                            _ => {
+                                                warn!(
+                                                    "Missing or empty from_qualified_name for unresolved {} relationship on entity {}, skipping",
+                                                    rel_type, entry.entity_id
+                                                );
+                                                continue;
+                                            }
+                                        };
 
                                         let prop_name = format!(
                                             "unresolved_{}_parent",

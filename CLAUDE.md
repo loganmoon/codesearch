@@ -89,7 +89,7 @@ codesearch index                          # Automatically rebuilds image if sour
 **Docker Infrastructure Management:**
 
 The codesearch CLI uses shared Docker infrastructure located at `~/.codesearch/infrastructure/`.
-All repositories connect to the same Postgres, Qdrant, and vLLM containers. The outbox processor runs embedded within the `codesearch serve` process.
+All repositories connect to the same Postgres, Qdrant, Neo4j, and vLLM containers. The outbox processor runs embedded within the `codesearch serve` process.
 
 Starting infrastructure (automatic on first `codesearch index`):
 ```bash
@@ -114,11 +114,12 @@ Troubleshooting:
 # View logs for a specific service
 docker logs codesearch-postgres
 docker logs codesearch-qdrant
+docker logs codesearch-neo4j
 docker logs codesearch-vllm-embeddings
 docker logs codesearch-vllm-reranker
 
 # Manually clean up stale containers (usually not needed, CLI auto-cleans)
-docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker
+docker rm -f codesearch-postgres codesearch-qdrant codesearch-neo4j codesearch-vllm-embeddings codesearch-vllm-reranker
 
 # Nuclear option: remove all stopped containers
 docker container prune -f
@@ -283,6 +284,116 @@ cargo test --workspace
 # E2E tests (requires Docker)
 cargo test --package codesearch-e2e-tests -- --ignored
 ```
+
+## Neo4j Graph Database
+
+Codesearch uses Neo4j to store and query code relationships, enabling graph-based queries like "find all callers of this function" or "show the inheritance hierarchy."
+
+### Overview
+
+Neo4j stores code entities as nodes and their relationships as edges in a graph database:
+- **Nodes**: Represent code entities (functions, classes, methods, etc.)
+- **Relationships**: Represent connections between entities (calls, inherits, implements, etc.)
+- **Database Per Repository**: Each repository gets its own Neo4j database for isolation
+
+### Supported Relationship Types
+
+The following relationship types are supported (enforced by Cypher injection protection):
+- `CONTAINS`: Parent-child containment (e.g., class contains method)
+- `IMPLEMENTS`: Implementation of trait/interface
+- `ASSOCIATES`: Association from impl block to type
+- `EXTENDS_INTERFACE`: Interface inheritance
+- `INHERITS_FROM`: Class inheritance
+- `USES`: Type usage in fields or parameters
+- `CALLS`: Function/method call
+- `IMPORTS`: Module imports
+
+### Configuration
+
+Configure Neo4j in your `~/.codesearch/config.toml`:
+
+```toml
+[storage]
+neo4j_host = "localhost"
+neo4j_bolt_port = 7687       # Bolt protocol port
+neo4j_http_port = 7474       # HTTP API port
+neo4j_user = "neo4j"
+neo4j_password = "codesearch"  # Local-only, no security concern
+```
+
+### Infrastructure Requirements
+
+Neo4j runs as a Docker container in the shared infrastructure at `~/.codesearch/infrastructure/`. The infrastructure is automatically started when you run `codesearch index`.
+
+To configure Neo4j in your `docker-compose.yml`:
+
+```yaml
+neo4j:
+  image: neo4j:latest
+  environment:
+    NEO4J_AUTH: neo4j/codesearch
+  ports:
+    - "7687:7687"  # Bolt
+    - "7474:7474"  # HTTP
+  volumes:
+    - neo4j_data:/data
+```
+
+### Architecture Details
+
+**Database Management:**
+- Repository database names: `codesearch_{repository_uuid}`
+- Database names stored in PostgreSQL for consistency
+- Automatic database creation on first index
+- Indexes created automatically for common queries
+
+**Relationship Resolution:**
+- Relationships resolved after entity indexing completes
+- Batch processing reduces network overhead
+- Supports both resolved (direct entity_id) and unresolved (qualified name lookup) relationships
+- Failed resolution logged but doesn't block indexing
+
+**Security:**
+- Cypher injection protection via allowlist validation
+- All user-provided relationship types validated against allowed list
+- Parameterized queries for all entity properties
+- No dynamic Cypher construction from user input
+
+### Testing
+
+Run Neo4j tests:
+```bash
+# Unit tests (no Neo4j required)
+cargo test --package codesearch-storage
+
+# Integration tests (requires Neo4j running)
+cargo test --package codesearch-storage --test neo4j_integration_test -- --ignored
+```
+
+### Troubleshooting
+
+**Common Issues:**
+```bash
+# Check if Neo4j is running
+docker ps | grep neo4j
+
+# View Neo4j logs
+docker logs codesearch-neo4j
+
+# Access Neo4j browser (for manual inspection)
+open http://localhost:7474
+
+# Check repository database status
+# Connect to Neo4j and run:
+SHOW DATABASES
+```
+
+**Performance:**
+- Uses UNWIND batching: N entities/relationships → M queries (one per type)
+- Example: 10,000 entities of 5 types = 5 queries instead of 10,000
+- Significantly reduces network round-trips compared to individual inserts
+- Relationship resolution happens after indexing, not during
+- BoltType system handles automatic conversion of Rust types to Neo4j parameters
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

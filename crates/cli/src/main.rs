@@ -536,25 +536,19 @@ async fn resolve_trait_implementations(
         .map(|i| (i.name.clone(), i.entity_id.clone()))
         .collect();
 
-    let mut implements_count = 0;
-    let mut associates_count = 0;
-    let mut extends_count = 0;
+    // Collect all relationships to create in batch
+    let mut relationships = Vec::new();
 
     // Resolve IMPLEMENTS and ASSOCIATES relationships from impl blocks
     for impl_entity in impls {
         // Resolve IMPLEMENTS relationship
         if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
             if let Some(trait_id) = trait_map.get(trait_name) {
-                neo4j
-                    .create_relationship(
-                        &impl_entity.entity_id,
-                        trait_id,
-                        "IMPLEMENTS",
-                        &HashMap::new(),
-                    )
-                    .await
-                    .context("Failed to create IMPLEMENTS relationship")?;
-                implements_count += 1;
+                relationships.push((
+                    impl_entity.entity_id.clone(),
+                    trait_id.clone(),
+                    "IMPLEMENTS".to_string(),
+                ));
             } else {
                 debug!("Trait '{trait_name}' not found in repository");
             }
@@ -566,16 +560,11 @@ async fn resolve_trait_implementations(
             let type_name = for_type.split('<').next().unwrap_or(for_type).trim();
 
             if let Some(type_id) = type_map.get(type_name) {
-                neo4j
-                    .create_relationship(
-                        &impl_entity.entity_id,
-                        type_id,
-                        "ASSOCIATES",
-                        &HashMap::new(),
-                    )
-                    .await
-                    .context("Failed to create ASSOCIATES relationship")?;
-                associates_count += 1;
+                relationships.push((
+                    impl_entity.entity_id.clone(),
+                    type_id.clone(),
+                    "ASSOCIATES".to_string(),
+                ));
             } else {
                 debug!("Type '{type_name}' not found in repository");
             }
@@ -588,22 +577,36 @@ async fn resolve_trait_implementations(
             // Parse comma-separated interface names: "Base, ICloneable"
             for interface_name in extends.split(',').map(|s| s.trim()) {
                 if let Some(parent_id) = interface_map.get(interface_name) {
-                    neo4j
-                        .create_relationship(
-                            &interface_entity.entity_id,
-                            parent_id,
-                            "EXTENDS_INTERFACE",
-                            &HashMap::new(),
-                        )
-                        .await
-                        .context("Failed to create EXTENDS_INTERFACE relationship")?;
-                    extends_count += 1;
+                    relationships.push((
+                        interface_entity.entity_id.clone(),
+                        parent_id.clone(),
+                        "EXTENDS_INTERFACE".to_string(),
+                    ));
                 } else {
                     debug!("Interface '{interface_name}' not found in repository");
                 }
             }
         }
     }
+
+    // Batch create all relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to batch create relationships")?;
+
+    let implements_count = relationships
+        .iter()
+        .filter(|(_, _, t)| t == "IMPLEMENTS")
+        .count();
+    let associates_count = relationships
+        .iter()
+        .filter(|(_, _, t)| t == "ASSOCIATES")
+        .count();
+    let extends_count = relationships
+        .iter()
+        .filter(|(_, _, t)| t == "EXTENDS_INTERFACE")
+        .count();
 
     info!(
         "Resolved {} IMPLEMENTS, {} ASSOCIATES, {} EXTENDS_INTERFACE relationships",
@@ -642,28 +645,33 @@ async fn resolve_class_inheritance(
         .map(|c| (c.name.clone(), c.entity_id.clone()))
         .collect();
 
-    let mut inherits_count = 0;
+    // Collect all relationships to create in batch
+    let mut relationships = Vec::new();
 
     for class in classes {
         if let Some(extends) = class.metadata.attributes.get("extends") {
             if let Some(parent_id) = class_map.get(extends) {
-                neo4j
-                    .create_relationship(
-                        &class.entity_id,
-                        parent_id,
-                        "INHERITS_FROM",
-                        &HashMap::new(),
-                    )
-                    .await
-                    .context("Failed to create INHERITS_FROM relationship")?;
-                inherits_count += 1;
+                relationships.push((
+                    class.entity_id.clone(),
+                    parent_id.clone(),
+                    "INHERITS_FROM".to_string(),
+                ));
             } else {
                 debug!("Parent class '{extends}' not found in repository");
             }
         }
     }
 
-    info!("Resolved {} INHERITS_FROM relationships", inherits_count);
+    // Batch create all relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to batch create INHERITS_FROM relationships")?;
+
+    info!(
+        "Resolved {} INHERITS_FROM relationships",
+        relationships.len()
+    );
 
     Ok(())
 }
@@ -781,7 +789,8 @@ async fn resolve_call_graph(
         callable_map.insert(callable.qualified_name.clone(), callable.entity_id.clone());
     }
 
-    let mut edge_count = 0;
+    // Collect all relationships to create in batch
+    let mut relationships = Vec::new();
 
     for caller in all_callables {
         if let Some(calls_json) = caller.metadata.attributes.get("calls") {
@@ -789,24 +798,24 @@ async fn resolve_call_graph(
                 for callee_name in calls {
                     // Try to resolve callee
                     if let Some(callee_id) = callable_map.get(&callee_name) {
-                        neo4j
-                            .create_relationship(
-                                &caller.entity_id,
-                                callee_id,
-                                "CALLS",
-                                &HashMap::new(),
-                            )
-                            .await
-                            .context("Failed to create CALLS relationship")?;
-
-                        edge_count += 1;
+                        relationships.push((
+                            caller.entity_id.clone(),
+                            callee_id.clone(),
+                            "CALLS".to_string(),
+                        ));
                     }
                 }
             }
         }
     }
 
-    info!("Created {} CALLS edges", edge_count);
+    // Batch create all relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to batch create CALLS relationships")?;
+
+    info!("Created {} CALLS edges", relationships.len());
 
     Ok(())
 }

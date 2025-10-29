@@ -6,6 +6,18 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 use uuid::Uuid;
 
+/// Allowed relationship types for Neo4j (prevents Cypher injection)
+const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
+    "CONTAINS",
+    "IMPLEMENTS",
+    "ASSOCIATES",
+    "EXTENDS_INTERFACE",
+    "INHERITS_FROM",
+    "USES",
+    "CALLS",
+    "IMPORTS",
+];
+
 /// Neo4j client for graph database operations
 pub struct Neo4jClient {
     graph: Arc<Graph>,
@@ -13,7 +25,24 @@ pub struct Neo4jClient {
 }
 
 impl Neo4jClient {
-    /// Connect to Neo4j server
+    /// Connect to Neo4j server with the provided configuration
+    ///
+    /// # Arguments
+    /// * `config` - Storage configuration containing Neo4j connection details
+    ///
+    /// # Returns
+    /// * `Result<Self>` - Connected Neo4j client or error
+    ///
+    /// # Example
+    /// ```no_run
+    /// use codesearch_storage::Neo4jClient;
+    /// use codesearch_core::StorageConfig;
+    ///
+    /// # async fn example(config: &StorageConfig) -> anyhow::Result<()> {
+    /// let client = Neo4jClient::new(config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn new(config: &StorageConfig) -> Result<Self> {
         let uri = format!("bolt://{}:{}", config.neo4j_host, config.neo4j_bolt_port);
 
@@ -78,7 +107,28 @@ impl Neo4jClient {
         &self.graph
     }
 
-    /// Create a single entity node
+    /// Create a single entity node in the current Neo4j database
+    ///
+    /// # Arguments
+    /// * `entity` - Code entity to create as a node
+    ///
+    /// # Returns
+    /// * `Result<i64>` - Internal Neo4j node ID or error
+    ///
+    /// # Errors
+    /// * Returns error if no database is selected (call `use_database()` first)
+    /// * Returns error if node creation fails
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use codesearch_storage::Neo4jClient;
+    /// # use codesearch_core::CodeEntity;
+    /// # async fn example(client: &Neo4jClient, entity: &CodeEntity) -> anyhow::Result<()> {
+    /// client.use_database("my_db").await?;
+    /// let node_id = client.create_entity_node(entity).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_entity_node(&self, entity: &CodeEntity) -> Result<i64> {
         let _db = self.get_current_database().await?;
 
@@ -123,16 +173,97 @@ impl Neo4jClient {
         }
     }
 
-    /// Batch create nodes
+    /// Batch create nodes using UNWIND for better performance
+    ///
+    /// Creates multiple nodes in a single query per entity type, significantly reducing
+    /// network overhead compared to individual inserts.
+    ///
+    /// # Performance
+    /// For N entities of M types: M queries instead of N queries
+    /// Example: 1,000 entities of 5 types = 5 queries instead of 1,000
     pub async fn batch_create_nodes(&self, entities: &[CodeEntity]) -> Result<Vec<i64>> {
-        let mut node_ids = Vec::new();
-
-        for entity in entities {
-            let node_id = self.create_entity_node(entity).await?;
-            node_ids.push(node_id);
+        if entities.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(node_ids)
+        let _db = self.get_current_database().await?;
+
+        // Group entities by type (needed for label assignment)
+        let mut entities_by_type: Vec<(EntityType, Vec<&CodeEntity>)> = Vec::new();
+        for entity in entities {
+            if let Some((_, group)) = entities_by_type
+                .iter_mut()
+                .find(|(t, _)| *t == entity.entity_type)
+            {
+                group.push(entity);
+            } else {
+                entities_by_type.push((entity.entity_type, vec![entity]));
+            }
+        }
+
+        let mut all_node_ids = Vec::new();
+
+        // Process each entity type group with a single UNWIND query
+        for (entity_type, group_entities) in entities_by_type {
+            let labels = self.get_entity_labels(&entity_type);
+            let label_str = labels.join(":");
+
+            // Build list of entity maps for UNWIND
+            let entity_maps: Vec<std::collections::HashMap<String, neo4rs::BoltType>> =
+                group_entities
+                    .iter()
+                    .map(|e| {
+                        let mut map = std::collections::HashMap::new();
+                        map.insert("id".to_string(), e.entity_id.clone().into());
+                        map.insert(
+                            "repository_id".to_string(),
+                            e.repository_id.to_string().into(),
+                        );
+                        map.insert(
+                            "qualified_name".to_string(),
+                            e.qualified_name.clone().into(),
+                        );
+                        map.insert("name".to_string(), e.name.clone().into());
+                        map.insert("language".to_string(), e.language.to_string().into());
+                        map.insert("visibility".to_string(), e.visibility.to_string().into());
+                        map.insert("is_async".to_string(), e.metadata.is_async.into());
+                        map.insert("is_generic".to_string(), e.metadata.is_generic.into());
+                        map.insert("is_static".to_string(), e.metadata.is_static.into());
+                        map.insert("is_abstract".to_string(), e.metadata.is_abstract.into());
+                        map.insert("is_const".to_string(), e.metadata.is_const.into());
+                        map
+                    })
+                    .collect();
+
+            // UNWIND query: processes entire list in single network call
+            let query_str = format!(
+                "UNWIND $entities AS entity
+                 MERGE (n:{label_str} {{id: entity.id}})
+                 SET n.repository_id = entity.repository_id,
+                     n.qualified_name = entity.qualified_name,
+                     n.name = entity.name,
+                     n.language = entity.language,
+                     n.visibility = entity.visibility,
+                     n.is_async = entity.is_async,
+                     n.is_generic = entity.is_generic,
+                     n.is_static = entity.is_static,
+                     n.is_abstract = entity.is_abstract,
+                     n.is_const = entity.is_const
+                 RETURN id(n) as node_id"
+            );
+
+            // Vec<HashMap<String, BoltType>> automatically converts to BoltType
+            let query = Query::new(query_str).param("entities", entity_maps);
+
+            let mut result = self.graph.execute(query).await?;
+
+            while let Some(row) = result.next().await? {
+                let node_id: i64 = row.get("node_id")?;
+                all_node_ids.push(node_id);
+            }
+        }
+
+        Ok(all_node_ids)
     }
 
     /// Delete a node by entity_id
@@ -194,6 +325,35 @@ impl Neo4jClient {
     }
 
     /// Ensure a repository database exists and return its name
+    ///
+    /// Creates a new Neo4j database for the repository if one doesn't exist, and
+    /// stores the database name in PostgreSQL for future lookups.
+    ///
+    /// # Arguments
+    /// * `repository_id` - UUID of the repository
+    /// * `postgres_client` - PostgreSQL client for storing database name mapping
+    ///
+    /// # Returns
+    /// * `Result<String>` - Database name (format: `codesearch_{uuid}`)
+    ///
+    /// # Database Naming
+    /// Database names follow the format `codesearch_{repository_uuid}` where uuid
+    /// is the simple (no hyphens) representation of the repository UUID.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use codesearch_storage::Neo4jClient;
+    /// # use uuid::Uuid;
+    /// # async fn example(
+    /// #     client: &Neo4jClient,
+    /// #     postgres: &dyn codesearch_storage::PostgresClientTrait
+    /// # ) -> anyhow::Result<()> {
+    /// let repo_id = Uuid::new_v4();
+    /// let db_name = client.ensure_repository_database(repo_id, postgres).await?;
+    /// client.use_database(&db_name).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn ensure_repository_database(
         &self,
         repository_id: Uuid,
@@ -377,7 +537,40 @@ impl Neo4jClient {
         Ok(true)
     }
 
-    /// Create a relationship between two entities
+    /// Create a relationship between two entities with Cypher injection protection
+    ///
+    /// # Arguments
+    /// * `from_entity_id` - Source entity ID
+    /// * `to_entity_id` - Target entity ID
+    /// * `relationship_type` - Type of relationship (must be in allowed list)
+    /// * `properties` - Optional properties to attach to the relationship
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    ///
+    /// # Errors
+    /// * Returns error if `relationship_type` is not in the allowed list (Cypher injection protection)
+    /// * Returns error if no database is selected
+    /// * Returns error if relationship creation fails
+    ///
+    /// # Allowed Relationship Types
+    /// * CONTAINS, IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE, INHERITS_FROM, USES, CALLS, IMPORTS
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use codesearch_storage::Neo4jClient;
+    /// # use std::collections::HashMap;
+    /// # async fn example(client: &Neo4jClient) -> anyhow::Result<()> {
+    /// client.use_database("my_db").await?;
+    /// client.create_relationship(
+    ///     "entity1",
+    ///     "entity2",
+    ///     "CALLS",
+    ///     &HashMap::new()
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn create_relationship(
         &self,
         from_entity_id: &str,
@@ -386,6 +579,13 @@ impl Neo4jClient {
         properties: &std::collections::HashMap<String, String>,
     ) -> Result<()> {
         let _db = self.get_current_database().await?;
+
+        // Validate relationship type to prevent Cypher injection
+        if !ALLOWED_RELATIONSHIP_TYPES.contains(&relationship_type) {
+            return Err(anyhow!(
+                "Invalid relationship type '{relationship_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
+            ));
+        }
 
         // Build the relationship creation query
         let mut query = format!(
@@ -413,6 +613,81 @@ impl Neo4jClient {
         }
 
         self.graph.run(q).await?;
+
+        Ok(())
+    }
+
+    /// Batch create relationships using UNWIND for better performance
+    ///
+    /// Creates multiple relationships in a single query per relationship type,
+    /// significantly reducing network overhead compared to individual inserts.
+    ///
+    /// # Arguments
+    /// * `relationships` - List of (from_id, to_id, rel_type) tuples
+    ///
+    /// # Performance
+    /// For N relationships of M types: M queries instead of N queries
+    /// Example: 10,000 relationships of 4 types = 4 queries instead of 10,000
+    ///
+    /// # Security
+    /// All relationship types are validated against the allowlist to prevent Cypher injection
+    pub async fn batch_create_relationships(
+        &self,
+        relationships: &[(String, String, String)], // (from_id, to_id, rel_type)
+    ) -> Result<()> {
+        if relationships.is_empty() {
+            return Ok(());
+        }
+
+        let _db = self.get_current_database().await?;
+
+        // Validate all relationship types first (fail fast)
+        for (_, _, rel_type) in relationships {
+            if !ALLOWED_RELATIONSHIP_TYPES.contains(&rel_type.as_str()) {
+                return Err(anyhow!(
+                    "Invalid relationship type '{rel_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
+                ));
+            }
+        }
+
+        // Group by relationship type
+        let mut rels_by_type: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+        for (from_id, to_id, rel_type) in relationships {
+            if let Some((_, group)) = rels_by_type
+                .iter_mut()
+                .find(|(t, _)| *t == rel_type.as_str())
+            {
+                group.push((from_id.as_str(), to_id.as_str()));
+            } else {
+                rels_by_type.push((rel_type.as_str(), vec![(from_id.as_str(), to_id.as_str())]));
+            }
+        }
+
+        // Process each relationship type group with a single UNWIND query
+        for (rel_type, pairs) in rels_by_type {
+            // Build list of relationship maps for UNWIND
+            let rel_maps: Vec<std::collections::HashMap<String, neo4rs::BoltType>> = pairs
+                .iter()
+                .map(|(from_id, to_id)| {
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("from_id".to_string(), (*from_id).into());
+                    map.insert("to_id".to_string(), (*to_id).into());
+                    map
+                })
+                .collect();
+
+            // UNWIND query: processes entire list in single network call
+            let query_str = format!(
+                "UNWIND $relationships AS rel
+                 MATCH (from {{id: rel.from_id}}), (to {{id: rel.to_id}})
+                 MERGE (from)-[:{rel_type}]->(to)"
+            );
+
+            // Vec<HashMap<String, BoltType>> automatically converts to BoltType
+            let query = Query::new(query_str).param("relationships", rel_maps);
+
+            self.graph.run(query).await?;
+        }
 
         Ok(())
     }

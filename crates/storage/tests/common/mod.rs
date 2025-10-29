@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Create a test CodeEntity with minimal required fields
+#[allow(dead_code)]
 pub fn create_test_entity(name: &str, entity_type: EntityType, repository_id: &str) -> CodeEntity {
     CodeEntityBuilder::default()
         .entity_id(format!("{}_{}", name, Uuid::new_v4()))

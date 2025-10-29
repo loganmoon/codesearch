@@ -1,5 +1,6 @@
 use codesearch_core::error::{Error, Result};
 use codesearch_core::StorageConfig;
+use codesearch_storage::neo4j::ALLOWED_RELATIONSHIP_TYPES;
 use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
 };
@@ -774,8 +775,20 @@ impl OutboxProcessor {
                 match entry.operation.as_str() {
                     "INSERT" | "UPDATE" => {
                         let payload: serde_json::Value = entry.payload.clone();
+
+                        // Parse labels with proper error handling (don't mask corruption)
                         let labels: Vec<String> =
-                            serde_json::from_value(payload["labels"].clone()).unwrap_or_default();
+                            match serde_json::from_value(payload["labels"].clone()) {
+                                Ok(l) => l,
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to parse labels for entity {}: {}",
+                                        entry.entity_id, e
+                                    );
+                                    failed_ids.push(entry.outbox_id);
+                                    continue;
+                                }
+                            };
 
                         if labels.is_empty() {
                             warn!("Empty labels for entity {}, skipping", entry.entity_id);
@@ -819,10 +832,19 @@ impl OutboxProcessor {
                                     );
                                 }
 
-                                // Process relationships
+                                // Process relationships with proper error handling (don't mask corruption)
                                 let relationships: Vec<serde_json::Value> =
-                                    serde_json::from_value(payload["relationships"].clone())
-                                        .unwrap_or_default();
+                                    match serde_json::from_value(payload["relationships"].clone()) {
+                                        Ok(rels) => rels,
+                                        Err(e) => {
+                                            warn!(
+                                                "Failed to parse relationships for entity {}: {}",
+                                                entry.entity_id, e
+                                            );
+                                            // Continue processing - missing relationships are not fatal
+                                            Vec::new()
+                                        }
+                                    };
 
                                 for rel in relationships {
                                     // Extract required fields with proper error handling
@@ -837,6 +859,15 @@ impl OutboxProcessor {
                                         }
                                     };
                                     let resolved = rel["resolved"].as_bool().unwrap_or(false);
+
+                                    // Validate relationship type against allowlist (prevents Cypher injection)
+                                    if !ALLOWED_RELATIONSHIP_TYPES.contains(&rel_type) {
+                                        warn!(
+                                            "Invalid relationship type '{}' for entity {}, skipping. Allowed types: {:?}",
+                                            rel_type, entry.entity_id, ALLOWED_RELATIONSHIP_TYPES
+                                        );
+                                        continue;
+                                    }
 
                                     if resolved {
                                         // Resolved relationship: create edge immediately
@@ -861,12 +892,15 @@ impl OutboxProcessor {
                                             }
                                         };
 
+                                        // Use parameterized query (relationship type is validated above)
                                         let edge_query = format!(
-                                            "MATCH (from {{id: '{from_id}'}}), (to {{id: '{to_id}'}})
+                                            "MATCH (from {{id: $from_id}}), (to {{id: $to_id}})
                                              MERGE (from)-[:{rel_type}]->(to)"
                                         );
 
-                                        let query = Neo4jQuery::new(edge_query);
+                                        let query = Neo4jQuery::new(edge_query)
+                                            .param("from_id", from_id)
+                                            .param("to_id", to_id);
                                         if let Err(e) = neo4j_client.graph().run(query).await {
                                             debug!("Failed to create {rel_type} edge: {e}");
                                         }
@@ -893,16 +927,20 @@ impl OutboxProcessor {
                                             }
                                         };
 
+                                        // Property name is safe because rel_type was validated above
                                         let prop_name = format!(
                                             "unresolved_{}_parent",
                                             rel_type.to_lowercase()
                                         );
+                                        // Use parameterized query for values
                                         let prop_query = format!(
-                                            "MATCH (n {{id: '{to_id}'}})
-                                             SET n.{prop_name} = '{from_qname}'"
+                                            "MATCH (n {{id: $to_id}})
+                                             SET n.{prop_name} = $from_qname"
                                         );
 
-                                        let query = Neo4jQuery::new(prop_query);
+                                        let query = Neo4jQuery::new(prop_query)
+                                            .param("to_id", to_id)
+                                            .param("from_qname", from_qname);
                                         if let Err(e) = neo4j_client.graph().run(query).await {
                                             debug!("Failed to store unresolved {rel_type}: {e}");
                                         }

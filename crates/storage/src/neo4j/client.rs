@@ -7,7 +7,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 /// Allowed relationship types for Neo4j (prevents Cypher injection)
-const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
+pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
     "CONTAINS",
     "IMPLEMENTS",
     "ASSOCIATES",

@@ -374,3 +374,204 @@ pub fn build_imports_relationship_json(entity: &CodeEntity) -> Vec<serde_json::V
 
     relationships
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codesearch_core::{
+        entities::{CodeEntityBuilder, EntityMetadata, SourceLocation},
+        Visibility,
+    };
+    use std::path::PathBuf;
+
+    fn create_test_entity(
+        id: &str,
+        name: &str,
+        qualified_name: &str,
+        entity_type: EntityType,
+        parent_scope: Option<String>,
+    ) -> CodeEntity {
+        let mut builder = CodeEntityBuilder::default();
+        builder
+            .entity_id(id.to_string())
+            .repository_id("test_repo".to_string())
+            .name(name.to_string())
+            .qualified_name(qualified_name.to_string())
+            .entity_type(entity_type)
+            .language(Language::Rust)
+            .file_path(PathBuf::from("test.rs"))
+            .location(SourceLocation {
+                start_line: 1,
+                start_column: 0,
+                end_line: 10,
+                end_column: 0,
+            })
+            .visibility(Visibility::Public)
+            .parent_scope(parent_scope);
+        builder.build().expect("Failed to build test entity")
+    }
+
+    #[test]
+    fn test_extract_contains_relationships_with_parent() {
+        let parent = create_test_entity(
+            "parent_id",
+            "Parent",
+            "test::Parent",
+            EntityType::Module,
+            None,
+        );
+        let child = create_test_entity(
+            "child_id",
+            "Child",
+            "test::Parent::Child",
+            EntityType::Function,
+            Some("test::Parent".to_string()),
+        );
+
+        let entities = vec![parent, child];
+        let relationships = extract_contains_relationships(&entities);
+
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0].rel_type, "CONTAINS");
+        assert_eq!(relationships[0].from_id, "parent_id");
+        assert_eq!(relationships[0].to_id, Some("child_id".to_string()));
+    }
+
+    #[test]
+    fn test_extract_contains_relationships_missing_parent() {
+        let child = create_test_entity(
+            "child_id",
+            "Child",
+            "test::Parent::Child",
+            EntityType::Function,
+            Some("test::Parent".to_string()),
+        );
+
+        let entities = vec![child];
+        let relationships = extract_contains_relationships(&entities);
+
+        // Parent not in batch, so no relationship created
+        assert_eq!(relationships.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_contains_relationships_no_parent() {
+        let entity = create_test_entity(
+            "entity_id",
+            "Entity",
+            "test::Entity",
+            EntityType::Function,
+            None,
+        );
+
+        let entities = vec![entity];
+        let relationships = extract_contains_relationships(&entities);
+
+        assert_eq!(relationships.len(), 0);
+    }
+
+    #[test]
+    fn test_build_contains_relationship_json_resolved() {
+        let parent = create_test_entity(
+            "parent_id",
+            "Parent",
+            "test::Parent",
+            EntityType::Module,
+            None,
+        );
+        let child = create_test_entity(
+            "child_id",
+            "Child",
+            "test::Parent::Child",
+            EntityType::Function,
+            Some("test::Parent".to_string()),
+        );
+
+        let relationships =
+            build_contains_relationship_json(&child, &[parent.clone(), child.clone()]);
+
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0]["type"], "CONTAINS");
+        assert_eq!(relationships[0]["from_id"], "parent_id");
+        assert_eq!(relationships[0]["to_id"], "child_id");
+        assert_eq!(relationships[0]["resolved"], true);
+    }
+
+    #[test]
+    fn test_build_contains_relationship_json_unresolved() {
+        let child = create_test_entity(
+            "child_id",
+            "Child",
+            "test::Parent::Child",
+            EntityType::Function,
+            Some("test::Parent".to_string()),
+        );
+
+        let relationships = build_contains_relationship_json(&child, &[child.clone()]);
+
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0]["type"], "CONTAINS");
+        assert_eq!(relationships[0]["from_qualified_name"], "test::Parent");
+        assert_eq!(relationships[0]["to_id"], "child_id");
+        assert_eq!(relationships[0]["resolved"], false);
+    }
+
+    #[test]
+    fn test_extract_implements_relationships() {
+        let mut metadata = EntityMetadata::default();
+        metadata
+            .attributes
+            .insert("implements_trait".to_string(), "MyTrait".to_string());
+
+        let impl_block = CodeEntityBuilder::default()
+            .entity_id("impl_id".to_string())
+            .repository_id("test_repo".to_string())
+            .name("impl MyTrait for MyStruct".to_string())
+            .qualified_name("impl_block".to_string())
+            .entity_type(EntityType::Impl)
+            .language(Language::Rust)
+            .file_path(PathBuf::from("test.rs"))
+            .location(SourceLocation {
+                start_line: 1,
+                start_column: 0,
+                end_line: 10,
+                end_column: 0,
+            })
+            .visibility(Visibility::Public)
+            .metadata(metadata)
+            .build()
+            .expect("Failed to build test entity");
+
+        let relationships = extract_implements_relationships(&impl_block);
+
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0].rel_type, "IMPLEMENTS");
+        assert_eq!(relationships[0].from_id, "impl_id");
+        assert_eq!(relationships[0].to_name, Some("MyTrait".to_string()));
+    }
+
+    #[test]
+    fn test_extract_implements_relationships_no_trait() {
+        let impl_block =
+            create_test_entity("impl_id", "impl", "impl_block", EntityType::Impl, None);
+
+        let relationships = extract_implements_relationships(&impl_block);
+
+        assert_eq!(relationships.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_implements_relationships_wrong_entity_type() {
+        let function = create_test_entity(
+            "func_id",
+            "my_function",
+            "test::my_function",
+            EntityType::Function,
+            None,
+        );
+
+        let relationships = extract_implements_relationships(&function);
+
+        assert_eq!(relationships.len(), 0);
+    }
+}

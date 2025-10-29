@@ -710,7 +710,8 @@ async fn resolve_type_usage(
         .map(|t| (t.name.clone(), t.entity_id.clone()))
         .collect();
 
-    let mut uses_count = 0;
+    // Collect all USES relationships for batch creation
+    let mut relationships = Vec::new();
 
     for struct_entity in structs {
         if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
@@ -718,27 +719,18 @@ async fn resolve_type_usage(
             if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
                 for field in fields {
                     if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
-                        if let Some(field_name) = field.get("name").and_then(|v| v.as_str()) {
+                        if field.get("name").and_then(|v| v.as_str()).is_some() {
                             // Strip generics: "Vec<String>" -> "Vec"
                             let type_name =
                                 field_type.split('<').next().unwrap_or(field_type).trim();
 
                             // Try to resolve type
                             if let Some(type_id) = type_map.get(type_name) {
-                                let mut props = HashMap::new();
-                                props.insert("context".to_string(), "field".to_string());
-                                props.insert("field_name".to_string(), field_name.to_string());
-
-                                neo4j
-                                    .create_relationship(
-                                        &struct_entity.entity_id,
-                                        type_id,
-                                        "USES",
-                                        &props,
-                                    )
-                                    .await
-                                    .context("Failed to create USES relationship")?;
-                                uses_count += 1;
+                                relationships.push((
+                                    struct_entity.entity_id.clone(),
+                                    type_id.clone(),
+                                    "USES".to_string(),
+                                ));
                             }
                         }
                     }
@@ -746,6 +738,14 @@ async fn resolve_type_usage(
             }
         }
     }
+
+    // Batch create all USES relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to batch create USES relationships")?;
+
+    let uses_count = relationships.len();
 
     info!("Resolved {} USES relationships", uses_count);
 
@@ -849,7 +849,8 @@ async fn resolve_imports(
         .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
         .collect();
 
-    let mut edge_count = 0;
+    // Collect all IMPORTS relationships for batch creation
+    let mut relationships = Vec::new();
 
     for module in modules {
         if let Some(imports_str) = module.metadata.attributes.get("imports") {
@@ -858,21 +859,23 @@ async fn resolve_imports(
 
                 // Resolve import path to module entity
                 if let Some(imported_id) = module_map.get(import_path) {
-                    let mut props = HashMap::new();
-                    props.insert("import_type".to_string(), "use".to_string());
-
-                    neo4j
-                        .create_relationship(&module.entity_id, imported_id, "IMPORTS", &props)
-                        .await
-                        .context("Failed to create IMPORTS relationship")?;
-
-                    edge_count += 1;
+                    relationships.push((
+                        module.entity_id.clone(),
+                        imported_id.clone(),
+                        "IMPORTS".to_string(),
+                    ));
                 }
             }
         }
     }
 
-    info!("Created {} IMPORTS edges", edge_count);
+    // Batch create all IMPORTS relationships
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to batch create IMPORTS relationships")?;
+
+    info!("Created {} IMPORTS edges", relationships.len());
 
     Ok(())
 }

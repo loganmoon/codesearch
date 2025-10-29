@@ -325,19 +325,49 @@ neo4j_password = "codesearch"  # Local-only, no security concern
 
 Neo4j runs as a Docker container in the shared infrastructure at `~/.codesearch/infrastructure/`. The infrastructure is automatically started when you run `codesearch index`.
 
-To configure Neo4j in your `docker-compose.yml`:
+To configure Neo4j in your `~/.codesearch/infrastructure/docker-compose.yml`:
 
 ```yaml
 neo4j:
-  image: neo4j:latest
-  environment:
-    NEO4J_AUTH: neo4j/codesearch
+  image: neo4j:5.28
+  container_name: codesearch-neo4j
   ports:
-    - "7687:7687"  # Bolt
-    - "7474:7474"  # HTTP
+    - "127.0.0.1:7687:7687"  # Bolt protocol - localhost only for security
+    - "127.0.0.1:7474:7474"  # HTTP browser - localhost only for security
   volumes:
     - neo4j_data:/data
+    - neo4j_logs:/logs
+  environment:
+    - NEO4J_AUTH=neo4j/codesearch
+    - NEO4J_PLUGINS=["apoc"]
+    - NEO4J_dbms_memory_heap_initial__size=512M
+    - NEO4J_dbms_memory_heap_max__size=2G
+    - NEO4J_dbms_memory_pagecache_size=512M
+  healthcheck:
+    test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+  networks:
+    - codesearch
+  restart: unless-stopped
+
+# Don't forget to add the volumes:
+volumes:
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
 ```
+
+**Configuration Notes:**
+- `container_name`: Required for CLI container detection
+- `127.0.0.1` binding: Prevents network exposure (local-only access)
+- Memory limits: Prevents Neo4j from consuming excessive resources
+- Healthcheck: Ensures service is ready before accepting connections
+- Logs volume: Aids troubleshooting
+- APOC plugins: Provides additional graph algorithms (optional)
 
 ### Architecture Details
 

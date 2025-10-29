@@ -370,6 +370,89 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         }
     }
 
+    // Resolve CONTAINS relationships in Neo4j
+    info!("Resolving graph relationships...");
+    let neo4j_client = codesearch_storage::create_neo4j_client(&config.storage)
+        .await
+        .context("Failed to create Neo4j client")?;
+
+    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
+        .await
+        .context("Failed to connect to Postgres")?;
+
+    resolve_contains_relationships(&postgres_client, &neo4j_client, repository_id)
+        .await
+        .context("Failed to resolve CONTAINS relationships")?;
+
+    // Mark graph as ready
+    postgres_client
+        .set_graph_ready(repository_id, true)
+        .await
+        .context("Failed to set graph_ready flag")?;
+
+    info!("Graph relationships resolved successfully");
+
+    Ok(())
+}
+
+/// Resolve CONTAINS relationships after indexing completes
+async fn resolve_contains_relationships(
+    postgres: &std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
+    neo4j: &codesearch_storage::Neo4jClient,
+    repository_id: Uuid,
+) -> Result<()> {
+    // Ensure Neo4j database context
+    let db_name = neo4j
+        .ensure_repository_database(repository_id, postgres.as_ref())
+        .await?;
+    neo4j.use_database(&db_name).await?;
+
+    // Find all nodes with unresolved parent
+    info!("Searching for unresolved CONTAINS relationships...");
+
+    let unresolved_nodes = neo4j
+        .find_unresolved_contains_nodes()
+        .await
+        .context("Failed to find unresolved nodes")?;
+
+    info!("Found {} unresolved nodes", unresolved_nodes.len());
+
+    if unresolved_nodes.is_empty() {
+        return Ok(());
+    }
+
+    // Resolve each node
+    let mut resolved_count = 0;
+    let mut failed_count = 0;
+
+    for (child_id, parent_qname) in unresolved_nodes {
+        match neo4j
+            .resolve_contains_relationship(&child_id, &parent_qname)
+            .await
+        {
+            Ok(true) => resolved_count += 1,
+            Ok(false) => {
+                warn!(
+                    "Parent '{}' not found for child '{}'",
+                    parent_qname, child_id
+                );
+                failed_count += 1;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to resolve parent '{}' for child '{}': {}",
+                    parent_qname, child_id, e
+                );
+                failed_count += 1;
+            }
+        }
+    }
+
+    info!(
+        "Resolved {} CONTAINS relationships ({} failed)",
+        resolved_count, failed_count
+    );
+
     Ok(())
 }
 

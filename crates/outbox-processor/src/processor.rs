@@ -5,6 +5,7 @@ use codesearch_storage::{
 };
 use codesearch_storage::{OutboxEntry, PostgresClientTrait};
 use moka::future::Cache;
+use neo4rs::Query as Neo4jQuery;
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -782,10 +783,94 @@ impl OutboxProcessor {
                             continue;
                         }
 
-                        // For Phase 1, just validate and mark as processed
-                        // Actual node creation will be implemented in follow-up work
-                        // This establishes the infrastructure for Neo4j integration
-                        processed_ids.push(entry.outbox_id);
+                        // Parse entity from payload
+                        let entity = match serde_json::from_value::<codesearch_core::CodeEntity>(
+                            entry.payload["entity"].clone(),
+                        ) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to parse entity from payload for {}: {}",
+                                    entry.entity_id, e
+                                );
+                                failed_ids.push(entry.outbox_id);
+                                continue;
+                            }
+                        };
+
+                        // Create/merge node in Neo4j
+                        match neo4j_client.create_entity_node(&entity).await {
+                            Ok(neo4j_node_id) => {
+                                // Store neo4j_node_id in PostgreSQL
+                                if let Err(e) = sqlx::query(
+                                    "UPDATE entity_metadata
+                                     SET neo4j_node_id = $1
+                                     WHERE repository_id = $2 AND entity_id = $3",
+                                )
+                                .bind(neo4j_node_id)
+                                .bind(entry.repository_id)
+                                .bind(&entry.entity_id)
+                                .execute(&mut **tx)
+                                .await
+                                {
+                                    warn!(
+                                        "Failed to update neo4j_node_id for {}: {}",
+                                        entry.entity_id, e
+                                    );
+                                }
+
+                                // Process relationships
+                                let relationships: Vec<serde_json::Value> =
+                                    serde_json::from_value(payload["relationships"].clone())
+                                        .unwrap_or_default();
+
+                                for rel in relationships {
+                                    let rel_type = rel["type"].as_str().unwrap_or("UNKNOWN");
+                                    let resolved = rel["resolved"].as_bool().unwrap_or(false);
+
+                                    if resolved {
+                                        // Resolved relationship: create edge immediately
+                                        let from_id = rel["from_id"].as_str().unwrap_or("");
+                                        let to_id = rel["to_id"].as_str().unwrap_or("");
+
+                                        let edge_query = format!(
+                                            "MATCH (from {{id: '{from_id}'}}), (to {{id: '{to_id}'}})
+                                             MERGE (from)-[:{rel_type}]->(to)"
+                                        );
+
+                                        let query = Neo4jQuery::new(edge_query);
+                                        if let Err(e) = neo4j_client.graph().run(query).await {
+                                            debug!("Failed to create {rel_type} edge: {e}");
+                                        }
+                                    } else {
+                                        // Unresolved relationship: store as node property for later resolution
+                                        let to_id = rel["to_id"].as_str().unwrap_or("");
+                                        let from_qname =
+                                            rel["from_qualified_name"].as_str().unwrap_or("");
+
+                                        let prop_name = format!(
+                                            "unresolved_{}_parent",
+                                            rel_type.to_lowercase()
+                                        );
+                                        let prop_query = format!(
+                                            "MATCH (n {{id: '{to_id}'}})
+                                             SET n.{prop_name} = '{from_qname}'"
+                                        );
+
+                                        let query = Neo4jQuery::new(prop_query);
+                                        if let Err(e) = neo4j_client.graph().run(query).await {
+                                            debug!("Failed to store unresolved {rel_type}: {e}");
+                                        }
+                                    }
+                                }
+
+                                processed_ids.push(entry.outbox_id);
+                            }
+                            Err(e) => {
+                                warn!("Failed to create Neo4j node for {}: {}", entry.entity_id, e);
+                                failed_ids.push(entry.outbox_id);
+                            }
+                        }
                     }
                     "DELETE" => {
                         let payload: serde_json::Value = entry.payload.clone();

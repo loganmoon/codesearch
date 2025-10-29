@@ -256,6 +256,16 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(())
     }
 
+    async fn set_graph_ready(&self, _repository_id: Uuid, _ready: bool) -> Result<()> {
+        // Mock - not implemented
+        Ok(())
+    }
+
+    async fn is_graph_ready(&self, _repository_id: Uuid) -> Result<bool> {
+        // Mock - always return true
+        Ok(true)
+    }
+
     async fn get_repository_by_collection(
         &self,
         collection_name: &str,

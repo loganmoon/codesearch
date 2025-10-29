@@ -1274,6 +1274,12 @@ impl PostgresClient {
             .map_err(|e| Error::storage(format!("Failed to bulk insert outbox entries: {e}")))?;
 
         // Build bulk insert for Neo4j outbox entries
+        // Extract just the entities for relationship resolution
+        let entities_in_batch: Vec<CodeEntity> = validated_entities
+            .iter()
+            .map(|(entity, ..)| (**entity).clone())
+            .collect();
+
         let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
                 repository_id, entity_id, operation, target_store, payload, collection_name
@@ -1294,13 +1300,15 @@ impl PostgresClient {
                 _entity_json,
                 _file_path_str,
             )| {
-                let neo4j_payload = self.build_neo4j_payload(entity).unwrap_or_else(|_| {
-                    serde_json::json!({
-                        "node": {},
-                        "labels": [],
-                        "relationships": []
-                    })
-                });
+                let neo4j_payload = self
+                    .build_neo4j_payload(entity, &entities_in_batch)
+                    .unwrap_or_else(|_| {
+                        serde_json::json!({
+                            "node": {},
+                            "labels": [],
+                            "relationships": []
+                        })
+                    });
 
                 b.push_bind(repository_id)
                     .push_bind(&entity.entity_id)
@@ -1871,7 +1879,11 @@ impl PostgresClient {
     }
 
     /// Build Neo4j payload from entity for outbox entry
-    fn build_neo4j_payload(&self, entity: &CodeEntity) -> Result<serde_json::Value> {
+    fn build_neo4j_payload(
+        &self,
+        entity: &CodeEntity,
+        entities_in_batch: &[CodeEntity],
+    ) -> Result<serde_json::Value> {
         // Extract core properties
         let properties = serde_json::json!({
             "id": entity.entity_id,
@@ -1905,10 +1917,15 @@ impl PostgresClient {
             EntityType::Impl => vec!["ImplBlock"],
         };
 
+        // Extract CONTAINS relationships
+        let relationships =
+            crate::neo4j::build_contains_relationship_json(entity, entities_in_batch);
+
         Ok(serde_json::json!({
+            "entity": entity,
             "node": properties,
             "labels": labels,
-            "relationships": []
+            "relationships": relationships
         }))
     }
 }
@@ -1952,6 +1969,14 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
         self.set_neo4j_database_name(repository_id, db_name).await
+    }
+
+    async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()> {
+        self.set_graph_ready(repository_id, ready).await
+    }
+
+    async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool> {
+        self.is_graph_ready(repository_id).await
     }
 
     async fn get_repository_by_collection(

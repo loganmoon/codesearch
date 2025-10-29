@@ -73,6 +73,11 @@ impl Neo4jClient {
             .ok_or_else(|| anyhow!("No database selected. Call use_database() first"))
     }
 
+    /// Get a reference to the underlying Graph for direct query execution
+    pub fn graph(&self) -> &Arc<Graph> {
+        &self.graph
+    }
+
     /// Create a single entity node
     pub async fn create_entity_node(&self, entity: &CodeEntity) -> Result<i64> {
         let _db = self.get_current_database().await?;
@@ -192,7 +197,7 @@ impl Neo4jClient {
     pub async fn ensure_repository_database(
         &self,
         repository_id: Uuid,
-        postgres_client: &crate::postgres::PostgresClient,
+        postgres_client: &dyn crate::postgres::PostgresClientTrait,
     ) -> Result<String> {
         // Check if database name exists in PostgreSQL
         let existing_name = postgres_client
@@ -262,6 +267,114 @@ impl Neo4jClient {
             .await
             .context(format!("Failed to run query: {query_str}"))?;
         Ok(())
+    }
+
+    /// Create a node from a custom query and return the internal node ID
+    pub async fn create_entity_node_from_query(&self, query: Query) -> Result<i64> {
+        let _db = self.get_current_database().await?;
+
+        let mut result = self.graph.execute(query).await?;
+
+        if let Some(row) = result.next().await? {
+            let node_id: i64 = row.get("id(n)")?;
+            Ok(node_id)
+        } else {
+            Err(anyhow!("Failed to get node ID after creation"))
+        }
+    }
+
+    /// Run a query with named parameters
+    pub async fn run_query_with_params(
+        &self,
+        query_str: &str,
+        params: &[(&str, String)],
+    ) -> Result<()> {
+        let _db = self.get_current_database().await?;
+
+        let mut query = Query::new(query_str.to_string());
+        for (key, value) in params {
+            query = query.param(*key, value.clone());
+        }
+
+        self.graph
+            .run(query)
+            .await
+            .context(format!("Failed to run query: {query_str}"))?;
+        Ok(())
+    }
+
+    /// Find all nodes with unresolved CONTAINS relationships
+    pub async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
+        let _db = self.get_current_database().await?;
+
+        let query = Query::new(
+            "MATCH (child)
+             WHERE child.unresolved_contains_parent IS NOT NULL
+             RETURN child.id AS child_id, child.unresolved_contains_parent AS parent_qname"
+                .to_string(),
+        );
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut nodes = Vec::new();
+        while let Some(row) = result.next().await? {
+            let child_id: String = row.get("child_id")?;
+            let parent_qname: String = row.get("parent_qname")?;
+            nodes.push((child_id, parent_qname));
+        }
+
+        Ok(nodes)
+    }
+
+    /// Resolve a CONTAINS relationship by creating the edge and removing the unresolved property
+    /// Returns Ok(true) if successful, Ok(false) if parent not found
+    pub async fn resolve_contains_relationship(
+        &self,
+        child_id: &str,
+        parent_qname: &str,
+    ) -> Result<bool> {
+        let _db = self.get_current_database().await?;
+
+        // Look up parent by qualified_name
+        let lookup_query = Query::new(
+            "MATCH (parent {qualified_name: $qname})
+             RETURN parent.id AS parent_id"
+                .to_string(),
+        )
+        .param("qname", parent_qname);
+
+        let mut lookup_result = self.graph.execute(lookup_query).await?;
+
+        let parent_id = if let Some(row) = lookup_result.next().await? {
+            let id: String = row.get("parent_id")?;
+            id
+        } else {
+            // Parent not found
+            return Ok(false);
+        };
+
+        // Create CONTAINS edge
+        let create_edge_query = Query::new(
+            "MATCH (parent {id: $parent_id}), (child {id: $child_id})
+             MERGE (parent)-[:CONTAINS]->(child)"
+                .to_string(),
+        )
+        .param("parent_id", parent_id)
+        .param("child_id", child_id);
+
+        self.graph.run(create_edge_query).await?;
+
+        // Remove unresolved property
+        let cleanup_query = Query::new(
+            "MATCH (child {id: $child_id})
+             REMOVE child.unresolved_contains_parent"
+                .to_string(),
+        )
+        .param("child_id", child_id);
+
+        self.graph.run(cleanup_query).await?;
+
+        Ok(true)
     }
 
     /// Get Neo4j labels for an entity type

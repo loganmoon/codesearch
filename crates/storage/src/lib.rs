@@ -37,6 +37,9 @@ pub use postgres::PostgresClient;
 // Re-export mock for testing
 pub use postgres::mock::MockPostgresClient;
 
+// Re-export Neo4j client
+pub use neo4j::Neo4jClient;
+
 pub use uuid::Uuid;
 
 /// Cache statistics for embedding cache

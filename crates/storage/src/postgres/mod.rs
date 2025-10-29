@@ -71,6 +71,12 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Set Neo4j database name for a repository
     async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()>;
 
+    /// Set graph_ready flag for repository
+    async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()>;
+
+    /// Check if graph is ready for repository
+    async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool>;
+
     /// Get repository information by collection name
     ///
     /// Looks up a repository by its Qdrant collection name and returns full metadata.

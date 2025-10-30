@@ -46,6 +46,11 @@ pub fn is_postgres_running() -> Result<bool> {
     is_container_running("codesearch-postgres")
 }
 
+/// Check if Neo4j container is running
+pub fn is_neo4j_running() -> Result<bool> {
+    is_container_running("codesearch-neo4j")
+}
+
 /// Check if a container exists (running or stopped)
 fn container_exists(container_name: &str) -> Result<bool> {
     let filter_arg = format!("name=^{container_name}$");
@@ -85,6 +90,7 @@ pub fn get_stopped_infrastructure_containers() -> Result<Vec<String>> {
         "codesearch-qdrant",
         "codesearch-vllm",
         "codesearch-vllm-reranker",
+        "codesearch-neo4j",
     ];
 
     let mut stopped = Vec::new();
@@ -198,6 +204,35 @@ pub async fn check_vllm_health(api_base_url: &str) -> bool {
             false
         }
     }
+}
+
+/// Check Neo4j health status
+pub async fn check_neo4j_health(config: &StorageConfig) -> bool {
+    let url = format!("http://{}:{}", config.neo4j_host, config.neo4j_http_port);
+    match reqwest::get(&url).await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Wait for Neo4j to become healthy
+pub async fn wait_for_neo4j(config: &StorageConfig, timeout: Duration) -> Result<()> {
+    info!("Waiting for Neo4j to become healthy...");
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if check_neo4j_health(config).await {
+            info!("Neo4j is healthy");
+            return Ok(());
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    Err(anyhow!(
+        "Neo4j failed to become healthy within {} seconds. \
+         Check logs with: docker logs codesearch-neo4j",
+        timeout.as_secs()
+    ))
 }
 
 /// Wait for Qdrant to become healthy

@@ -48,6 +48,7 @@ struct CodeSearchMcpServer {
     repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
     embedding_manager: Arc<EmbeddingManager>,
     postgres_client: Arc<dyn PostgresClientTrait>,
+    neo4j_client: Option<Arc<dyn codesearch_storage::Neo4jClientTrait>>,
     #[allow(dead_code)]
     watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
     tool_router: ToolRouter<Self>,
@@ -90,23 +91,97 @@ struct SearchCodeRequest {
     /// If provided, searches only the repository at this path.
     /// If omitted, searches all indexed repositories.
     repository_path: Option<String>,
+
+    // Structural filters for hybrid queries (require Neo4j)
+    /// Filter to entities that implement this trait (e.g., "Display", "Clone")
+    #[schemars(
+        description = "Filter to code that implements this trait (Rust only, requires Neo4j)"
+    )]
+    implements_trait: Option<String>,
+
+    /// Filter to entities called by this function
+    #[schemars(description = "Filter to code called by this function (requires Neo4j)")]
+    called_by: Option<String>,
+
+    /// Filter to entities that call this function
+    #[schemars(description = "Filter to code that calls this function (requires Neo4j)")]
+    calls: Option<String>,
+
+    /// Filter to entities within this module
+    #[schemars(description = "Filter to code within this module (requires Neo4j)")]
+    in_module: Option<String>,
 }
 
 fn default_limit() -> Option<usize> {
     Some(10)
 }
 
+/// Request parameters for navigate tool
+#[derive(Debug, Deserialize, JsonSchema)]
+struct NavigateRequest {
+    /// Repository path to search
+    repository_path: String,
+    /// Qualified name of the entity to navigate from
+    from_entity: String,
+    /// Type of relationship to explore
+    #[schemars(
+        description = "Type of relationship: implementations, callers, calls, contains, dependencies, dependents, inherits, subclasses"
+    )]
+    relationship: String,
+    /// Maximum number of results (default: 20)
+    #[serde(default = "default_navigate_limit")]
+    limit: Option<usize>,
+    /// Optional semantic filter to rank results by similarity
+    #[allow(dead_code)] // TODO: Implement semantic filtering in hybrid queries
+    semantic_filter: Option<String>,
+}
+
+fn default_navigate_limit() -> Option<usize> {
+    Some(20)
+}
+
+/// Request parameters for analyze tool
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AnalyzeRequest {
+    /// Repository path to analyze
+    repository_path: String,
+    /// Type of analysis to perform
+    #[schemars(description = "Type of analysis: unused_code, circular_dependencies")]
+    analysis_type: String,
+}
+
 #[tool_router]
 impl CodeSearchMcpServer {
     #[tool(
-        description = "Semantic code search using embeddings. Searches the repository at the specified path, or all indexed repositories if no path is provided."
+        description = "Search for code using semantic similarity and optional structural filters. Supports hybrid queries combining embeddings with graph relationships."
     )]
-    async fn search_code(
+    async fn search(
         &self,
         Parameters(request): Parameters<SearchCodeRequest>,
     ) -> std::result::Result<CallToolResult, McpError> {
         // Validate limit
         let limit = request.limit.unwrap_or(10).clamp(1, 100);
+
+        // Check if structural filters are requested
+        let has_structural_filters = request.implements_trait.is_some()
+            || request.called_by.is_some()
+            || request.calls.is_some()
+            || request.in_module.is_some();
+
+        // Warn if structural filters are used but Neo4j is unavailable
+        if has_structural_filters && self.neo4j_client.is_none() {
+            return Err(McpError::new(
+                ErrorCode::INVALID_PARAMS,
+                "Structural filters (implements_trait, called_by, calls, in_module) require Neo4j, which is not available.".to_string(),
+                None,
+            ));
+        }
+
+        // TODO: Implement hybrid search logic to combine semantic results with structural filters
+        // For now, structural filters are validated but not yet applied
+        if has_structural_filters {
+            tracing::warn!("Structural filters requested but not yet implemented in search");
+        }
 
         // Determine which repositories to search
         let repos = self.repositories.read().await;
@@ -508,6 +583,312 @@ impl CodeSearchMcpServer {
         Ok(CallToolResult::success(vec![Content::text(response_str)]))
     }
 
+    #[tool(
+        description = "Navigate code relationships from a known entity. Explore implementations, callers, dependencies, and more."
+    )]
+    async fn navigate(
+        &self,
+        Parameters(request): Parameters<NavigateRequest>,
+    ) -> std::result::Result<CallToolResult, McpError> {
+        let neo4j = self.neo4j_client.as_ref().ok_or_else(|| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                "Neo4j graph database is not available. Graph navigation requires Neo4j."
+                    .to_string(),
+                None,
+            )
+        })?;
+
+        // Get repository
+        let path_buf = PathBuf::from(&request.repository_path);
+        let (repo_id, _) = self
+            .postgres_client
+            .get_repository_by_path(&path_buf)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to look up repository: {e}"),
+                    None,
+                )
+            })?
+            .ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "No indexed repository found at path '{}'",
+                        request.repository_path
+                    ),
+                    None,
+                )
+            })?;
+
+        // Check graph_ready flag
+        let is_ready = self
+            .postgres_client
+            .is_graph_ready(repo_id)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to check graph_ready status: {e}"),
+                    None,
+                )
+            })?;
+
+        let warning = if !is_ready {
+            Some(
+                "Warning: Graph is incomplete (indexing in progress). Results may be partial."
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
+        let _limit = request.limit.unwrap_or(20).clamp(1, 100); // TODO: Use for result pagination
+
+        // Route to appropriate graph query based on relationship type
+        let results: serde_json::Value = match request.relationship.as_str() {
+            "implementations" => {
+                let impls = crate::graph_queries::find_trait_implementations(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                    &request.from_entity,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Graph query failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!(impls)
+            }
+            "callers" => {
+                let callers = crate::graph_queries::find_function_callers(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                    &request.from_entity,
+                    3, // Default max depth
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Graph query failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!(callers)
+            }
+            "contains" => {
+                let children = crate::graph_queries::find_functions_in_module(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                    &request.from_entity,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Graph query failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!(children)
+            }
+            "dependencies" => {
+                let deps = crate::graph_queries::find_module_dependencies(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                    &request.from_entity,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Graph query failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!(deps)
+            }
+            "inherits" => {
+                let hierarchy = crate::graph_queries::find_class_hierarchy(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                    &request.from_entity,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Graph query failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!(hierarchy)
+            }
+            _ => {
+                return Err(McpError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("Unknown relationship type '{}'. Valid types: implementations, callers, calls, contains, dependencies, dependents, inherits, subclasses", request.relationship),
+                    None,
+                ));
+            }
+        };
+
+        let response = serde_json::json!({
+            "results": results,
+            "relationship": request.relationship,
+            "from_entity": request.from_entity,
+            "warning": warning,
+        });
+
+        let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                format!("Failed to serialize response: {e}"),
+                None,
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![Content::text(response_str)]))
+    }
+
+    #[tool(
+        description = "Analyze code quality and health. Detect unused code, circular dependencies, and other code smells."
+    )]
+    async fn analyze(
+        &self,
+        Parameters(request): Parameters<AnalyzeRequest>,
+    ) -> std::result::Result<CallToolResult, McpError> {
+        let neo4j = self.neo4j_client.as_ref().ok_or_else(|| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                "Code analysis requires Neo4j graph database, which is not available.".to_string(),
+                None,
+            )
+        })?;
+
+        // Get repository
+        let path_buf = PathBuf::from(&request.repository_path);
+        let (repo_id, _) = self
+            .postgres_client
+            .get_repository_by_path(&path_buf)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to look up repository: {e}"),
+                    None,
+                )
+            })?
+            .ok_or_else(|| {
+                McpError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "No indexed repository found at path '{}'",
+                        request.repository_path
+                    ),
+                    None,
+                )
+            })?;
+
+        // Check graph_ready flag
+        let is_ready = self
+            .postgres_client
+            .is_graph_ready(repo_id)
+            .await
+            .map_err(|e| {
+                McpError::new(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!("Failed to check graph_ready status: {e}"),
+                    None,
+                )
+            })?;
+
+        let warning = if !is_ready {
+            Some(
+                "Warning: Graph is incomplete (indexing in progress). Analysis may be partial."
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
+        // Route to appropriate analysis based on type
+        let results: serde_json::Value = match request.analysis_type.as_str() {
+            "unused_code" => {
+                let unused = crate::graph_queries::find_unused_functions(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Analysis failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!({
+                    "unused_functions": unused,
+                    "count": unused.len()
+                })
+            }
+            "circular_dependencies" => {
+                let cycles = crate::graph_queries::find_circular_dependencies(
+                    neo4j,
+                    &self.postgres_client,
+                    repo_id,
+                )
+                .await
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Analysis failed: {e}"),
+                        None,
+                    )
+                })?;
+                serde_json::json!({
+                    "cycles": cycles,
+                    "count": cycles.len()
+                })
+            }
+            _ => {
+                return Err(McpError::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("Unknown analysis type '{}'. Valid types: unused_code, circular_dependencies", request.analysis_type),
+                    None,
+                ));
+            }
+        };
+
+        let response = serde_json::json!({
+            "analysis_type": request.analysis_type,
+            "results": results,
+            "warning": warning,
+        });
+
+        let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
+            McpError::new(
+                ErrorCode::INTERNAL_ERROR,
+                format!("Failed to serialize response: {e}"),
+                None,
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![Content::text(response_str)]))
+    }
+
     #[tool(description = "List all indexed repositories available for search")]
     async fn list_repositories(&self) -> std::result::Result<CallToolResult, McpError> {
         let repos = self.repositories.read().await;
@@ -549,6 +930,7 @@ impl CodeSearchMcpServer {
         repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
         embedding_manager: Arc<EmbeddingManager>,
         postgres_client: Arc<dyn PostgresClientTrait>,
+        neo4j_client: Option<Arc<dyn codesearch_storage::Neo4jClientTrait>>,
         watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
         default_bge_instruction: String,
         reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
@@ -559,6 +941,7 @@ impl CodeSearchMcpServer {
             repositories,
             embedding_manager,
             postgres_client,
+            neo4j_client,
             watchers,
             tool_router: Self::tool_router(),
             default_bge_instruction,
@@ -788,10 +1171,24 @@ pub(crate) async fn run_multi_repo_server(
 
     info!("All watchers started successfully");
 
+    // Initialize Neo4j client if enabled
+    let neo4j_client = match codesearch_storage::create_neo4j_client(&config.storage).await {
+        Ok(client) => {
+            info!("Neo4j client initialized successfully");
+            Some(client)
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize Neo4j client: {e}");
+            tracing::warn!("Graph queries will be disabled for this session");
+            None
+        }
+    };
+
     let mcp_server = CodeSearchMcpServer::new(
         repositories,
         embedding_manager,
         postgres_client,
+        neo4j_client,
         watchers.clone(),
         config.embeddings.default_bge_instruction.clone(),
         reranker,

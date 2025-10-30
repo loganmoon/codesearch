@@ -61,6 +61,11 @@ async fn create_qdrant_collection(
         postgres_database: db_name.to_string(),
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
     };
 
@@ -388,9 +393,28 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         port: qdrant.port(),
         rest_port: qdrant.rest_port(),
     };
+    let storage_config = codesearch_core::config::StorageConfig {
+        qdrant_host: "localhost".to_string(),
+        qdrant_port: qdrant.port(),
+        qdrant_rest_port: qdrant.rest_port(),
+        auto_start_deps: false,
+        docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: postgres.port(),
+        postgres_database: db_name.to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
+        max_entities_per_db_operation: 10000,
+    };
     let _processor = OutboxProcessor::new(
         Arc::clone(&postgres_client),
         qdrant_config,
+        storage_config,
         Duration::from_millis(100),
         10,
         3,

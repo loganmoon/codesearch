@@ -7,7 +7,10 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-// All modules are private
+// Public modules
+pub mod graph_queries;
+
+// Private modules
 mod mcp_server;
 mod storage_init;
 

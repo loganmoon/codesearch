@@ -66,10 +66,11 @@ fn get_lock_file_path() -> Result<PathBuf> {
 pub fn is_shared_infrastructure_running() -> Result<bool> {
     let postgres_running = docker::is_postgres_running()?;
     let qdrant_running = docker::is_qdrant_running()?;
+    let neo4j_running = docker::is_neo4j_running()?;
     let vllm_running = docker::is_vllm_running()?;
     let reranker_running = docker::is_vllm_reranker_running()?;
 
-    Ok(postgres_running && qdrant_running && vllm_running && reranker_running)
+    Ok(postgres_running && qdrant_running && neo4j_running && vllm_running && reranker_running)
 }
 
 /// Ensure shared infrastructure directory and compose file exist
@@ -148,6 +149,7 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         "qdrant",
         "vllm-embeddings",
         "vllm-reranker",
+        "neo4j",
     ]);
 
     let output = Command::new(cmd)
@@ -162,7 +164,7 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
         let help_msg = if stderr.contains("already in use") {
             "\n\nHint: Some containers may still be running. Try:\n  \
              docker ps -a --filter \"name=codesearch\"\n  \
-             docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker"
+             docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker codesearch-neo4j"
         } else if stderr.contains("Cannot connect to the Docker daemon") {
             "\n\nHint: Docker daemon is not running. Start Docker Desktop or run: sudo systemctl start docker"
         } else {
@@ -170,7 +172,8 @@ fn start_infrastructure(infra_dir: &Path) -> Result<()> {
              docker logs codesearch-postgres\n  \
              docker logs codesearch-qdrant\n  \
              docker logs codesearch-vllm-embeddings\n  \
-             docker logs codesearch-vllm-reranker"
+             docker logs codesearch-vllm-reranker\n  \
+             docker logs codesearch-neo4j"
         };
 
         return Err(anyhow!(
@@ -191,6 +194,9 @@ async fn wait_for_all_services(config: &StorageConfig) -> Result<()> {
 
     // Wait for Qdrant
     docker::wait_for_qdrant(config, Duration::from_secs(60)).await?;
+
+    // Wait for Neo4j
+    docker::wait_for_neo4j(config, Duration::from_secs(60)).await?;
 
     // Wait for vLLM embeddings
     let api_url = "http://localhost:8000/v1";

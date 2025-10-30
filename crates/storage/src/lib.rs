@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod collection_manager;
+mod neo4j;
 mod postgres;
 mod qdrant;
 
@@ -35,6 +36,9 @@ pub use postgres::PostgresClient;
 
 // Re-export mock for testing
 pub use postgres::mock::MockPostgresClient;
+
+// Re-export Neo4j trait and mock - only trait-based API is public
+pub use neo4j::{MockNeo4jClient, Neo4jClientTrait, ALLOWED_RELATIONSHIP_TYPES};
 
 pub use uuid::Uuid;
 
@@ -403,4 +407,10 @@ pub async fn create_postgres_client_from_config(
         pool,
         config.max_entities_per_db_operation,
     )) as Arc<dyn postgres::PostgresClientTrait>)
+}
+
+/// Create Neo4j client from configuration
+pub async fn create_neo4j_client(config: &StorageConfig) -> Result<Arc<dyn Neo4jClientTrait>> {
+    let client = neo4j::Neo4jClient::new(config).await?;
+    Ok(Arc::new(client) as Arc<dyn Neo4jClientTrait>)
 }

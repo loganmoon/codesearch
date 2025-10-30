@@ -8,7 +8,7 @@
 #![deny(clippy::expect_used)]
 
 use crate::rust::handlers::common::{
-    build_entity, extract_common_components, extract_function_modifiers,
+    build_entity, extract_common_components, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_from_node, find_capture_node, node_to_text,
     require_capture_node,
 };
@@ -74,6 +74,9 @@ pub fn handle_function(
     let return_type = find_capture_node(query_match, query, capture_names::RETURN)
         .and_then(|node| node_to_text(node, source).ok());
 
+    // Extract function calls from the function body
+    let calls = extract_function_calls(function_node, source);
+
     // Build metadata
     let mut metadata = EntityMetadata {
         is_async,
@@ -88,6 +91,13 @@ pub fn handle_function(
         metadata
             .attributes
             .insert("unsafe".to_string(), "true".to_string());
+    }
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
     }
 
     // Build signature

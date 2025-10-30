@@ -65,6 +65,38 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Get collection name by repository ID
     async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>>;
 
+    /// Get Neo4j database name by repository ID
+    async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>>;
+
+    /// Set Neo4j database name for a repository
+    async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()>;
+
+    /// Set graph_ready flag for repository
+    async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()>;
+
+    /// Check if graph is ready for repository
+    async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool>;
+
+    /// Set pending_relationship_resolution flag for repository
+    ///
+    /// This flag indicates that entities have been added to Neo4j but relationships
+    /// need to be resolved. The outbox processor sets this flag after creating entity
+    /// nodes and clears it after resolving relationships.
+    async fn set_pending_relationship_resolution(
+        &self,
+        repository_id: Uuid,
+        pending: bool,
+    ) -> Result<()>;
+
+    /// Check if repository has pending relationship resolution
+    async fn has_pending_relationship_resolution(&self, repository_id: Uuid) -> Result<bool>;
+
+    /// Get all repositories with pending relationship resolution
+    ///
+    /// Returns repository IDs that have the pending_relationship_resolution flag set.
+    /// Used by the outbox processor to find repositories that need resolution.
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>>;
+
     /// Get repository information by collection name
     ///
     /// Looks up a repository by its Qdrant collection name and returns full metadata.
@@ -317,6 +349,22 @@ pub trait PostgresClientTrait: Send + Sync {
     ///
     /// Maximum batch size is 1000 entity references.
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>>;
+
+    /// Get all entities of a specific type in a repository
+    ///
+    /// Returns all non-deleted entities matching the specified EntityType.
+    /// This is used during graph relationship resolution.
+    async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: codesearch_core::entities::EntityType,
+    ) -> Result<Vec<CodeEntity>>;
+
+    /// Get all type entities (structs, enums, classes, interfaces, type aliases) in a repository
+    ///
+    /// Returns all non-deleted entities that represent types.
+    /// This is used during USES relationship resolution.
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>>;
 
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///

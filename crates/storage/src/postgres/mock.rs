@@ -69,6 +69,7 @@ impl From<MockOutboxEntry> for OutboxEntry {
 struct MockData {
     repositories: HashMap<Uuid, (String, String, String)>, // (repository_id -> (path, name, collection))
     collection_to_repo: HashMap<String, Uuid>,             // collection_name -> repository_id
+    neo4j_databases: HashMap<Uuid, String>,                // repository_id -> neo4j_database_name
     entities: HashMap<(Uuid, String), EntityMetadata>,     // (repository_id, entity_id) -> metadata
     snapshots: HashMap<(Uuid, String), (Vec<String>, Option<String>)>, // (repo_id, file_path) -> (entity_ids, git_commit)
     outbox: Vec<MockOutboxEntry>,
@@ -241,6 +242,47 @@ impl PostgresClientTrait for MockPostgresClient {
             .repositories
             .get(&repository_id)
             .map(|(_, _, collection_name)| collection_name.clone()))
+    }
+
+    async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let data = self.data.lock().unwrap();
+        Ok(data.neo4j_databases.get(&repository_id).cloned())
+    }
+
+    async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+        data.neo4j_databases
+            .insert(repository_id, db_name.to_string());
+        Ok(())
+    }
+
+    async fn set_graph_ready(&self, _repository_id: Uuid, _ready: bool) -> Result<()> {
+        // Mock - not implemented
+        Ok(())
+    }
+
+    async fn is_graph_ready(&self, _repository_id: Uuid) -> Result<bool> {
+        // Mock - always return true
+        Ok(true)
+    }
+
+    async fn set_pending_relationship_resolution(
+        &self,
+        _repository_id: Uuid,
+        _pending: bool,
+    ) -> Result<()> {
+        // Mock - no-op
+        Ok(())
+    }
+
+    async fn has_pending_relationship_resolution(&self, _repository_id: Uuid) -> Result<bool> {
+        // Mock - always return false (no pending resolution)
+        Ok(false)
+    }
+
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>> {
+        // Mock - return empty list
+        Ok(Vec::new())
     }
 
     async fn get_repository_by_collection(
@@ -489,6 +531,57 @@ impl PostgresClientTrait for MockPostgresClient {
                     .get(&(*repo_id, entity_id.clone()))
                     .filter(|metadata| metadata.deleted_at.is_none())
                     .map(|metadata| metadata.entity.clone())
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
+    async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: codesearch_core::entities::EntityType,
+    ) -> Result<Vec<CodeEntity>> {
+        let data = self.data.lock().unwrap();
+
+        let entities: Vec<CodeEntity> = data
+            .entities
+            .iter()
+            .filter_map(|((repo_id, _entity_id), metadata)| {
+                if *repo_id == repository_id
+                    && metadata.deleted_at.is_none()
+                    && metadata.entity.entity_type == entity_type
+                {
+                    Some(metadata.entity.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        use codesearch_core::entities::EntityType;
+        let data = self.data.lock().unwrap();
+
+        let entities: Vec<CodeEntity> = data
+            .entities
+            .iter()
+            .filter_map(|((repo_id, _entity_id), metadata)| {
+                if *repo_id == repository_id && metadata.deleted_at.is_none() {
+                    match metadata.entity.entity_type {
+                        EntityType::Struct
+                        | EntityType::Enum
+                        | EntityType::Class
+                        | EntityType::Interface
+                        | EntityType::TypeAlias => Some(metadata.entity.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
             })
             .collect();
 

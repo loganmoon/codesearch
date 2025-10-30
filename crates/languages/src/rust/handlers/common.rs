@@ -13,6 +13,7 @@ use crate::rust::handlers::constants::{
 use codesearch_core::entities::Visibility;
 use codesearch_core::error::{Error, Result};
 use std::path::Path;
+use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryMatch};
 
 // Import shared utilities from common module
@@ -407,4 +408,44 @@ pub fn build_entity(
         .file_path(components.file_path)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
+}
+
+// ============================================================================
+// Function Call Extraction
+// ============================================================================
+
+/// Extract function calls from a function body using tree-sitter queries
+pub fn extract_function_calls(function_node: Node, source: &str) -> Vec<String> {
+    let query_source = r#"
+        (call_expression
+          function: (identifier) @callee)
+
+        (call_expression
+          function: (field_expression
+            field: (field_identifier) @method))
+
+        (call_expression
+          function: (scoped_identifier
+            name: (identifier) @scoped_callee))
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut calls = Vec::new();
+
+    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if let Ok(callee_name) = node_to_text(capture.node, source) {
+                calls.push(callee_name);
+            }
+        }
+    }
+
+    calls
 }

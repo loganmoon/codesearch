@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
+pub mod neo4j_relationship_resolver;
 pub mod processor;
 
 use codesearch_core::config::OutboxConfig;
@@ -13,6 +14,11 @@ use tokio::time::sleep;
 use tracing::{error, info};
 
 // Re-export for ease of use
+pub use neo4j_relationship_resolver::{
+    resolve_contains_relationships, resolve_relationships_generic, CallGraphResolver,
+    ImportsResolver, InheritanceResolver, RelationshipResolver, TraitImplResolver,
+    TypeUsageResolver,
+};
 pub use processor::OutboxProcessor;
 
 /// Public API for starting outbox processor
@@ -41,12 +47,14 @@ pub use processor::OutboxProcessor;
 pub async fn start_outbox_processor(
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: &QdrantConfig,
+    storage_config: codesearch_core::StorageConfig,
     config: &OutboxConfig,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     let processor = OutboxProcessor::new(
         postgres_client,
         qdrant_config.clone(),
+        storage_config,
         Duration::from_millis(config.poll_interval_ms),
         config.entries_per_poll,
         config.max_retries,

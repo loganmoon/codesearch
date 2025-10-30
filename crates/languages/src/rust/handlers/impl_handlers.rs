@@ -10,8 +10,9 @@
 
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handlers::common::{
-    extract_function_modifiers, extract_function_parameters, extract_generics_from_node,
-    extract_preceding_doc_comments, find_capture_node, node_to_text, require_capture_node,
+    extract_function_calls, extract_function_modifiers, extract_function_parameters,
+    extract_generics_from_node, extract_preceding_doc_comments, find_capture_node, node_to_text,
+    require_capture_node,
 };
 use crate::rust::handlers::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -502,6 +503,9 @@ fn extract_method(
     // Extract return type
     let return_type = extract_method_return_type(method_node, source);
 
+    // Extract function calls from the method body
+    let calls = extract_function_calls(method_node, source);
+
     // Build metadata
     let mut metadata = EntityMetadata {
         is_async,
@@ -515,6 +519,13 @@ fn extract_method(
         metadata
             .attributes
             .insert("unsafe".to_string(), "true".to_string());
+    }
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
     }
 
     // Build signature

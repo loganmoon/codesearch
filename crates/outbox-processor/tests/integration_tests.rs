@@ -69,10 +69,30 @@ async fn test_outbox_processor_basic_initialization() {
         rest_port: 6333,
     };
 
+    let storage_config = codesearch_core::config::StorageConfig {
+        qdrant_host: "localhost".to_string(),
+        qdrant_port: 6334,
+        qdrant_rest_port: 6333,
+        auto_start_deps: false,
+        docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "postgres".to_string(),
+        postgres_user: "postgres".to_string(),
+        postgres_password: "postgres".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
+        max_entities_per_db_operation: 1000,
+    };
+
     // Create processor
     let _processor = OutboxProcessor::new(
         postgres_client,
         qdrant_config,
+        storage_config,
         Duration::from_secs(1),
         10,
         3,
@@ -189,9 +209,29 @@ async fn test_client_cache_reuses_clients() {
         rest_port: 6333,
     };
 
+    let storage_config = codesearch_core::config::StorageConfig {
+        qdrant_host: "localhost".to_string(),
+        qdrant_port: 6334,
+        qdrant_rest_port: 6333,
+        auto_start_deps: false,
+        docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: 5432,
+        postgres_database: "postgres".to_string(),
+        postgres_user: "postgres".to_string(),
+        postgres_password: "postgres".to_string(),
+        neo4j_host: "localhost".to_string(),
+        neo4j_http_port: 7474,
+        neo4j_bolt_port: 7687,
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: "codesearch".to_string(),
+        max_entities_per_db_operation: 1000,
+    };
+
     let processor = OutboxProcessor::new(
         postgres_client,
         qdrant_config,
+        storage_config,
         Duration::from_secs(1),
         10,
         3,

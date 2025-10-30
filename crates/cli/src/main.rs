@@ -228,11 +228,13 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     // Spawn outbox processor as background task
     let postgres_client_clone = postgres_client.clone();
+    let storage_config = config.storage.clone();
     let outbox_config = config.outbox.clone();
     let outbox_handle = tokio::spawn(async move {
         if let Err(e) = codesearch_outbox_processor::start_outbox_processor(
             postgres_client_clone,
             &qdrant_config,
+            storage_config,
             &outbox_config,
             outbox_shutdown_rx,
         )
@@ -367,6 +369,12 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
             warn!("  ... and {} more errors", result.errors().len() - 5);
         }
     }
+
+    // Note: Relationship resolution now happens automatically in the outbox processor
+    // after entities are created in Neo4j. No manual resolution step required.
+    info!(
+        "Indexing completed. Relationships will be resolved automatically by the outbox processor."
+    );
 
     Ok(())
 }

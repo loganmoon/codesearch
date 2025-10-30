@@ -7,6 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1.0"
 codesearch-core = { path = "../core" }
 codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
@@ -21,6 +22,7 @@ uuid = { version = "1.11", features = ["v4", "serde"] }
 async-trait = "0.1"
 chrono = "0.4"
 moka = { version = "0.12", features = ["future"] }
+neo4rs = "0.8"
 
 [dev-dependencies]
 testcontainers = "0.23"

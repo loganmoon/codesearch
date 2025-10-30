@@ -89,7 +89,7 @@ codesearch index                          # Automatically rebuilds image if sour
 **Docker Infrastructure Management:**
 
 The codesearch CLI uses shared Docker infrastructure located at `~/.codesearch/infrastructure/`.
-All repositories connect to the same Postgres, Qdrant, and vLLM containers. The outbox processor runs embedded within the `codesearch serve` process.
+All repositories connect to the same Postgres, Qdrant, Neo4j, and vLLM containers. The outbox processor runs embedded within the `codesearch serve` process.
 
 Starting infrastructure (automatic on first `codesearch index`):
 ```bash
@@ -114,11 +114,12 @@ Troubleshooting:
 # View logs for a specific service
 docker logs codesearch-postgres
 docker logs codesearch-qdrant
+docker logs codesearch-neo4j
 docker logs codesearch-vllm-embeddings
 docker logs codesearch-vllm-reranker
 
 # Manually clean up stale containers (usually not needed, CLI auto-cleans)
-docker rm -f codesearch-postgres codesearch-qdrant codesearch-vllm-embeddings codesearch-vllm-reranker
+docker rm -f codesearch-postgres codesearch-qdrant codesearch-neo4j codesearch-vllm-embeddings codesearch-vllm-reranker
 
 # Nuclear option: remove all stopped containers
 docker container prune -f
@@ -283,6 +284,125 @@ cargo test --workspace
 # E2E tests (requires Docker)
 cargo test --package codesearch-e2e-tests -- --ignored
 ```
+
+## Neo4j Graph Database
+
+Codesearch uses Neo4j to store and query code relationships, enabling graph-based queries like "find all callers of this function" or "show the inheritance hierarchy."
+
+### Overview
+
+Neo4j stores code entities as nodes and their relationships as edges in a graph database:
+- **Nodes**: Represent code entities (functions, classes, methods, etc.)
+- **Relationships**: Represent connections between entities (calls, inherits, implements, etc.)
+- **Database Per Repository**: Each repository gets its own Neo4j database for isolation
+
+### Supported Relationship Types
+
+The following relationship types are supported (enforced by Cypher injection protection):
+- `CONTAINS`: Parent-child containment (e.g., class contains method)
+- `IMPLEMENTS`: Implementation of trait/interface
+- `ASSOCIATES`: Association from impl block to type
+- `EXTENDS_INTERFACE`: Interface inheritance
+- `INHERITS_FROM`: Class inheritance
+- `USES`: Type usage in fields or parameters
+- `CALLS`: Function/method call
+- `IMPORTS`: Module imports
+
+### Configuration
+
+Configure Neo4j in your `~/.codesearch/config.toml`:
+
+```toml
+[storage]
+neo4j_host = "localhost"
+neo4j_bolt_port = 7687       # Bolt protocol port
+neo4j_http_port = 7474       # HTTP API port
+neo4j_user = "neo4j"
+neo4j_password = "codesearch"  # Local-only, no security concern
+```
+
+### Infrastructure Requirements
+
+Neo4j is included in the shared infrastructure at `~/.codesearch/infrastructure/` and will be automatically started when you run `codesearch index` or `codesearch serve`. The infrastructure includes Neo4j 5.28 with the following configuration:
+
+- **Bolt protocol:** Port 7687 (localhost only)
+- **HTTP browser:** Port 7474 (localhost only)
+- **Authentication:** neo4j/codesearch (local-only, no security concern)
+- **Memory limits:** 512MB-2GB heap, 512MB page cache
+- **Volumes:** Persistent data and logs stored in `~/.codesearch/infrastructure/` volumes
+- **APOC procedures:** Enabled for advanced graph operations
+
+### Architecture Details
+
+**Database Management:**
+- Repository database names: `codesearch_{repository_uuid}`
+- Database names stored in PostgreSQL for consistency
+- Automatic database creation on first index
+- Indexes created automatically for common queries
+
+**Relationship Resolution:**
+- **Automatic Resolution**: Relationships are automatically resolved by the outbox processor after entities are created in Neo4j
+- **No Manual Step Required**: Unlike previous versions, `codesearch index` no longer requires a manual post-indexing resolution step
+- **Event-Based Triggering**: The processor sets a `pending_relationship_resolution` flag when entities are added, triggers resolution automatically
+- **Supports Both Types**: Handles resolved relationships (direct entity_id) and unresolved relationships (qualified name lookup)
+- **Batch Processing**: All resolvers run in batch mode to reduce network overhead
+- **Resolution Stages**:
+  1. Entities indexed → nodes created in Neo4j → flag set
+  2. Outbox processor detects flag → runs all relationship resolvers
+  3. Relationships created → flag cleared → `graph_ready` set to true
+- **Resolver Types**:
+  - `TraitImplResolver`: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE
+  - `InheritanceResolver`: INHERITS_FROM
+  - `TypeUsageResolver`: USES
+  - `CallGraphResolver`: CALLS
+  - `ImportsResolver`: IMPORTS
+  - Special CONTAINS resolver with optimized batch resolution
+- **Error Handling**: Failed resolutions are logged but don't block entity processing; will retry in next cycle
+- **Real-Time Updates**: Works with incremental file changes through the watcher
+
+**Security:**
+- Cypher injection protection via allowlist validation
+- All user-provided relationship types validated against allowed list
+- Parameterized queries for all entity properties
+- No dynamic Cypher construction from user input
+
+### Testing
+
+Run Neo4j tests:
+```bash
+# Unit tests (no Neo4j required)
+cargo test --package codesearch-storage
+
+# Integration tests (requires Neo4j running)
+cargo test --package codesearch-storage --test neo4j_integration_test -- --ignored
+```
+
+### Troubleshooting
+
+**Common Issues:**
+```bash
+# Check if Neo4j is running
+docker ps | grep neo4j
+
+# View Neo4j logs
+docker logs codesearch-neo4j
+
+# Access Neo4j browser (for manual inspection)
+open http://localhost:7474
+
+# Check repository database status
+# Connect to Neo4j and run:
+SHOW DATABASES
+```
+
+**Performance:**
+- Uses UNWIND batching: N entities/relationships → M queries (one per type)
+- Example: 10,000 entities of 5 types = 5 queries instead of 10,000
+- Significantly reduces network round-trips compared to individual inserts
+- Relationship resolution happens automatically in the background via outbox processor
+- Resolution runs outside transaction boundaries to avoid holding locks
+- BoltType system handles automatic conversion of Rust types to Neo4j parameters
+- Resolvers run in parallel with other outbox processing tasks
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

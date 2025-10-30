@@ -1,9 +1,42 @@
 use async_trait::async_trait;
-use codesearch_core::entities::CodeEntity;
+use codesearch_core::entities::{CodeEntity, EntityType};
 use codesearch_core::error::{Error, Result};
+use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
+
+// Import Neo4j relationship builders (internal to crate)
+use crate::neo4j::relationship_builder::{
+    build_calls_relationship_json, build_contains_relationship_json,
+    build_imports_relationship_json, build_inherits_from_relationship_json,
+    build_trait_relationship_json, build_uses_relationship_json,
+};
+
+/// Neo4j node properties for outbox payload
+#[derive(Debug, Clone, Serialize)]
+struct Neo4jNodeProperties {
+    id: String,
+    repository_id: String,
+    qualified_name: String,
+    name: String,
+    language: String,
+    visibility: String,
+    is_async: bool,
+    is_generic: bool,
+    is_static: bool,
+    is_abstract: bool,
+    is_const: bool,
+}
+
+/// Complete Neo4j outbox payload
+#[derive(Debug, Serialize)]
+struct Neo4jOutboxPayload<'a> {
+    entity: &'a CodeEntity,
+    node: Neo4jNodeProperties,
+    labels: Vec<&'static str>,
+    relationships: Vec<serde_json::Value>,
+}
 
 /// Maximum sparse embedding size to prevent memory exhaustion attacks
 const MAX_SPARSE_EMBEDDING_SIZE: usize = 100_000;
@@ -736,6 +769,57 @@ impl PostgresClient {
         Ok(result)
     }
 
+    /// Get all entities of a specific type in a repository
+    pub async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: EntityType,
+    ) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT entity_data
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND entity_type = $2
+               AND deleted_at IS NULL",
+        )
+        .bind(repository_id)
+        .bind(entity_type.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!("Failed to get entities by type {entity_type}: {e}"))
+        })?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .collect();
+
+        Ok(entities)
+    }
+
+    /// Get all type entities (structs, enums, classes, interfaces, type aliases) in a repository
+    pub async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT entity_data
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND entity_type IN ('struct', 'enum', 'class', 'interface', 'type_alias')
+               AND deleted_at IS NULL",
+        )
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get type entities: {e}")))?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .collect();
+
+        Ok(entities)
+    }
+
     /// Get file snapshot (list of entity IDs in file)
     pub async fn get_file_snapshot(
         &self,
@@ -1066,6 +1150,32 @@ impl PostgresClient {
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| Error::storage(format!("Failed to write outbox entries: {e}")))?;
+
+                // Create Neo4j DELETE outbox entries
+                let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+                    "INSERT INTO entity_outbox (repository_id, entity_id, operation, target_store, payload, collection_name, created_at) "
+                );
+
+                neo4j_outbox_query.push_values(&existing_entity_ids, |mut b, entity_id| {
+                    let payload = serde_json::json!({
+                        "entity_id": entity_id,
+                    });
+                    b.push_bind(repository_id)
+                        .push_bind(entity_id)
+                        .push_bind(OutboxOperation::Delete.to_string())
+                        .push_bind(TargetStore::Neo4j.to_string())
+                        .push_bind(payload)
+                        .push_bind(collection_name)
+                        .push("NOW()");
+                });
+
+                neo4j_outbox_query
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        Error::storage(format!("Failed to write Neo4j outbox entries: {e}"))
+                    })?;
             }
         }
 
@@ -1246,6 +1356,66 @@ impl PostgresClient {
             .fetch_all(&mut *tx)
             .await
             .map_err(|e| Error::storage(format!("Failed to bulk insert outbox entries: {e}")))?;
+
+        // Build bulk insert for Neo4j outbox entries
+        // Extract just the entities for relationship resolution
+        let entities_in_batch: Vec<CodeEntity> = validated_entities
+            .iter()
+            .map(|(entity, ..)| (**entity).clone())
+            .collect();
+
+        // Build qualified_name -> entity_id map for O(1) relationship resolution
+        let name_to_id: std::collections::HashMap<&str, &str> = entities_in_batch
+            .iter()
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .collect();
+
+        let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO entity_outbox (
+                repository_id, entity_id, operation, target_store, payload, collection_name
+            ) ",
+        );
+
+        neo4j_outbox_query.push_values(
+            &validated_entities,
+            |mut b,
+             (
+                entity,
+                _embedding_id,
+                op,
+                _point_id,
+                _target,
+                _git_commit,
+                _token_count,
+                _entity_json,
+                _file_path_str,
+            )| {
+                let neo4j_payload = self
+                    .build_neo4j_payload(entity, &name_to_id)
+                    .unwrap_or_else(|_| {
+                        serde_json::json!({
+                            "node": {},
+                            "labels": [],
+                            "relationships": []
+                        })
+                    });
+
+                b.push_bind(repository_id)
+                    .push_bind(&entity.entity_id)
+                    .push_bind(op.to_string())
+                    .push_bind(TargetStore::Neo4j.to_string())
+                    .push_bind(neo4j_payload)
+                    .push_bind(collection_name);
+            },
+        );
+
+        neo4j_outbox_query
+            .build()
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                Error::storage(format!("Failed to bulk insert Neo4j outbox entries: {e}"))
+            })?;
 
         tx.commit()
             .await
@@ -1748,6 +1918,76 @@ impl PostgresClient {
         tracing::info!("Cleared {} cache entries", rows_affected);
         Ok(rows_affected)
     }
+
+    /// Build Neo4j payload from entity for outbox entry
+    fn build_neo4j_payload(
+        &self,
+        entity: &CodeEntity,
+        name_to_id: &std::collections::HashMap<&str, &str>,
+    ) -> Result<serde_json::Value> {
+        // Extract core properties using proper struct
+        let properties = Neo4jNodeProperties {
+            id: entity.entity_id.clone(),
+            repository_id: entity.repository_id.to_string(),
+            qualified_name: entity.qualified_name.clone(),
+            name: entity.name.clone(),
+            language: entity.language.to_string(),
+            visibility: entity.visibility.to_string(),
+            is_async: entity.metadata.is_async,
+            is_generic: entity.metadata.is_generic,
+            is_static: entity.metadata.is_static,
+            is_abstract: entity.metadata.is_abstract,
+            is_const: entity.metadata.is_const,
+        };
+
+        // Determine labels from entity type
+        let labels = match entity.entity_type {
+            EntityType::Function => vec!["Function"],
+            EntityType::Method => vec!["Method"],
+            EntityType::Class => vec!["Class"],
+            EntityType::Struct => vec!["Struct", "Class"],
+            EntityType::Interface => vec!["Interface"],
+            EntityType::Trait => vec!["Trait", "Interface"],
+            EntityType::Enum => vec!["Enum"],
+            EntityType::Module => vec!["Module"],
+            EntityType::Package => vec!["Package"],
+            EntityType::Constant => vec!["Constant"],
+            EntityType::Variable => vec!["Variable"],
+            EntityType::TypeAlias => vec!["TypeAlias"],
+            EntityType::Macro => vec!["Macro"],
+            EntityType::Impl => vec!["ImplBlock"],
+        };
+
+        // Extract CONTAINS relationships using O(1) HashMap lookup
+        let mut relationships = build_contains_relationship_json(entity, name_to_id);
+
+        // Extract IMPLEMENTS and EXTENDS_INTERFACE relationships
+        relationships.extend(build_trait_relationship_json(entity));
+
+        // Extract INHERITS_FROM relationships
+        relationships.extend(build_inherits_from_relationship_json(entity));
+
+        // Extract USES relationships (field type dependencies)
+        relationships.extend(build_uses_relationship_json(entity));
+
+        // Extract CALLS relationships (function calls)
+        relationships.extend(build_calls_relationship_json(entity));
+
+        // Extract IMPORTS relationships (module imports)
+        relationships.extend(build_imports_relationship_json(entity));
+
+        // Build payload using proper struct
+        let payload = Neo4jOutboxPayload {
+            entity,
+            node: properties,
+            labels,
+            relationships,
+        };
+
+        // Serialize to JSON
+        serde_json::to_value(&payload)
+            .map_err(|e| Error::storage(format!("Failed to serialize Neo4j payload: {e}")))
+    }
 }
 
 // Trait implementation delegates to inherent methods for testability and flexibility
@@ -1781,6 +2021,108 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_collection_name(&self, repository_id: Uuid) -> Result<Option<String>> {
         self.get_collection_name(repository_id).await
+    }
+
+    async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT neo4j_database_name FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to get neo4j database name: {e}")))?;
+
+        Ok(row.and_then(|(name,)| name))
+    }
+
+    async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
+        sqlx::query("UPDATE repositories SET neo4j_database_name = $1 WHERE repository_id = $2")
+            .bind(db_name)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set neo4j database name: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()> {
+        sqlx::query("UPDATE repositories SET graph_ready = $1 WHERE repository_id = $2")
+            .bind(ready)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set graph_ready: {e}")))?;
+
+        Ok(())
+    }
+
+    async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool> {
+        let row: (bool,) = sqlx::query_as(
+            "SELECT COALESCE(graph_ready, FALSE) FROM repositories WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get graph_ready status: {e}")))?;
+
+        Ok(row.0)
+    }
+
+    async fn set_pending_relationship_resolution(
+        &self,
+        repository_id: Uuid,
+        pending: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE repositories SET pending_relationship_resolution = $1 WHERE repository_id = $2",
+        )
+        .bind(pending)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to set pending_relationship_resolution: {e}"
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    async fn has_pending_relationship_resolution(&self, repository_id: Uuid) -> Result<bool> {
+        let row: (bool,) = sqlx::query_as(
+            "SELECT COALESCE(pending_relationship_resolution, FALSE)
+             FROM repositories
+             WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to get pending_relationship_resolution status: {e}"
+            ))
+        })?;
+
+        Ok(row.0)
+    }
+
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT repository_id
+             FROM repositories
+             WHERE pending_relationship_resolution = TRUE
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to get repositories with pending resolution: {e}"
+            ))
+        })?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
     async fn get_repository_by_collection(
@@ -1903,6 +2245,18 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_entities_by_ids(&self, entity_refs: &[(Uuid, String)]) -> Result<Vec<CodeEntity>> {
         self.get_entities_by_ids(entity_refs).await
+    }
+
+    async fn get_entities_by_type(
+        &self,
+        repository_id: Uuid,
+        entity_type: EntityType,
+    ) -> Result<Vec<CodeEntity>> {
+        self.get_entities_by_type(repository_id, entity_type).await
+    }
+
+    async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        self.get_all_type_entities(repository_id).await
     }
 
     async fn mark_entities_deleted_with_outbox(

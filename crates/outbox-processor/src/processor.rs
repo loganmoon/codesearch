@@ -1,12 +1,11 @@
 use codesearch_core::error::{Error, Result};
 use codesearch_core::StorageConfig;
-use codesearch_storage::neo4j::ALLOWED_RELATIONSHIP_TYPES;
 use codesearch_storage::{
-    create_storage_client_from_config, EmbeddedEntity, QdrantConfig, StorageClient,
+    create_storage_client_from_config, EmbeddedEntity, Neo4jClientTrait, QdrantConfig,
+    StorageClient, ALLOWED_RELATIONSHIP_TYPES,
 };
 use codesearch_storage::{OutboxEntry, PostgresClientTrait};
 use moka::future::Cache;
-use neo4rs::Query as Neo4jQuery;
 use sqlx::{Postgres, QueryBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,7 +32,7 @@ pub struct OutboxProcessor {
     max_retries: i32,
     max_embedding_dim: usize,
     client_cache: Cache<String, Arc<dyn StorageClient>>,
-    neo4j_client: Arc<Mutex<Option<Arc<codesearch_storage::neo4j::Neo4jClient>>>>,
+    neo4j_client: Arc<Mutex<Option<Arc<dyn Neo4jClientTrait>>>>,
 }
 
 impl OutboxProcessor {
@@ -92,7 +91,7 @@ impl OutboxProcessor {
     }
 
     /// Get or create Neo4j client (with lazy initialization)
-    async fn get_neo4j_client(&self) -> Result<Arc<codesearch_storage::neo4j::Neo4jClient>> {
+    async fn get_neo4j_client(&self) -> Result<Arc<dyn Neo4jClientTrait>> {
         let mut client_guard = self.neo4j_client.lock().await;
 
         if let Some(client) = client_guard.as_ref() {
@@ -938,21 +937,13 @@ impl OutboxProcessor {
                                                 }
                                             };
 
-                                            // Property name is safe because rel_type was validated above
-                                            let prop_name = format!(
-                                                "unresolved_{}_parent",
-                                                rel_type.to_lowercase()
-                                            );
-                                            // Use parameterized query for values, backticks for property name safety
-                                            let prop_query = format!(
-                                                "MATCH (n {{id: $to_id}})
-                                             SET n.`{prop_name}` = $from_qname"
-                                            );
-
-                                            let query = Neo4jQuery::new(prop_query)
-                                                .param("to_id", to_id)
-                                                .param("from_qname", from_qname);
-                                            if let Err(e) = neo4j_client.graph().run(query).await {
+                                            // Use validated API method instead of graph() escape hatch
+                                            if let Err(e) = neo4j_client
+                                                .store_unresolved_relationship(
+                                                    to_id, rel_type, from_qname,
+                                                )
+                                                .await
+                                            {
                                                 debug!(
                                                     "Failed to store unresolved {rel_type}: {e}"
                                                 );
@@ -1118,7 +1109,7 @@ impl OutboxProcessor {
             for resolver in resolvers {
                 if let Err(e) = resolve_relationships_generic(
                     &self.postgres_client,
-                    &neo4j_client,
+                    neo4j_client.as_ref(),
                     repository_id,
                     resolver.as_ref(),
                 )
@@ -1135,9 +1126,12 @@ impl OutboxProcessor {
             }
 
             // Resolve CONTAINS relationships (special case with batch optimization)
-            if let Err(e) =
-                resolve_contains_relationships(&self.postgres_client, &neo4j_client, repository_id)
-                    .await
+            if let Err(e) = resolve_contains_relationships(
+                &self.postgres_client,
+                neo4j_client.as_ref(),
+                repository_id,
+            )
+            .await
             {
                 warn!(
                     "Failed to resolve CONTAINS relationships for repository {}: {}",

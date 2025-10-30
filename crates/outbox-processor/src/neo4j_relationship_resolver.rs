@@ -38,7 +38,7 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use codesearch_core::error::Result;
-use codesearch_storage::PostgresClientTrait;
+use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use tracing::info;
 use uuid::Uuid;
 
@@ -85,7 +85,7 @@ pub trait RelationshipResolver: Send + Sync {
 /// ```
 pub async fn resolve_relationships_generic(
     postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
+    neo4j: &dyn Neo4jClientTrait,
     repository_id: Uuid,
     resolver: &dyn RelationshipResolver,
 ) -> Result<()> {
@@ -138,7 +138,7 @@ pub async fn resolve_relationships_generic(
 /// ```
 pub async fn resolve_contains_relationships(
     postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-    neo4j: &codesearch_storage::Neo4jClient,
+    neo4j: &dyn Neo4jClientTrait,
     repository_id: Uuid,
 ) -> Result<()> {
     // Ensure Neo4j database context

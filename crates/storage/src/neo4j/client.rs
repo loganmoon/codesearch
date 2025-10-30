@@ -56,17 +56,6 @@ impl Neo4jClient {
     ///
     /// # Returns
     /// * `Result<Self>` - Connected Neo4j client or error
-    ///
-    /// # Example
-    /// ```no_run
-    /// use codesearch_storage::Neo4jClient;
-    /// use codesearch_core::StorageConfig;
-    ///
-    /// # async fn example(config: &StorageConfig) -> anyhow::Result<()> {
-    /// let client = Neo4jClient::new(config).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn new(config: &StorageConfig) -> Result<Self> {
         let uri = format!("bolt://{}:{}", config.neo4j_host, config.neo4j_bolt_port);
 
@@ -127,7 +116,10 @@ impl Neo4jClient {
     }
 
     /// Get a reference to the underlying Graph for direct query execution
-    pub fn graph(&self) -> &Arc<Graph> {
+    ///
+    /// Internal use only. External callers should use validated API methods.
+    #[allow(dead_code)]
+    pub(crate) fn graph(&self) -> &Arc<Graph> {
         &self.graph
     }
 
@@ -142,17 +134,6 @@ impl Neo4jClient {
     /// # Errors
     /// * Returns error if no database is selected (call `use_database()` first)
     /// * Returns error if node creation fails
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use codesearch_storage::Neo4jClient;
-    /// # use codesearch_core::CodeEntity;
-    /// # async fn example(client: &Neo4jClient, entity: &CodeEntity) -> anyhow::Result<()> {
-    /// client.use_database("my_db").await?;
-    /// let node_id = client.create_entity_node(entity).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn create_entity_node(&self, entity: &CodeEntity) -> Result<i64> {
         let _db = self.get_current_database().await?;
 
@@ -363,21 +344,6 @@ impl Neo4jClient {
     /// # Database Naming
     /// Database names follow the format `codesearch_{repository_uuid}` where uuid
     /// is the simple (no hyphens) representation of the repository UUID.
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use codesearch_storage::Neo4jClient;
-    /// # use uuid::Uuid;
-    /// # async fn example(
-    /// #     client: &Neo4jClient,
-    /// #     postgres: &dyn codesearch_storage::PostgresClientTrait
-    /// # ) -> anyhow::Result<()> {
-    /// let repo_id = Uuid::new_v4();
-    /// let db_name = client.ensure_repository_database(repo_id, postgres).await?;
-    /// client.use_database(&db_name).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn ensure_repository_database(
         &self,
         repository_id: Uuid,
@@ -584,22 +550,6 @@ impl Neo4jClient {
     ///
     /// # Allowed Relationship Types
     /// * CONTAINS, IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE, INHERITS_FROM, USES, CALLS, IMPORTS
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use codesearch_storage::Neo4jClient;
-    /// # use std::collections::HashMap;
-    /// # async fn example(client: &Neo4jClient) -> anyhow::Result<()> {
-    /// client.use_database("my_db").await?;
-    /// client.create_relationship(
-    ///     "entity1",
-    ///     "entity2",
-    ///     "CALLS",
-    ///     &HashMap::new()
-    /// ).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub async fn create_relationship(
         &self,
         from_entity_id: &str,
@@ -647,6 +597,60 @@ impl Neo4jClient {
         }
 
         self.graph.run(q).await?;
+
+        Ok(())
+    }
+
+    /// Store an unresolved relationship as a node property for later resolution
+    ///
+    /// When a relationship target doesn't exist yet, we store the relationship
+    /// information as a temporary node property. Later resolution processes will
+    /// query for these properties and create actual relationship edges.
+    ///
+    /// # Arguments
+    /// * `entity_id` - ID of the entity with unresolved relationship
+    /// * `relationship_type` - Type of relationship (must be in allowed list)
+    /// * `target_qualified_name` - Qualified name of the target entity
+    ///
+    /// # Property Naming
+    /// Property is stored as `unresolved_{rel_type}_parent` (lowercase)
+    ///
+    /// # Security
+    /// - Validates `relationship_type` against `ALLOWED_RELATIONSHIP_TYPES`
+    /// - Uses parameterized queries for all values
+    /// - Property name derived from validated constant (safe from injection)
+    pub async fn store_unresolved_relationship(
+        &self,
+        entity_id: &str,
+        relationship_type: &str,
+        target_qualified_name: &str,
+    ) -> Result<()> {
+        let _db = self.get_current_database().await?;
+
+        // Validate relationship type (Cypher injection protection)
+        if !ALLOWED_RELATIONSHIP_TYPES.contains(&relationship_type) {
+            return Err(anyhow!(
+                "Invalid relationship type '{relationship_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
+            ));
+        }
+
+        let property_name = format!("unresolved_{}_parent", relationship_type.to_lowercase());
+
+        // Use parameterized query for values, format string for property name
+        // (property name is derived from validated relationship_type constant)
+        let query_str = format!(
+            "MATCH (n {{id: $entity_id}})
+             SET n.`{property_name}` = $target_qname"
+        );
+
+        let query = Query::new(query_str)
+            .param("entity_id", entity_id)
+            .param("target_qname", target_qualified_name);
+
+        self.graph
+            .run(query)
+            .await
+            .context("Failed to store unresolved relationship")?;
 
         Ok(())
     }
@@ -744,5 +748,408 @@ impl Neo4jClient {
             EntityType::Macro => &["Macro"],
             EntityType::Impl => &["ImplBlock"],
         }
+    }
+
+    // ===== Graph Query Methods =====
+
+    /// Find all functions contained in a module
+    pub async fn find_functions_in_module(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        module_qualified_name: &str,
+    ) -> Result<Vec<String>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH (m:Module {qualified_name: $qname})-[:CONTAINS*]->(f:Function)
+             RETURN f.qualified_name AS name"
+                .to_string(),
+        )
+        .param("qname", module_qualified_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut names = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(name) = row.get::<String>("name") {
+                names.push(name);
+            }
+        }
+        Ok(names)
+    }
+
+    /// Find all implementations of a trait
+    pub async fn find_trait_implementations(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        trait_name: &str,
+    ) -> Result<Vec<String>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH (impl:ImplBlock)-[:IMPLEMENTS]->(trait:Interface {name: $trait_name})
+             MATCH (impl)-[:ASSOCIATES]->(type)
+             RETURN type.qualified_name AS name"
+                .to_string(),
+        )
+        .param("trait_name", trait_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut names = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(name) = row.get::<String>("name") {
+                names.push(name);
+            }
+        }
+        Ok(names)
+    }
+
+    /// Find class inheritance hierarchy
+    pub async fn find_class_hierarchy(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        class_name: &str,
+    ) -> Result<Vec<Vec<String>>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH path = (root:Class {name: $class_name})-[:INHERITS_FROM*]->(ancestor:Class)
+             RETURN [node in nodes(path) | node.name] AS hierarchy"
+                .to_string(),
+        )
+        .param("class_name", class_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut hierarchies = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(hierarchy) = row.get::<Vec<String>>("hierarchy") {
+                hierarchies.push(hierarchy);
+            }
+        }
+        Ok(hierarchies)
+    }
+
+    /// Find call graph (callers of a function)
+    pub async fn find_function_callers(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        function_qualified_name: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, usize)>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query_str = format!(
+            "MATCH (target {{qualified_name: $qname}})
+             MATCH path = (caller)-[:CALLS*1..{max_depth}]->(target)
+             RETURN DISTINCT caller.qualified_name AS name, length(path) AS depth
+             ORDER BY depth ASC"
+        );
+
+        let query = Query::new(query_str).param("qname", function_qualified_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut callers = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let (Ok(name), Ok(depth)) = (row.get::<String>("name"), row.get::<i64>("depth")) {
+                callers.push((name, depth as usize));
+            }
+        }
+        Ok(callers)
+    }
+
+    /// Find unused functions (no incoming calls, not public)
+    pub async fn find_unused_functions(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<String>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH (f:Function)
+             WHERE f.visibility = 'private'
+               AND NOT (:Function)-[:CALLS]->(f)
+               AND NOT (:Method)-[:CALLS]->(f)
+               AND NOT f.name IN ['main', 'test']
+               AND NOT f.name STARTS WITH 'test_'
+             RETURN f.qualified_name AS name"
+                .to_string(),
+        );
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut functions = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(name) = row.get::<String>("name") {
+                functions.push(name);
+            }
+        }
+        Ok(functions)
+    }
+
+    /// Find module dependencies (imports)
+    pub async fn find_module_dependencies(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        module_qualified_name: &str,
+    ) -> Result<Vec<String>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH (m:Module {qualified_name: $qname})-[:IMPORTS]->(imported:Module)
+             RETURN imported.qualified_name AS name"
+                .to_string(),
+        )
+        .param("qname", module_qualified_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut deps = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(name) = row.get::<String>("name") {
+                deps.push(name);
+            }
+        }
+        Ok(deps)
+    }
+
+    /// Find circular dependencies
+    pub async fn find_circular_dependencies(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<Vec<String>>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query = Query::new(
+            "MATCH path = (m1:Module)-[:IMPORTS*]->(m2:Module)-[:IMPORTS*]->(m1)
+             WHERE m1 <> m2
+             RETURN [node in nodes(path) | node.qualified_name] AS cycle,
+                    length(path) AS length
+             ORDER BY length
+             LIMIT 100"
+                .to_string(),
+        );
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut cycles = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let Ok(cycle) = row.get::<Vec<String>>("cycle") {
+                cycles.push(cycle);
+            }
+        }
+        Ok(cycles)
+    }
+}
+
+// Implement Neo4jClientTrait for Neo4jClient
+use super::traits::Neo4jClientTrait;
+use async_trait::async_trait;
+
+#[async_trait]
+impl Neo4jClientTrait for Neo4jClient {
+    async fn create_database(&self, database_name: &str) -> Result<()> {
+        Self::create_database(self, database_name).await
+    }
+
+    async fn drop_database(&self, database_name: &str) -> Result<()> {
+        Self::drop_database(self, database_name).await
+    }
+
+    async fn use_database(&self, database_name: &str) -> Result<()> {
+        Self::use_database(self, database_name).await
+    }
+
+    async fn ensure_repository_database(
+        &self,
+        repository_id: Uuid,
+        postgres_client: &dyn crate::postgres::PostgresClientTrait,
+    ) -> Result<String> {
+        Self::ensure_repository_database(self, repository_id, postgres_client).await
+    }
+
+    async fn create_entity_node(&self, entity: &CodeEntity) -> Result<i64> {
+        Self::create_entity_node(self, entity).await
+    }
+
+    async fn batch_create_nodes(&self, entities: &[CodeEntity]) -> Result<Vec<i64>> {
+        Self::batch_create_nodes(self, entities).await
+    }
+
+    async fn delete_entity_node(&self, entity_id: &str) -> Result<()> {
+        Self::delete_entity_node(self, entity_id).await
+    }
+
+    async fn node_exists(&self, entity_id: &str) -> Result<bool> {
+        Self::node_exists(self, entity_id).await
+    }
+
+    async fn lookup_entity_by_name(
+        &self,
+        name: &str,
+        entity_type: EntityType,
+    ) -> Result<Option<String>> {
+        Self::lookup_entity_by_name(self, name, entity_type).await
+    }
+
+    async fn create_entity_node_from_query(&self, query: Query) -> Result<i64> {
+        Self::create_entity_node_from_query(self, query).await
+    }
+
+    async fn create_relationship(
+        &self,
+        from_entity_id: &str,
+        to_entity_id: &str,
+        relationship_type: &str,
+        properties: &std::collections::HashMap<String, String>,
+    ) -> Result<()> {
+        Self::create_relationship(
+            self,
+            from_entity_id,
+            to_entity_id,
+            relationship_type,
+            properties,
+        )
+        .await
+    }
+
+    async fn batch_create_relationships(
+        &self,
+        relationships: &[(String, String, String)],
+    ) -> Result<()> {
+        Self::batch_create_relationships(self, relationships).await
+    }
+
+    async fn store_unresolved_relationship(
+        &self,
+        entity_id: &str,
+        relationship_type: &str,
+        target_qualified_name: &str,
+    ) -> Result<()> {
+        Self::store_unresolved_relationship(
+            self,
+            entity_id,
+            relationship_type,
+            target_qualified_name,
+        )
+        .await
+    }
+
+    async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
+        Self::find_unresolved_contains_nodes(self).await
+    }
+
+    async fn resolve_contains_relationships_batch(
+        &self,
+        unresolved_nodes: &[(String, String)],
+    ) -> Result<usize> {
+        Self::resolve_contains_relationships_batch(self, unresolved_nodes).await
+    }
+
+    async fn run_query_with_params(
+        &self,
+        query_str: &str,
+        params: &[(&str, String)],
+    ) -> Result<()> {
+        Self::run_query_with_params(self, query_str, params).await
+    }
+
+    async fn find_functions_in_module(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        module_qualified_name: &str,
+    ) -> Result<Vec<String>> {
+        Self::find_functions_in_module(self, postgres, repository_id, module_qualified_name).await
+    }
+
+    async fn find_trait_implementations(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        trait_name: &str,
+    ) -> Result<Vec<String>> {
+        Self::find_trait_implementations(self, postgres, repository_id, trait_name).await
+    }
+
+    async fn find_class_hierarchy(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        class_name: &str,
+    ) -> Result<Vec<Vec<String>>> {
+        Self::find_class_hierarchy(self, postgres, repository_id, class_name).await
+    }
+
+    async fn find_function_callers(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        function_qualified_name: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, usize)>> {
+        Self::find_function_callers(
+            self,
+            postgres,
+            repository_id,
+            function_qualified_name,
+            max_depth,
+        )
+        .await
+    }
+
+    async fn find_unused_functions(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<String>> {
+        Self::find_unused_functions(self, postgres, repository_id).await
+    }
+
+    async fn find_module_dependencies(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        module_qualified_name: &str,
+    ) -> Result<Vec<String>> {
+        Self::find_module_dependencies(self, postgres, repository_id, module_qualified_name).await
+    }
+
+    async fn find_circular_dependencies(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<Vec<String>>> {
+        Self::find_circular_dependencies(self, postgres, repository_id).await
     }
 }

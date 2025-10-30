@@ -48,7 +48,7 @@ struct CodeSearchMcpServer {
     repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
     embedding_manager: Arc<EmbeddingManager>,
     postgres_client: Arc<dyn PostgresClientTrait>,
-    neo4j_client: Option<Arc<codesearch_storage::Neo4jClient>>,
+    neo4j_client: Option<Arc<dyn codesearch_storage::Neo4jClientTrait>>,
     #[allow(dead_code)]
     watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
     tool_router: ToolRouter<Self>,
@@ -930,7 +930,7 @@ impl CodeSearchMcpServer {
         repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
         embedding_manager: Arc<EmbeddingManager>,
         postgres_client: Arc<dyn PostgresClientTrait>,
-        neo4j_client: Option<Arc<codesearch_storage::Neo4jClient>>,
+        neo4j_client: Option<Arc<dyn codesearch_storage::Neo4jClientTrait>>,
         watchers: Arc<RwLock<HashMap<Uuid, FileWatcher>>>,
         default_bge_instruction: String,
         reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,

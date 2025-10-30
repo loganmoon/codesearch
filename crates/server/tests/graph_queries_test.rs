@@ -6,7 +6,7 @@
 use anyhow::Result;
 use codesearch_core::config::StorageConfig;
 use codesearch_server::graph_queries::*;
-use codesearch_storage::{Neo4jClient, PostgresClient, PostgresClientTrait};
+use codesearch_storage::{create_neo4j_client, PostgresClient, PostgresClientTrait};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ fn create_test_config() -> StorageConfig {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_functions_in_module_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -70,7 +70,7 @@ async fn test_find_functions_in_module_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_trait_implementations_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -103,7 +103,7 @@ async fn test_find_trait_implementations_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_class_hierarchy_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -136,7 +136,7 @@ async fn test_find_class_hierarchy_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_function_callers_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -169,7 +169,7 @@ async fn test_find_function_callers_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_unused_functions_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -202,7 +202,7 @@ async fn test_find_unused_functions_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_module_dependencies_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -235,7 +235,7 @@ async fn test_find_module_dependencies_smoke() -> Result<()> {
 #[ignore] // Requires Neo4j and Postgres to be running
 async fn test_find_circular_dependencies_smoke() -> Result<()> {
     let config = create_test_config();
-    let neo4j = Arc::new(Neo4jClient::new(&config).await?);
+    let neo4j = create_neo4j_client(&config).await?;
 
     let pool = PgPoolOptions::new()
         .max_connections(5)

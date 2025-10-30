@@ -1849,6 +1849,47 @@ impl PostgresClient {
             .transpose()
     }
 
+    /// Fetch cached dense embeddings for entities by qualified names within a single repository
+    pub async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(String, Vec<f32>)> = sqlx::query_as(
+            "SELECT
+                e.entity_data->>'qualified_name' as qualified_name,
+                ee.embedding
+            FROM entity_metadata e
+            JOIN entity_embeddings ee ON e.embedding_id = ee.id
+            WHERE e.repository_id = $1
+                AND e.deleted_at IS NULL
+                AND e.entity_data->>'qualified_name' = ANY($2)",
+        )
+        .bind(repository_id)
+        .bind(qualified_names)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to fetch embeddings by qualified names: {e}"
+            ))
+        })?;
+
+        let found_count = rows.len();
+        let requested_count = qualified_names.len();
+        if found_count < requested_count {
+            tracing::debug!(
+                "Embedding cache partial hit: found {found_count}/{requested_count} embeddings"
+            );
+        }
+
+        Ok(rows.into_iter().collect())
+    }
+
     /// Get cache statistics
     pub async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
         let row = sqlx::query(
@@ -2353,6 +2394,15 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
         self.clear_cache(model_version).await
+    }
+
+    async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        self.get_embeddings_by_qualified_names(repository_id, qualified_names)
+            .await
     }
 }
 

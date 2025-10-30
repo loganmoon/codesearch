@@ -452,4 +452,24 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Clear entity embeddings entries (optional: filter by model_version)
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64>;
+
+    /// Fetch cached dense embeddings for entities by qualified names within a single repository
+    ///
+    /// Returns embeddings from the entity_embeddings table for entities matching the provided
+    /// qualified names. Only returns embeddings that exist in the cache - does not generate new ones.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `qualified_names` - Slice of qualified entity names to fetch embeddings for
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping qualified_name to dense_embedding vector.
+    /// Entities without cached embeddings will not be present in the map.
+    async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>>;
 }

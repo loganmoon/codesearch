@@ -132,7 +132,6 @@ struct NavigateRequest {
     #[serde(default = "default_navigate_limit")]
     limit: Option<usize>,
     /// Optional semantic filter to rank results by similarity
-    #[allow(dead_code)] // TODO: Implement semantic filtering in hybrid queries
     semantic_filter: Option<String>,
 }
 
@@ -148,6 +147,19 @@ struct AnalyzeRequest {
     /// Type of analysis to perform
     #[schemars(description = "Type of analysis: unused_code, circular_dependencies")]
     analysis_type: String,
+}
+
+/// Compute cosine similarity between two normalized embedding vectors
+///
+/// Assumes embeddings are already L2-normalized (as BGE embeddings are).
+/// For normalized vectors, cosine similarity simplifies to the dot product.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "Embedding dimensions must match for cosine similarity"
+    );
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
 #[tool_router]
@@ -177,11 +189,184 @@ impl CodeSearchMcpServer {
             ));
         }
 
-        // TODO: Implement hybrid search logic to combine semantic results with structural filters
-        // For now, structural filters are validated but not yet applied
-        if has_structural_filters {
-            tracing::warn!("Structural filters requested but not yet implemented in search");
-        }
+        // Execute structural filters if present
+        let structural_qualified_names: Option<std::collections::HashSet<String>> =
+            if has_structural_filters {
+                // Already validated above at line 184 that neo4j is Some
+                let Some(ref neo4j) = self.neo4j_client else {
+                    return Err(McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        "Neo4j client unexpectedly unavailable".to_string(),
+                        None,
+                    ));
+                };
+
+                // Structural filters require single repository (can't filter across repos)
+                let (target_repo_id, _) = if let Some(ref repo_path) = request.repository_path {
+                    let path_buf = PathBuf::from(repo_path);
+                    self.postgres_client
+                        .get_repository_by_path(&path_buf)
+                        .await
+                        .map_err(|e| {
+                            McpError::new(
+                                ErrorCode::INTERNAL_ERROR,
+                                format!("Failed to look up repository: {e}"),
+                                None,
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            McpError::new(
+                                ErrorCode::INVALID_PARAMS,
+                                format!("No indexed repository found at path '{repo_path}'"),
+                                None,
+                            )
+                        })?
+                } else {
+                    return Err(McpError::new(
+                        ErrorCode::INVALID_PARAMS,
+                        "Structural filters (implements_trait, called_by, calls, in_module) require specifying a single repository via repository_path parameter.".to_string(),
+                        None,
+                    ));
+                };
+
+                // Run structural queries and intersect results (AND logic)
+                let mut qualified_names: Option<std::collections::HashSet<String>> = None;
+
+                // Filter: implements_trait
+                if let Some(ref trait_name) = request.implements_trait {
+                    let trait_impls = crate::graph_queries::find_trait_implementations(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        trait_name,
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Trait implementation query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(impls) = trait_impls {
+                        let impls_set: std::collections::HashSet<String> =
+                            impls.into_iter().collect();
+                        qualified_names = Some(match qualified_names {
+                            None => impls_set,
+                            Some(existing) => existing.intersection(&impls_set).cloned().collect(),
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: in_module
+                if let Some(ref module_name) = request.in_module {
+                    let module_functions = crate::graph_queries::find_functions_in_module(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        module_name,
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Module functions query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(functions) = module_functions {
+                        let functions_set: std::collections::HashSet<String> =
+                            functions.into_iter().collect();
+                        qualified_names = Some(match qualified_names {
+                            None => functions_set,
+                            Some(existing) => {
+                                existing.intersection(&functions_set).cloned().collect()
+                            }
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: calls (entities that call this function)
+                if let Some(ref function_name) = request.calls {
+                    let callers = crate::graph_queries::find_function_callers(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        function_name,
+                        3, // Default max depth
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Function callers query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(caller_list) = callers {
+                        let callers_set: std::collections::HashSet<String> =
+                            caller_list.into_iter().map(|(name, _depth)| name).collect();
+                        qualified_names = Some(match qualified_names {
+                            None => callers_set,
+                            Some(existing) => {
+                                existing.intersection(&callers_set).cloned().collect()
+                            }
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: called_by (NOT IMPLEMENTED - requires reverse call graph)
+                if request.called_by.is_some() {
+                    return Err(McpError::new(
+                        ErrorCode::INVALID_PARAMS,
+                        "The 'called_by' filter is not yet implemented. It requires a reverse call graph query. Use 'calls' to find callers of a function instead.".to_string(),
+                        None,
+                    ));
+                }
+
+                // Check if intersection resulted in empty set
+                if let Some(ref names) = qualified_names {
+                    if names.is_empty() {
+                        // No entities match all structural filters
+                        return Ok(CallToolResult::success(vec![Content::text(
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "results": [],
+                                "total": 0,
+                                "query": request.query,
+                                "repositories_searched": 1,
+                                "message": "No entities match all structural filters",
+                                "reranked": false,
+                            }))
+                            .map_err(|e| {
+                                McpError::new(
+                                    ErrorCode::INTERNAL_ERROR,
+                                    format!("Failed to serialize response: {e}"),
+                                    None,
+                                )
+                            })?,
+                        )]));
+                    }
+                }
+
+                qualified_names
+            } else {
+                None
+            };
 
         // Determine which repositories to search
         let repos = self.repositories.read().await;
@@ -476,6 +661,38 @@ impl CodeSearchMcpServer {
                 )
             })?;
 
+        // Apply structural filtering if present
+        let entities_vec: Vec<CodeEntity> =
+            if let Some(ref allowed_names) = structural_qualified_names {
+                entities_vec
+                    .into_iter()
+                    .filter(|entity| allowed_names.contains(&entity.qualified_name))
+                    .collect()
+            } else {
+                entities_vec
+            };
+
+        // If filtering resulted in zero entities, return early
+        if entities_vec.is_empty() && structural_qualified_names.is_some() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "results": [],
+                    "total": 0,
+                    "query": query_text,
+                    "repositories_searched": target_repos.len(),
+                    "message": "Semantic search found results, but none matched structural filters",
+                    "reranked": false,
+                }))
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to serialize response: {e}"),
+                        None,
+                    )
+                })?,
+            )]));
+        }
+
         // Rerank if enabled, otherwise use vector scores
         let (final_results, reranked) = if let Some(ref reranker) = self.reranker {
             // Build documents for reranking
@@ -645,7 +862,7 @@ impl CodeSearchMcpServer {
             None
         };
 
-        let _limit = request.limit.unwrap_or(20).clamp(1, 100); // TODO: Use for result pagination
+        let limit = request.limit.unwrap_or(20).clamp(1, 100);
 
         // Route to appropriate graph query based on relationship type
         let results: serde_json::Value = match request.relationship.as_str() {
@@ -741,6 +958,133 @@ impl CodeSearchMcpServer {
                     format!("Unknown relationship type '{}'. Valid types: implementations, callers, calls, contains, dependencies, dependents, inherits, subclasses", request.relationship),
                     None,
                 ));
+            }
+        };
+
+        // Apply semantic filtering if requested
+        let results = if let Some(ref semantic_filter) = request.semantic_filter {
+            // Extract qualified names from graph results
+            let qualified_names: Vec<String> = match &results {
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .filter_map(|v| match v {
+                        serde_json::Value::String(s) => Some(s.clone()),
+                        serde_json::Value::Object(obj) => obj
+                            .get("qualified_name")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![],
+            };
+
+            if qualified_names.is_empty() {
+                results
+            } else {
+                // Generate embedding for semantic filter query
+                let filter_instruction = self.default_bge_instruction.clone();
+                let formatted_filter =
+                    format!("<instruct>{filter_instruction}\n<query>{semantic_filter}");
+
+                let filter_embeddings = self
+                    .embedding_manager
+                    .embed(vec![formatted_filter])
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Failed to generate filter embedding: {e}, returning unfiltered results"
+                        );
+                        e
+                    })
+                    .ok();
+
+                match filter_embeddings.and_then(|mut embs| embs.pop().flatten()) {
+                    Some(filter_embedding) => {
+                        // Fetch cached embeddings for entities
+                        let cached_embeddings = self
+                            .postgres_client
+                            .get_embeddings_by_qualified_names(repo_id, &qualified_names)
+                            .await
+                            .map_err(|e| {
+                                tracing::warn!(
+                                    "Failed to fetch cached embeddings: {e}, returning unfiltered results"
+                                );
+                                e
+                            })
+                            .ok();
+
+                        match cached_embeddings {
+                            Some(embeddings_map) if !embeddings_map.is_empty() => {
+                                // Compute similarity scores
+                                let mut scored: Vec<(String, f32)> = qualified_names
+                                    .into_iter()
+                                    .filter_map(|qname| {
+                                        embeddings_map.get(&qname).map(|entity_emb| {
+                                            let score =
+                                                cosine_similarity(&filter_embedding, entity_emb);
+                                            (qname, score)
+                                        })
+                                    })
+                                    .collect();
+
+                                // Sort by similarity descending
+                                scored.sort_by(|a, b| {
+                                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+
+                                // Truncate to limit
+                                scored.truncate(limit);
+
+                                // Format results with similarity scores
+                                let filtered_results: Vec<_> = scored
+                                    .into_iter()
+                                    .map(|(qname, score)| {
+                                        serde_json::json!({
+                                            "qualified_name": qname,
+                                            "similarity_score": (score * 100.0).round() as i32,
+                                        })
+                                    })
+                                    .collect();
+
+                                serde_json::json!(filtered_results)
+                            }
+                            _ => {
+                                // Cache miss or empty - log and return unfiltered
+                                tracing::warn!(
+                                    "No cached embeddings found for semantic filtering, returning unfiltered results"
+                                );
+                                // Still apply limit to unfiltered results
+                                match results {
+                                    serde_json::Value::Array(mut items) => {
+                                        items.truncate(limit);
+                                        serde_json::json!(items)
+                                    }
+                                    other => other,
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        // Failed to generate filter embedding - return unfiltered
+                        match results {
+                            serde_json::Value::Array(mut items) => {
+                                items.truncate(limit);
+                                serde_json::json!(items)
+                            }
+                            other => other,
+                        }
+                    }
+                }
+            }
+        } else {
+            // No semantic filter - apply limit only
+            match results {
+                serde_json::Value::Array(mut items) => {
+                    items.truncate(limit);
+                    serde_json::json!(items)
+                }
+                other => other,
             }
         };
 

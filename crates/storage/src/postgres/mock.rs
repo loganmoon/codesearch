@@ -901,6 +901,33 @@ impl PostgresClientTrait for MockPostgresClient {
 
         Ok(result)
     }
+
+    async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let data = self.data.lock().unwrap();
+        let mut result = std::collections::HashMap::new();
+
+        for ((repo_id, _entity_id), metadata) in &data.entities {
+            if *repo_id == repository_id
+                && metadata.deleted_at.is_none()
+                && qualified_names.contains(&metadata.entity.qualified_name)
+            {
+                result.insert(
+                    metadata.entity.qualified_name.clone(),
+                    metadata.entity.clone(),
+                );
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 // Test helper methods (not part of the trait)

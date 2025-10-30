@@ -298,6 +298,24 @@ pub trait Neo4jClientTrait: Send + Sync {
         max_depth: usize,
     ) -> Result<Vec<(String, usize)>>;
 
+    /// Find call graph (callees of a function - functions called by this function)
+    ///
+    /// # Arguments
+    /// * `postgres` - PostgreSQL client for repository database lookup
+    /// * `repository_id` - UUID of the repository
+    /// * `function_qualified_name` - Qualified name of the function
+    /// * `max_depth` - Maximum depth of the call graph to traverse
+    ///
+    /// # Returns
+    /// * `Result<Vec<(String, usize)>>` - List of (callee_name, depth) tuples
+    async fn find_function_callees(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        function_qualified_name: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, usize)>>;
+
     /// Find unused functions (no incoming calls, not public)
     ///
     /// # Arguments

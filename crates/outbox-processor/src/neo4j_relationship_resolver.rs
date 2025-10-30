@@ -243,10 +243,17 @@ impl RelationshipResolver for TraitImplResolver {
             // IMPLEMENTS relationships
             if let Some(trait_name) = impl_entity.metadata.attributes.get("implements_trait") {
                 if let Some(trait_id) = trait_map.get(trait_name) {
+                    // Forward edge: impl -> trait
                     relationships.push((
                         impl_entity.entity_id.clone(),
                         trait_id.clone(),
                         "IMPLEMENTS".to_string(),
+                    ));
+                    // Reciprocal edge: trait -> impl
+                    relationships.push((
+                        trait_id.clone(),
+                        impl_entity.entity_id.clone(),
+                        "IMPLEMENTED_BY".to_string(),
                     ));
                 }
             }
@@ -256,10 +263,17 @@ impl RelationshipResolver for TraitImplResolver {
                 let type_name = for_type.split('<').next().unwrap_or(for_type).trim();
 
                 if let Some(type_id) = type_map.get(type_name) {
+                    // Forward edge: impl -> type
                     relationships.push((
                         impl_entity.entity_id.clone(),
                         type_id.clone(),
                         "ASSOCIATES".to_string(),
+                    ));
+                    // Reciprocal edge: type -> impl
+                    relationships.push((
+                        type_id.clone(),
+                        impl_entity.entity_id.clone(),
+                        "ASSOCIATED_WITH".to_string(),
                     ));
                 }
             }
@@ -267,10 +281,17 @@ impl RelationshipResolver for TraitImplResolver {
             // EXTENDS_INTERFACE relationships (TypeScript/JavaScript)
             if let Some(extends) = impl_entity.metadata.attributes.get("extends") {
                 if let Some(interface_id) = interface_map.get(extends) {
+                    // Forward edge: impl -> interface
                     relationships.push((
                         impl_entity.entity_id.clone(),
                         interface_id.clone(),
                         "EXTENDS_INTERFACE".to_string(),
+                    ));
+                    // Reciprocal edge: interface -> impl
+                    relationships.push((
+                        interface_id.clone(),
+                        impl_entity.entity_id.clone(),
+                        "EXTENDED_BY".to_string(),
                     ));
                 }
             }
@@ -314,10 +335,17 @@ impl RelationshipResolver for InheritanceResolver {
                 let parent_name = extends.split('<').next().unwrap_or(extends).trim();
 
                 if let Some(parent_id) = class_map.get(parent_name) {
+                    // Forward edge: child -> parent
                     relationships.push((
                         class_entity.entity_id.clone(),
                         parent_id.clone(),
                         "INHERITS_FROM".to_string(),
+                    ));
+                    // Reciprocal edge: parent -> child
+                    relationships.push((
+                        parent_id.clone(),
+                        class_entity.entity_id.clone(),
+                        "HAS_SUBCLASS".to_string(),
                     ));
                 }
             }
@@ -370,10 +398,17 @@ impl RelationshipResolver for TypeUsageResolver {
                                     field_type.split('<').next().unwrap_or(field_type).trim();
 
                                 if let Some(type_id) = type_map.get(type_name) {
+                                    // Forward edge: struct -> type
                                     relationships.push((
                                         struct_entity.entity_id.clone(),
                                         type_id.clone(),
                                         "USES".to_string(),
+                                    ));
+                                    // Reciprocal edge: type -> struct
+                                    relationships.push((
+                                        type_id.clone(),
+                                        struct_entity.entity_id.clone(),
+                                        "USED_BY".to_string(),
                                     ));
                                 }
                             }
@@ -428,10 +463,17 @@ impl RelationshipResolver for CallGraphResolver {
                 if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
                     for callee_name in calls {
                         if let Some(callee_id) = callable_map.get(&callee_name) {
+                            // Forward edge: caller -> callee
                             relationships.push((
                                 caller.entity_id.clone(),
                                 callee_id.clone(),
                                 "CALLS".to_string(),
+                            ));
+                            // Reciprocal edge: callee -> caller
+                            relationships.push((
+                                callee_id.clone(),
+                                caller.entity_id.clone(),
+                                "CALLED_BY".to_string(),
                             ));
                         }
                     }
@@ -477,10 +519,17 @@ impl RelationshipResolver for ImportsResolver {
                 if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_json) {
                     for import_path in imports {
                         if let Some(imported_module_id) = module_map.get(&import_path) {
+                            // Forward edge: module -> imported_module
                             relationships.push((
                                 module_entity.entity_id.clone(),
                                 imported_module_id.clone(),
                                 "IMPORTS".to_string(),
+                            ));
+                            // Reciprocal edge: imported_module -> module
+                            relationships.push((
+                                imported_module_id.clone(),
+                                module_entity.entity_id.clone(),
+                                "IMPORTED_BY".to_string(),
                             ));
                         }
                     }

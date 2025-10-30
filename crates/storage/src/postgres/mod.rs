@@ -171,7 +171,11 @@ pub trait PostgresClientTrait: Send + Sync {
     /// # Returns
     ///
     /// BM25Statistics containing avgdl, total_tokens, and entity_count.
-    /// If statistics are not yet calculated, returns default values (avgdl=50.0).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if BM25 statistics have not been initialized for this repository.
+    /// Statistics must be initialized during indexing before they can be retrieved.
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
 
     /// Get BM25 statistics for a repository within a transaction
@@ -472,4 +476,21 @@ pub trait PostgresClientTrait: Send + Sync {
         repository_id: Uuid,
         qualified_names: &[String],
     ) -> Result<std::collections::HashMap<String, Vec<f32>>>;
+
+    /// Get full entities by their qualified names
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `qualified_names` - List of qualified names to look up
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping qualified_name to full CodeEntity.
+    /// Entities not found will not be present in the map.
+    async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>>;
 }

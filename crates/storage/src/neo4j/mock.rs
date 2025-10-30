@@ -327,6 +327,17 @@ impl Neo4jClientTrait for MockNeo4jClient {
         Ok(vec![])
     }
 
+    async fn find_function_callees(
+        &self,
+        _postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        _repository_id: Uuid,
+        _function_qualified_name: &str,
+        _max_depth: usize,
+    ) -> Result<Vec<(String, usize)>> {
+        // Mock implementation
+        Ok(vec![])
+    }
+
     async fn find_unused_functions(
         &self,
         _postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,

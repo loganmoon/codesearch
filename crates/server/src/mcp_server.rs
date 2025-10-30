@@ -149,19 +149,6 @@ struct AnalyzeRequest {
     analysis_type: String,
 }
 
-/// Compute cosine similarity between two normalized embedding vectors
-///
-/// Assumes embeddings are already L2-normalized (as BGE embeddings are).
-/// For normalized vectors, cosine similarity simplifies to the dot product.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    assert_eq!(
-        a.len(),
-        b.len(),
-        "Embedding dimensions must match for cosine similarity"
-    );
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
 #[tool_router]
 impl CodeSearchMcpServer {
     #[tool(
@@ -330,13 +317,54 @@ impl CodeSearchMcpServer {
                     }
                 }
 
-                // Filter: called_by (NOT IMPLEMENTED - requires reverse call graph)
-                if request.called_by.is_some() {
-                    return Err(McpError::new(
-                        ErrorCode::INVALID_PARAMS,
-                        "The 'called_by' filter is not yet implemented. It requires a reverse call graph query. Use 'calls' to find callers of a function instead.".to_string(),
-                        None,
-                    ));
+                // Filter: called_by (find callees - what this function calls)
+                if let Some(ref function_name) = request.called_by {
+                    // Query for functions that are called BY the specified function
+                    // Using forward CALLS edges: (function)-[:CALLS]->(callee)
+                    let db_name = neo4j
+                        .ensure_repository_database(target_repo_id, self.postgres_client.as_ref())
+                        .await
+                        .map_err(|e| {
+                            McpError::new(
+                                ErrorCode::INTERNAL_ERROR,
+                                format!("Failed to ensure Neo4j database: {e}"),
+                                None,
+                            )
+                        })?;
+                    neo4j.use_database(&db_name).await.map_err(|e| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            format!("Failed to use Neo4j database: {e}"),
+                            None,
+                        )
+                    })?;
+
+                    let callees_result = neo4j
+                        .find_function_callees(
+                            &self.postgres_client,
+                            target_repo_id,
+                            function_name,
+                            3,
+                        )
+                        .await;
+
+                    match callees_result {
+                        Ok(callee_list) => {
+                            let callees_set: std::collections::HashSet<String> =
+                                callee_list.into_iter().map(|(name, _depth)| name).collect();
+                            qualified_names = Some(match qualified_names {
+                                None => callees_set,
+                                Some(existing) => {
+                                    existing.intersection(&callees_set).cloned().collect()
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Function callees query failed: {e}, falling back to semantic-only search"
+                            );
+                        }
+                    }
                 }
 
                 // Check if intersection resulted in empty set
@@ -554,21 +582,44 @@ impl CodeSearchMcpServer {
             file_path: request.file_path.as_ref().map(PathBuf::from),
         };
 
-        // Search all target repositories in parallel using hybrid search
-        let stats_batch_clone = stats_batch.clone();
+        // Execute hybrid search using Reciprocal Rank Fusion (RRF)
+        //
+        // Hybrid search combines two retrieval methods for improved accuracy:
+        // 1. BM25 sparse embeddings - Traditional keyword-based search using term frequency
+        //    and inverse document frequency. Good for exact keyword matches.
+        // 2. Dense vector embeddings - Semantic search using learned embeddings from the
+        //    BGE model. Good for conceptual similarity.
+        //
+        // The Reciprocal Rank Fusion algorithm merges results from both methods:
+        // - Each method retrieves (prefetch_multiplier × limit) candidates
+        // - RRF assigns scores based on rank: score = 1 / (k + rank) where k=60
+        // - Final ranking combines scores from both methods
+        //
+        // The prefetch_multiplier parameter controls the trade-off:
+        // - Higher values (10-20): Better recall, captures more candidates, slower
+        // - Lower values (3-5): Faster queries, may miss some relevant results
+        // - Default (5): Balanced trade-off between quality and latency
+        //
+        // For more on RRF: https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
+
+        // Wrap shared data in Arc to avoid expensive clones
+        let dense_query_emb_arc = std::sync::Arc::new(dense_query_embedding);
+        let avgdl_to_sparse_arc = std::sync::Arc::new(avgdl_to_sparse_embedding);
+        let stats_batch_arc = std::sync::Arc::new(stats_batch);
+
         let search_futures = target_repos.iter().map(|(repo_id, repo_info)| {
             let storage_client = repo_info.storage_client.clone();
-            let dense_query_emb = dense_query_embedding.clone();
+            let dense_query_emb_arc = std::sync::Arc::clone(&dense_query_emb_arc);
             let filters_clone = filters.clone();
             let collection_name = repo_info.collection_name.clone();
             let repo_id = *repo_id;
-            let avgdl_to_sparse = avgdl_to_sparse_embedding.clone();
+            let avgdl_to_sparse_arc = std::sync::Arc::clone(&avgdl_to_sparse_arc);
             let prefetch_multiplier = self.hybrid_search_config.prefetch_multiplier;
-            let stats_batch_inner = stats_batch_clone.clone();
+            let stats_batch_arc = std::sync::Arc::clone(&stats_batch_arc);
 
             async move {
                 // Get avgdl from batch results (already fetched above)
-                let avgdl = stats_batch_inner
+                let avgdl = stats_batch_arc
                     .get(&repo_id)
                     .map(|s| s.avgdl)
                     .ok_or_else(|| {
@@ -580,7 +631,7 @@ impl CodeSearchMcpServer {
                     })?;
 
                 // Look up the correct sparse embedding using the repository's avgdl
-                let sparse_query_emb = avgdl_to_sparse
+                let sparse_query_emb = avgdl_to_sparse_arc
                     .get(&OrderedFloat(avgdl))
                     .ok_or_else(|| {
                         McpError::new(
@@ -593,7 +644,7 @@ impl CodeSearchMcpServer {
 
                 storage_client
                     .search_similar_hybrid(
-                        dense_query_emb,
+                        dense_query_emb_arc.as_ref().clone(),
                         sparse_query_emb,
                         limit,
                         Some(filters_clone),
@@ -982,91 +1033,89 @@ impl CodeSearchMcpServer {
             if qualified_names.is_empty() {
                 results
             } else {
-                // Generate embedding for semantic filter query
-                let filter_instruction = self.default_bge_instruction.clone();
-                let formatted_filter =
-                    format!("<instruct>{filter_instruction}\n<query>{semantic_filter}");
-
-                let filter_embeddings = self
-                    .embedding_manager
-                    .embed(vec![formatted_filter])
+                // Fetch full entities for reranking
+                let entities = self
+                    .postgres_client
+                    .get_entities_by_qualified_names(repo_id, &qualified_names)
                     .await
                     .map_err(|e| {
                         tracing::warn!(
-                            "Failed to generate filter embedding: {e}, returning unfiltered results"
+                            "Failed to fetch entities: {e}, returning unfiltered results"
                         );
                         e
                     })
                     .ok();
 
-                match filter_embeddings.and_then(|mut embs| embs.pop().flatten()) {
-                    Some(filter_embedding) => {
-                        // Fetch cached embeddings for entities
-                        let cached_embeddings = self
-                            .postgres_client
-                            .get_embeddings_by_qualified_names(repo_id, &qualified_names)
-                            .await
-                            .map_err(|e| {
-                                tracing::warn!(
-                                    "Failed to fetch cached embeddings: {e}, returning unfiltered results"
-                                );
-                                e
-                            })
-                            .ok();
-
-                        match cached_embeddings {
-                            Some(embeddings_map) if !embeddings_map.is_empty() => {
-                                // Compute similarity scores
-                                let mut scored: Vec<(String, f32)> = qualified_names
-                                    .into_iter()
-                                    .filter_map(|qname| {
-                                        embeddings_map.get(&qname).map(|entity_emb| {
-                                            let score =
-                                                cosine_similarity(&filter_embedding, entity_emb);
-                                            (qname, score)
-                                        })
+                match entities {
+                    Some(entities_map) if !entities_map.is_empty() => {
+                        // Use reranker if available, otherwise return unscored results
+                        if let Some(ref reranker) = self.reranker {
+                            // Build documents for reranking
+                            let entity_contents: Vec<(String, String)> = qualified_names
+                                .iter()
+                                .filter_map(|qname| {
+                                    entities_map.get(qname).map(|entity| {
+                                        (qname.clone(), extract_embedding_content(entity))
                                     })
-                                    .collect();
+                                })
+                                .collect();
 
-                                // Sort by similarity descending
-                                scored.sort_by(|a, b| {
-                                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-                                });
+                            let documents: Vec<(String, &str)> = entity_contents
+                                .iter()
+                                .map(|(qname, content)| (qname.clone(), content.as_str()))
+                                .collect();
 
-                                // Truncate to limit
-                                scored.truncate(limit);
-
-                                // Format results with similarity scores
-                                let filtered_results: Vec<_> = scored
-                                    .into_iter()
-                                    .map(|(qname, score)| {
-                                        serde_json::json!({
-                                            "qualified_name": qname,
-                                            "similarity_score": (score * 100.0).round() as i32,
+                            // Attempt reranking with fallback
+                            match reranker.rerank(semantic_filter, &documents, limit).await {
+                                Ok(reranked) => {
+                                    let filtered_results: Vec<_> = reranked
+                                        .into_iter()
+                                        .map(|(qname, score)| {
+                                            serde_json::json!({
+                                                "qualified_name": qname,
+                                                "relevance_score": (score * 100.0).round() as i32,
+                                            })
                                         })
-                                    })
-                                    .collect();
+                                        .collect();
 
-                                serde_json::json!(filtered_results)
-                            }
-                            _ => {
-                                // Cache miss or empty - log and return unfiltered
-                                tracing::warn!(
-                                    "No cached embeddings found for semantic filtering, returning unfiltered results"
-                                );
-                                // Still apply limit to unfiltered results
-                                match results {
-                                    serde_json::Value::Array(mut items) => {
-                                        items.truncate(limit);
-                                        serde_json::json!(items)
-                                    }
-                                    other => other,
+                                    serde_json::json!(filtered_results)
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Reranking failed: {e}, returning unscored results"
+                                    );
+                                    // Fall back to unscored results
+                                    let unscored: Vec<_> = qualified_names
+                                        .into_iter()
+                                        .take(limit)
+                                        .map(|qname| {
+                                            serde_json::json!({
+                                                "qualified_name": qname,
+                                            })
+                                        })
+                                        .collect();
+                                    serde_json::json!(unscored)
                                 }
                             }
+                        } else {
+                            // No reranker configured, return unscored results
+                            let unscored: Vec<_> = qualified_names
+                                .into_iter()
+                                .take(limit)
+                                .map(|qname| {
+                                    serde_json::json!({
+                                        "qualified_name": qname,
+                                    })
+                                })
+                                .collect();
+                            serde_json::json!(unscored)
                         }
                     }
-                    None => {
-                        // Failed to generate filter embedding - return unfiltered
+                    _ => {
+                        // Failed to fetch entities - return unfiltered
+                        tracing::warn!(
+                            "Could not fetch entities for semantic filtering, returning unfiltered results"
+                        );
                         match results {
                             serde_json::Value::Array(mut items) => {
                                 items.truncate(limit);

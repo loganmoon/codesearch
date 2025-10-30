@@ -1,9 +1,42 @@
 use async_trait::async_trait;
 use codesearch_core::entities::{CodeEntity, EntityType};
 use codesearch_core::error::{Error, Result};
+use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::str::FromStr;
 use uuid::Uuid;
+
+// Import Neo4j relationship builders (internal to crate)
+use crate::neo4j::relationship_builder::{
+    build_calls_relationship_json, build_contains_relationship_json,
+    build_imports_relationship_json, build_inherits_from_relationship_json,
+    build_trait_relationship_json, build_uses_relationship_json,
+};
+
+/// Neo4j node properties for outbox payload
+#[derive(Debug, Clone, Serialize)]
+struct Neo4jNodeProperties {
+    id: String,
+    repository_id: String,
+    qualified_name: String,
+    name: String,
+    language: String,
+    visibility: String,
+    is_async: bool,
+    is_generic: bool,
+    is_static: bool,
+    is_abstract: bool,
+    is_const: bool,
+}
+
+/// Complete Neo4j outbox payload
+#[derive(Debug, Serialize)]
+struct Neo4jOutboxPayload<'a> {
+    entity: &'a CodeEntity,
+    node: Neo4jNodeProperties,
+    labels: Vec<&'static str>,
+    relationships: Vec<serde_json::Value>,
+}
 
 /// Maximum sparse embedding size to prevent memory exhaustion attacks
 const MAX_SPARSE_EMBEDDING_SIZE: usize = 100_000;
@@ -1130,7 +1163,7 @@ impl PostgresClient {
                     b.push_bind(repository_id)
                         .push_bind(entity_id)
                         .push_bind(OutboxOperation::Delete.to_string())
-                        .push_bind("neo4j")
+                        .push_bind(TargetStore::Neo4j.to_string())
                         .push_bind(payload)
                         .push_bind(collection_name)
                         .push("NOW()");
@@ -1370,7 +1403,7 @@ impl PostgresClient {
                 b.push_bind(repository_id)
                     .push_bind(&entity.entity_id)
                     .push_bind(op.to_string())
-                    .push_bind("neo4j")
+                    .push_bind(TargetStore::Neo4j.to_string())
                     .push_bind(neo4j_payload)
                     .push_bind(collection_name);
             },
@@ -1886,75 +1919,26 @@ impl PostgresClient {
         Ok(rows_affected)
     }
 
-    /// Get Neo4j database name for a repository
-    pub async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
-        let row: Option<(Option<String>,)> =
-            sqlx::query_as("SELECT neo4j_database_name FROM repositories WHERE repository_id = $1")
-                .bind(repository_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| Error::storage(format!("Failed to get neo4j database name: {e}")))?;
-
-        Ok(row.and_then(|(name,)| name))
-    }
-
-    /// Set Neo4j database name for a repository
-    pub async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
-        sqlx::query("UPDATE repositories SET neo4j_database_name = $1 WHERE repository_id = $2")
-            .bind(db_name)
-            .bind(repository_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to set neo4j database name: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Set graph_ready flag for repository
-    pub async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()> {
-        sqlx::query("UPDATE repositories SET graph_ready = $1 WHERE repository_id = $2")
-            .bind(ready)
-            .bind(repository_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to set graph_ready: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Get graph_ready status
-    pub async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool> {
-        let row: (bool,) = sqlx::query_as(
-            "SELECT COALESCE(graph_ready, FALSE) FROM repositories WHERE repository_id = $1",
-        )
-        .bind(repository_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to get graph_ready status: {e}")))?;
-
-        Ok(row.0)
-    }
-
     /// Build Neo4j payload from entity for outbox entry
     fn build_neo4j_payload(
         &self,
         entity: &CodeEntity,
         name_to_id: &std::collections::HashMap<&str, &str>,
     ) -> Result<serde_json::Value> {
-        // Extract core properties
-        let properties = serde_json::json!({
-            "id": entity.entity_id,
-            "repository_id": entity.repository_id.to_string(),
-            "qualified_name": entity.qualified_name,
-            "name": entity.name,
-            "language": entity.language.to_string(),
-            "visibility": entity.visibility.to_string(),
-            "is_async": entity.metadata.is_async,
-            "is_generic": entity.metadata.is_generic,
-            "is_static": entity.metadata.is_static,
-            "is_abstract": entity.metadata.is_abstract,
-            "is_const": entity.metadata.is_const,
-        });
+        // Extract core properties using proper struct
+        let properties = Neo4jNodeProperties {
+            id: entity.entity_id.clone(),
+            repository_id: entity.repository_id.to_string(),
+            qualified_name: entity.qualified_name.clone(),
+            name: entity.name.clone(),
+            language: entity.language.to_string(),
+            visibility: entity.visibility.to_string(),
+            is_async: entity.metadata.is_async,
+            is_generic: entity.metadata.is_generic,
+            is_static: entity.metadata.is_static,
+            is_abstract: entity.metadata.is_abstract,
+            is_const: entity.metadata.is_const,
+        };
 
         // Determine labels from entity type
         let labels = match entity.entity_type {
@@ -1975,29 +1959,34 @@ impl PostgresClient {
         };
 
         // Extract CONTAINS relationships using O(1) HashMap lookup
-        let mut relationships = crate::neo4j::build_contains_relationship_json(entity, name_to_id);
+        let mut relationships = build_contains_relationship_json(entity, name_to_id);
 
         // Extract IMPLEMENTS and EXTENDS_INTERFACE relationships
-        relationships.extend(crate::neo4j::build_trait_relationship_json(entity));
+        relationships.extend(build_trait_relationship_json(entity));
 
         // Extract INHERITS_FROM relationships
-        relationships.extend(crate::neo4j::build_inherits_from_relationship_json(entity));
+        relationships.extend(build_inherits_from_relationship_json(entity));
 
         // Extract USES relationships (field type dependencies)
-        relationships.extend(crate::neo4j::build_uses_relationship_json(entity));
+        relationships.extend(build_uses_relationship_json(entity));
 
         // Extract CALLS relationships (function calls)
-        relationships.extend(crate::neo4j::build_calls_relationship_json(entity));
+        relationships.extend(build_calls_relationship_json(entity));
 
         // Extract IMPORTS relationships (module imports)
-        relationships.extend(crate::neo4j::build_imports_relationship_json(entity));
+        relationships.extend(build_imports_relationship_json(entity));
 
-        Ok(serde_json::json!({
-            "entity": entity,
-            "node": properties,
-            "labels": labels,
-            "relationships": relationships
-        }))
+        // Build payload using proper struct
+        let payload = Neo4jOutboxPayload {
+            entity,
+            node: properties,
+            labels,
+            relationships,
+        };
+
+        // Serialize to JSON
+        serde_json::to_value(&payload)
+            .map_err(|e| Error::storage(format!("Failed to serialize Neo4j payload: {e}")))
     }
 }
 
@@ -2035,19 +2024,105 @@ impl super::PostgresClientTrait for PostgresClient {
     }
 
     async fn get_neo4j_database_name(&self, repository_id: Uuid) -> Result<Option<String>> {
-        self.get_neo4j_database_name(repository_id).await
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT neo4j_database_name FROM repositories WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Error::storage(format!("Failed to get neo4j database name: {e}")))?;
+
+        Ok(row.and_then(|(name,)| name))
     }
 
     async fn set_neo4j_database_name(&self, repository_id: Uuid, db_name: &str) -> Result<()> {
-        self.set_neo4j_database_name(repository_id, db_name).await
+        sqlx::query("UPDATE repositories SET neo4j_database_name = $1 WHERE repository_id = $2")
+            .bind(db_name)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set neo4j database name: {e}")))?;
+
+        Ok(())
     }
 
     async fn set_graph_ready(&self, repository_id: Uuid, ready: bool) -> Result<()> {
-        self.set_graph_ready(repository_id, ready).await
+        sqlx::query("UPDATE repositories SET graph_ready = $1 WHERE repository_id = $2")
+            .bind(ready)
+            .bind(repository_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to set graph_ready: {e}")))?;
+
+        Ok(())
     }
 
     async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool> {
-        self.is_graph_ready(repository_id).await
+        let row: (bool,) = sqlx::query_as(
+            "SELECT COALESCE(graph_ready, FALSE) FROM repositories WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get graph_ready status: {e}")))?;
+
+        Ok(row.0)
+    }
+
+    async fn set_pending_relationship_resolution(
+        &self,
+        repository_id: Uuid,
+        pending: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE repositories SET pending_relationship_resolution = $1 WHERE repository_id = $2",
+        )
+        .bind(pending)
+        .bind(repository_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to set pending_relationship_resolution: {e}"
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    async fn has_pending_relationship_resolution(&self, repository_id: Uuid) -> Result<bool> {
+        let row: (bool,) = sqlx::query_as(
+            "SELECT COALESCE(pending_relationship_resolution, FALSE)
+             FROM repositories
+             WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to get pending_relationship_resolution status: {e}"
+            ))
+        })?;
+
+        Ok(row.0)
+    }
+
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT repository_id
+             FROM repositories
+             WHERE pending_relationship_resolution = TRUE
+             ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to get repositories with pending resolution: {e}"
+            ))
+        })?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
     async fn get_repository_by_collection(

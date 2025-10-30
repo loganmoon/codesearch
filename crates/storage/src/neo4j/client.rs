@@ -566,60 +566,6 @@ impl Neo4jClient {
         Ok(resolved_count)
     }
 
-    /// Resolve a CONTAINS relationship by creating the edge and removing the unresolved property
-    /// Returns Ok(true) if successful, Ok(false) if parent not found
-    ///
-    /// # Deprecated
-    /// This method makes 3 queries per relationship. Use `resolve_contains_relationships_batch` instead.
-    pub async fn resolve_contains_relationship(
-        &self,
-        child_id: &str,
-        parent_qname: &str,
-    ) -> Result<bool> {
-        let _db = self.get_current_database().await?;
-
-        // Look up parent by qualified_name
-        let lookup_query = Query::new(
-            "MATCH (parent {qualified_name: $qname})
-             RETURN parent.id AS parent_id"
-                .to_string(),
-        )
-        .param("qname", parent_qname);
-
-        let mut lookup_result = self.graph.execute(lookup_query).await?;
-
-        let parent_id = if let Some(row) = lookup_result.next().await? {
-            let id: String = row.get("parent_id")?;
-            id
-        } else {
-            // Parent not found
-            return Ok(false);
-        };
-
-        // Create CONTAINS edge
-        let create_edge_query = Query::new(
-            "MATCH (parent {id: $parent_id}), (child {id: $child_id})
-             MERGE (parent)-[:CONTAINS]->(child)"
-                .to_string(),
-        )
-        .param("parent_id", parent_id)
-        .param("child_id", child_id);
-
-        self.graph.run(create_edge_query).await?;
-
-        // Remove unresolved property
-        let cleanup_query = Query::new(
-            "MATCH (child {id: $child_id})
-             REMOVE child.unresolved_contains_parent"
-                .to_string(),
-        )
-        .param("child_id", child_id);
-
-        self.graph.run(cleanup_query).await?;
-
-        Ok(true)
-    }
-
     /// Create a relationship between two entities with Cypher injection protection
     ///
     /// # Arguments
@@ -781,22 +727,22 @@ impl Neo4jClient {
     }
 
     /// Get Neo4j labels for an entity type
-    fn get_entity_labels(&self, entity_type: &EntityType) -> Vec<String> {
+    fn get_entity_labels(&self, entity_type: &EntityType) -> &'static [&'static str] {
         match entity_type {
-            EntityType::Function => vec!["Function".to_string()],
-            EntityType::Method => vec!["Method".to_string()],
-            EntityType::Class => vec!["Class".to_string()],
-            EntityType::Struct => vec!["Struct".to_string(), "Class".to_string()],
-            EntityType::Interface => vec!["Interface".to_string()],
-            EntityType::Trait => vec!["Trait".to_string(), "Interface".to_string()],
-            EntityType::Enum => vec!["Enum".to_string()],
-            EntityType::Module => vec!["Module".to_string()],
-            EntityType::Package => vec!["Package".to_string()],
-            EntityType::Constant => vec!["Constant".to_string()],
-            EntityType::Variable => vec!["Variable".to_string()],
-            EntityType::TypeAlias => vec!["TypeAlias".to_string()],
-            EntityType::Macro => vec!["Macro".to_string()],
-            EntityType::Impl => vec!["ImplBlock".to_string()],
+            EntityType::Function => &["Function"],
+            EntityType::Method => &["Method"],
+            EntityType::Class => &["Class"],
+            EntityType::Struct => &["Struct", "Class"],
+            EntityType::Interface => &["Interface"],
+            EntityType::Trait => &["Trait", "Interface"],
+            EntityType::Enum => &["Enum"],
+            EntityType::Module => &["Module"],
+            EntityType::Package => &["Package"],
+            EntityType::Constant => &["Constant"],
+            EntityType::Variable => &["Variable"],
+            EntityType::TypeAlias => &["TypeAlias"],
+            EntityType::Macro => &["Macro"],
+            EntityType::Impl => &["ImplBlock"],
         }
     }
 }

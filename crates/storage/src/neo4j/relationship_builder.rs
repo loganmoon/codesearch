@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 /// Relationship information for Neo4j edge creation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Relationship {
     pub rel_type: String,
     pub from_id: String,
@@ -15,6 +16,7 @@ pub struct Relationship {
 }
 
 /// Extract CONTAINS relationships from parent_scope
+#[allow(dead_code)]
 pub fn extract_contains_relationships(entities: &[CodeEntity]) -> Vec<Relationship> {
     let mut relationships = Vec::new();
 
@@ -198,34 +200,24 @@ pub fn build_inherits_from_relationship_json(entity: &CodeEntity) -> Vec<serde_j
     relationships
 }
 
-/// Check if a type name is a primitive type
+/// Check if a type name is a primitive type that should be filtered from relationships
+/// This filters primitives from both Rust and TypeScript/JavaScript
 fn is_primitive_type(type_name: &str) -> bool {
     matches!(
         type_name,
-        "i8" | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "bool"
-            | "char"
-            | "str"
-            | "String"
-            | "string"
-            | "number"
-            | "boolean"
+        // Rust primitives
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
+        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" |
+        "f32" | "f64" |
+        "bool" | "char" | "str" | "String" |
+        "()" | "!" |
+        // TypeScript/JavaScript primitives
+        "string" | "number" | "boolean" | "undefined" | "null" | "any" | "unknown" | "void"
     )
 }
 
 /// Extract USES relationships from struct fields
+/// Primitive types are filtered here rather than at extraction to keep field metadata complete
 pub fn extract_uses_relationships(entity: &CodeEntity) -> Vec<Relationship> {
     let mut relationships = Vec::new();
 

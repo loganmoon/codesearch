@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
+pub mod neo4j_relationship_resolver;
 pub mod processor;
 
 use codesearch_core::config::OutboxConfig;
@@ -13,6 +14,11 @@ use tokio::time::sleep;
 use tracing::{error, info};
 
 // Re-export for ease of use
+pub use neo4j_relationship_resolver::{
+    resolve_contains_relationships, resolve_relationships_generic, CallGraphResolver,
+    ImportsResolver, InheritanceResolver, RelationshipResolver, TraitImplResolver,
+    TypeUsageResolver,
+};
 pub use processor::OutboxProcessor;
 
 /// Public API for starting outbox processor

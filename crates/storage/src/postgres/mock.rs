@@ -266,6 +266,25 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(true)
     }
 
+    async fn set_pending_relationship_resolution(
+        &self,
+        _repository_id: Uuid,
+        _pending: bool,
+    ) -> Result<()> {
+        // Mock - no-op
+        Ok(())
+    }
+
+    async fn has_pending_relationship_resolution(&self, _repository_id: Uuid) -> Result<bool> {
+        // Mock - always return false (no pending resolution)
+        Ok(false)
+    }
+
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>> {
+        // Mock - return empty list
+        Ok(Vec::new())
+    }
+
     async fn get_repository_by_collection(
         &self,
         collection_name: &str,

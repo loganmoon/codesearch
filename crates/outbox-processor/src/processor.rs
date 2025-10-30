@@ -467,6 +467,14 @@ impl OutboxProcessor {
             collections = collection_count,
             "Successfully processed entire batch"
         );
+
+        // Step 6: Resolve pending relationships after successful batch processing
+        // This runs outside the transaction to avoid holding locks during resolution
+        if let Err(e) = self.resolve_pending_relationships().await {
+            warn!("Failed to resolve pending relationships: {}", e);
+            // Don't fail the batch processing if resolution fails - it will be retried next cycle
+        }
+
         Ok(())
     }
 
@@ -767,207 +775,219 @@ impl OutboxProcessor {
 
             neo4j_client.use_database(&db_name).await?;
 
-            // Process each entry
+            // Separate INSERT/UPDATE from DELETE operations
+            let mut insert_update_entries = Vec::new();
+            let mut delete_entries = Vec::new();
+
+            for entry in &repo_entries {
+                match entry.operation.as_str() {
+                    "INSERT" | "UPDATE" => insert_update_entries.push(*entry),
+                    "DELETE" => delete_entries.push(*entry),
+                    _ => {}
+                }
+            }
+
             let mut processed_ids = Vec::new();
             let mut failed_ids = Vec::new();
             let mut resolved_relationships: Vec<(String, String, String)> = Vec::new();
 
-            for entry in repo_entries {
-                match entry.operation.as_str() {
-                    "INSERT" | "UPDATE" => {
-                        let payload: serde_json::Value = entry.payload.clone();
+            // Batch process INSERT/UPDATE operations
+            if !insert_update_entries.is_empty() {
+                // Parse all entities first, tracking which ones succeed
+                let mut entities_to_create = Vec::new();
+                let mut entity_entry_map = Vec::new(); // (entity_idx, entry, payload)
 
-                        // Parse labels with proper error handling (don't mask corruption)
-                        let labels: Vec<String> =
-                            match serde_json::from_value(payload["labels"].clone()) {
-                                Ok(l) => l,
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to parse labels for entity {}: {}",
-                                        entry.entity_id, e
-                                    );
-                                    failed_ids.push(entry.outbox_id);
-                                    continue;
-                                }
-                            };
+                for entry in &insert_update_entries {
+                    let payload: serde_json::Value = entry.payload.clone();
 
-                        if labels.is_empty() {
-                            warn!("Empty labels for entity {}, skipping", entry.entity_id);
-                            failed_ids.push(entry.outbox_id);
-                            continue;
+                    // Parse entity from payload
+                    match serde_json::from_value::<codesearch_core::CodeEntity>(
+                        payload["entity"].clone(),
+                    ) {
+                        Ok(entity) => {
+                            let idx = entities_to_create.len();
+                            entities_to_create.push(entity);
+                            entity_entry_map.push((idx, *entry, payload));
                         }
+                        Err(e) => {
+                            warn!(
+                                "Failed to parse entity from payload for {}: {}",
+                                entry.entity_id, e
+                            );
+                            failed_ids.push(entry.outbox_id);
+                        }
+                    }
+                }
 
-                        // Parse entity from payload
-                        let entity = match serde_json::from_value::<codesearch_core::CodeEntity>(
-                            entry.payload["entity"].clone(),
-                        ) {
-                            Ok(e) => e,
-                            Err(e) => {
-                                warn!(
-                                    "Failed to parse entity from payload for {}: {}",
-                                    entry.entity_id, e
-                                );
-                                failed_ids.push(entry.outbox_id);
-                                continue;
-                            }
-                        };
+                // Batch create all nodes in Neo4j
+                if !entities_to_create.is_empty() {
+                    match neo4j_client.batch_create_nodes(&entities_to_create).await {
+                        Ok(neo4j_node_ids) => {
+                            // Update neo4j_node_id in PostgreSQL and process relationships
+                            for (idx, entry, payload) in entity_entry_map {
+                                if idx < neo4j_node_ids.len() {
+                                    let neo4j_node_id = neo4j_node_ids[idx];
 
-                        // Create/merge node in Neo4j
-                        match neo4j_client.create_entity_node(&entity).await {
-                            Ok(neo4j_node_id) => {
-                                // Store neo4j_node_id in PostgreSQL
-                                if let Err(e) = sqlx::query(
-                                    "UPDATE entity_metadata
-                                     SET neo4j_node_id = $1
-                                     WHERE repository_id = $2 AND entity_id = $3",
-                                )
-                                .bind(neo4j_node_id)
-                                .bind(entry.repository_id)
-                                .bind(&entry.entity_id)
-                                .execute(&mut **tx)
-                                .await
-                                {
-                                    warn!(
-                                        "Failed to update neo4j_node_id for {}: {}",
-                                        entry.entity_id, e
-                                    );
-                                }
+                                    // Store neo4j_node_id in PostgreSQL
+                                    if let Err(e) = sqlx::query(
+                                        "UPDATE entity_metadata
+                                         SET neo4j_node_id = $1
+                                         WHERE repository_id = $2 AND entity_id = $3",
+                                    )
+                                    .bind(neo4j_node_id)
+                                    .bind(entry.repository_id)
+                                    .bind(&entry.entity_id)
+                                    .execute(&mut **tx)
+                                    .await
+                                    {
+                                        warn!(
+                                            "Failed to update neo4j_node_id for {}: {}",
+                                            entry.entity_id, e
+                                        );
+                                    }
 
-                                // Process relationships with proper error handling (don't mask corruption)
-                                let relationships: Vec<serde_json::Value> =
-                                    match serde_json::from_value(payload["relationships"].clone()) {
-                                        Ok(rels) => rels,
-                                        Err(e) => {
-                                            warn!(
-                                                "Failed to parse relationships for entity {}: {}",
-                                                entry.entity_id, e
-                                            );
-                                            // Continue processing - missing relationships are not fatal
-                                            Vec::new()
-                                        }
-                                    };
+                                    // Process relationships
+                                    let relationships: Vec<serde_json::Value> =
+                                        match serde_json::from_value(
+                                            payload["relationships"].clone(),
+                                        ) {
+                                            Ok(rels) => rels,
+                                            Err(e) => {
+                                                warn!(
+                                                    "Failed to parse relationships for entity {}: {}",
+                                                    entry.entity_id, e
+                                                );
+                                                Vec::new()
+                                            }
+                                        };
 
-                                for rel in relationships {
-                                    // Extract required fields with proper error handling
-                                    let rel_type = match rel["type"].as_str() {
-                                        Some(t) => t,
-                                        None => {
-                                            warn!(
+                                    for rel in relationships {
+                                        // Extract required fields with proper error handling
+                                        let rel_type = match rel["type"].as_str() {
+                                            Some(t) => t,
+                                            None => {
+                                                warn!(
                                                 "Missing relationship type for entity {}, skipping relationship",
                                                 entry.entity_id
                                             );
-                                            continue;
-                                        }
-                                    };
-                                    let resolved = rel["resolved"].as_bool().unwrap_or(false);
+                                                continue;
+                                            }
+                                        };
+                                        let resolved = rel["resolved"].as_bool().unwrap_or(false);
 
-                                    // Validate relationship type against allowlist (prevents Cypher injection)
-                                    if !ALLOWED_RELATIONSHIP_TYPES.contains(&rel_type) {
-                                        warn!(
+                                        // Validate relationship type against allowlist (prevents Cypher injection)
+                                        if !ALLOWED_RELATIONSHIP_TYPES.contains(&rel_type) {
+                                            warn!(
                                             "Invalid relationship type '{}' for entity {}, skipping. Allowed types: {:?}",
                                             rel_type, entry.entity_id, ALLOWED_RELATIONSHIP_TYPES
                                         );
-                                        continue;
-                                    }
+                                            continue;
+                                        }
 
-                                    if resolved {
-                                        // Resolved relationship: collect for batch creation
-                                        let from_id = match rel["from_id"].as_str() {
-                                            Some(id) if !id.is_empty() => id,
-                                            _ => {
-                                                warn!(
+                                        if resolved {
+                                            // Resolved relationship: collect for batch creation
+                                            let from_id = match rel["from_id"].as_str() {
+                                                Some(id) if !id.is_empty() => id,
+                                                _ => {
+                                                    warn!(
                                                     "Missing or empty from_id for {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
-                                                continue;
-                                            }
-                                        };
-                                        let to_id = match rel["to_id"].as_str() {
-                                            Some(id) if !id.is_empty() => id,
-                                            _ => {
-                                                warn!(
+                                                    continue;
+                                                }
+                                            };
+                                            let to_id = match rel["to_id"].as_str() {
+                                                Some(id) if !id.is_empty() => id,
+                                                _ => {
+                                                    warn!(
                                                     "Missing or empty to_id for {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
-                                                continue;
-                                            }
-                                        };
+                                                    continue;
+                                                }
+                                            };
 
-                                        // Collect relationship for batch creation after all nodes are processed
-                                        resolved_relationships.push((
-                                            from_id.to_string(),
-                                            to_id.to_string(),
-                                            rel_type.to_string(),
-                                        ));
-                                    } else {
-                                        // Unresolved relationship: store as node property for later resolution
-                                        let to_id = match rel["to_id"].as_str() {
-                                            Some(id) if !id.is_empty() => id,
-                                            _ => {
-                                                warn!(
+                                            // Collect relationship for batch creation after all nodes are processed
+                                            resolved_relationships.push((
+                                                from_id.to_string(),
+                                                to_id.to_string(),
+                                                rel_type.to_string(),
+                                            ));
+                                        } else {
+                                            // Unresolved relationship: store as node property for later resolution
+                                            let to_id = match rel["to_id"].as_str() {
+                                                Some(id) if !id.is_empty() => id,
+                                                _ => {
+                                                    warn!(
                                                     "Missing or empty to_id for unresolved {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
-                                                continue;
-                                            }
-                                        };
-                                        let from_qname = match rel["from_qualified_name"].as_str() {
-                                            Some(qname) if !qname.is_empty() => qname,
-                                            _ => {
-                                                warn!(
+                                                    continue;
+                                                }
+                                            };
+                                            let from_qname = match rel["from_qualified_name"]
+                                                .as_str()
+                                            {
+                                                Some(qname) if !qname.is_empty() => qname,
+                                                _ => {
+                                                    warn!(
                                                     "Missing or empty from_qualified_name for unresolved {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
-                                                continue;
-                                            }
-                                        };
+                                                    continue;
+                                                }
+                                            };
 
-                                        // Property name is safe because rel_type was validated above
-                                        let prop_name = format!(
-                                            "unresolved_{}_parent",
-                                            rel_type.to_lowercase()
-                                        );
-                                        // Use parameterized query for values, backticks for property name safety
-                                        let prop_query = format!(
-                                            "MATCH (n {{id: $to_id}})
+                                            // Property name is safe because rel_type was validated above
+                                            let prop_name = format!(
+                                                "unresolved_{}_parent",
+                                                rel_type.to_lowercase()
+                                            );
+                                            // Use parameterized query for values, backticks for property name safety
+                                            let prop_query = format!(
+                                                "MATCH (n {{id: $to_id}})
                                              SET n.`{prop_name}` = $from_qname"
-                                        );
+                                            );
 
-                                        let query = Neo4jQuery::new(prop_query)
-                                            .param("to_id", to_id)
-                                            .param("from_qname", from_qname);
-                                        if let Err(e) = neo4j_client.graph().run(query).await {
-                                            debug!("Failed to store unresolved {rel_type}: {e}");
+                                            let query = Neo4jQuery::new(prop_query)
+                                                .param("to_id", to_id)
+                                                .param("from_qname", from_qname);
+                                            if let Err(e) = neo4j_client.graph().run(query).await {
+                                                debug!(
+                                                    "Failed to store unresolved {rel_type}: {e}"
+                                                );
+                                            }
                                         }
                                     }
+
+                                    processed_ids.push(entry.outbox_id);
                                 }
-
-                                processed_ids.push(entry.outbox_id);
                             }
-                            Err(e) => {
-                                warn!("Failed to create Neo4j node for {}: {}", entry.entity_id, e);
+                        }
+                        Err(e) => {
+                            warn!("Failed to batch create Neo4j nodes: {}", e);
+                            // Mark all entities in this batch as failed
+                            for (_, entry, _) in entity_entry_map {
                                 failed_ids.push(entry.outbox_id);
                             }
                         }
                     }
-                    "DELETE" => {
-                        let payload: serde_json::Value = entry.payload.clone();
-                        let entity_id = payload["entity_id"]
-                            .as_str()
-                            .ok_or_else(|| Error::storage("Missing entity_id in delete payload"))?;
+                }
+            }
 
-                        match neo4j_client.delete_entity_node(entity_id).await {
-                            Ok(_) => {
-                                processed_ids.push(entry.outbox_id);
-                            }
-                            Err(e) => {
-                                warn!("Failed to delete Neo4j node for {}: {}", entity_id, e);
-                                failed_ids.push(entry.outbox_id);
-                            }
-                        }
+            // Process DELETE operations
+            for entry in delete_entries {
+                let payload: serde_json::Value = entry.payload.clone();
+                let entity_id = payload["entity_id"]
+                    .as_str()
+                    .ok_or_else(|| Error::storage("Missing entity_id in delete payload"))?;
+
+                match neo4j_client.delete_entity_node(entity_id).await {
+                    Ok(_) => {
+                        processed_ids.push(entry.outbox_id);
                     }
-                    _ => {
-                        error!("Unknown operation type: {}", entry.operation);
+                    Err(e) => {
+                        warn!("Failed to delete Neo4j node for {}: {}", entity_id, e);
                         failed_ids.push(entry.outbox_id);
                     }
                 }
@@ -983,6 +1003,21 @@ impl OutboxProcessor {
                         "Failed to batch create {} relationships: {}",
                         resolved_relationships.len(),
                         e
+                    );
+                }
+            }
+
+            // Set pending_relationship_resolution flag if we processed any nodes
+            // (they may have unresolved relationships that need resolution)
+            if !insert_update_entries.is_empty() && !processed_ids.is_empty() {
+                if let Err(e) = self
+                    .postgres_client
+                    .set_pending_relationship_resolution(repository_id, true)
+                    .await
+                {
+                    warn!(
+                        "Failed to set pending_relationship_resolution for repository {}: {}",
+                        repository_id, e
                     );
                 }
             }
@@ -1008,6 +1043,135 @@ impl OutboxProcessor {
                     .map_err(|e| Error::storage(format!("Failed to update retry count: {e}")))?;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Resolve pending relationships for repositories that need it
+    ///
+    /// This method checks for repositories with the pending_relationship_resolution flag set
+    /// and runs all relationship resolvers to create relationship edges in Neo4j.
+    ///
+    /// Called after processing batches of entity outbox entries to ensure relationships
+    /// are resolved as entities become available.
+    async fn resolve_pending_relationships(&self) -> Result<()> {
+        use crate::neo4j_relationship_resolver::{
+            resolve_contains_relationships, resolve_relationships_generic, CallGraphResolver,
+            ImportsResolver, InheritanceResolver, TraitImplResolver, TypeUsageResolver,
+        };
+
+        // Get repositories that need resolution
+        let repo_ids = self
+            .postgres_client
+            .get_repositories_with_pending_resolution()
+            .await?;
+
+        if repo_ids.is_empty() {
+            return Ok(());
+        }
+
+        debug!(
+            "Found {} repositories with pending relationship resolution",
+            repo_ids.len()
+        );
+
+        // Get Neo4j client
+        let neo4j_client = self.get_neo4j_client().await?;
+
+        // Resolve relationships for each repository
+        for repository_id in repo_ids {
+            info!("Resolving relationships for repository {}", repository_id);
+
+            // Ensure Neo4j database exists and is selected
+            let db_name = match self
+                .postgres_client
+                .get_neo4j_database_name(repository_id)
+                .await?
+            {
+                Some(name) => name,
+                None => {
+                    warn!(
+                        "No Neo4j database found for repository {}, skipping resolution",
+                        repository_id
+                    );
+                    // Clear the flag since we can't resolve without a database
+                    let _ = self
+                        .postgres_client
+                        .set_pending_relationship_resolution(repository_id, false)
+                        .await;
+                    continue;
+                }
+            };
+
+            neo4j_client.use_database(&db_name).await?;
+
+            // Run all resolvers
+            let resolvers: Vec<Box<dyn crate::neo4j_relationship_resolver::RelationshipResolver>> = vec![
+                Box::new(TraitImplResolver),
+                Box::new(InheritanceResolver),
+                Box::new(TypeUsageResolver),
+                Box::new(CallGraphResolver),
+                Box::new(ImportsResolver),
+            ];
+
+            for resolver in resolvers {
+                if let Err(e) = resolve_relationships_generic(
+                    &self.postgres_client,
+                    &neo4j_client,
+                    repository_id,
+                    resolver.as_ref(),
+                )
+                .await
+                {
+                    warn!(
+                        "Failed to resolve {} for repository {}: {}",
+                        resolver.name(),
+                        repository_id,
+                        e
+                    );
+                    // Continue with other resolvers even if one fails
+                }
+            }
+
+            // Resolve CONTAINS relationships (special case with batch optimization)
+            if let Err(e) =
+                resolve_contains_relationships(&self.postgres_client, &neo4j_client, repository_id)
+                    .await
+            {
+                warn!(
+                    "Failed to resolve CONTAINS relationships for repository {}: {}",
+                    repository_id, e
+                );
+            }
+
+            // Clear the pending flag and set graph_ready
+            if let Err(e) = self
+                .postgres_client
+                .set_pending_relationship_resolution(repository_id, false)
+                .await
+            {
+                warn!(
+                    "Failed to clear pending_relationship_resolution flag for repository {}: {}",
+                    repository_id, e
+                );
+            }
+
+            if let Err(e) = self
+                .postgres_client
+                .set_graph_ready(repository_id, true)
+                .await
+            {
+                warn!(
+                    "Failed to set graph_ready flag for repository {}: {}",
+                    repository_id, e
+                );
+            }
+
+            info!(
+                "Completed relationship resolution for repository {}",
+                repository_id
+            );
         }
 
         Ok(())

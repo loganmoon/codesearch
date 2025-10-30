@@ -341,10 +341,24 @@ Neo4j is included in the shared infrastructure at `~/.codesearch/infrastructure/
 - Indexes created automatically for common queries
 
 **Relationship Resolution:**
-- Relationships resolved after entity indexing completes
-- Batch processing reduces network overhead
-- Supports both resolved (direct entity_id) and unresolved (qualified name lookup) relationships
-- Failed resolution logged but doesn't block indexing
+- **Automatic Resolution**: Relationships are automatically resolved by the outbox processor after entities are created in Neo4j
+- **No Manual Step Required**: Unlike previous versions, `codesearch index` no longer requires a manual post-indexing resolution step
+- **Event-Based Triggering**: The processor sets a `pending_relationship_resolution` flag when entities are added, triggers resolution automatically
+- **Supports Both Types**: Handles resolved relationships (direct entity_id) and unresolved relationships (qualified name lookup)
+- **Batch Processing**: All resolvers run in batch mode to reduce network overhead
+- **Resolution Stages**:
+  1. Entities indexed → nodes created in Neo4j → flag set
+  2. Outbox processor detects flag → runs all relationship resolvers
+  3. Relationships created → flag cleared → `graph_ready` set to true
+- **Resolver Types**:
+  - `TraitImplResolver`: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE
+  - `InheritanceResolver`: INHERITS_FROM
+  - `TypeUsageResolver`: USES
+  - `CallGraphResolver`: CALLS
+  - `ImportsResolver`: IMPORTS
+  - Special CONTAINS resolver with optimized batch resolution
+- **Error Handling**: Failed resolutions are logged but don't block entity processing; will retry in next cycle
+- **Real-Time Updates**: Works with incremental file changes through the watcher
 
 **Security:**
 - Cypher injection protection via allowlist validation
@@ -385,8 +399,10 @@ SHOW DATABASES
 - Uses UNWIND batching: N entities/relationships → M queries (one per type)
 - Example: 10,000 entities of 5 types = 5 queries instead of 10,000
 - Significantly reduces network round-trips compared to individual inserts
-- Relationship resolution happens after indexing, not during
+- Relationship resolution happens automatically in the background via outbox processor
+- Resolution runs outside transaction boundaries to avoid holding locks
 - BoltType system handles automatic conversion of Rust types to Neo4j parameters
+- Resolvers run in parallel with other outbox processing tasks
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.

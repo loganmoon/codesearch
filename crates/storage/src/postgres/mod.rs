@@ -77,6 +77,26 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Check if graph is ready for repository
     async fn is_graph_ready(&self, repository_id: Uuid) -> Result<bool>;
 
+    /// Set pending_relationship_resolution flag for repository
+    ///
+    /// This flag indicates that entities have been added to Neo4j but relationships
+    /// need to be resolved. The outbox processor sets this flag after creating entity
+    /// nodes and clears it after resolving relationships.
+    async fn set_pending_relationship_resolution(
+        &self,
+        repository_id: Uuid,
+        pending: bool,
+    ) -> Result<()>;
+
+    /// Check if repository has pending relationship resolution
+    async fn has_pending_relationship_resolution(&self, repository_id: Uuid) -> Result<bool>;
+
+    /// Get all repositories with pending relationship resolution
+    ///
+    /// Returns repository IDs that have the pending_relationship_resolution flag set.
+    /// Used by the outbox processor to find repositories that need resolution.
+    async fn get_repositories_with_pending_resolution(&self) -> Result<Vec<Uuid>>;
+
     /// Get repository information by collection name
     ///
     /// Looks up a repository by its Qdrant collection name and returns full metadata.

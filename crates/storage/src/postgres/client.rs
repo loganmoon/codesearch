@@ -498,30 +498,24 @@ impl PostgresClient {
 
         let mut result = std::collections::HashMap::new();
         for (repo_id, avgdl_opt, total_tokens_opt, entity_count_opt) in rows {
-            let avgdl = avgdl_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 statistics not initialized for repository {repo_id}"
-                ))
-            })?;
-            let total_tokens = total_tokens_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 total_tokens not initialized for repository {repo_id}"
-                ))
-            })?;
-            let entity_count = entity_count_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 entity_count not initialized for repository {repo_id}"
-                ))
-            })?;
-
-            result.insert(
-                repo_id,
-                super::BM25Statistics {
-                    avgdl,
-                    total_tokens,
-                    entity_count,
-                },
-            );
+            // Filter incomplete statistics instead of failing the entire batch
+            match (avgdl_opt, total_tokens_opt, entity_count_opt) {
+                (Some(avgdl), Some(total_tokens), Some(entity_count)) => {
+                    result.insert(
+                        repo_id,
+                        super::BM25Statistics {
+                            avgdl,
+                            total_tokens,
+                            entity_count,
+                        },
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        "Skipping repository {repo_id} with incomplete BM25 statistics (not yet initialized)"
+                    );
+                }
+            }
         }
 
         Ok(result)

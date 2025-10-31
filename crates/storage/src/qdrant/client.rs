@@ -285,7 +285,8 @@ impl StorageClient for QdrantStorageClient {
         };
 
         let filter = filters.and_then(|f| Self::build_filter(&f));
-        let prefetch_limit = (limit * prefetch_multiplier) as u64;
+        // Cap prefetch to prevent resource exhaustion with high limit/multiplier values
+        let prefetch_limit = (limit * prefetch_multiplier).min(1000) as u64;
 
         // Convert sparse vector format
         let (sparse_indices, sparse_values): (Vec<u32>, Vec<f32>) =

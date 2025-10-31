@@ -175,7 +175,13 @@ pub trait PostgresClientTrait: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if BM25 statistics have not been initialized for this repository.
-    /// Statistics must be initialized during indexing before they can be retrieved.
+    /// This occurs when:
+    /// - The repository has never been indexed
+    /// - No entities have been added yet (indexing in progress)
+    /// - The repository was dropped and re-created but not yet indexed
+    ///
+    /// Statistics are initialized during the first entity insertion and maintained
+    /// incrementally thereafter.
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
 
     /// Get BM25 statistics for a repository within a transaction

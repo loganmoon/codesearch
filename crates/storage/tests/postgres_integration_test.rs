@@ -1671,3 +1671,299 @@ async fn test_get_embeddings_by_qualified_names_deleted_entities() -> Result<()>
     })
     .await
 }
+
+#[tokio::test]
+async fn test_get_entities_by_qualified_names_basic() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Create test entities
+        let mut entity1 =
+            create_test_entity("func1", EntityType::Function, &repository_id.to_string());
+        entity1.qualified_name = "module::func1".to_string();
+
+        let mut entity2 =
+            create_test_entity("func2", EntityType::Function, &repository_id.to_string());
+        entity2.qualified_name = "module::func2".to_string();
+
+        // Store entities
+        let embedding = vec![0.1; 768];
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = client
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                768,
+            )
+            .await?;
+        let embedding_id = embedding_ids[0];
+
+        let batch = vec![
+            (
+                &entity1,
+                embedding_id,
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+                10,
+            ),
+            (
+                &entity2,
+                embedding_id,
+                OutboxOperation::Insert,
+                Uuid::new_v4(),
+                TargetStore::Qdrant,
+                None,
+                15,
+            ),
+        ];
+
+        client
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
+            .await?;
+
+        // Query by qualified names
+        let qualified_names = vec!["module::func1".to_string(), "module::func2".to_string()];
+
+        let entities = client
+            .get_entities_by_qualified_names(repository_id, &qualified_names)
+            .await?;
+
+        assert_eq!(entities.len(), 2, "Should return both entities");
+        assert!(entities.contains_key("module::func1"));
+        assert!(entities.contains_key("module::func2"));
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_get_entities_by_qualified_names_empty_input() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Query with empty list
+        let qualified_names: Vec<String> = vec![];
+
+        let entities = client
+            .get_entities_by_qualified_names(repository_id, &qualified_names)
+            .await?;
+
+        assert_eq!(entities.len(), 0, "Should return empty map for empty input");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_get_entities_by_qualified_names_partial_match() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Create only one entity
+        let mut entity =
+            create_test_entity("func1", EntityType::Function, &repository_id.to_string());
+        entity.qualified_name = "module::func1".to_string();
+
+        let embedding = vec![0.1; 768];
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = client
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                768,
+            )
+            .await?;
+        let embedding_id = embedding_ids[0];
+
+        let batch = vec![(
+            &entity,
+            embedding_id,
+            OutboxOperation::Insert,
+            Uuid::new_v4(),
+            TargetStore::Qdrant,
+            None,
+            10,
+        )];
+
+        client
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
+            .await?;
+
+        // Query for two entities (one exists, one doesn't)
+        let qualified_names = vec![
+            "module::func1".to_string(),
+            "module::nonexistent".to_string(),
+        ];
+
+        let entities = client
+            .get_entities_by_qualified_names(repository_id, &qualified_names)
+            .await?;
+
+        assert_eq!(entities.len(), 1, "Should return only existing entity");
+        assert!(entities.contains_key("module::func1"));
+        assert!(!entities.contains_key("module::nonexistent"));
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_get_entities_by_qualified_names_duplicates() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Create test entity
+        let mut entity =
+            create_test_entity("func1", EntityType::Function, &repository_id.to_string());
+        entity.qualified_name = "module::func1".to_string();
+
+        let embedding = vec![0.1; 768];
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = client
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                768,
+            )
+            .await?;
+        let embedding_id = embedding_ids[0];
+
+        let batch = vec![(
+            &entity,
+            embedding_id,
+            OutboxOperation::Insert,
+            Uuid::new_v4(),
+            TargetStore::Qdrant,
+            None,
+            10,
+        )];
+
+        client
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
+            .await?;
+
+        // Query with duplicate qualified names
+        let qualified_names = vec![
+            "module::func1".to_string(),
+            "module::func1".to_string(),
+            "module::func1".to_string(),
+        ];
+
+        let entities = client
+            .get_entities_by_qualified_names(repository_id, &qualified_names)
+            .await?;
+
+        assert_eq!(
+            entities.len(),
+            1,
+            "Should deduplicate and return only one entity"
+        );
+        assert!(entities.contains_key("module::func1"));
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn test_get_entities_by_qualified_names_deleted() -> Result<()> {
+    with_timeout(Duration::from_secs(30), async {
+        let (postgres, db_name, client) = setup_postgres().await?;
+
+        let repo_path = Path::new("/tmp/test-repo");
+        let collection_name = format!("test_{}", Uuid::new_v4());
+        let repository_id = client
+            .ensure_repository(repo_path, &collection_name, None)
+            .await?;
+
+        // Create test entity
+        let mut entity =
+            create_test_entity("func1", EntityType::Function, &repository_id.to_string());
+        entity.qualified_name = "module::func1".to_string();
+
+        let embedding = vec![0.1; 768];
+        let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+        let embedding_ids = client
+            .store_embeddings(
+                repository_id,
+                &[(content_hash, embedding, None)],
+                "test-model",
+                768,
+            )
+            .await?;
+        let embedding_id = embedding_ids[0];
+
+        let batch = vec![(
+            &entity,
+            embedding_id,
+            OutboxOperation::Insert,
+            Uuid::new_v4(),
+            TargetStore::Qdrant,
+            None,
+            10,
+        )];
+
+        client
+            .store_entities_with_outbox_batch(repository_id, &collection_name, &batch)
+            .await?;
+
+        // Mark entity as deleted
+        client
+            .mark_entities_deleted_with_outbox(
+                repository_id,
+                &collection_name,
+                &[entity.entity_id.clone()],
+                &[10],
+            )
+            .await?;
+
+        // Query for deleted entity
+        let qualified_names = vec!["module::func1".to_string()];
+
+        let entities = client
+            .get_entities_by_qualified_names(repository_id, &qualified_names)
+            .await?;
+
+        assert_eq!(entities.len(), 0, "Should not return deleted entities");
+
+        drop_test_database(&postgres, &db_name).await?;
+        Ok(())
+    })
+    .await
+}

@@ -131,7 +131,25 @@ struct NavigateRequest {
     /// Maximum number of results (default: 20)
     #[serde(default = "default_navigate_limit")]
     limit: Option<usize>,
-    /// Optional semantic filter to rank results by similarity
+    /// Optional semantic filter to rank results by relevance using reranking.
+    ///
+    /// When provided:
+    /// 1. Graph query retrieves qualified names of matching entities
+    /// 2. Full entity data (including content) is fetched from Postgres using qualified names
+    /// 3. If a reranker is configured, entities are reranked against the semantic_filter query
+    ///    using the vLLM reranker for improved relevance scoring
+    /// 4. Results are returned with relevance scores (0-100)
+    ///
+    /// Fallback behavior:
+    /// - If entity fetch fails: Returns unfiltered graph results with a warning log
+    /// - If reranking fails: Returns unscored results (without relevance scores) with a warning log
+    /// - If no reranker is configured: Returns unscored results
+    ///
+    /// The semantic filter is particularly useful for narrowing broad graph queries
+    /// (e.g., "all implementations") to the most relevant results for a specific use case.
+    #[schemars(
+        description = "Optional semantic filter to rank results by relevance. Uses reranking with vLLM when available, with graceful fallback to unscored results on errors."
+    )]
     semantic_filter: Option<String>,
 }
 
@@ -591,14 +609,22 @@ impl CodeSearchMcpServer {
         //    BGE model. Good for conceptual similarity.
         //
         // The Reciprocal Rank Fusion algorithm merges results from both methods:
-        // - Each method retrieves (prefetch_multiplier × limit) candidates
+        // - Each method retrieves (prefetch_multiplier × limit) candidates (capped at 1000)
         // - RRF assigns scores based on rank: score = 1 / (k + rank) where k=60
         // - Final ranking combines scores from both methods
         //
         // The prefetch_multiplier parameter controls the trade-off:
-        // - Higher values (10-20): Better recall, captures more candidates, slower
-        // - Lower values (3-5): Faster queries, may miss some relevant results
-        // - Default (5): Balanced trade-off between quality and latency
+        // - Higher values (10-20): Better recall, captures more candidates at the cost
+        //   of higher latency and memory usage. May retrieve 10,000+ vectors across
+        //   parallel repository searches if not capped.
+        // - Lower values (3-5): Faster queries with lower resource usage, but may miss
+        //   some relevant results if the top candidates differ significantly between methods.
+        // - Default (5): Balanced trade-off between quality and latency.
+        // - Maximum effective: 1000 prefetch per method (enforced to prevent resource exhaustion)
+        //
+        // Resource considerations: With N repositories, limit=100, multiplier=10,
+        // the system would attempt to retrieve 2N × min(100×10, 1000) = 2000N vectors
+        // before fusion (2000 vectors per repository: 1000 sparse + 1000 dense).
         //
         // For more on RRF: https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
 
@@ -1013,6 +1039,9 @@ impl CodeSearchMcpServer {
         };
 
         // Apply semantic filtering if requested
+        let mut semantic_filter_applied = false;
+        let mut semantic_filter_errors: Vec<String> = Vec::new();
+
         let results = if let Some(ref semantic_filter) = request.semantic_filter {
             // Extract qualified names from graph results
             let qualified_names: Vec<String> = match &results {
@@ -1039,9 +1068,9 @@ impl CodeSearchMcpServer {
                     .get_entities_by_qualified_names(repo_id, &qualified_names)
                     .await
                     .map_err(|e| {
-                        tracing::warn!(
-                            "Failed to fetch entities: {e}, returning unfiltered results"
-                        );
+                        let error_msg = format!("Failed to fetch entities for reranking: {e}");
+                        tracing::warn!("{error_msg}, returning unfiltered results");
+                        semantic_filter_errors.push(error_msg);
                         e
                     })
                     .ok();
@@ -1068,6 +1097,7 @@ impl CodeSearchMcpServer {
                             // Attempt reranking with fallback
                             match reranker.rerank(semantic_filter, &documents, limit).await {
                                 Ok(reranked) => {
+                                    semantic_filter_applied = true;
                                     let filtered_results: Vec<_> = reranked
                                         .into_iter()
                                         .map(|(qname, score)| {
@@ -1081,9 +1111,9 @@ impl CodeSearchMcpServer {
                                     serde_json::json!(filtered_results)
                                 }
                                 Err(e) => {
-                                    tracing::warn!(
-                                        "Reranking failed: {e}, returning unscored results"
-                                    );
+                                    let error_msg = format!("Reranking failed: {e}");
+                                    tracing::warn!("{error_msg}, returning unscored results");
+                                    semantic_filter_errors.push(error_msg);
                                     // Fall back to unscored results
                                     let unscored: Vec<_> = qualified_names
                                         .into_iter()
@@ -1137,12 +1167,27 @@ impl CodeSearchMcpServer {
             }
         };
 
-        let response = serde_json::json!({
+        let mut response = serde_json::json!({
             "results": results,
             "relationship": request.relationship,
             "from_entity": request.from_entity,
             "warning": warning,
         });
+
+        // Add metadata about semantic filter application
+        if request.semantic_filter.is_some() {
+            let metadata = if semantic_filter_errors.is_empty() {
+                serde_json::json!({
+                    "semantic_filter_applied": semantic_filter_applied,
+                })
+            } else {
+                serde_json::json!({
+                    "semantic_filter_applied": semantic_filter_applied,
+                    "semantic_filter_errors": semantic_filter_errors,
+                })
+            };
+            response["metadata"] = metadata;
+        }
 
         let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
             McpError::new(

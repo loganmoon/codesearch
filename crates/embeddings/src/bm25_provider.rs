@@ -175,4 +175,93 @@ mod tests {
         // Note: "i32" appears 3 times in input but should only appear once in output
         assert_eq!(sparse_vec.len(), 6, "Should have 6 unique indices");
     }
+
+    #[tokio::test]
+    async fn test_token_count_consistency() {
+        use crate::code_tokenizer::CodeTokenizer;
+        use bm25::Tokenizer;
+
+        let tokenizer = CodeTokenizer::new();
+        let text = "fn calculate_sum(a: i32, b: i32) -> i32";
+
+        // Count tokens using the tokenizer directly
+        let tokens = tokenizer.tokenize(text);
+        let token_count = tokens.len();
+
+        // Generate BM25 embedding
+        let provider = Bm25SparseProvider::new(50.0);
+        let result = provider.embed_sparse(vec![text]).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_some());
+
+        let sparse_vec = result[0].as_ref().unwrap();
+        let unique_token_count = sparse_vec.len();
+
+        // Token count from tokenizer should equal the number of unique indices in sparse embedding
+        // This verifies that bm25_token_count stored in DB would match tokenizer output
+        assert_eq!(
+            token_count, 8,
+            "Tokenizer should produce 8 tokens (with duplicates)"
+        );
+        assert_eq!(
+            unique_token_count, 6,
+            "BM25 sparse embedding should have 6 unique indices (after deduplication)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_token_count_with_special_characters() {
+        use crate::code_tokenizer::CodeTokenizer;
+        use bm25::Tokenizer;
+
+        let tokenizer = CodeTokenizer::new();
+        let text = "parse_HTTPRequest!@#$%getUserName";
+
+        let tokens = tokenizer.tokenize(text);
+        // Should tokenize to: ["parse", "http", "request", "get", "user", "name"]
+        assert_eq!(
+            tokens.len(),
+            6,
+            "Should handle special characters correctly"
+        );
+
+        // Verify BM25 embedding generates same number of unique tokens
+        let provider = Bm25SparseProvider::new(50.0);
+        let result = provider.embed_sparse(vec![text]).await.unwrap();
+        let sparse_vec = result[0].as_ref().unwrap();
+        assert_eq!(
+            sparse_vec.len(),
+            6,
+            "BM25 should generate 6 unique indices matching tokenizer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_token_count_with_unicode() {
+        use crate::code_tokenizer::CodeTokenizer;
+        use bm25::Tokenizer;
+
+        let tokenizer = CodeTokenizer::new();
+        // Unicode characters should be handled properly
+        let text = "fn calculateSum(données: i32) → Result";
+
+        let tokens = tokenizer.tokenize(text);
+        let token_count = tokens.len();
+
+        let provider = Bm25SparseProvider::new(50.0);
+        let result = provider.embed_sparse(vec![text]).await.unwrap();
+        let sparse_vec = result[0].as_ref().unwrap();
+
+        // Verify token count consistency with Unicode input
+        assert!(token_count > 0, "Should tokenize Unicode text");
+        assert_eq!(
+            sparse_vec.len(),
+            tokens
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            "Unique BM25 indices should match unique tokens from tokenizer"
+        );
+    }
 }

@@ -299,6 +299,8 @@ Neo4j stores code entities as nodes and their relationships as edges in a graph 
 ### Supported Relationship Types
 
 The following relationship types are supported (enforced by Cypher injection protection):
+
+**Forward Relationships:**
 - `CONTAINS`: Parent-child containment (e.g., class contains method)
 - `IMPLEMENTS`: Implementation of trait/interface
 - `ASSOCIATES`: Association from impl block to type
@@ -307,6 +309,21 @@ The following relationship types are supported (enforced by Cypher injection pro
 - `USES`: Type usage in fields or parameters
 - `CALLS`: Function/method call
 - `IMPORTS`: Module imports
+
+**Reciprocal Relationships:**
+
+For efficient bidirectional graph traversal, the system automatically creates reciprocal edges:
+- `IMPLEMENTED_BY`: Inverse of IMPLEMENTS (trait → impl)
+- `ASSOCIATED_WITH`: Inverse of ASSOCIATES (type → impl block)
+- `EXTENDED_BY`: Inverse of EXTENDS_INTERFACE (parent interface → child interface)
+- `HAS_SUBCLASS`: Inverse of INHERITS_FROM (parent class → subclass)
+- `USED_BY`: Inverse of USES (type → entities using it)
+- `CALLED_BY`: Inverse of CALLS (callee → caller)
+- `IMPORTED_BY`: Inverse of IMPORTS (module → importers)
+
+Reciprocal relationships are created automatically by the relationship resolvers during
+the outbox processing cycle. Both forward and reciprocal edges are created and deleted
+atomically to maintain graph consistency.
 
 ### Configuration
 

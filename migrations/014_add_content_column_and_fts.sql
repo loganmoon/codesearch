@@ -9,7 +9,7 @@ ALTER TABLE entity_metadata ADD COLUMN content TEXT;
 -- Using english configuration for stemming and stop words
 CREATE INDEX idx_entity_metadata_content_fts
     ON entity_metadata
-    USING GIN (to_tsvector('english', COALESCE(content, '')))
+    USING GIN (to_tsvector('english', content))
     WHERE deleted_at IS NULL AND content IS NOT NULL;
 
 -- Add comment explaining the column

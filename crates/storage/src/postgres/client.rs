@@ -1036,7 +1036,7 @@ impl PostgresClient {
     ///
     /// # Arguments
     /// * `repository_id` - Repository to search in
-    /// * `query` - Search query string (will be parsed using to_tsquery)
+    /// * `query` - Search query string (will be parsed using plainto_tsquery for plain text search)
     /// * `limit` - Maximum number of results to return
     pub async fn search_entities_fulltext(
         &self,
@@ -1050,8 +1050,8 @@ impl PostgresClient {
              WHERE repository_id = $1
                AND deleted_at IS NULL
                AND content IS NOT NULL
-               AND to_tsvector('english', content) @@ plainto_tsquery('english', $2)
-             ORDER BY ts_rank(to_tsvector('english', content), plainto_tsquery('english', $2)) DESC
+               AND content_tsv @@ plainto_tsquery('english', $2)
+             ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
              LIMIT $3",
         )
         .bind(repository_id)
@@ -1064,13 +1064,21 @@ impl PostgresClient {
         let entities = rows
             .into_iter()
             .filter_map(|(json, content)| {
-                serde_json::from_value::<CodeEntity>(json)
-                    .ok()
-                    .map(|mut entity| {
+                match serde_json::from_value::<CodeEntity>(json) {
+                    Ok(mut entity) => {
                         // Use content from column, overriding any value in JSON
                         entity.content = content;
-                        entity
-                    })
+                        Some(entity)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            repository_id = %repository_id,
+                            error = %e,
+                            "Failed to deserialize entity from full-text search results"
+                        );
+                        None
+                    }
+                }
             })
             .collect();
 
@@ -1266,12 +1274,12 @@ impl PostgresClient {
             .iter()
             .map(
                 |(entity, embedding, op, point_id, target, git_commit, token_count)| {
-                    // Extract content before serialization (will be stored in separate column)
-                    let content = entity.content.clone();
-
                     // Create entity without content for JSON storage
                     let mut entity_without_content = (*entity).clone();
-                    entity_without_content.content = None;
+
+                    // Extract content (will be stored in separate column)
+                    // Use take() to move instead of cloning again
+                    let content = entity_without_content.content.take();
 
                     let entity_json = serde_json::to_value(&entity_without_content)
                         .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;

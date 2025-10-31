@@ -874,6 +874,60 @@ impl PostgresClientTrait for MockPostgresClient {
         data.embedding_id_counter = 0;
         Ok(count)
     }
+
+    async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let data = self.data.lock().unwrap();
+        let mut result = std::collections::HashMap::new();
+
+        for ((repo_id, _entity_id), metadata) in &data.entities {
+            if *repo_id == repository_id
+                && metadata.deleted_at.is_none()
+                && qualified_names.contains(&metadata.entity.qualified_name)
+            {
+                // For the mock, we'll return a dummy embedding if we find the entity
+                // In real usage, this would need to join with embedding_id
+                let dummy_embedding = vec![0.1; 768]; // BGE-style embedding dimension
+                result.insert(metadata.entity.qualified_name.clone(), dummy_embedding);
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let data = self.data.lock().unwrap();
+        let mut result = std::collections::HashMap::new();
+
+        for ((repo_id, _entity_id), metadata) in &data.entities {
+            if *repo_id == repository_id
+                && metadata.deleted_at.is_none()
+                && qualified_names.contains(&metadata.entity.qualified_name)
+            {
+                result.insert(
+                    metadata.entity.qualified_name.clone(),
+                    metadata.entity.clone(),
+                );
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 // Test helper methods (not part of the trait)

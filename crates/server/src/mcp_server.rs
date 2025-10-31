@@ -131,8 +131,25 @@ struct NavigateRequest {
     /// Maximum number of results (default: 20)
     #[serde(default = "default_navigate_limit")]
     limit: Option<usize>,
-    /// Optional semantic filter to rank results by similarity
-    #[allow(dead_code)] // TODO: Implement semantic filtering in hybrid queries
+    /// Optional semantic filter to rank results by relevance using reranking.
+    ///
+    /// When provided:
+    /// 1. Graph query retrieves qualified names of matching entities
+    /// 2. Full entity data (including content) is fetched from Postgres using qualified names
+    /// 3. If a reranker is configured, entities are reranked against the semantic_filter query
+    ///    using the vLLM reranker for improved relevance scoring
+    /// 4. Results are returned with relevance scores (0-100)
+    ///
+    /// Fallback behavior:
+    /// - If entity fetch fails: Returns unfiltered graph results with a warning log
+    /// - If reranking fails: Returns unscored results (without relevance scores) with a warning log
+    /// - If no reranker is configured: Returns unscored results
+    ///
+    /// The semantic filter is particularly useful for narrowing broad graph queries
+    /// (e.g., "all implementations") to the most relevant results for a specific use case.
+    #[schemars(
+        description = "Optional semantic filter to rank results by relevance. Uses reranking with vLLM when available, with graceful fallback to unscored results on errors."
+    )]
     semantic_filter: Option<String>,
 }
 
@@ -177,11 +194,225 @@ impl CodeSearchMcpServer {
             ));
         }
 
-        // TODO: Implement hybrid search logic to combine semantic results with structural filters
-        // For now, structural filters are validated but not yet applied
-        if has_structural_filters {
-            tracing::warn!("Structural filters requested but not yet implemented in search");
-        }
+        // Execute structural filters if present
+        let structural_qualified_names: Option<std::collections::HashSet<String>> =
+            if has_structural_filters {
+                // Already validated above at line 184 that neo4j is Some
+                let Some(ref neo4j) = self.neo4j_client else {
+                    return Err(McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        "Neo4j client unexpectedly unavailable".to_string(),
+                        None,
+                    ));
+                };
+
+                // Structural filters require single repository (can't filter across repos)
+                let (target_repo_id, _) = if let Some(ref repo_path) = request.repository_path {
+                    let path_buf = PathBuf::from(repo_path);
+                    self.postgres_client
+                        .get_repository_by_path(&path_buf)
+                        .await
+                        .map_err(|e| {
+                            McpError::new(
+                                ErrorCode::INTERNAL_ERROR,
+                                format!("Failed to look up repository: {e}"),
+                                None,
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            McpError::new(
+                                ErrorCode::INVALID_PARAMS,
+                                format!("No indexed repository found at path '{repo_path}'"),
+                                None,
+                            )
+                        })?
+                } else {
+                    return Err(McpError::new(
+                        ErrorCode::INVALID_PARAMS,
+                        "Structural filters (implements_trait, called_by, calls, in_module) require specifying a single repository via repository_path parameter.".to_string(),
+                        None,
+                    ));
+                };
+
+                // Run structural queries and intersect results (AND logic)
+                let mut qualified_names: Option<std::collections::HashSet<String>> = None;
+
+                // Filter: implements_trait
+                if let Some(ref trait_name) = request.implements_trait {
+                    let trait_impls = crate::graph_queries::find_trait_implementations(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        trait_name,
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Trait implementation query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(impls) = trait_impls {
+                        let impls_set: std::collections::HashSet<String> =
+                            impls.into_iter().collect();
+                        qualified_names = Some(match qualified_names {
+                            None => impls_set,
+                            Some(existing) => existing.intersection(&impls_set).cloned().collect(),
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: in_module
+                if let Some(ref module_name) = request.in_module {
+                    let module_functions = crate::graph_queries::find_functions_in_module(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        module_name,
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Module functions query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(functions) = module_functions {
+                        let functions_set: std::collections::HashSet<String> =
+                            functions.into_iter().collect();
+                        qualified_names = Some(match qualified_names {
+                            None => functions_set,
+                            Some(existing) => {
+                                existing.intersection(&functions_set).cloned().collect()
+                            }
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: calls (entities that call this function)
+                if let Some(ref function_name) = request.calls {
+                    let callers = crate::graph_queries::find_function_callers(
+                        neo4j,
+                        &self.postgres_client,
+                        target_repo_id,
+                        function_name,
+                        3, // Default max depth
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(
+                            "Function callers query failed: {e}, falling back to semantic-only search"
+                        );
+                        e
+                    })
+                    .ok();
+
+                    if let Some(caller_list) = callers {
+                        let callers_set: std::collections::HashSet<String> =
+                            caller_list.into_iter().map(|(name, _depth)| name).collect();
+                        qualified_names = Some(match qualified_names {
+                            None => callers_set,
+                            Some(existing) => {
+                                existing.intersection(&callers_set).cloned().collect()
+                            }
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Structural filter failed, continuing with semantic-only search"
+                        );
+                    }
+                }
+
+                // Filter: called_by (find callees - what this function calls)
+                if let Some(ref function_name) = request.called_by {
+                    // Query for functions that are called BY the specified function
+                    // Using forward CALLS edges: (function)-[:CALLS]->(callee)
+                    let db_name = neo4j
+                        .ensure_repository_database(target_repo_id, self.postgres_client.as_ref())
+                        .await
+                        .map_err(|e| {
+                            McpError::new(
+                                ErrorCode::INTERNAL_ERROR,
+                                format!("Failed to ensure Neo4j database: {e}"),
+                                None,
+                            )
+                        })?;
+                    neo4j.use_database(&db_name).await.map_err(|e| {
+                        McpError::new(
+                            ErrorCode::INTERNAL_ERROR,
+                            format!("Failed to use Neo4j database: {e}"),
+                            None,
+                        )
+                    })?;
+
+                    let callees_result = neo4j
+                        .find_function_callees(
+                            &self.postgres_client,
+                            target_repo_id,
+                            function_name,
+                            3,
+                        )
+                        .await;
+
+                    match callees_result {
+                        Ok(callee_list) => {
+                            let callees_set: std::collections::HashSet<String> =
+                                callee_list.into_iter().map(|(name, _depth)| name).collect();
+                            qualified_names = Some(match qualified_names {
+                                None => callees_set,
+                                Some(existing) => {
+                                    existing.intersection(&callees_set).cloned().collect()
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Function callees query failed: {e}, falling back to semantic-only search"
+                            );
+                        }
+                    }
+                }
+
+                // Check if intersection resulted in empty set
+                if let Some(ref names) = qualified_names {
+                    if names.is_empty() {
+                        // No entities match all structural filters
+                        return Ok(CallToolResult::success(vec![Content::text(
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "results": [],
+                                "total": 0,
+                                "query": request.query,
+                                "repositories_searched": 1,
+                                "message": "No entities match all structural filters",
+                                "reranked": false,
+                            }))
+                            .map_err(|e| {
+                                McpError::new(
+                                    ErrorCode::INTERNAL_ERROR,
+                                    format!("Failed to serialize response: {e}"),
+                                    None,
+                                )
+                            })?,
+                        )]));
+                    }
+                }
+
+                qualified_names
+            } else {
+                None
+            };
 
         // Determine which repositories to search
         let repos = self.repositories.read().await;
@@ -369,21 +600,52 @@ impl CodeSearchMcpServer {
             file_path: request.file_path.as_ref().map(PathBuf::from),
         };
 
-        // Search all target repositories in parallel using hybrid search
-        let stats_batch_clone = stats_batch.clone();
+        // Execute hybrid search using Reciprocal Rank Fusion (RRF)
+        //
+        // Hybrid search combines two retrieval methods for improved accuracy:
+        // 1. BM25 sparse embeddings - Traditional keyword-based search using term frequency
+        //    and inverse document frequency. Good for exact keyword matches.
+        // 2. Dense vector embeddings - Semantic search using learned embeddings from the
+        //    BGE model. Good for conceptual similarity.
+        //
+        // The Reciprocal Rank Fusion algorithm merges results from both methods:
+        // - Each method retrieves (prefetch_multiplier × limit) candidates (capped at 1000)
+        // - RRF assigns scores based on rank: score = 1 / (k + rank) where k=60
+        // - Final ranking combines scores from both methods
+        //
+        // The prefetch_multiplier parameter controls the trade-off:
+        // - Higher values (10-20): Better recall, captures more candidates at the cost
+        //   of higher latency and memory usage. May retrieve 10,000+ vectors across
+        //   parallel repository searches if not capped.
+        // - Lower values (3-5): Faster queries with lower resource usage, but may miss
+        //   some relevant results if the top candidates differ significantly between methods.
+        // - Default (5): Balanced trade-off between quality and latency.
+        // - Maximum effective: 1000 prefetch per method (enforced to prevent resource exhaustion)
+        //
+        // Resource considerations: With N repositories, limit=100, multiplier=10,
+        // the system would attempt to retrieve 2N × min(100×10, 1000) = 2000N vectors
+        // before fusion (2000 vectors per repository: 1000 sparse + 1000 dense).
+        //
+        // For more on RRF: https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
+
+        // Wrap shared data in Arc to avoid expensive clones
+        let dense_query_emb_arc = std::sync::Arc::new(dense_query_embedding);
+        let avgdl_to_sparse_arc = std::sync::Arc::new(avgdl_to_sparse_embedding);
+        let stats_batch_arc = std::sync::Arc::new(stats_batch);
+
         let search_futures = target_repos.iter().map(|(repo_id, repo_info)| {
             let storage_client = repo_info.storage_client.clone();
-            let dense_query_emb = dense_query_embedding.clone();
+            let dense_query_emb_arc = std::sync::Arc::clone(&dense_query_emb_arc);
             let filters_clone = filters.clone();
             let collection_name = repo_info.collection_name.clone();
             let repo_id = *repo_id;
-            let avgdl_to_sparse = avgdl_to_sparse_embedding.clone();
+            let avgdl_to_sparse_arc = std::sync::Arc::clone(&avgdl_to_sparse_arc);
             let prefetch_multiplier = self.hybrid_search_config.prefetch_multiplier;
-            let stats_batch_inner = stats_batch_clone.clone();
+            let stats_batch_arc = std::sync::Arc::clone(&stats_batch_arc);
 
             async move {
                 // Get avgdl from batch results (already fetched above)
-                let avgdl = stats_batch_inner
+                let avgdl = stats_batch_arc
                     .get(&repo_id)
                     .map(|s| s.avgdl)
                     .ok_or_else(|| {
@@ -395,7 +657,7 @@ impl CodeSearchMcpServer {
                     })?;
 
                 // Look up the correct sparse embedding using the repository's avgdl
-                let sparse_query_emb = avgdl_to_sparse
+                let sparse_query_emb = avgdl_to_sparse_arc
                     .get(&OrderedFloat(avgdl))
                     .ok_or_else(|| {
                         McpError::new(
@@ -408,7 +670,7 @@ impl CodeSearchMcpServer {
 
                 storage_client
                     .search_similar_hybrid(
-                        dense_query_emb,
+                        dense_query_emb_arc.as_ref().clone(),
                         sparse_query_emb,
                         limit,
                         Some(filters_clone),
@@ -475,6 +737,38 @@ impl CodeSearchMcpServer {
                     None,
                 )
             })?;
+
+        // Apply structural filtering if present
+        let entities_vec: Vec<CodeEntity> =
+            if let Some(ref allowed_names) = structural_qualified_names {
+                entities_vec
+                    .into_iter()
+                    .filter(|entity| allowed_names.contains(&entity.qualified_name))
+                    .collect()
+            } else {
+                entities_vec
+            };
+
+        // If filtering resulted in zero entities, return early
+        if entities_vec.is_empty() && structural_qualified_names.is_some() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "results": [],
+                    "total": 0,
+                    "query": query_text,
+                    "repositories_searched": target_repos.len(),
+                    "message": "Semantic search found results, but none matched structural filters",
+                    "reranked": false,
+                }))
+                .map_err(|e| {
+                    McpError::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("Failed to serialize response: {e}"),
+                        None,
+                    )
+                })?,
+            )]));
+        }
 
         // Rerank if enabled, otherwise use vector scores
         let (final_results, reranked) = if let Some(ref reranker) = self.reranker {
@@ -645,7 +939,7 @@ impl CodeSearchMcpServer {
             None
         };
 
-        let _limit = request.limit.unwrap_or(20).clamp(1, 100); // TODO: Use for result pagination
+        let limit = request.limit.unwrap_or(20).clamp(1, 100);
 
         // Route to appropriate graph query based on relationship type
         let results: serde_json::Value = match request.relationship.as_str() {
@@ -744,12 +1038,156 @@ impl CodeSearchMcpServer {
             }
         };
 
-        let response = serde_json::json!({
+        // Apply semantic filtering if requested
+        let mut semantic_filter_applied = false;
+        let mut semantic_filter_errors: Vec<String> = Vec::new();
+
+        let results = if let Some(ref semantic_filter) = request.semantic_filter {
+            // Extract qualified names from graph results
+            let qualified_names: Vec<String> = match &results {
+                serde_json::Value::Array(items) => items
+                    .iter()
+                    .filter_map(|v| match v {
+                        serde_json::Value::String(s) => Some(s.clone()),
+                        serde_json::Value::Object(obj) => obj
+                            .get("qualified_name")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![],
+            };
+
+            if qualified_names.is_empty() {
+                results
+            } else {
+                // Fetch full entities for reranking
+                let entities = self
+                    .postgres_client
+                    .get_entities_by_qualified_names(repo_id, &qualified_names)
+                    .await
+                    .map_err(|e| {
+                        let error_msg = format!("Failed to fetch entities for reranking: {e}");
+                        tracing::warn!("{error_msg}, returning unfiltered results");
+                        semantic_filter_errors.push(error_msg);
+                        e
+                    })
+                    .ok();
+
+                match entities {
+                    Some(entities_map) if !entities_map.is_empty() => {
+                        // Use reranker if available, otherwise return unscored results
+                        if let Some(ref reranker) = self.reranker {
+                            // Build documents for reranking
+                            let entity_contents: Vec<(String, String)> = qualified_names
+                                .iter()
+                                .filter_map(|qname| {
+                                    entities_map.get(qname).map(|entity| {
+                                        (qname.clone(), extract_embedding_content(entity))
+                                    })
+                                })
+                                .collect();
+
+                            let documents: Vec<(String, &str)> = entity_contents
+                                .iter()
+                                .map(|(qname, content)| (qname.clone(), content.as_str()))
+                                .collect();
+
+                            // Attempt reranking with fallback
+                            match reranker.rerank(semantic_filter, &documents, limit).await {
+                                Ok(reranked) => {
+                                    semantic_filter_applied = true;
+                                    let filtered_results: Vec<_> = reranked
+                                        .into_iter()
+                                        .map(|(qname, score)| {
+                                            serde_json::json!({
+                                                "qualified_name": qname,
+                                                "relevance_score": (score * 100.0).round() as i32,
+                                            })
+                                        })
+                                        .collect();
+
+                                    serde_json::json!(filtered_results)
+                                }
+                                Err(e) => {
+                                    let error_msg = format!("Reranking failed: {e}");
+                                    tracing::warn!("{error_msg}, returning unscored results");
+                                    semantic_filter_errors.push(error_msg);
+                                    // Fall back to unscored results
+                                    let unscored: Vec<_> = qualified_names
+                                        .into_iter()
+                                        .take(limit)
+                                        .map(|qname| {
+                                            serde_json::json!({
+                                                "qualified_name": qname,
+                                            })
+                                        })
+                                        .collect();
+                                    serde_json::json!(unscored)
+                                }
+                            }
+                        } else {
+                            // No reranker configured, return unscored results
+                            let unscored: Vec<_> = qualified_names
+                                .into_iter()
+                                .take(limit)
+                                .map(|qname| {
+                                    serde_json::json!({
+                                        "qualified_name": qname,
+                                    })
+                                })
+                                .collect();
+                            serde_json::json!(unscored)
+                        }
+                    }
+                    _ => {
+                        // Failed to fetch entities - return unfiltered
+                        tracing::warn!(
+                            "Could not fetch entities for semantic filtering, returning unfiltered results"
+                        );
+                        match results {
+                            serde_json::Value::Array(mut items) => {
+                                items.truncate(limit);
+                                serde_json::json!(items)
+                            }
+                            other => other,
+                        }
+                    }
+                }
+            }
+        } else {
+            // No semantic filter - apply limit only
+            match results {
+                serde_json::Value::Array(mut items) => {
+                    items.truncate(limit);
+                    serde_json::json!(items)
+                }
+                other => other,
+            }
+        };
+
+        let mut response = serde_json::json!({
             "results": results,
             "relationship": request.relationship,
             "from_entity": request.from_entity,
             "warning": warning,
         });
+
+        // Add metadata about semantic filter application
+        if request.semantic_filter.is_some() {
+            let metadata = if semantic_filter_errors.is_empty() {
+                serde_json::json!({
+                    "semantic_filter_applied": semantic_filter_applied,
+                })
+            } else {
+                serde_json::json!({
+                    "semantic_filter_applied": semantic_filter_applied,
+                    "semantic_filter_errors": semantic_filter_errors,
+                })
+            };
+            response["metadata"] = metadata;
+        }
 
         let response_str = serde_json::to_string_pretty(&response).map_err(|e| {
             McpError::new(

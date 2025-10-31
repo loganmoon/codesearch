@@ -498,30 +498,24 @@ impl PostgresClient {
 
         let mut result = std::collections::HashMap::new();
         for (repo_id, avgdl_opt, total_tokens_opt, entity_count_opt) in rows {
-            let avgdl = avgdl_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 statistics not initialized for repository {repo_id}"
-                ))
-            })?;
-            let total_tokens = total_tokens_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 total_tokens not initialized for repository {repo_id}"
-                ))
-            })?;
-            let entity_count = entity_count_opt.ok_or_else(|| {
-                Error::storage(format!(
-                    "BM25 entity_count not initialized for repository {repo_id}"
-                ))
-            })?;
-
-            result.insert(
-                repo_id,
-                super::BM25Statistics {
-                    avgdl,
-                    total_tokens,
-                    entity_count,
-                },
-            );
+            // Filter incomplete statistics instead of failing the entire batch
+            match (avgdl_opt, total_tokens_opt, entity_count_opt) {
+                (Some(avgdl), Some(total_tokens), Some(entity_count)) => {
+                    result.insert(
+                        repo_id,
+                        super::BM25Statistics {
+                            avgdl,
+                            total_tokens,
+                            entity_count,
+                        },
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        "Skipping repository {repo_id} with incomplete BM25 statistics (not yet initialized)"
+                    );
+                }
+            }
         }
 
         Ok(result)
@@ -534,8 +528,6 @@ impl PostgresClient {
         repository_id: Uuid,
         new_token_counts: &[usize],
     ) -> Result<f32> {
-        let stats = self.get_bm25_statistics_in_tx(tx, repository_id).await?;
-
         let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
             let count_i64 = i64::try_from(count)
                 .map_err(|_| Error::storage("Token count too large for i64"))?;
@@ -545,35 +537,31 @@ impl PostgresClient {
         let new_entity_count: i64 = i64::try_from(new_token_counts.len())
             .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
-        let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
-        let updated_count = stats.entity_count.saturating_add(new_entity_count);
-
-        let updated_avgdl = if updated_count > 0 {
-            updated_total as f32 / updated_count as f32
-        } else {
-            // Preserve last known avgdl when count becomes 0
-            // Only use 50.0 as ultimate fallback for brand new repos
-            if stats.avgdl > 0.0 {
-                stats.avgdl
-            } else {
-                50.0
-            }
-        };
-
-        sqlx::query(
+        // Perform atomic update with calculation in SQL to avoid race conditions
+        let row = sqlx::query_scalar::<_, f32>(
             "UPDATE repositories
-             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
-             WHERE repository_id = $4",
+             SET bm25_total_tokens = bm25_total_tokens + $1,
+                 bm25_entity_count = bm25_entity_count + $2,
+                 bm25_avgdl = CASE
+                     WHEN (bm25_entity_count + $2) > 0
+                     THEN (bm25_total_tokens + $1)::float / (bm25_entity_count + $2)
+                     ELSE CASE
+                         WHEN bm25_avgdl > 0.0 THEN bm25_avgdl
+                         ELSE 50.0
+                     END
+                 END,
+                 updated_at = NOW()
+             WHERE repository_id = $3
+             RETURNING bm25_avgdl",
         )
-        .bind(updated_avgdl)
-        .bind(updated_total)
-        .bind(updated_count)
+        .bind(new_total_tokens)
+        .bind(new_entity_count)
         .bind(repository_id)
-        .execute(&mut **tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|e| Error::storage(format!("Failed to update BM25 statistics: {e}")))?;
 
-        Ok(updated_avgdl)
+        Ok(row)
     }
 
     /// Update BM25 statistics incrementally after adding new entities
@@ -582,8 +570,6 @@ impl PostgresClient {
         repository_id: Uuid,
         new_token_counts: &[usize],
     ) -> Result<f32> {
-        let stats = self.get_bm25_statistics(repository_id).await?;
-
         let new_total_tokens: i64 = new_token_counts.iter().try_fold(0i64, |acc, &count| {
             let count_i64 = i64::try_from(count)
                 .map_err(|_| Error::storage("Token count too large for i64"))?;
@@ -593,35 +579,31 @@ impl PostgresClient {
         let new_entity_count: i64 = i64::try_from(new_token_counts.len())
             .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
-        let updated_total = stats.total_tokens.saturating_add(new_total_tokens);
-        let updated_count = stats.entity_count.saturating_add(new_entity_count);
-
-        let updated_avgdl = if updated_count > 0 {
-            updated_total as f32 / updated_count as f32
-        } else {
-            // Preserve last known avgdl when count becomes 0
-            // Only use 50.0 as ultimate fallback for brand new repos
-            if stats.avgdl > 0.0 {
-                stats.avgdl
-            } else {
-                50.0
-            }
-        };
-
-        sqlx::query(
+        // Perform atomic update with calculation in SQL to avoid race conditions
+        let row = sqlx::query_scalar::<_, f32>(
             "UPDATE repositories
-             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
-             WHERE repository_id = $4",
+             SET bm25_total_tokens = bm25_total_tokens + $1,
+                 bm25_entity_count = bm25_entity_count + $2,
+                 bm25_avgdl = CASE
+                     WHEN (bm25_entity_count + $2) > 0
+                     THEN (bm25_total_tokens + $1)::float / (bm25_entity_count + $2)
+                     ELSE CASE
+                         WHEN bm25_avgdl > 0.0 THEN bm25_avgdl
+                         ELSE 50.0
+                     END
+                 END,
+                 updated_at = NOW()
+             WHERE repository_id = $3
+             RETURNING bm25_avgdl",
         )
-        .bind(updated_avgdl)
-        .bind(updated_total)
-        .bind(updated_count)
+        .bind(new_total_tokens)
+        .bind(new_entity_count)
         .bind(repository_id)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to update BM25 statistics: {e}")))?;
 
-        Ok(updated_avgdl)
+        Ok(row)
     }
 
     /// Update BM25 statistics after deleting entities
@@ -630,8 +612,6 @@ impl PostgresClient {
         repository_id: Uuid,
         deleted_token_counts: &[usize],
     ) -> Result<f32> {
-        let stats = self.get_bm25_statistics(repository_id).await?;
-
         let removed_total: i64 = deleted_token_counts.iter().try_fold(0i64, |acc, &count| {
             let count_i64 = i64::try_from(count)
                 .map_err(|_| Error::storage("Token count too large for i64"))?;
@@ -641,31 +621,27 @@ impl PostgresClient {
         let removed_count: i64 = i64::try_from(deleted_token_counts.len())
             .map_err(|_| Error::storage("Entity count too large for i64"))?;
 
-        let updated_total = (stats.total_tokens - removed_total).max(0);
-        let updated_count = (stats.entity_count - removed_count).max(0);
-
-        let updated_avgdl = if updated_count > 0 {
-            updated_total as f32 / updated_count as f32
-        } else {
-            // Preserve last known avgdl when count becomes 0
-            // Only use 50.0 as ultimate fallback for brand new repos
-            if stats.avgdl > 0.0 {
-                stats.avgdl
-            } else {
-                50.0
-            }
-        };
-
-        sqlx::query(
+        // Perform atomic update with calculation in SQL to avoid race conditions
+        let row = sqlx::query_scalar::<_, f32>(
             "UPDATE repositories
-             SET bm25_avgdl = $1, bm25_total_tokens = $2, bm25_entity_count = $3, updated_at = NOW()
-             WHERE repository_id = $4",
+             SET bm25_total_tokens = GREATEST(bm25_total_tokens - $1, 0),
+                 bm25_entity_count = GREATEST(bm25_entity_count - $2, 0),
+                 bm25_avgdl = CASE
+                     WHEN GREATEST(bm25_entity_count - $2, 0) > 0
+                     THEN GREATEST(bm25_total_tokens - $1, 0)::float / GREATEST(bm25_entity_count - $2, 0)
+                     ELSE CASE
+                         WHEN bm25_avgdl > 0.0 THEN bm25_avgdl
+                         ELSE 50.0
+                     END
+                 END,
+                 updated_at = NOW()
+             WHERE repository_id = $3
+             RETURNING bm25_avgdl",
         )
-        .bind(updated_avgdl)
-        .bind(updated_total)
-        .bind(updated_count)
+        .bind(removed_total)
+        .bind(removed_count)
         .bind(repository_id)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(|e| {
             Error::storage(format!(
@@ -673,7 +649,7 @@ impl PostgresClient {
             ))
         })?;
 
-        Ok(updated_avgdl)
+        Ok(row)
     }
 
     /// Get token counts for entities (needed before deletion/update)
@@ -1849,6 +1825,82 @@ impl PostgresClient {
             .transpose()
     }
 
+    /// Fetch cached dense embeddings for entities by qualified names within a single repository
+    pub async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(String, Vec<f32>)> = sqlx::query_as(
+            "SELECT
+                e.entity_data->>'qualified_name' as qualified_name,
+                ee.embedding
+            FROM entity_metadata e
+            JOIN entity_embeddings ee ON e.embedding_id = ee.id
+            WHERE e.repository_id = $1
+                AND e.deleted_at IS NULL
+                AND e.entity_data->>'qualified_name' = ANY($2)",
+        )
+        .bind(repository_id)
+        .bind(qualified_names)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            Error::storage(format!(
+                "Failed to fetch embeddings by qualified names: {e}"
+            ))
+        })?;
+
+        let found_count = rows.len();
+        let requested_count = qualified_names.len();
+        if found_count < requested_count {
+            tracing::debug!(
+                "Embedding cache partial hit: found {found_count}/{requested_count} embeddings"
+            );
+        }
+
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Get full entities by their qualified names
+    pub async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>> {
+        if qualified_names.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(String, sqlx::types::JsonValue)> = sqlx::query_as(
+            "SELECT
+                e.entity_data->>'qualified_name' as qualified_name,
+                e.entity_data
+            FROM entity_metadata e
+            WHERE e.repository_id = $1
+                AND e.deleted_at IS NULL
+                AND e.entity_data->>'qualified_name' = ANY($2)",
+        )
+        .bind(repository_id)
+        .bind(qualified_names)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to fetch entities by qualified names: {e}")))?;
+
+        let mut result = std::collections::HashMap::new();
+        for (qname, entity_json) in rows {
+            let entity: CodeEntity = serde_json::from_value(entity_json)
+                .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
+            result.insert(qname, entity);
+        }
+
+        Ok(result)
+    }
+
     /// Get cache statistics
     pub async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
         let row = sqlx::query(
@@ -2353,6 +2405,24 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64> {
         self.clear_cache(model_version).await
+    }
+
+    async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>> {
+        self.get_embeddings_by_qualified_names(repository_id, qualified_names)
+            .await
+    }
+
+    async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>> {
+        self.get_entities_by_qualified_names(repository_id, qualified_names)
+            .await
     }
 }
 

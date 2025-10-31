@@ -171,7 +171,17 @@ pub trait PostgresClientTrait: Send + Sync {
     /// # Returns
     ///
     /// BM25Statistics containing avgdl, total_tokens, and entity_count.
-    /// If statistics are not yet calculated, returns default values (avgdl=50.0).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if BM25 statistics have not been initialized for this repository.
+    /// This occurs when:
+    /// - The repository has never been indexed
+    /// - No entities have been added yet (indexing in progress)
+    /// - The repository was dropped and re-created but not yet indexed
+    ///
+    /// Statistics are initialized during the first entity insertion and maintained
+    /// incrementally thereafter.
     async fn get_bm25_statistics(&self, repository_id: Uuid) -> Result<BM25Statistics>;
 
     /// Get BM25 statistics for a repository within a transaction
@@ -452,4 +462,41 @@ pub trait PostgresClientTrait: Send + Sync {
 
     /// Clear entity embeddings entries (optional: filter by model_version)
     async fn clear_cache(&self, model_version: Option<&str>) -> Result<u64>;
+
+    /// Fetch cached dense embeddings for entities by qualified names within a single repository
+    ///
+    /// Returns embeddings from the entity_embeddings table for entities matching the provided
+    /// qualified names. Only returns embeddings that exist in the cache - does not generate new ones.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `qualified_names` - Slice of qualified entity names to fetch embeddings for
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping qualified_name to dense_embedding vector.
+    /// Entities without cached embeddings will not be present in the map.
+    async fn get_embeddings_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<f32>>>;
+
+    /// Get full entities by their qualified names
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `qualified_names` - List of qualified names to look up
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping qualified_name to full CodeEntity.
+    /// Entities not found will not be present in the map.
+    async fn get_entities_by_qualified_names(
+        &self,
+        repository_id: Uuid,
+        qualified_names: &[String],
+    ) -> Result<std::collections::HashMap<String, CodeEntity>>;
 }

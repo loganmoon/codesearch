@@ -10,12 +10,19 @@ use uuid::Uuid;
 pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
     "CONTAINS",
     "IMPLEMENTS",
+    "IMPLEMENTED_BY",
     "ASSOCIATES",
+    "ASSOCIATED_WITH",
     "EXTENDS_INTERFACE",
+    "EXTENDED_BY",
     "INHERITS_FROM",
+    "HAS_SUBCLASS",
     "USES",
+    "USED_BY",
     "CALLS",
+    "CALLED_BY",
     "IMPORTS",
+    "IMPORTED_BY",
 ];
 
 /// Validates that a property key is safe to use in Cypher queries
@@ -876,6 +883,39 @@ impl Neo4jClient {
         Ok(callers)
     }
 
+    /// Find call graph (callees of a function - functions called by this function)
+    pub async fn find_function_callees(
+        &self,
+        postgres: &std::sync::Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        function_qualified_name: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, usize)>> {
+        let db_name = self
+            .ensure_repository_database(repository_id, postgres.as_ref())
+            .await?;
+        self.use_database(&db_name).await?;
+
+        let query_str = format!(
+            "MATCH (source {{qualified_name: $qname}})
+             MATCH path = (source)-[:CALLS*1..{max_depth}]->(callee)
+             RETURN DISTINCT callee.qualified_name AS name, length(path) AS depth
+             ORDER BY depth ASC"
+        );
+
+        let query = Query::new(query_str).param("qname", function_qualified_name);
+
+        let mut result = self.graph.execute(query).await?;
+
+        let mut callees = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            if let (Ok(name), Ok(depth)) = (row.get::<String>("name"), row.get::<i64>("depth")) {
+                callees.push((name, depth as usize));
+            }
+        }
+        Ok(callees)
+    }
+
     /// Find unused functions (no incoming calls, not public)
     pub async fn find_unused_functions(
         &self,
@@ -1119,6 +1159,23 @@ impl Neo4jClientTrait for Neo4jClient {
         max_depth: usize,
     ) -> Result<Vec<(String, usize)>> {
         Self::find_function_callers(
+            self,
+            postgres,
+            repository_id,
+            function_qualified_name,
+            max_depth,
+        )
+        .await
+    }
+
+    async fn find_function_callees(
+        &self,
+        postgres: &Arc<dyn crate::postgres::PostgresClientTrait>,
+        repository_id: Uuid,
+        function_qualified_name: &str,
+        max_depth: usize,
+    ) -> Result<Vec<(String, usize)>> {
+        Self::find_function_callees(
             self,
             postgres,
             repository_id,

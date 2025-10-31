@@ -588,6 +588,34 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(entities)
     }
 
+    async fn search_entities_fulltext(
+        &self,
+        repository_id: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<CodeEntity>> {
+        let data = self.data.lock().unwrap();
+        let query_lower = query.to_lowercase();
+
+        let entities: Vec<CodeEntity> = data
+            .entities
+            .iter()
+            .filter_map(|((repo_id, _entity_id), metadata)| {
+                if *repo_id == repository_id && metadata.deleted_at.is_none() {
+                    if let Some(content) = &metadata.entity.content {
+                        if content.to_lowercase().contains(&query_lower) {
+                            return Some(metadata.entity.clone());
+                        }
+                    }
+                }
+                None
+            })
+            .take(limit as usize)
+            .collect();
+
+        Ok(entities)
+    }
+
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,

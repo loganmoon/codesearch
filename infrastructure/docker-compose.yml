@@ -141,7 +141,7 @@ services:
     restart: unless-stopped
 
   neo4j:
-    image: neo4j:5.28
+    image: neo4j:5.26
     container_name: codesearch-neo4j
     ports:
       - "127.0.0.1:7474:7474"  # HTTP (browser)

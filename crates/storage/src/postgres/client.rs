@@ -751,8 +751,8 @@ impl PostgresClient {
         repository_id: Uuid,
         entity_type: EntityType,
     ) -> Result<Vec<CodeEntity>> {
-        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
-            "SELECT entity_data
+        let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
+            "SELECT entity_data, content
              FROM entity_metadata
              WHERE repository_id = $1
                AND entity_type = $2
@@ -768,7 +768,15 @@ impl PostgresClient {
 
         let entities = rows
             .into_iter()
-            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .filter_map(|(json, content)| {
+                serde_json::from_value::<CodeEntity>(json)
+                    .ok()
+                    .map(|mut entity| {
+                        // Use content from column, overriding any value in JSON
+                        entity.content = content;
+                        entity
+                    })
+            })
             .collect();
 
         Ok(entities)
@@ -776,8 +784,8 @@ impl PostgresClient {
 
     /// Get all type entities (structs, enums, classes, interfaces, type aliases) in a repository
     pub async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
-        let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
-            "SELECT entity_data
+        let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
+            "SELECT entity_data, content
              FROM entity_metadata
              WHERE repository_id = $1
                AND entity_type IN ('struct', 'enum', 'class', 'interface', 'type_alias')
@@ -790,7 +798,15 @@ impl PostgresClient {
 
         let entities = rows
             .into_iter()
-            .filter_map(|(json,)| serde_json::from_value::<CodeEntity>(json).ok())
+            .filter_map(|(json, content)| {
+                serde_json::from_value::<CodeEntity>(json)
+                    .ok()
+                    .map(|mut entity| {
+                        // Use content from column, overriding any value in JSON
+                        entity.content = content;
+                        entity
+                    })
+            })
             .collect();
 
         Ok(entities)
@@ -983,7 +999,7 @@ impl PostgresClient {
 
         // Build query using QueryBuilder for type safety
         let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "SELECT entity_data FROM entity_metadata WHERE deleted_at IS NULL AND (repository_id, entity_id) IN "
+            "SELECT entity_data, content FROM entity_metadata WHERE deleted_at IS NULL AND (repository_id, entity_id) IN "
         );
 
         query_builder.push_tuples(entity_refs, |mut b, (repo_id, entity_id)| {
@@ -1001,10 +1017,62 @@ impl PostgresClient {
             let entity_json: serde_json::Value = row
                 .try_get("entity_data")
                 .map_err(|e| Error::storage(format!("Failed to extract entity_data: {e}")))?;
-            let entity: CodeEntity = serde_json::from_value(entity_json)
+            let content: Option<String> = row
+                .try_get("content")
+                .map_err(|e| Error::storage(format!("Failed to extract content: {e}")))?;
+            let mut entity: CodeEntity = serde_json::from_value(entity_json)
                 .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
+            // Use content from column, overriding any value in JSON
+            entity.content = content;
             entities.push(entity);
         }
+
+        Ok(entities)
+    }
+
+    /// Full-text search entities using PostgreSQL's tsvector
+    ///
+    /// Returns entities ranked by relevance using ts_rank.
+    ///
+    /// # Arguments
+    /// * `repository_id` - Repository to search in
+    /// * `query` - Search query string (will be parsed using to_tsquery)
+    /// * `limit` - Maximum number of results to return
+    pub async fn search_entities_fulltext(
+        &self,
+        repository_id: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
+            "SELECT entity_data, content
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND deleted_at IS NULL
+               AND content IS NOT NULL
+               AND to_tsvector('english', content) @@ plainto_tsquery('english', $2)
+             ORDER BY ts_rank(to_tsvector('english', content), plainto_tsquery('english', $2)) DESC
+             LIMIT $3",
+        )
+        .bind(repository_id)
+        .bind(query)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to search entities: {e}")))?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json, content)| {
+                serde_json::from_value::<CodeEntity>(json)
+                    .ok()
+                    .map(|mut entity| {
+                        // Use content from column, overriding any value in JSON
+                        entity.content = content;
+                        entity
+                    })
+            })
+            .collect();
 
         Ok(entities)
     }
@@ -1198,7 +1266,14 @@ impl PostgresClient {
             .iter()
             .map(
                 |(entity, embedding, op, point_id, target, git_commit, token_count)| {
-                    let entity_json = serde_json::to_value(entity)
+                    // Extract content before serialization (will be stored in separate column)
+                    let content = entity.content.clone();
+
+                    // Create entity without content for JSON storage
+                    let mut entity_without_content = (*entity).clone();
+                    entity_without_content.content = None;
+
+                    let entity_json = serde_json::to_value(&entity_without_content)
                         .map_err(|e| Error::storage(format!("Failed to serialize entity: {e}")))?;
 
                     let file_path_str = entity
@@ -1216,6 +1291,7 @@ impl PostgresClient {
                         token_count,
                         entity_json,
                         file_path_str,
+                        content,
                     ))
                 },
             )
@@ -1228,7 +1304,7 @@ impl PostgresClient {
             "INSERT INTO entity_metadata (
                 entity_id, repository_id, qualified_name, name, parent_scope,
                 entity_type, language, file_path, visibility,
-                entity_data, git_commit_hash, qdrant_point_id, embedding_id, bm25_token_count
+                entity_data, git_commit_hash, qdrant_point_id, embedding_id, bm25_token_count, content
             ) ",
         );
 
@@ -1245,6 +1321,7 @@ impl PostgresClient {
                 token_count,
                 entity_json,
                 file_path_str,
+                content,
             )| {
                 b.push_bind(&entity.entity_id)
                     .push_bind(repository_id)
@@ -1259,7 +1336,8 @@ impl PostgresClient {
                     .push_bind(git_commit)
                     .push_bind(point_id)
                     .push_bind(embedding_id)
-                    .push_bind(**token_count as i32);
+                    .push_bind(**token_count as i32)
+                    .push_bind(content);
             },
         );
 
@@ -1278,6 +1356,7 @@ impl PostgresClient {
                 qdrant_point_id = EXCLUDED.qdrant_point_id,
                 embedding_id = EXCLUDED.embedding_id,
                 bm25_token_count = EXCLUDED.bm25_token_count,
+                content = EXCLUDED.content,
                 updated_at = NOW(),
                 deleted_at = NULL",
         );
@@ -1309,6 +1388,7 @@ impl PostgresClient {
                 _token_count,
                 entity_json,
                 _file_path_str,
+                _content,
             )| {
                 let payload = serde_json::json!({
                     "entity": entity_json,
@@ -1365,6 +1445,7 @@ impl PostgresClient {
                 _token_count,
                 _entity_json,
                 _file_path_str,
+                _content,
             )| {
                 let neo4j_payload = self
                     .build_neo4j_payload(entity, &name_to_id)
@@ -2309,6 +2390,16 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
         self.get_all_type_entities(repository_id).await
+    }
+
+    async fn search_entities_fulltext(
+        &self,
+        repository_id: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<CodeEntity>> {
+        self.search_entities_fulltext(repository_id, query, limit)
+            .await
     }
 
     async fn mark_entities_deleted_with_outbox(

@@ -303,8 +303,8 @@ async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::er
         // Create entity metadata first
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -317,6 +317,7 @@ async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::er
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
 
@@ -411,8 +412,8 @@ async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std
 
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -425,6 +426,7 @@ async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
 
@@ -544,8 +546,8 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
 
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -558,6 +560,7 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
 
@@ -588,8 +591,8 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
 
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -602,6 +605,7 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
 
@@ -691,8 +695,8 @@ async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std:
 
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     )
     .bind(repo_id)
     .bind(entity_id)
@@ -705,6 +709,7 @@ async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std:
     .bind(serde_json::json!({}))
     .bind("abc123")
     .bind(Uuid::new_v4())
+    .bind(None::<String>)
     .execute(&pool)
     .await?;
 
@@ -810,8 +815,8 @@ async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std
         let entity_id = format!("entity-{i}");
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -824,6 +829,7 @@ async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
     }
@@ -894,8 +900,8 @@ async fn test_delete_operation_with_single_entity_id_fallback(
     let entity_id = "single-entity";
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     )
     .bind(repo_id)
     .bind(entity_id)
@@ -908,6 +914,7 @@ async fn test_delete_operation_with_single_entity_id_fallback(
     .bind(serde_json::json!({}))
     .bind("abc123")
     .bind(Uuid::new_v4())
+    .bind(None::<String>)
     .execute(&pool)
     .await?;
 
@@ -979,8 +986,8 @@ async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn s
         let entity_id = format!("entity-{i}");
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -993,6 +1000,7 @@ async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn s
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
     }
@@ -1149,8 +1157,8 @@ async fn test_concurrent_processor_isolation_with_skip_locked(
         let entity_id = format!("entity-{i}");
         sqlx::query(
             "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
         )
         .bind(repo_id)
         .bind(&entity_id)
@@ -1163,6 +1171,7 @@ async fn test_concurrent_processor_isolation_with_skip_locked(
         .bind(serde_json::json!({}))
         .bind("abc123")
         .bind(Uuid::new_v4())
+        .bind(None::<String>)
         .execute(&pool)
         .await?;
 

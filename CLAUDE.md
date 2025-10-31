@@ -285,6 +285,50 @@ cargo test --workspace
 cargo test --package codesearch-e2e-tests -- --ignored
 ```
 
+## PostgreSQL Full-Text Search
+
+Codesearch uses PostgreSQL's native full-text search capabilities to provide fast keyword-based entity search alongside semantic vector search.
+
+### Overview
+
+Entity content is stored in a dedicated `content` TEXT column with a GIN index on `to_tsvector('english', content)` for efficient full-text search:
+- **Normalized Schema**: Content extracted from `entity_data` JSONB to dedicated column
+- **Full-Text Index**: GIN index using English stemming and stop words
+- **Ranked Results**: Uses `ts_rank` for relevance scoring
+
+### Schema
+
+The `entity_metadata` table includes:
+- `content` TEXT column for entity source code content
+- GIN index: `idx_entity_metadata_content_fts` for fast text search
+- Only non-NULL content is indexed (supports lazy migration)
+
+### API
+
+Use `PostgresClientTrait::search_entities_fulltext()` to perform full-text searches:
+
+```rust
+let results = postgres_client
+    .search_entities_fulltext(repository_id, "authentication error", 50)
+    .await?;
+```
+
+The method uses `plainto_tsquery` for user-friendly query parsing and `ts_rank` for relevance ranking.
+
+### Migration
+
+The content column is populated during entity insertion/update. Legacy entities indexed before the migration may have NULL content until they are re-indexed or updated.
+
+### Testing
+
+```bash
+# Unit tests
+cargo test --package codesearch-storage
+
+# Integration tests
+cargo test --package codesearch-storage --test postgres_integration_test
+```
+
 ## Neo4j Graph Database
 
 Codesearch uses Neo4j to store and query code relationships, enabling graph-based queries like "find all callers of this function" or "show the inheritance hierarchy."
@@ -340,7 +384,7 @@ neo4j_password = "codesearch"  # Local-only, no security concern
 
 ### Infrastructure Requirements
 
-Neo4j is included in the shared infrastructure at `~/.codesearch/infrastructure/` and will be automatically started when you run `codesearch index` or `codesearch serve`. The infrastructure includes Neo4j 5.28 with the following configuration:
+Neo4j is included in the shared infrastructure at `~/.codesearch/infrastructure/` and will be automatically started when you run `codesearch index` or `codesearch serve`. The infrastructure includes Neo4j 5.26 with the following configuration:
 
 - **Bolt protocol:** Port 7687 (localhost only)
 - **HTTP browser:** Port 7474 (localhost only)

@@ -353,8 +353,8 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
     // Create entity metadata
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     )
     .bind(repo_id)
     .bind("invalid-entity")
@@ -367,6 +367,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
     .bind(serde_json::json!({}))
     .bind("abc123")
     .bind(Uuid::new_v4())
+    .bind(None::<String>)
     .execute(&pool)
     .await?;
 
@@ -498,8 +499,8 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
     // Create entity metadata
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
-         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+         entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
     )
     .bind(repo_id)
     .bind("max-retry-entity")
@@ -512,6 +513,7 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
     .bind(serde_json::json!({}))
     .bind("abc123")
     .bind(Uuid::new_v4())
+    .bind(None::<String>)
     .execute(&pool)
     .await?;
 

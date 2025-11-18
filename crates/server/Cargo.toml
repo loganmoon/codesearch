@@ -9,12 +9,13 @@ repository.workspace = true
 
 [dependencies]
 # Workspace crates
-codesearch-core = { path = "../core" }
+codesearch-core = { path = "../core", features = ["openapi"] }
 codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
 codesearch-indexer = { path = "../indexer" }
+codesearch-api-service = { path = "../api-service", features = ["openapi"] }
 
 # External dependencies from workspace
 anyhow.workspace = true
@@ -23,18 +24,21 @@ tracing.workspace = true
 serde.workspace = true
 sqlx.workspace = true
 
-# MCP protocol (not in workspace)
-rmcp = { version = "0.8", features = ["server", "transport-io", "transport-streamable-http-server"] }
 serde_json = "1.0"
 uuid = "1.18"
 schemars = "1.0"
 futures = "0.3"
 ordered-float = "5.0"
 
-# HTTP server for MCP transport
+# HTTP server for REST API
 axum = "0.8.6"
 tower = "0.5.2"
 http-body-util = "0.1.2"
+tower-http = { version = "0.6.2", features = ["cors", "trace"] }
+
+# OpenAPI
+utoipa = { version = "5.3.1", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [dev-dependencies]
 tempfile.workspace = true

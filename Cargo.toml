@@ -9,6 +9,7 @@ members = [
     "crates/cli",
     "crates/indexer",
     "crates/storage",
+    "crates/api-service",
     "crates/server",
     "crates/outbox-processor",
     "crates/e2e-tests",

@@ -30,6 +30,12 @@ twox-hash = { version = "2.1", features = ["xxhash3_128"] }
 # For tree-sitter node position conversion
 tree-sitter = { workspace = true }
 
+# Optional OpenAPI support
+utoipa = { version = "5.3", optional = true }
+
+[features]
+openapi = ["utoipa"]
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

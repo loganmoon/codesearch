@@ -1045,13 +1045,16 @@ impl PostgresClient {
         limit: i64,
     ) -> Result<Vec<CodeEntity>> {
         let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
-            "SELECT entity_data, content
-             FROM entity_metadata
+            "WITH query_tsv AS (
+                 SELECT plainto_tsquery('english', $2) AS tsquery
+             )
+             SELECT entity_data, content
+             FROM entity_metadata, query_tsv
              WHERE repository_id = $1
                AND deleted_at IS NULL
                AND content IS NOT NULL
-               AND content_tsv @@ plainto_tsquery('english', $2)
-             ORDER BY ts_rank(content_tsv, plainto_tsquery('english', $2)) DESC
+               AND content_tsv @@ query_tsv.tsquery
+             ORDER BY ts_rank(content_tsv, query_tsv.tsquery) DESC
              LIMIT $3",
         )
         .bind(repository_id)

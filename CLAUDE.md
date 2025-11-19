@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## PROJECT OVERVIEW
 
-Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with MCP server integration.
+Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with REST API server integration.
 
 ## Rust Development Practices
 
@@ -39,7 +39,7 @@ This is a workspace with these crates:
 - **indexer**: Repository indexing logic with Git integration
 - **watcher**: Real-time file system monitoring with ignore patterns
 - **storage**: Persistent storage layer (Postgres, Qdrant, Neo4j)
-- **cli**: Command-line interface and MCP server (`codesearch` binary)
+- **cli**: Command-line interface and REST API server (`codesearch` binary)
 
 ## DEVELOPMENT COMMANDS
 
@@ -54,7 +54,7 @@ cargo clippy --workspace && cargo fmt                           # Lint & format
 **Run:**
 ```bash
 cargo run -- index        # Index current repository
-cargo run -- serve        # Start MCP server
+cargo run -- serve        # Start REST API server
 ```
 
 **Infrastructure:**

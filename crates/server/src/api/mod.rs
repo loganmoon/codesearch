@@ -8,6 +8,7 @@ mod entity_operations;
 mod fulltext_search;
 mod graph_search;
 pub mod models;
+mod reranking_helpers;
 mod semantic_search;
 mod unified_search;
 

@@ -7,9 +7,9 @@ use super::models::{
     BackendClients, EntityResult, SearchConfig, UnifiedResponseMetadata, UnifiedSearchRequest,
     UnifiedSearchResponse,
 };
+use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use codesearch_indexer::entity_processor::extract_embedding_content;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::warn;
@@ -227,10 +227,7 @@ async fn rerank_merged_results(
         .map(|(entity, _score)| (entity.entity_id.clone(), extract_embedding_content(entity)))
         .collect();
 
-    let documents: Vec<(String, &str)> = entity_contents
-        .iter()
-        .map(|(id, content)| (id.clone(), content.as_str()))
-        .collect();
+    let documents = prepare_documents_for_reranking(&entity_contents);
 
     match reranker
         .rerank(&request.query.text, &documents, final_limit)

@@ -13,8 +13,18 @@ use std::time::Instant;
 pub async fn get_entities_batch(
     request: BatchEntityRequest,
     postgres_client: &Arc<dyn PostgresClientTrait>,
+    max_batch_size: usize,
 ) -> Result<BatchEntityResponse> {
     let start_time = Instant::now();
+
+    // Validate batch size
+    if request.entity_refs.len() > max_batch_size {
+        return Err(codesearch_core::error::Error::invalid_input(format!(
+            "Batch size {} exceeds maximum allowed size of {}",
+            request.entity_refs.len(),
+            max_batch_size
+        )));
+    }
 
     let entities = postgres_client
         .get_entities_by_ids(&request.entity_refs)

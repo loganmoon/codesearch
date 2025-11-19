@@ -3,8 +3,8 @@
 use super::models::{
     GraphQueryRequest, GraphQueryResponse, GraphQueryType, GraphResponseMetadata, GraphResult,
 };
+use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::Result;
-use codesearch_indexer::entity_processor::extract_embedding_content;
 use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::sync::Arc;
@@ -187,10 +187,7 @@ async fn apply_semantic_filter(
                 })
                 .collect();
 
-            let documents: Vec<(String, &str)> = entity_contents
-                .iter()
-                .map(|(qname, content)| (qname.clone(), content.as_str()))
-                .collect();
+            let documents = prepare_documents_for_reranking(&entity_contents);
 
             match reranker_provider
                 .rerank(semantic_filter, &documents, request.limit)

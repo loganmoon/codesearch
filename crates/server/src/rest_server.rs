@@ -12,11 +12,12 @@ use crate::api::{
 };
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+use codesearch_core::config::ServerConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -35,8 +36,8 @@ pub(crate) struct AppState {
 }
 
 /// Build the Axum router with all endpoints
-pub(crate) fn build_router(state: AppState) -> Router {
-    Router::new()
+pub(crate) fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
+    let router = Router::new()
         // Search endpoints
         .route("/api/v1/search/semantic", post(semantic_search_handler))
         .route("/api/v1/search/fulltext", post(fulltext_search_handler))
@@ -51,8 +52,34 @@ pub(crate) fn build_router(state: AppState) -> Router {
         // Health check
         .route("/health", get(health_handler))
         // OpenAPI documentation
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .layer(CorsLayer::permissive())
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()));
+
+    // Configure CORS based on allowed_origins
+    let cors_layer = if server_config.allowed_origins.is_empty() {
+        // CORS disabled
+        CorsLayer::new()
+    } else if server_config.allowed_origins.contains(&"*".to_string()) {
+        // Allow all origins
+        CorsLayer::permissive()
+    } else {
+        // Allow specific origins
+        let mut cors = CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            .allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::AUTHORIZATION,
+            ]);
+
+        for origin in &server_config.allowed_origins {
+            if let Ok(header_value) = HeaderValue::from_str(origin) {
+                cors = cors.allow_origin(header_value);
+            }
+        }
+        cors
+    };
+
+    router
+        .layer(cors_layer)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -198,7 +225,12 @@ async fn entities_batch_handler(
         request.entity_refs.len()
     );
 
-    let response = get_entities_batch(request, &state.clients.postgres).await?;
+    let response = get_entities_batch(
+        request,
+        &state.clients.postgres,
+        state.config.max_batch_size,
+    )
+    .await?;
     Ok(Json(response))
 }
 
@@ -262,43 +294,30 @@ async fn repositories_handler(
 )]
 async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
     use serde_json::json;
-    use serde_json::Map;
 
-    // Build dependencies map
-    let mut deps = Map::new();
-
-    // Report dependency availability (clients are initialized at startup)
-    deps.insert("postgres".to_string(), json!({"status": "initialized"}));
-    deps.insert("qdrant".to_string(), json!({"status": "initialized"}));
-
-    // Check Neo4j availability
-    if state.clients.neo4j.is_some() {
-        deps.insert("neo4j".to_string(), json!({"status": "initialized"}));
-    } else {
-        deps.insert("neo4j".to_string(), json!({"status": "disabled"}));
-    }
-
-    // Embedding manager is always available (created during startup)
-    deps.insert(
-        "embedding_manager".to_string(),
-        json!({"status": "initialized"}),
-    );
-
-    // Check reranker availability
-    if state.clients.reranker.is_some() {
-        deps.insert("reranker".to_string(), json!({"status": "initialized"}));
-    } else {
-        deps.insert("reranker".to_string(), json!({"status": "disabled"}));
-    }
-
-    // Repository count
     let repo_count = state.repositories.read().await.len();
-    deps.insert("repositories".to_string(), json!({"count": repo_count}));
+    let neo4j_status = if state.clients.neo4j.is_some() {
+        "initialized"
+    } else {
+        "disabled"
+    };
+    let reranker_status = if state.clients.reranker.is_some() {
+        "initialized"
+    } else {
+        "disabled"
+    };
 
     let health_status = json!({
         "status": "healthy",
         "version": env!("CARGO_PKG_VERSION"),
-        "dependencies": deps
+        "dependencies": {
+            "postgres": {"status": "initialized"},
+            "qdrant": {"status": "initialized"},
+            "neo4j": {"status": neo4j_status},
+            "embedding_manager": {"status": "initialized"},
+            "reranker": {"status": reranker_status},
+            "repositories": {"count": repo_count}
+        }
     });
 
     (StatusCode::OK, Json(health_status))
@@ -318,7 +337,15 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
-            ApiError::Internal(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+            ApiError::Internal(err) => {
+                // Log the full error details for debugging
+                tracing::error!("Internal server error: {err:?}");
+                // Return a generic message to the client to avoid information disclosure
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal server error occurred".to_string(),
+                )
+            }
         };
 
         (status, Json(serde_json::json!({ "error": message }))).into_response()

@@ -7,9 +7,10 @@ use super::models::{
     BackendClients, EntityResult, ResponseMetadata, SearchConfig, SemanticSearchRequest,
     SemanticSearchResponse,
 };
+use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
-use codesearch_indexer::entity_processor::extract_embedding_content;
+use futures::future;
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -300,19 +301,36 @@ async fn search_repositories(
             .push(*repo_id);
     }
 
-    let mut avgdl_to_sparse: HashMap<OrderedFloat<f32>, Vec<(u32, f32)>> = HashMap::new();
-    for avgdl in avgdl_to_repos.keys() {
-        let sparse_manager = codesearch_embeddings::create_sparse_manager(avgdl.0)?;
-        let sparse_embeddings = sparse_manager
-            .embed_sparse(vec![request.query.text.as_str()])
-            .await?;
-        let sparse_embedding = sparse_embeddings
-            .into_iter()
-            .next()
-            .flatten()
-            .ok_or_else(|| Error::config("Failed to generate sparse embedding".to_string()))?;
-        avgdl_to_sparse.insert(*avgdl, sparse_embedding);
-    }
+    // Generate sparse embeddings in parallel for all unique avgdl values
+    let sparse_futures: Vec<_> = avgdl_to_repos
+        .keys()
+        .map(|avgdl| {
+            let avgdl_val = *avgdl;
+            let query_text = request.query.text.clone();
+            async move {
+                let sparse_manager = codesearch_embeddings::create_sparse_manager(avgdl_val.0)?;
+                let sparse_embeddings = sparse_manager
+                    .embed_sparse(vec![query_text.as_str()])
+                    .await?;
+                let sparse_embedding =
+                    sparse_embeddings
+                        .into_iter()
+                        .next()
+                        .flatten()
+                        .ok_or_else(|| {
+                            Error::config("Failed to generate sparse embedding".to_string())
+                        })?;
+                Ok::<_, Error>((avgdl_val, sparse_embedding))
+            }
+        })
+        .collect();
+
+    let sparse_results = future::join_all(sparse_futures).await;
+    let avgdl_to_sparse: HashMap<OrderedFloat<f32>, Vec<(u32, f32)>> = sparse_results
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .collect();
 
     let filters = super::models::build_storage_filters(&request.filters);
 
@@ -359,10 +377,12 @@ async fn search_repositories(
 
     let search_results = futures::future::join_all(search_futures).await;
 
-    let mut all_results = Vec::new();
-    for result in search_results {
-        all_results.extend(result?);
-    }
+    let mut all_results: Vec<(Uuid, String, f32)> = search_results
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
 
     all_results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -419,10 +439,7 @@ async fn rerank_results(
                 })
                 .collect();
 
-            let documents: Vec<(String, &str)> = entity_contents
-                .iter()
-                .map(|(id, content)| (id.clone(), content.as_str()))
-                .collect();
+            let documents = prepare_documents_for_reranking(&entity_contents);
 
             match reranker
                 .rerank(&request.query.text, &documents, final_limit)

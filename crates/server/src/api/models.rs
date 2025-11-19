@@ -32,6 +32,7 @@ pub struct SearchConfig {
     pub hybrid_search: HybridSearchConfig,
     pub reranking: RerankingConfig,
     pub default_bge_instruction: String,
+    pub max_batch_size: usize,
 }
 
 /// Query specification with text and optional pre-computed embedding

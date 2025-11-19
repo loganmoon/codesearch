@@ -256,6 +256,10 @@ pub struct ServerConfig {
     /// Port to listen on (host is always 127.0.0.1 for localhost-only access)
     #[serde(default = "default_server_port")]
     pub port: u16,
+
+    /// Allowed CORS origins (empty = disabled, ["*"] = all origins)
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
 }
 
 /// Configuration for language support
@@ -493,6 +497,10 @@ fn default_server_port() -> u16 {
     3000
 }
 
+fn default_allowed_origins() -> Vec<String> {
+    Vec::new() // Empty by default = CORS disabled
+}
+
 fn default_files_per_discovery_batch() -> usize {
     50
 }
@@ -586,6 +594,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             port: default_server_port(),
+            allowed_origins: default_allowed_origins(),
         }
     }
 }

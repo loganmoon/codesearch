@@ -152,12 +152,13 @@ pub async fn run_rest_server(
             hybrid_search: config.hybrid_search.clone(),
             reranking: config.reranking.clone(),
             default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
+            max_batch_size: config.storage.max_entities_per_db_operation,
         }),
         repositories: Arc::new(RwLock::new(repositories)),
     };
 
     // Build router
-    let app = rest_server::build_router(app_state);
+    let app = rest_server::build_router(app_state, &config.server);
 
     // Start server
     let addr = SocketAddr::from(([127, 0, 0, 1], config.server.port));

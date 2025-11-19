@@ -274,6 +274,7 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
                 config.reranking.model.clone(),
                 api_base_url,
                 config.reranking.timeout_secs,
+                config.reranking.max_concurrent_requests,
             )
             .await
             {

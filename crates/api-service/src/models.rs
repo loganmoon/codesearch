@@ -7,7 +7,9 @@ use codesearch_core::entities::{
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::{EmbeddingManager, RerankerProvider};
-use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait, SearchFilters as StorageSearchFilters, StorageClient};
+use codesearch_storage::{
+    Neo4jClientTrait, PostgresClientTrait, SearchFilters as StorageSearchFilters, StorageClient,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;

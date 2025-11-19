@@ -455,6 +455,7 @@ async fn test_balanced_evaluation() -> Result<()> {
             config.reranking.model.clone(),
             api_base_url,
             config.reranking.timeout_secs,
+            config.reranking.max_concurrent_requests,
         )
         .await
         .context("Failed to create reranker")?,

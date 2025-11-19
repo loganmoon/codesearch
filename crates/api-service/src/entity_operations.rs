@@ -26,11 +26,12 @@ pub async fn get_entities_batch(
         .collect::<Result<Vec<_>>>()?;
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
+    let total_results = results.len();
 
     Ok(BatchEntityResponse {
-        entities: results.clone(),
+        entities: results,
         metadata: ResponseMetadata {
-            total_results: results.len(),
+            total_results,
             repositories_searched: 0,
             reranked: false,
             query_time_ms,
@@ -61,8 +62,10 @@ pub async fn list_repositories(
         )
         .collect();
 
+    let total = repo_list.len();
+
     Ok(ListRepositoriesResponse {
-        repositories: repo_list.clone(),
-        total: repo_list.len(),
+        repositories: repo_list,
+        total,
     })
 }

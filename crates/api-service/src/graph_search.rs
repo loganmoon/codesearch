@@ -53,11 +53,12 @@ pub async fn query_graph(
     };
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
+    let total_results = results.len();
 
     Ok(GraphQueryResponse {
-        results: results.clone(),
+        results,
         metadata: GraphResponseMetadata {
-            total_results: results.len(),
+            total_results,
             semantic_filter_applied,
             query_time_ms,
             warning,

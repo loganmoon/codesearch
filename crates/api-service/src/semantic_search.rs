@@ -42,7 +42,8 @@ pub async fn search_semantic(
         generate_query_embeddings(&request, clients, config).await?;
 
     // Step 3: Determine target repositories
-    let target_repos = determine_target_repositories(&request.repository_ids, clients).await?;
+    let target_repos =
+        determine_target_repositories(request.repository_ids.take(), clients).await?;
 
     if target_repos.is_empty() {
         return Err(Error::config(
@@ -258,11 +259,11 @@ async fn generate_query_embeddings(
 }
 
 async fn determine_target_repositories(
-    repository_ids: &Option<Vec<Uuid>>,
+    repository_ids: Option<Vec<Uuid>>,
     clients: &ApiClients,
 ) -> Result<Vec<Uuid>> {
     if let Some(ids) = repository_ids {
-        Ok(ids.clone())
+        Ok(ids)
     } else {
         let all_repos = clients.postgres.list_all_repositories().await?;
         Ok(all_repos.into_iter().map(|(id, _, _)| id).collect())

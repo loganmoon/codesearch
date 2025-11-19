@@ -27,11 +27,12 @@ pub async fn search_fulltext(
         .collect::<Result<Vec<_>>>()?;
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
+    let total_results = results.len();
 
     Ok(FulltextSearchResponse {
-        results: results.clone(),
+        results,
         metadata: ResponseMetadata {
-            total_results: results.len(),
+            total_results,
             repositories_searched: 1,
             reranked: false,
             query_time_ms,

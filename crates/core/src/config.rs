@@ -294,6 +294,10 @@ pub struct RerankingConfig {
     /// Request timeout in seconds for reranking API calls (default: 30)
     #[serde(default = "default_reranking_timeout_secs")]
     pub timeout_secs: u64,
+
+    /// Maximum concurrent reranking API requests (default: 16)
+    #[serde(default = "default_reranking_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
 }
 
 /// Per-request reranking override configuration
@@ -315,6 +319,7 @@ impl RerankingRequestConfig {
             api_base_url: base.api_base_url.clone(),
             api_key: base.api_key.clone(),
             timeout_secs: base.timeout_secs,
+            max_concurrent_requests: base.max_concurrent_requests,
         }
     }
 }
@@ -524,6 +529,10 @@ fn default_reranking_timeout_secs() -> u64 {
     5
 }
 
+fn default_reranking_max_concurrent_requests() -> usize {
+    16
+}
+
 fn default_prefetch_multiplier() -> usize {
     5
 }
@@ -599,6 +608,7 @@ impl Default for RerankingConfig {
             api_base_url: None,
             api_key: None,
             timeout_secs: default_reranking_timeout_secs(),
+            max_concurrent_requests: default_reranking_max_concurrent_requests(),
         }
     }
 }
@@ -2139,6 +2149,7 @@ mod tests {
             api_base_url: Some("http://base.com".to_string()),
             api_key: Some("base-key".to_string()),
             timeout_secs: 30,
+            max_concurrent_requests: 16,
         };
 
         let request = RerankingRequestConfig {
@@ -2168,6 +2179,7 @@ mod tests {
             api_base_url: None,
             api_key: None,
             timeout_secs: 30,
+            max_concurrent_requests: 16,
         };
 
         let request = RerankingRequestConfig {
@@ -2194,6 +2206,7 @@ mod tests {
             api_base_url: None,
             api_key: None,
             timeout_secs: 30,
+            max_concurrent_requests: 16,
         };
 
         let request = RerankingRequestConfig {
@@ -2220,6 +2233,7 @@ mod tests {
             api_base_url: None,
             api_key: None,
             timeout_secs: 30,
+            max_concurrent_requests: 16,
         };
 
         let request = RerankingRequestConfig {
@@ -2243,6 +2257,7 @@ mod tests {
             api_base_url: None,
             api_key: None,
             timeout_secs: 30,
+            max_concurrent_requests: 16,
         };
 
         let request = RerankingRequestConfig {

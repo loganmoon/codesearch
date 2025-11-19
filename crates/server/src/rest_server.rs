@@ -3,19 +3,19 @@
 //! This module provides the REST API server with OpenAPI documentation,
 //! integrating the service layer from codesearch-api-service.
 
+use crate::api::{
+    generate_embeddings, get_entities_batch, list_repositories, query_graph, search_fulltext,
+    search_semantic, search_unified, BackendClients, BatchEntityRequest, BatchEntityResponse,
+    EmbeddingRequest, EmbeddingResponse, FulltextSearchRequest, FulltextSearchResponse,
+    GraphQueryRequest, GraphQueryResponse, ListRepositoriesResponse, RepositoryInfo, SearchConfig,
+    SemanticSearchRequest, SemanticSearchResponse, UnifiedSearchRequest, UnifiedSearchResponse,
+};
 use axum::{
     extract::State,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
-};
-use codesearch_api_service::{
-    generate_embeddings, get_entities_batch, list_repositories, query_graph, search_fulltext,
-    search_semantic, search_unified, ApiClients, BatchEntityRequest, BatchEntityResponse,
-    EmbeddingRequest, EmbeddingResponse, FulltextSearchRequest, FulltextSearchResponse,
-    GraphQueryRequest, GraphQueryResponse, ListRepositoriesResponse, RepositoryInfo, SearchConfig,
-    SemanticSearchRequest, SemanticSearchResponse, UnifiedSearchRequest, UnifiedSearchResponse,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,14 +28,14 @@ use uuid::Uuid;
 
 /// Shared application state
 #[derive(Clone)]
-pub struct AppState {
-    pub clients: Arc<ApiClients>,
-    pub config: Arc<SearchConfig>,
-    pub repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
+pub(crate) struct AppState {
+    pub(crate) clients: Arc<BackendClients>,
+    pub(crate) config: Arc<SearchConfig>,
+    pub(crate) repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
 }
 
 /// Build the Axum router with all endpoints
-pub fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         // Search endpoints
         .route("/api/v1/search/semantic", post(semantic_search_handler))
@@ -260,15 +260,53 @@ async fn repositories_handler(
     ),
     tag = "health"
 )]
-async fn health_handler() -> impl IntoResponse {
-    Json(serde_json::json!({
+async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
+    use serde_json::json;
+    use serde_json::Map;
+
+    // Build dependencies map
+    let mut deps = Map::new();
+
+    // Report dependency availability (clients are initialized at startup)
+    deps.insert("postgres".to_string(), json!({"status": "initialized"}));
+    deps.insert("qdrant".to_string(), json!({"status": "initialized"}));
+
+    // Check Neo4j availability
+    if state.clients.neo4j.is_some() {
+        deps.insert("neo4j".to_string(), json!({"status": "initialized"}));
+    } else {
+        deps.insert("neo4j".to_string(), json!({"status": "disabled"}));
+    }
+
+    // Embedding manager is always available (created during startup)
+    deps.insert(
+        "embedding_manager".to_string(),
+        json!({"status": "initialized"}),
+    );
+
+    // Check reranker availability
+    if state.clients.reranker.is_some() {
+        deps.insert("reranker".to_string(), json!({"status": "initialized"}));
+    } else {
+        deps.insert("reranker".to_string(), json!({"status": "disabled"}));
+    }
+
+    // Repository count
+    let repo_count = state.repositories.read().await.len();
+    deps.insert("repositories".to_string(), json!({"count": repo_count}));
+
+    let health_status = json!({
         "status": "healthy",
-        "version": env!("CARGO_PKG_VERSION")
-    }))
+        "version": env!("CARGO_PKG_VERSION"),
+        "dependencies": deps
+    });
+
+    (StatusCode::OK, Json(health_status))
 }
 
 /// Error handling for API endpoints
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ApiError {
     InvalidRequest(String),
     ServiceUnavailable(String),

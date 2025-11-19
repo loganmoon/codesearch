@@ -3,8 +3,8 @@
 //! Uses Reciprocal Rank Fusion (RRF) to merge results from PostgreSQL full-text
 //! search and Qdrant semantic search for better recall and precision.
 
-use crate::models::{
-    ApiClients, EntityResult, SearchConfig, UnifiedResponseMetadata, UnifiedSearchRequest,
+use super::models::{
+    BackendClients, EntityResult, SearchConfig, UnifiedResponseMetadata, UnifiedSearchRequest,
     UnifiedSearchResponse,
 };
 use codesearch_core::error::Result;
@@ -17,7 +17,7 @@ use tracing::warn;
 /// Execute unified search combining full-text and semantic search with RRF fusion
 pub async fn search_unified(
     mut request: UnifiedSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<UnifiedSearchResponse> {
     let start_time = Instant::now();
@@ -109,7 +109,7 @@ pub async fn search_unified(
 
 async fn execute_semantic_search(
     request: &UnifiedSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<Vec<CodeEntity>> {
     let bge_instruction = request
@@ -146,7 +146,7 @@ async fn execute_semantic_search(
         .flatten()
         .ok_or_else(|| codesearch_core::error::Error::config("No sparse embedding".to_string()))?;
 
-    let filters = crate::models::build_storage_filters(&request.filters);
+    let filters = super::models::build_storage_filters(&request.filters);
 
     let candidates = clients
         .qdrant
@@ -203,7 +203,7 @@ pub fn apply_rrf_fusion(
 async fn rerank_merged_results(
     merged_results: Vec<(CodeEntity, f32)>,
     request: &UnifiedSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<(Vec<(CodeEntity, f32)>, bool)> {
     let reranker = match &clients.reranker {

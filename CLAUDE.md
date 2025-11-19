@@ -9,11 +9,9 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 ## Rust Development Practices
 
 **Architecture Principles:**
-- Design narrow, abstract public APIs centered around traits
-- Limit public exports to traits, models, errors, and factory functions
-- Use core domain types directly (`CodeEntity` from `code-context-core`)
+- IMPORTANT: Design narrow, abstract public APIs centered around traits
+- IMPORTANT: Limit public exports to traits, models, errors, and factory functions
 - Implement From/Into traits for API boundary conversions
-- Never assume backwards compatibility is required unless specifically requested
 
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests
@@ -30,7 +28,7 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 - Redundant allocations during type conversions
 
 **Style Rules:**
-- String formatting: `println!("The thing is {thing}");`
+- String formatting: `println!("The thing is {thing}");`, NOT `println!("The thing is {}", thing);`
 
 ## CRATE ARCHITECTURE
 

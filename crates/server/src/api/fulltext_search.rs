@@ -2,7 +2,7 @@
 //!
 //! Simple wrapper around PostgreSQL full-text search capabilities.
 
-use crate::models::{
+use super::models::{
     EntityResult, FulltextSearchRequest, FulltextSearchResponse, ResponseMetadata,
 };
 use codesearch_core::error::Result;

@@ -1,10 +1,11 @@
 //! Graph search service for Neo4j-based code relationship queries
 
-use crate::models::{
+use super::models::{
     GraphQueryRequest, GraphQueryResponse, GraphQueryType, GraphResponseMetadata, GraphResult,
 };
 use codesearch_core::error::Result;
 use codesearch_indexer::entity_processor::extract_embedding_content;
+use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,7 +16,7 @@ pub async fn query_graph(
     mut request: GraphQueryRequest,
     neo4j_client: &Arc<dyn Neo4jClientTrait>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
-    reranker: &Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
+    reranker: &Option<Arc<dyn RerankerProvider>>,
 ) -> Result<GraphQueryResponse> {
     let start_time = Instant::now();
 
@@ -147,7 +148,7 @@ async fn apply_semantic_filter(
     qualified_names: Vec<String>,
     request: &GraphQueryRequest,
     postgres_client: &Arc<dyn PostgresClientTrait>,
-    reranker: &Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
+    reranker: &Option<Arc<dyn RerankerProvider>>,
 ) -> Result<(Vec<GraphResult>, bool)> {
     if qualified_names.is_empty() {
         return Ok((vec![], false));

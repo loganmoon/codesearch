@@ -4,8 +4,8 @@ use codesearch_core::entities::{
     EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
 };
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::create_reranker_provider;
 use codesearch_indexer::entity_processor::extract_embedding_content;
+use codesearch_reranking::create_reranker_provider;
 use std::path::PathBuf;
 
 /// Test reranker handles empty documents

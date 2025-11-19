@@ -1,17 +1,13 @@
-//! Service layer for codesearch API operations
+//! API service layer for search operations
 //!
-//! This crate contains the business logic for search operations,
+//! This module contains the business logic for search operations,
 //! providing a clean interface for the REST API server.
-
-#![deny(warnings)]
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
-#![cfg_attr(not(test), deny(clippy::expect_used))]
 
 mod embedding_operations;
 mod entity_operations;
 mod fulltext_search;
 mod graph_search;
-mod models;
+pub mod models;
 mod semantic_search;
 mod unified_search;
 

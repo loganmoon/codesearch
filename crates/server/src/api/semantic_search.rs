@@ -3,8 +3,8 @@
 //! Provides semantic code search using vector embeddings, hybrid search,
 //! and optional reranking for improved relevance.
 
-use crate::models::{
-    ApiClients, EntityResult, ResponseMetadata, SearchConfig, SemanticSearchRequest,
+use super::models::{
+    BackendClients, EntityResult, ResponseMetadata, SearchConfig, SemanticSearchRequest,
     SemanticSearchResponse,
 };
 use codesearch_core::error::{Error, Result};
@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// Main entry point for semantic search
 pub async fn search_semantic(
     mut request: SemanticSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<SemanticSearchResponse> {
     let start_time = Instant::now();
@@ -113,7 +113,7 @@ pub async fn search_semantic(
     })
 }
 
-fn has_structural_filters(filters: &Option<crate::models::SearchFilters>) -> bool {
+fn has_structural_filters(filters: &Option<super::models::SearchFilters>) -> bool {
     if let Some(f) = filters {
         f.implements_trait.is_some()
             || f.called_by.is_some()
@@ -126,7 +126,7 @@ fn has_structural_filters(filters: &Option<crate::models::SearchFilters>) -> boo
 
 async fn apply_structural_filters(
     request: &SemanticSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
 ) -> Result<HashSet<String>> {
     let neo4j = clients
         .neo4j
@@ -228,7 +228,7 @@ async fn apply_structural_filters(
 
 async fn generate_query_embeddings(
     request: &SemanticSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<(Vec<f32>, HashMap<OrderedFloat<f32>, Vec<(u32, f32)>>)> {
     let query_text = &request.query.text;
@@ -260,7 +260,7 @@ async fn generate_query_embeddings(
 
 async fn determine_target_repositories(
     repository_ids: Option<Vec<Uuid>>,
-    clients: &ApiClients,
+    clients: &BackendClients,
 ) -> Result<Vec<Uuid>> {
     if let Some(ids) = repository_ids {
         Ok(ids)
@@ -276,7 +276,7 @@ async fn search_repositories(
     target_repos: &[Uuid],
     limit: usize,
     request: &SemanticSearchRequest,
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
 ) -> Result<Vec<(Uuid, String, f32)>> {
     let prefetch_multiplier = request
@@ -314,7 +314,7 @@ async fn search_repositories(
         avgdl_to_sparse.insert(*avgdl, sparse_embedding);
     }
 
-    let filters = crate::models::build_storage_filters(&request.filters);
+    let filters = super::models::build_storage_filters(&request.filters);
 
     let dense_query_arc = std::sync::Arc::new(dense_embedding.to_vec());
     let avgdl_to_sparse_arc = std::sync::Arc::new(avgdl_to_sparse);
@@ -371,7 +371,7 @@ async fn search_repositories(
 
 async fn fetch_entities(
     candidates: &[(Uuid, String, f32)],
-    clients: &ApiClients,
+    clients: &BackendClients,
 ) -> Result<Vec<CodeEntity>> {
     let entity_refs: Vec<_> = candidates
         .iter()
@@ -385,7 +385,7 @@ async fn rerank_results(
     entities: Vec<CodeEntity>,
     request: &SemanticSearchRequest,
     candidates: &[(Uuid, String, f32)],
-    clients: &ApiClients,
+    clients: &BackendClients,
     config: &SearchConfig,
     limit: usize,
 ) -> Result<(Vec<EntityResult>, bool)> {

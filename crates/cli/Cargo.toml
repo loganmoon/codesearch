@@ -15,12 +15,12 @@ path = "src/main.rs"
 codesearch-core = { path = "../core" }
 codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
+codesearch-reranking = { path = "../reranking" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
 codesearch-server = { path = "../server" }
 codesearch-indexer = { path = "../indexer" }
 codesearch-outbox-processor = { path = "../outbox-processor" }
-codesearch-api-service = { path = "../api-service" }
 
 # CLI framework
 clap = { workspace = true }

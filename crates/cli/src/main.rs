@@ -15,12 +15,8 @@ use clap::{Parser, Subcommand};
 use codesearch_core::config::Config;
 use codesearch_indexer::{Indexer, RepositoryIndexer};
 use dialoguer::{Confirm, Select};
-use std::collections::HashMap;
 use std::env;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -252,129 +248,8 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     info!("Outbox processor started successfully");
 
-    info!(
-        "Starting multi-repository REST API server with {} valid repositories",
-        valid_repos.len()
-    );
-
-    // Initialize embedding manager
-    let embedding_manager = create_embedding_manager(&config).await?;
-
-    // Initialize reranker if enabled
-    let reranker: Option<Arc<dyn codesearch_embeddings::RerankerProvider>> =
-        if config.reranking.enabled {
-            let api_base_url = config
-                .reranking
-                .api_base_url
-                .clone()
-                .or_else(|| config.embeddings.api_base_url.clone())
-                .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
-
-            match codesearch_embeddings::create_reranker_provider(
-                config.reranking.model.clone(),
-                api_base_url,
-                config.reranking.timeout_secs,
-                config.reranking.max_concurrent_requests,
-            )
-            .await
-            {
-                Ok(provider) => {
-                    info!("Reranker initialized successfully");
-                    Some(provider)
-                }
-                Err(e) => {
-                    warn!("Failed to initialize reranker: {e}");
-                    warn!("Reranking will be disabled for this session");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-    // Load repository storage clients
-    let mut repositories = HashMap::new();
-    let mut first_storage_client = None;
-
-    for (repository_id, collection_name, repo_path) in valid_repos {
-        let storage_client =
-            codesearch_storage::create_storage_client(&config.storage, &collection_name)
-                .await
-                .context("Failed to create storage client")?;
-
-        // Store first storage client for ApiClients (temporary solution)
-        if first_storage_client.is_none() {
-            first_storage_client = Some(storage_client.clone());
-        }
-
-        let last_indexed_commit = postgres_client
-            .get_last_indexed_commit(repository_id)
-            .await
-            .context("Failed to get last indexed commit")?;
-
-        let repo_info = codesearch_api_service::RepositoryInfo {
-            repository_id,
-            repository_name: collection_name.clone(),
-            repository_path: repo_path.display().to_string(),
-            collection_name,
-            last_indexed_commit,
-        };
-
-        repositories.insert(repository_id, repo_info);
-    }
-
-    let qdrant_client = first_storage_client
-        .ok_or_else(|| anyhow!("No valid repositories found to create storage client"))?;
-
-    // Initialize Neo4j client if enabled
-    let neo4j_client = match codesearch_storage::create_neo4j_client(&config.storage).await {
-        Ok(client) => {
-            info!("Neo4j client initialized successfully");
-            Some(client)
-        }
-        Err(e) => {
-            warn!("Failed to initialize Neo4j client: {e}");
-            warn!("Graph queries will be disabled for this session");
-            None
-        }
-    };
-
-    // Build AppState
-    let app_state = codesearch_server::rest_server::AppState {
-        clients: Arc::new(codesearch_api_service::ApiClients {
-            postgres: postgres_client,
-            qdrant: qdrant_client,
-            neo4j: neo4j_client,
-            embedding_manager,
-            reranker,
-        }),
-        config: Arc::new(codesearch_api_service::SearchConfig {
-            hybrid_search: config.hybrid_search.clone(),
-            reranking: config.reranking.clone(),
-            default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
-        }),
-        repositories: Arc::new(RwLock::new(repositories)),
-    };
-
-    // Build router
-    let app = codesearch_server::rest_server::build_router(app_state);
-
-    // Start server
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.server.port));
-    info!("Starting REST API server on http://{}", addr);
-    info!("API documentation available at http://{}/swagger-ui", addr);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-
-    // Run server with graceful shutdown
-    let server_result = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c()
-                .await
-                .map_err(|e| error!("Failed to listen for shutdown signal: {e}"))
-                .ok();
-            info!("Shutdown signal received, stopping server...");
-        })
+    // Run REST API server
+    let server_result = codesearch_server::run_rest_server(config, valid_repos, postgres_client)
         .await
         .map_err(|e| anyhow!("REST server error: {e}"));
 

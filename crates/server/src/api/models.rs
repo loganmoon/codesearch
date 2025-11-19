@@ -6,7 +6,8 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::{EmbeddingManager, RerankerProvider};
+use codesearch_embeddings::EmbeddingManager;
+use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{
     Neo4jClientTrait, PostgresClientTrait, SearchFilters as StorageSearchFilters, StorageClient,
 };
@@ -17,8 +18,8 @@ use uuid::Uuid;
 #[cfg(feature = "openapi")]
 use utoipa::ToSchema;
 
-/// Container for all storage clients
-pub struct ApiClients {
+/// Container for backend storage and infrastructure clients
+pub struct BackendClients {
     pub postgres: Arc<dyn PostgresClientTrait>,
     pub qdrant: Arc<dyn StorageClient>,
     pub neo4j: Option<Arc<dyn Neo4jClientTrait>>,

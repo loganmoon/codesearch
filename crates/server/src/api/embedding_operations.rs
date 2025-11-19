@@ -1,6 +1,6 @@
 //! Embedding generation service
 
-use crate::models::{EmbeddingRequest, EmbeddingResponse};
+use super::models::{EmbeddingRequest, EmbeddingResponse};
 use codesearch_core::error::Result;
 use codesearch_embeddings::EmbeddingManager;
 use std::sync::Arc;

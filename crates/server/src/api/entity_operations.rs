@@ -1,6 +1,6 @@
 //! Entity operation services for batch retrieval and repository listing
 
-use crate::models::{
+use super::models::{
     BatchEntityRequest, BatchEntityResponse, EntityResult, ListRepositoriesResponse,
     RepositoryInfo, ResponseMetadata,
 };

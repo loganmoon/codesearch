@@ -20,7 +20,10 @@ pub async fn get_entities_batch(
         .get_entities_by_ids(&request.entity_refs)
         .await?;
 
-    let results: Vec<EntityResult> = entities.into_iter().map(EntityResult::from).collect();
+    let results: Vec<EntityResult> = entities
+        .into_iter()
+        .map(|e| e.try_into())
+        .collect::<Result<Vec<_>>>()?;
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
 

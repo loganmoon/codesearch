@@ -10,18 +10,26 @@ use crate::models::{
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use codesearch_indexer::entity_processor::extract_embedding_content;
-use codesearch_storage::SearchFilters;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::warn;
 
 /// Execute unified search combining full-text and semantic search with RRF fusion
 pub async fn search_unified(
-    request: UnifiedSearchRequest,
+    mut request: UnifiedSearchRequest,
     clients: &ApiClients,
     config: &SearchConfig,
 ) -> Result<UnifiedSearchResponse> {
     let start_time = Instant::now();
+
+    // Validate and clamp input parameters to prevent resource exhaustion
+    request.limit = request.limit.clamp(1, 1000);
+    if let Some(ref mut ft_limit) = request.fulltext_limit {
+        *ft_limit = (*ft_limit).clamp(1, 1000);
+    }
+    if let Some(ref mut sem_limit) = request.semantic_limit {
+        *sem_limit = (*sem_limit).clamp(1, 1000);
+    }
 
     let (fulltext_results, semantic_results) = tokio::try_join!(
         // Full-text search via PostgreSQL
@@ -74,19 +82,22 @@ pub async fn search_unified(
         .into_iter()
         .take(request.limit)
         .map(|(entity, score)| {
-            let mut result = EntityResult::from(entity);
-            result.score = score;
-            result.reranked = reranked;
-            result
+            let result: Result<EntityResult> = entity.try_into();
+            result.map(|mut r| {
+                r.score = score;
+                r.reranked = reranked;
+                r
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
+    let total_results = truncated.len();
 
     Ok(UnifiedSearchResponse {
-        results: truncated.clone(),
+        results: truncated,
         metadata: UnifiedResponseMetadata {
-            total_results: truncated.len(),
+            total_results,
             fulltext_count,
             semantic_count,
             merged_via_rrf: true,
@@ -135,7 +146,7 @@ async fn execute_semantic_search(
         .flatten()
         .ok_or_else(|| codesearch_core::error::Error::config("No sparse embedding".to_string()))?;
 
-    let filters = build_storage_filters(&request.filters);
+    let filters = crate::models::build_storage_filters(&request.filters);
 
     let candidates = clients
         .qdrant
@@ -154,17 +165,6 @@ async fn execute_semantic_search(
         .collect();
 
     clients.postgres.get_entities_by_ids(&entity_refs).await
-}
-
-fn build_storage_filters(filters: &Option<crate::models::SearchFilters>) -> Option<SearchFilters> {
-    filters.as_ref().map(|f| SearchFilters {
-        entity_type: f
-            .entity_type
-            .clone()
-            .and_then(|types| types.first().cloned()),
-        language: f.language.clone(),
-        file_path: f.file_path.as_ref().map(std::path::PathBuf::from),
-    })
 }
 
 /// Apply Reciprocal Rank Fusion (RRF) to merge two result lists

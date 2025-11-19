@@ -1,8 +1,7 @@
 //! Graph search service for Neo4j-based code relationship queries
 
 use crate::models::{
-    EntityResult, GraphQueryRequest, GraphQueryResponse, GraphQueryType, GraphResponseMetadata,
-    GraphResult,
+    GraphQueryRequest, GraphQueryResponse, GraphQueryType, GraphResponseMetadata, GraphResult,
 };
 use codesearch_core::error::Result;
 use codesearch_indexer::entity_processor::extract_embedding_content;
@@ -13,12 +12,18 @@ use tracing::warn;
 
 /// Execute graph-based queries using Neo4j
 pub async fn query_graph(
-    request: GraphQueryRequest,
+    mut request: GraphQueryRequest,
     neo4j_client: &Arc<dyn Neo4jClientTrait>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
     reranker: &Option<Arc<dyn codesearch_embeddings::RerankerProvider>>,
 ) -> Result<GraphQueryResponse> {
     let start_time = Instant::now();
+
+    // Validate and clamp input parameters to prevent resource exhaustion
+    request.limit = request.limit.clamp(1, 1000);
+    if let Some(ref mut md) = request.parameters.max_depth {
+        *md = (*md).clamp(1, 10);
+    }
 
     let is_ready = postgres_client
         .is_graph_ready(request.repository_id)
@@ -190,22 +195,25 @@ async fn apply_semantic_filter(
                 .await
             {
                 Ok(reranked) => {
-                    let results = reranked
+                    let results: Vec<GraphResult> = reranked
                         .into_iter()
                         .map(|(qname, score)| {
                             let entity = if request.return_entities {
-                                entities.get(&qname).map(|e| EntityResult::from(e.clone()))
+                                entities
+                                    .get(&qname)
+                                    .map(|e| e.clone().try_into())
+                                    .transpose()
                             } else {
-                                None
-                            };
+                                Ok(None)
+                            }?;
 
-                            GraphResult {
+                            Ok(GraphResult {
                                 qualified_name: qname,
                                 relevance_score: Some(score),
                                 entity,
-                            }
+                            })
                         })
-                        .collect();
+                        .collect::<Result<Vec<_>>>()?;
 
                     return Ok((results, true));
                 }
@@ -216,23 +224,26 @@ async fn apply_semantic_filter(
         }
     }
 
-    let results = qualified_names
+    let results: Vec<GraphResult> = qualified_names
         .into_iter()
         .take(request.limit)
         .map(|qname| {
             let entity = if request.return_entities {
-                entities.get(&qname).map(|e| EntityResult::from(e.clone()))
+                entities
+                    .get(&qname)
+                    .map(|e| e.clone().try_into())
+                    .transpose()
             } else {
-                None
-            };
+                Ok(None)
+            }?;
 
-            GraphResult {
+            Ok(GraphResult {
                 qualified_name: qname,
                 relevance_score: None,
                 entity,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     Ok((results, false))
 }

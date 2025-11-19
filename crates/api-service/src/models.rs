@@ -4,9 +4,10 @@ use codesearch_core::config::{HybridSearchConfig, RerankingConfig, RerankingRequ
 use codesearch_core::entities::{
     EntityType, FunctionSignature, Language, SourceLocation, Visibility,
 };
+use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::{EmbeddingManager, RerankerProvider};
-use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait, StorageClient};
+use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait, SearchFilters as StorageSearchFilters, StorageClient};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -86,13 +87,18 @@ pub struct EntityResult {
     pub reranked: bool,
 }
 
-impl From<CodeEntity> for EntityResult {
-    fn from(entity: CodeEntity) -> Self {
-        let repository_id = Uuid::parse_str(&entity.repository_id)
-            .ok()
-            .unwrap_or_else(Uuid::nil);
+impl TryFrom<CodeEntity> for EntityResult {
+    type Error = Error;
 
-        Self {
+    fn try_from(entity: CodeEntity) -> Result<Self> {
+        let repository_id = Uuid::parse_str(&entity.repository_id).map_err(|e| {
+            Error::invalid_input(format!(
+                "Invalid repository UUID '{}': {}",
+                entity.repository_id, e
+            ))
+        })?;
+
+        Ok(Self {
             entity_id: entity.entity_id.clone(),
             repository_id,
             qualified_name: entity.qualified_name.clone(),
@@ -107,7 +113,7 @@ impl From<CodeEntity> for EntityResult {
             visibility: entity.visibility,
             score: 0.0,
             reranked: false,
-        }
+        })
     }
 }
 
@@ -292,4 +298,16 @@ pub struct EmbeddingRequest {
 pub struct EmbeddingResponse {
     pub embeddings: Vec<Vec<f32>>,
     pub dimension: usize,
+}
+
+/// Convert API search filters to storage search filters
+pub fn build_storage_filters(filters: &Option<SearchFilters>) -> Option<StorageSearchFilters> {
+    filters.as_ref().map(|f| StorageSearchFilters {
+        entity_type: f
+            .entity_type
+            .clone()
+            .and_then(|types| types.first().cloned()),
+        language: f.language.clone(),
+        file_path: f.file_path.as_ref().map(std::path::PathBuf::from),
+    })
 }

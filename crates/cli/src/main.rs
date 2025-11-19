@@ -359,7 +359,7 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
     let app = codesearch_server::rest_server::build_router(app_state);
 
     // Start server
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
+    let addr = SocketAddr::from(([127, 0, 0, 1], config.server.port));
     info!("Starting REST API server on http://{}", addr);
     info!("API documentation available at http://{}/swagger-ui", addr);
 

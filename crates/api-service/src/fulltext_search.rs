@@ -21,7 +21,10 @@ pub async fn search_fulltext(
         .search_entities_fulltext(request.repository_id, &request.query, request.limit as i64)
         .await?;
 
-    let results: Vec<EntityResult> = entities.into_iter().map(EntityResult::from).collect();
+    let results: Vec<EntityResult> = entities
+        .into_iter()
+        .map(|e| e.try_into())
+        .collect::<Result<Vec<_>>>()?;
 
     let query_time_ms = start_time.elapsed().as_millis() as u64;
 

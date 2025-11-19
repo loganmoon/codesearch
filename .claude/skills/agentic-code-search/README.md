@@ -103,12 +103,12 @@ interface AgenticSearchParams {
 
 ## Requirements
 
-- codesearch server running on `http://localhost:3001`
+- codesearch server running on `http://localhost:3000`
 - Node.js/TypeScript runtime (provided by Claude Code)
 - Access to Claude API for query planning
 
 ## References
 
 - Full implementation plan: `/docs/plans/rest-api-transition.md` (lines 1129-1485)
-- REST API documentation: `http://localhost:3001/swagger-ui`
+- REST API documentation: `http://localhost:3000/swagger-ui`
 - Service layer: `crates/api-service/src/`

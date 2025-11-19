@@ -10,7 +10,6 @@ use crate::models::{
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_indexer::entity_processor::extract_embedding_content;
-use codesearch_storage::SearchFilters;
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -19,12 +18,17 @@ use uuid::Uuid;
 
 /// Main entry point for semantic search
 pub async fn search_semantic(
-    request: SemanticSearchRequest,
+    mut request: SemanticSearchRequest,
     clients: &ApiClients,
     config: &SearchConfig,
 ) -> Result<SemanticSearchResponse> {
     let start_time = Instant::now();
-    let limit = request.limit.clamp(1, 100);
+
+    // Validate and clamp input parameters to prevent resource exhaustion
+    let limit = request.limit.clamp(1, 1000);
+    if let Some(ref mut pm) = request.prefetch_multiplier {
+        *pm = (*pm).clamp(1, 10);
+    }
 
     // Step 1: Structural filtering (if needed)
     let structural_filter = if has_structural_filters(&request.filters) {
@@ -309,7 +313,7 @@ async fn search_repositories(
         avgdl_to_sparse.insert(*avgdl, sparse_embedding);
     }
 
-    let filters = build_storage_filters(&request.filters);
+    let filters = crate::models::build_storage_filters(&request.filters);
 
     let dense_query_arc = std::sync::Arc::new(dense_embedding.to_vec());
     let avgdl_to_sparse_arc = std::sync::Arc::new(avgdl_to_sparse);
@@ -362,17 +366,6 @@ async fn search_repositories(
     all_results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(all_results)
-}
-
-fn build_storage_filters(filters: &Option<crate::models::SearchFilters>) -> Option<SearchFilters> {
-    filters.as_ref().map(|f| SearchFilters {
-        entity_type: f
-            .entity_type
-            .clone()
-            .and_then(|types| types.first().cloned()),
-        language: f.language.clone(),
-        file_path: f.file_path.as_ref().map(std::path::PathBuf::from),
-    })
 }
 
 async fn fetch_entities(
@@ -435,17 +428,19 @@ async fn rerank_results(
                 .await
             {
                 Ok(reranked) => {
-                    let results = reranked
+                    let results: Vec<EntityResult> = reranked
                         .into_iter()
                         .filter_map(|(entity_id, score)| {
                             entities_map.get(&entity_id).map(|entity| {
-                                let mut result = EntityResult::from(entity.clone());
-                                result.score = score;
-                                result.reranked = true;
-                                result
+                                let result: Result<EntityResult> = entity.clone().try_into();
+                                result.map(|mut r| {
+                                    r.score = score;
+                                    r.reranked = true;
+                                    r
+                                })
                             })
                         })
-                        .collect();
+                        .collect::<Result<Vec<_>>>()?;
                     return Ok((results, true));
                 }
                 Err(e) => {
@@ -455,19 +450,21 @@ async fn rerank_results(
         }
     }
 
-    let results = truncated_candidates
+    let results: Vec<EntityResult> = truncated_candidates
         .iter()
         .take(final_limit)
         .filter_map(|(repo_id, entity_id, score)| {
             entities_map.get(entity_id).map(|entity| {
-                let mut result = EntityResult::from(entity.clone());
-                result.repository_id = *repo_id;
-                result.score = *score;
-                result.reranked = false;
-                result
+                let result: Result<EntityResult> = entity.clone().try_into();
+                result.map(|mut r| {
+                    r.repository_id = *repo_id;
+                    r.score = *score;
+                    r.reranked = false;
+                    r
+                })
             })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     Ok((results, false))
 }

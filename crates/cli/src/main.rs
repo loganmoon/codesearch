@@ -42,7 +42,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start MCP server with semantic code search
+    /// Start REST API server with semantic code search
     Serve,
     /// Index the repository
     Index {
@@ -90,7 +90,9 @@ async fn main() -> Result<()> {
         }
         None => {
             // Default behavior - show help
-            println!("Run 'codesearch serve' to start the MCP server, or --help for more options");
+            println!(
+                "Run 'codesearch serve' to start the REST API server, or --help for more options"
+            );
             Ok(())
         }
     }
@@ -141,9 +143,9 @@ fn find_repository_root() -> Result<PathBuf> {
     }
 }
 
-/// Start the MCP server (multi-repository mode)
+/// Start the REST API server (multi-repository mode)
 async fn serve(config_path: Option<&Path>) -> Result<()> {
-    info!("Preparing to start multi-repository MCP server...");
+    info!("Preparing to start multi-repository REST API server...");
 
     // Load configuration (no collection_name needed)
     let (config, _sources) = Config::load_layered(config_path)?;
@@ -246,16 +248,10 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     info!("Outbox processor started successfully");
 
-    info!(
-        "Starting multi-repository MCP server with {} valid repositories",
-        valid_repos.len()
-    );
-
-    // Delegate to multi-repository server
-    let server_result =
-        codesearch_server::run_multi_repo_server(config, valid_repos, postgres_client)
-            .await
-            .map_err(|e| anyhow!("MCP server error: {e}"));
+    // Run REST API server
+    let server_result = codesearch_server::run_rest_server(config, valid_repos, postgres_client)
+        .await
+        .map_err(|e| anyhow!("REST server error: {e}"));
 
     // Always perform graceful shutdown of outbox processor, regardless of server result
     // This ensures proper cleanup even if the server failed

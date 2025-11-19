@@ -4,16 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## PROJECT OVERVIEW
 
-Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with MCP server integration.
+Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with REST API server integration.
 
 ## Rust Development Practices
 
 **Architecture Principles:**
-- Design narrow, abstract public APIs centered around traits
-- Limit public exports to traits, models, errors, and factory functions
-- Use core domain types directly (`CodeEntity` from `code-context-core`)
+- IMPORTANT: Design narrow, abstract public APIs centered around traits
+- IMPORTANT: Limit public exports to traits, models, errors, and factory functions
 - Implement From/Into traits for API boundary conversions
-- Never assume backwards compatibility is required unless specifically requested
 
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests
@@ -30,7 +28,7 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 - Redundant allocations during type conversions
 
 **Style Rules:**
-- String formatting: `println!("The thing is {thing}");`
+- String formatting: `println!("The thing is {thing}");`, NOT `println!("The thing is {}", thing);`
 
 ## CRATE ARCHITECTURE
 
@@ -41,7 +39,7 @@ This is a workspace with these crates:
 - **indexer**: Repository indexing logic with Git integration
 - **watcher**: Real-time file system monitoring with ignore patterns
 - **storage**: Persistent storage layer (Postgres, Qdrant, Neo4j)
-- **cli**: Command-line interface and MCP server (`codesearch` binary)
+- **cli**: Command-line interface and REST API server (`codesearch` binary)
 
 ## DEVELOPMENT COMMANDS
 
@@ -56,7 +54,7 @@ cargo clippy --workspace && cargo fmt                           # Lint & format
 **Run:**
 ```bash
 cargo run -- index        # Index current repository
-cargo run -- serve        # Start MCP server
+cargo run -- serve        # Start REST API server
 ```
 
 **Infrastructure:**

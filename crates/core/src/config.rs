@@ -250,12 +250,16 @@ impl std::fmt::Debug for StorageConfig {
     }
 }
 
-/// Configuration for MCP server
+/// Configuration for REST API server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// Port to listen on (host is always 127.0.0.1 for localhost-only access)
     #[serde(default = "default_server_port")]
     pub port: u16,
+
+    /// Allowed CORS origins (empty = disabled, ["*"] = all origins)
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
 }
 
 /// Configuration for language support
@@ -294,6 +298,34 @@ pub struct RerankingConfig {
     /// Request timeout in seconds for reranking API calls (default: 30)
     #[serde(default = "default_reranking_timeout_secs")]
     pub timeout_secs: u64,
+
+    /// Maximum concurrent reranking API requests (default: 16)
+    #[serde(default = "default_reranking_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
+}
+
+/// Per-request reranking override configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankingRequestConfig {
+    pub enabled: Option<bool>,
+    pub candidates: Option<usize>,
+    pub top_k: Option<usize>,
+}
+
+impl RerankingRequestConfig {
+    /// Merge with base config, request overrides take precedence
+    pub fn merge_with(&self, base: &RerankingConfig) -> RerankingConfig {
+        RerankingConfig {
+            enabled: self.enabled.unwrap_or(base.enabled),
+            candidates: self.candidates.unwrap_or(base.candidates).min(1000),
+            top_k: self.top_k.unwrap_or(base.top_k),
+            model: base.model.clone(),
+            api_base_url: base.api_base_url.clone(),
+            api_key: base.api_key.clone(),
+            timeout_secs: base.timeout_secs,
+            max_concurrent_requests: base.max_concurrent_requests,
+        }
+    }
 }
 
 /// Hybrid search configuration
@@ -465,6 +497,10 @@ fn default_server_port() -> u16 {
     3000
 }
 
+fn default_allowed_origins() -> Vec<String> {
+    Vec::new() // Empty by default = CORS disabled
+}
+
 fn default_files_per_discovery_batch() -> usize {
     50
 }
@@ -490,7 +526,7 @@ fn default_reranking_model() -> String {
 }
 
 fn default_reranking_candidates() -> usize {
-    100
+    350 // Increased from 100 for better reranking quality
 }
 
 fn default_reranking_top_k() -> usize {
@@ -499,6 +535,10 @@ fn default_reranking_top_k() -> usize {
 
 fn default_reranking_timeout_secs() -> u64 {
     5
+}
+
+fn default_reranking_max_concurrent_requests() -> usize {
+    16
 }
 
 fn default_prefetch_multiplier() -> usize {
@@ -554,6 +594,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             port: default_server_port(),
+            allowed_origins: default_allowed_origins(),
         }
     }
 }
@@ -576,6 +617,7 @@ impl Default for RerankingConfig {
             api_base_url: None,
             api_key: None,
             timeout_secs: default_reranking_timeout_secs(),
+            max_concurrent_requests: default_reranking_max_concurrent_requests(),
         }
     }
 }
@@ -2104,6 +2146,138 @@ mod tests {
         assert_eq!(config.outbox.max_retries, 3);
         assert_eq!(config.outbox.max_embedding_dim, 100_000);
         assert_eq!(config.outbox.max_cached_collections, 200);
+    }
+
+    #[test]
+    fn test_reranking_request_config_merge_override_all() {
+        let base = RerankingConfig {
+            enabled: false,
+            model: "base-model".to_string(),
+            candidates: 100,
+            top_k: 10,
+            api_base_url: Some("http://base.com".to_string()),
+            api_key: Some("base-key".to_string()),
+            timeout_secs: 30,
+            max_concurrent_requests: 16,
+        };
+
+        let request = RerankingRequestConfig {
+            enabled: Some(true),
+            candidates: Some(350),
+            top_k: Some(20),
+        };
+
+        let merged = request.merge_with(&base);
+
+        assert!(merged.enabled);
+        assert_eq!(merged.candidates, 350);
+        assert_eq!(merged.top_k, 20);
+        assert_eq!(merged.model, "base-model");
+        assert_eq!(merged.api_base_url, Some("http://base.com".to_string()));
+        assert_eq!(merged.api_key, Some("base-key".to_string()));
+        assert_eq!(merged.timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_reranking_request_config_merge_partial_override() {
+        let base = RerankingConfig {
+            enabled: true,
+            model: "base-model".to_string(),
+            candidates: 100,
+            top_k: 10,
+            api_base_url: None,
+            api_key: None,
+            timeout_secs: 30,
+            max_concurrent_requests: 16,
+        };
+
+        let request = RerankingRequestConfig {
+            enabled: None,
+            candidates: Some(200),
+            top_k: None,
+        };
+
+        let merged = request.merge_with(&base);
+
+        assert!(merged.enabled);
+        assert_eq!(merged.candidates, 200);
+        assert_eq!(merged.top_k, 10);
+        assert_eq!(merged.model, "base-model");
+    }
+
+    #[test]
+    fn test_reranking_request_config_merge_no_override() {
+        let base = RerankingConfig {
+            enabled: true,
+            model: "base-model".to_string(),
+            candidates: 100,
+            top_k: 10,
+            api_base_url: None,
+            api_key: None,
+            timeout_secs: 30,
+            max_concurrent_requests: 16,
+        };
+
+        let request = RerankingRequestConfig {
+            enabled: None,
+            candidates: None,
+            top_k: None,
+        };
+
+        let merged = request.merge_with(&base);
+
+        assert!(merged.enabled);
+        assert_eq!(merged.candidates, 100);
+        assert_eq!(merged.top_k, 10);
+        assert_eq!(merged.model, "base-model");
+    }
+
+    #[test]
+    fn test_reranking_request_config_merge_enforces_1000_limit() {
+        let base = RerankingConfig {
+            enabled: true,
+            model: "base-model".to_string(),
+            candidates: 100,
+            top_k: 10,
+            api_base_url: None,
+            api_key: None,
+            timeout_secs: 30,
+            max_concurrent_requests: 16,
+        };
+
+        let request = RerankingRequestConfig {
+            enabled: None,
+            candidates: Some(5000),
+            top_k: None,
+        };
+
+        let merged = request.merge_with(&base);
+
+        assert_eq!(merged.candidates, 1000);
+    }
+
+    #[test]
+    fn test_reranking_request_config_merge_allows_1000() {
+        let base = RerankingConfig {
+            enabled: true,
+            model: "base-model".to_string(),
+            candidates: 100,
+            top_k: 10,
+            api_base_url: None,
+            api_key: None,
+            timeout_secs: 30,
+            max_concurrent_requests: 16,
+        };
+
+        let request = RerankingRequestConfig {
+            enabled: None,
+            candidates: Some(1000),
+            top_k: None,
+        };
+
+        let merged = request.merge_with(&base);
+
+        assert_eq!(merged.candidates, 1000);
     }
 }
 

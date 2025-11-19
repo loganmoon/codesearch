@@ -208,7 +208,7 @@ pub trait PostgresClientTrait: Send + Sync {
     ///
     /// Optimized batch version for fetching statistics for many repositories at once.
     /// This reduces database round trips when loading statistics for multiple repositories,
-    /// such as when the MCP server initializes all repositories at startup.
+    /// such as when the REST API server initializes all repositories at startup.
     ///
     /// # Parameters
     ///

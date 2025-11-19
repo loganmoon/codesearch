@@ -9,6 +9,7 @@ pub type InternedString = String;
 
 /// Type of code entity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum EntityType {
     Function,
@@ -29,6 +30,7 @@ pub enum EntityType {
 
 /// Source location information
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceLocation {
     pub start_line: usize,
     pub end_line: usize,
@@ -53,6 +55,7 @@ impl SourceLocation {
 
 /// Visibility modifiers for entities
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
@@ -63,6 +66,7 @@ pub enum Visibility {
 
 /// Programming language enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Language {
     Rust,
@@ -148,6 +152,7 @@ pub struct CodeEntity {
 
 /// Function signature information
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FunctionSignature {
     /// Parameter names and types
     pub parameters: Vec<(String, Option<String>)>, // (name, type)

@@ -5,6 +5,7 @@ members = [
     "crates/languages",
     "crates/languages-macros",
     "crates/embeddings",
+    "crates/reranking",
     "crates/watcher",
     "crates/cli",
     "crates/indexer",

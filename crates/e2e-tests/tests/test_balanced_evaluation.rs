@@ -17,10 +17,10 @@ use codesearch_core::{
     CodeEntity,
 };
 use codesearch_embeddings::{
-    create_embedding_manager_from_app_config, create_reranker_provider, Bm25SparseProvider,
-    SparseEmbeddingProvider,
+    create_embedding_manager_from_app_config, Bm25SparseProvider, SparseEmbeddingProvider,
 };
 use codesearch_indexer::entity_processor::extract_embedding_content;
+use codesearch_reranking::create_reranker_provider;
 use codesearch_storage::{create_postgres_client, create_storage_client};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
@@ -455,6 +455,7 @@ async fn test_balanced_evaluation() -> Result<()> {
             config.reranking.model.clone(),
             api_base_url,
             config.reranking.timeout_secs,
+            config.reranking.max_concurrent_requests,
         )
         .await
         .context("Failed to create reranker")?,

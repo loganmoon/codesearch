@@ -4,8 +4,8 @@ use codesearch_core::entities::{
     EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
 };
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::create_reranker_provider;
 use codesearch_indexer::entity_processor::extract_embedding_content;
+use codesearch_reranking::create_reranker_provider;
 use std::path::PathBuf;
 
 /// Test reranker handles empty documents
@@ -15,6 +15,7 @@ async fn test_reranker_handles_empty_documents() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -37,6 +38,7 @@ async fn test_reranker_respects_top_k() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -74,6 +76,7 @@ async fn test_reranker_basic_functionality() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -221,6 +224,7 @@ async fn test_reranker_connection_failure() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:9999/v1".to_string(), // Non-existent port
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -252,6 +256,7 @@ async fn test_reranker_http_error() {
         "invalid-model-name".to_string(), // Invalid model
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -271,6 +276,7 @@ async fn test_reranker_empty_query() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -296,6 +302,7 @@ async fn test_reranker_large_top_k() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");
@@ -327,6 +334,7 @@ async fn test_reranker_handles_large_documents() {
         "BAAI/bge-reranker-v2-m3".to_string(),
         "http://localhost:8001".to_string(),
         30,
+        16,
     )
     .await
     .expect("Failed to create reranker provider");

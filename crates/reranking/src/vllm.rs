@@ -1,35 +1,14 @@
-//! Reranker provider for cross-encoder reranking
+//! vLLM-compatible reranker provider
 
-use crate::error::EmbeddingError;
+use crate::error::RerankingError;
+use crate::RerankerProvider;
 use async_trait::async_trait;
 use codesearch_core::error::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
-
-/// Trait for reranker providers
-///
-/// This trait defines the interface for reranking providers that use cross-encoder
-/// models to rescore candidate documents against a query.
-#[async_trait]
-pub trait RerankerProvider: Send + Sync {
-    /// Rerank documents by relevance to the query
-    ///
-    /// # Arguments
-    /// * `query` - The search query text
-    /// * `documents` - List of (document_id, document_content) tuples to rerank
-    /// * `top_k` - Number of top results to return
-    ///
-    /// # Returns
-    /// A vector of (document_id, relevance_score) tuples, sorted by descending relevance
-    async fn rerank(
-        &self,
-        query: &str,
-        documents: &[(String, &str)],
-        top_k: usize,
-    ) -> Result<Vec<(String, f32)>>;
-}
 
 /// Request payload for vLLM rerank API
 #[derive(Debug, Serialize)]
@@ -57,6 +36,7 @@ pub struct VllmRerankerProvider {
     client: Client,
     model: String,
     api_base_url: String,
+    concurrency_limiter: Arc<Semaphore>,
 }
 
 impl VllmRerankerProvider {
@@ -66,28 +46,36 @@ impl VllmRerankerProvider {
     /// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
     /// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001")
     /// * `timeout_secs` - Request timeout in seconds
-    pub fn new(model: String, api_base_url: String, timeout_secs: u64) -> Result<Self> {
+    /// * `max_concurrent_requests` - Maximum concurrent API requests
+    pub fn new(
+        model: String,
+        api_base_url: String,
+        timeout_secs: u64,
+        max_concurrent_requests: usize,
+    ) -> Result<Self> {
         info!("Initializing vLLM reranker provider");
         info!("  Model: {model}");
         info!("  API Base URL: {api_base_url}");
         info!("  Timeout: {timeout_secs}s");
+        info!("  Max concurrent requests: {max_concurrent_requests}");
 
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .build()
             .map_err(|e| {
-                EmbeddingError::ConfigError(format!("Failed to create HTTP client: {e}"))
+                RerankingError::ConfigError(format!("Failed to create HTTP client: {e}"))
             })?;
 
         Ok(Self {
             client,
             model,
             api_base_url,
+            concurrency_limiter: Arc::new(Semaphore::new(max_concurrent_requests)),
         })
     }
 
     /// Check if the reranker API is healthy (non-blocking, warns on failure)
-    async fn check_health(&self) {
+    pub async fn check_health(&self) {
         debug!("Checking reranker API health");
 
         let models_url = format!("{}/models", self.api_base_url);
@@ -169,6 +157,11 @@ impl RerankerProvider for VllmRerankerProvider {
 
         debug!("Sending rerank request for {} documents", documents.len());
 
+        // Acquire semaphore permit for concurrency control
+        let _permit = self.concurrency_limiter.acquire().await.map_err(|e| {
+            RerankingError::InferenceError(format!("Failed to acquire concurrency permit: {e}"))
+        })?;
+
         let response = self
             .client
             .post(&rerank_url)
@@ -176,7 +169,7 @@ impl RerankerProvider for VllmRerankerProvider {
             .send()
             .await
             .map_err(|e| {
-                EmbeddingError::InferenceError(format!("Rerank API request failed: {e}"))
+                RerankingError::InferenceError(format!("Rerank API request failed: {e}"))
             })?;
 
         if !response.status().is_success() {
@@ -185,14 +178,14 @@ impl RerankerProvider for VllmRerankerProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read error response".to_string());
-            return Err(EmbeddingError::InferenceError(format!(
+            return Err(RerankingError::InferenceError(format!(
                 "Rerank API returned error {status}: {error_text}"
             ))
             .into());
         }
 
         let rerank_response: RerankResponse = response.json().await.map_err(|e| {
-            EmbeddingError::InferenceError(format!("Failed to parse rerank response: {e}"))
+            RerankingError::InferenceError(format!("Failed to parse rerank response: {e}"))
         })?;
 
         // Map indices back to document IDs with scores
@@ -230,23 +223,4 @@ impl RerankerProvider for VllmRerankerProvider {
 
         Ok(scored_docs)
     }
-}
-
-/// Create a new reranker provider
-///
-/// # Arguments
-/// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
-/// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001")
-/// * `timeout_secs` - Request timeout in seconds
-pub async fn create_reranker_provider(
-    model: String,
-    api_base_url: String,
-    timeout_secs: u64,
-) -> Result<Arc<dyn RerankerProvider>> {
-    let provider = VllmRerankerProvider::new(model, api_base_url, timeout_secs)?;
-
-    // Perform health check (non-blocking)
-    provider.check_health().await;
-
-    Ok(Arc::new(provider))
 }

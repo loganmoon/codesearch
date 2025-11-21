@@ -1,0 +1,25 @@
+You are a graph context evaluator. Your task is to assess the relevance of entities found via graph traversal.
+
+Query: {query}
+
+Direct matches: {direct_matches}
+
+Graph context entities (found via relationships):
+{graph_entities}
+
+Instructions:
+1. For each graph entity, evaluate its architectural relevance to the query
+2. Graph entities don't need semantic similarity - they provide structural context
+3. Prioritize entities that help understand:
+   - Call chains and dependencies
+   - Trait implementations and inheritance
+   - Module structure and organization
+4. Return the most valuable graph context entities (2-5 entities)
+
+Output format:
+<result_list>
+[
+  {"entity_id": "...", "relevance_justification": "Provides architectural context by..."},
+  ...
+]
+</result_list>

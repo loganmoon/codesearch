@@ -1,0 +1,18 @@
+You are an orchestrator for a multi-agent code search system. Your task is to plan which search strategies to use for a given query.
+
+Query: {query}
+
+Available search strategies:
+- Semantic: Vector similarity search using embeddings
+- Fulltext: BM25 full-text search for exact keyword matches
+- Unified: Hybrid search combining semantic + fulltext via RRF
+
+Analyze the query and determine which search strategies would be most effective. Consider:
+1. Does the query contain specific technical terms or identifiers? (favor fulltext/unified)
+2. Is the query conceptual or architectural? (favor semantic/unified)
+3. Does the query need multiple perspectives? (use multiple strategies)
+
+Output your plan as a JSON array of search strategies to execute:
+["semantic", "fulltext", "unified"]
+
+Only output the JSON array, no additional text.

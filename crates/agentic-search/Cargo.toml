@@ -1,0 +1,27 @@
+[package]
+name = "codesearch-agentic-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codesearch-core = { path = "../core" }
+claudius = "0.16.0"
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+regex = "1.11.1"
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+mockall = "0.13.1"

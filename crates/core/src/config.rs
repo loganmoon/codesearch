@@ -292,7 +292,7 @@ pub struct RerankingConfig {
     /// API base URL for reranker service (defaults to embeddings URL if not set)
     pub api_base_url: Option<String>,
 
-    /// API key for reranker service (uses VLLM_API_KEY env if not set)
+    /// API key for reranker service (uses EMBEDDING_API_KEY env if not set)
     pub api_key: Option<String>,
 
     /// Request timeout in seconds for reranking API calls (default: 30)

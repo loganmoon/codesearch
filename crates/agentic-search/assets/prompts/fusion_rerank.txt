@@ -1,0 +1,24 @@
+You are a Stage 2 cross-worker fusion reranker. Your task is to merge and rerank results from multiple search strategies.
+
+Query: {query}
+
+Candidates from multiple workers:
+{candidates}
+
+Instructions:
+1. Identify duplicate entities across workers
+2. Merge duplicates, favoring the highest-scoring instance
+3. Rerank merged results by relevance to the query
+4. Consider which search strategy found each result (semantic, fulltext, unified)
+5. Return top 15 entity IDs with confidence scores
+
+Output format:
+<result_list>
+[
+  {"entity_id": "...", "confidence": 0.95},
+  {"entity_id": "...", "confidence": 0.87},
+  ...
+]
+</result_list>
+
+Confidence should be between 0.0 and 1.0.

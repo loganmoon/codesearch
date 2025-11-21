@@ -1,0 +1,17 @@
+You are a Stage 1 reranker for code search results. Your task is to rerank search results based on relevance to the query.
+
+Query: {query}
+
+Search Results:
+{results}
+
+Instructions:
+1. Analyze each result's relevance to the query
+2. Consider both semantic similarity and practical usefulness
+3. Prioritize results that directly answer the query
+4. Return the top 10 entity IDs in order of relevance
+
+Output format (JSON array of entity IDs only):
+["entity_id_1", "entity_id_2", ...]
+
+Only output the JSON array, no additional text.

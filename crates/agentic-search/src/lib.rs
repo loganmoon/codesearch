@@ -24,13 +24,16 @@
 // Public modules - exported API
 pub mod config;
 pub mod error;
+pub mod orchestrator;
 pub mod types;
 
 // Public re-exports - narrow API surface
 pub use config::AgenticSearchConfig;
 pub use error::{AgenticSearchError, Result};
-pub use types::{AgenticSearchRequest, AgenticSearchResponse};
+pub use orchestrator::AgenticSearchOrchestrator;
+pub use types::{AgenticEntity, AgenticSearchRequest, AgenticSearchResponse, RetrievalSource};
 
 // Private modules - implementation details not exported
 mod content_selection;
 mod prompts;
+mod worker;

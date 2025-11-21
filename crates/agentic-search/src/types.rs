@@ -24,6 +24,7 @@ pub struct AgenticSearchResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgenticSearchMetadata {
     pub query_time_ms: u64,
+    pub iterations: usize,
     pub workers_spawned: usize,
     pub workers_succeeded: usize,
     pub partial_outage: bool,
@@ -40,4 +41,54 @@ pub struct AgenticSearchMetadata {
 pub enum RerankingMethod {
     HaikuOnly,
     HaikuWithSonnet,
+}
+
+/// Tracks how an entity was retrieved
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalSource {
+    Semantic,
+    Fulltext,
+    Unified,
+    Graph {
+        source_entity_id: String,
+        relationship: String,
+    },
+}
+
+/// Enriched entity with retrieval metadata
+#[derive(Debug, Clone, Serialize)]
+pub struct AgenticEntity {
+    #[serde(flatten)]
+    pub entity: EntityResult,
+    pub source: RetrievalSource,
+    pub relevance_justification: String,
+}
+
+impl AgenticEntity {
+    pub fn from_search_result(entity: EntityResult, source: RetrievalSource) -> Self {
+        let justification = match &source {
+            RetrievalSource::Semantic => format!("Semantic similarity: {:.2}", entity.score),
+            RetrievalSource::Fulltext => format!("Full-text match: {:.2}", entity.score),
+            RetrievalSource::Unified => format!("Hybrid match: {:.2}", entity.score),
+            RetrievalSource::Graph { .. } => "Graph context".to_string(),
+        };
+
+        Self {
+            entity,
+            source,
+            relevance_justification: justification,
+        }
+    }
+
+    pub fn is_direct_match(&self) -> bool {
+        matches!(
+            self.source,
+            RetrievalSource::Semantic | RetrievalSource::Fulltext | RetrievalSource::Unified
+        )
+    }
+
+    pub fn is_graph_context(&self) -> bool {
+        matches!(self.source, RetrievalSource::Graph { .. })
+    }
 }

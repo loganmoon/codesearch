@@ -2,14 +2,23 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AgenticSearchConfig {
     pub api_key: Option<String>,
     pub orchestrator_model: String,
     pub worker_model: String,
-    pub max_workers: usize,
-    pub timeout_secs: u64,
     pub quality_gate: QualityGateConfig,
+}
+
+impl std::fmt::Debug for AgenticSearchConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgenticSearchConfig")
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("orchestrator_model", &self.orchestrator_model)
+            .field("worker_model", &self.worker_model)
+            .field("quality_gate", &self.quality_gate)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,8 +35,6 @@ impl Default for AgenticSearchConfig {
             api_key: None,
             orchestrator_model: "claude-sonnet-4-5".to_string(),
             worker_model: "claude-haiku-4-5".to_string(),
-            max_workers: 5,
-            timeout_secs: 120,
             quality_gate: QualityGateConfig::default(),
         }
     }
@@ -52,15 +59,6 @@ impl AgenticSearchConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.max_workers == 0 {
-            return Err("max_workers must be greater than 0".to_string());
-        }
-        if self.max_workers > 10 {
-            return Err("max_workers cannot exceed 10".to_string());
-        }
-        if self.timeout_secs == 0 {
-            return Err("timeout_secs must be greater than 0".to_string());
-        }
         if self.quality_gate.min_top5_avg_score < 0.0 || self.quality_gate.min_top5_avg_score > 1.0
         {
             return Err("min_top5_avg_score must be between 0.0 and 1.0".to_string());
@@ -72,24 +70,6 @@ impl AgenticSearchConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_config_validation_workers_zero() {
-        let config = AgenticSearchConfig {
-            max_workers: 0,
-            ..Default::default()
-        };
-        assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn test_config_validation_workers_too_high() {
-        let config = AgenticSearchConfig {
-            max_workers: 11,
-            ..Default::default()
-        };
-        assert!(config.validate().is_err());
-    }
 
     #[test]
     fn test_config_validation_score_range() {
@@ -106,10 +86,8 @@ mod tests {
     #[test]
     fn test_config_defaults() {
         let config = AgenticSearchConfig::default();
-        assert_eq!(config.max_workers, 5);
         assert_eq!(config.orchestrator_model, "claude-sonnet-4-5");
         assert_eq!(config.worker_model, "claude-haiku-4-5");
-        assert_eq!(config.timeout_secs, 120);
         assert!(config.validate().is_ok());
     }
 
@@ -119,5 +97,16 @@ mod tests {
         let config = AgenticSearchConfig::default();
         assert_eq!(config.resolve_api_key(), Some("test-key".to_string()));
         std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_debug_redacts_api_key() {
+        let config = AgenticSearchConfig {
+            api_key: Some("secret-api-key-12345".to_string()),
+            ..Default::default()
+        };
+        let debug_output = format!("{config:?}");
+        assert!(!debug_output.contains("secret-api-key-12345"));
+        assert!(debug_output.contains("[REDACTED]"));
     }
 }

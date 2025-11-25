@@ -2,7 +2,7 @@
 
 use crate::{
     content_selection::{select_content_for_reranking, RerankStage},
-    error::{AgenticSearchError, Result},
+    error::{truncate_for_error, AgenticSearchError, Result},
     prompts,
     types::{AgenticEntity, RetrievalSource},
 };
@@ -230,7 +230,8 @@ async fn rerank_worker_results(
     let reranked_list: Vec<RerankingResponse> =
         serde_json::from_str(&response_text).map_err(|e| {
             AgenticSearchError::Reranking(format!(
-                "Failed to parse Haiku reranking response: {e}. Response: {response_text}"
+                "Failed to parse Haiku reranking response: {e}. Response: {}",
+                truncate_for_error(&response_text)
             ))
         })?;
 
@@ -353,5 +354,67 @@ mod tests {
         assert_eq!(result.worker_type, WorkerType::Unified);
         assert_eq!(result.entities.len(), 0);
         assert_eq!(result.reranking_cost_usd, 0.0025);
+    }
+
+    #[test]
+    fn test_reranking_response_parsing_valid() {
+        let json = r#"[
+            {"entity_id": "e1", "score": 0.95, "reasoning": "Direct implementation"},
+            {"entity_id": "e2", "score": 0.82, "reasoning": "Helper function"}
+        ]"#;
+        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].entity_id, "e1");
+        assert_eq!(parsed[0].score, 0.95);
+        assert_eq!(parsed[0].reasoning, "Direct implementation");
+        assert_eq!(parsed[1].entity_id, "e2");
+        assert_eq!(parsed[1].score, 0.82);
+    }
+
+    #[test]
+    fn test_reranking_response_parsing_empty_array() {
+        let json = r#"[]"#;
+        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_reranking_response_parsing_malformed_missing_fields() {
+        // Missing 'reasoning' field
+        let json = r#"[{"entity_id": "e1", "score": 0.95}]"#;
+        let result: std::result::Result<Vec<RerankingResponse>, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_response_parsing_wrong_format() {
+        // Old format (array of strings) should fail
+        let json = r#"["entity_id_1", "entity_id_2"]"#;
+        let result: std::result::Result<Vec<RerankingResponse>, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_response_parsing_single_item() {
+        let json = r#"[{"entity_id": "single", "score": 0.99, "reasoning": "Only match"}]"#;
+        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].entity_id, "single");
+    }
+
+    #[test]
+    fn test_all_workers_failed_error() {
+        // Verify the AllWorkersFailed error type works correctly
+        let err = AgenticSearchError::AllWorkersFailed;
+        assert!(err.to_string().contains("All workers failed"));
+    }
+
+    #[test]
+    fn test_partial_worker_failure_error() {
+        let err = AgenticSearchError::PartialWorkerFailure {
+            successful: 2,
+            total: 3,
+        };
+        assert!(err.to_string().contains("2/3"));
     }
 }

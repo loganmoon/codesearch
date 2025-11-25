@@ -2,7 +2,7 @@
 
 use crate::{
     config::AgenticSearchConfig,
-    error::{AgenticSearchError, Result},
+    error::{truncate_for_error, AgenticSearchError, Result},
     prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
@@ -13,7 +13,7 @@ use crate::{
 use codesearch_core::search_models::{GraphQueryParameters, GraphQueryRequest, GraphQueryType};
 use codesearch_core::SearchApi;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -153,9 +153,13 @@ impl AgenticSearchOrchestrator {
 
     /// Execute agentic search with iterative loop
     pub async fn search(&self, request: AgenticSearchRequest) -> Result<AgenticSearchResponse> {
+        // Validate request before processing
+        request.validate()?;
+
         let start_time = Instant::now();
         let mut iteration = 0;
         let mut accumulated_entities: Vec<AgenticEntity> = Vec::new();
+        let mut seen_entity_ids: HashSet<String> = HashSet::new();
         let mut total_cost = 0.0;
         let mut workers_spawned = 0;
         let mut workers_succeeded = 0;
@@ -195,13 +199,10 @@ impl AgenticSearchOrchestrator {
                 partial_outage = true;
             }
 
-            // Merge with accumulated entities (deduplicate by entity_id)
+            // Merge with accumulated entities using HashSet for O(1) deduplication
             let initial_count = accumulated_entities.len();
             for entity in new_entities {
-                if !accumulated_entities
-                    .iter()
-                    .any(|e| e.entity.entity_id == entity.entity.entity_id)
-                {
+                if seen_entity_ids.insert(entity.entity.entity_id.clone()) {
                     accumulated_entities.push(entity);
                 }
             }
@@ -227,14 +228,7 @@ impl AgenticSearchOrchestrator {
             total_cost += decision.iteration_cost;
         }
 
-        // Final synthesis: select top 10
-        let final_results = self
-            .synthesize_final_results(accumulated_entities.clone(), &request.query)
-            .await?;
-
-        let query_time_ms = start_time.elapsed().as_millis() as u64;
-
-        // Calculate metadata
+        // Calculate metadata before synthesis (need counts from accumulated_entities)
         let direct_candidates = accumulated_entities
             .iter()
             .filter(|e| e.is_direct_match())
@@ -243,6 +237,14 @@ impl AgenticSearchOrchestrator {
             .iter()
             .filter(|e| e.is_graph_context())
             .count();
+
+        // Final synthesis: select top 10 (pass ownership, no clone needed)
+        let final_results = self
+            .synthesize_final_results(accumulated_entities, &request.query)
+            .await?;
+
+        let query_time_ms = start_time.elapsed().as_millis() as u64;
+
         let graph_in_results = final_results
             .iter()
             .filter(|e| e.is_graph_context())
@@ -340,7 +342,8 @@ impl AgenticSearchOrchestrator {
         let decision: OrchestratorDecisionResponse =
             serde_json::from_str(&response_text).map_err(|e| {
                 AgenticSearchError::Orchestrator(format!(
-                    "Failed to parse Sonnet decision: {e}. Response: {response_text}"
+                    "Failed to parse Sonnet decision: {e}. Response: {}",
+                    truncate_for_error(&response_text)
                 ))
             })?;
 
@@ -386,11 +389,17 @@ impl AgenticSearchOrchestrator {
     }
 
     /// Execute operations planned by orchestrator
+    ///
+    /// Executes search and graph operations with parallelization:
+    /// - All search operations run concurrently
+    /// - Graph traversals run after searches (need entities to reference)
     async fn execute_operations(
         &self,
         operations: &[PlannedOperation],
         request: &AgenticSearchRequest,
     ) -> Result<(Vec<AgenticEntity>, WorkerStats)> {
+        use futures::future::join_all;
+
         let mut all_entities = Vec::new();
         let mut stats = WorkerStats {
             spawned: 0,
@@ -398,12 +407,34 @@ impl AgenticSearchOrchestrator {
             failed: 0,
         };
 
-        for op in operations {
-            match op {
+        // Separate search and graph operations
+        let search_ops: Vec<_> = operations
+            .iter()
+            .filter_map(|op| match op {
                 PlannedOperation::Search {
                     query,
                     search_types,
-                } => {
+                } => Some((query.clone(), search_types.clone())),
+                _ => None,
+            })
+            .collect();
+
+        let graph_ops: Vec<_> = operations
+            .iter()
+            .filter_map(|op| match op {
+                PlannedOperation::GraphTraversal {
+                    entity_id,
+                    relationship,
+                } => Some((entity_id.clone(), relationship.clone())),
+                _ => None,
+            })
+            .collect();
+
+        // Execute all search operations concurrently
+        if !search_ops.is_empty() {
+            let search_futures: Vec<_> = search_ops
+                .iter()
+                .map(|(query, search_types)| {
                     let worker_queries: Vec<WorkerQuery> = search_types
                         .iter()
                         .map(|worker_type| WorkerQuery {
@@ -412,58 +443,62 @@ impl AgenticSearchOrchestrator {
                             repository_ids: request.repository_ids.clone(),
                         })
                         .collect();
+                    let count = worker_queries.len();
+                    let search_api = self.search_api.clone();
+                    let haiku_client = self.haiku_client.clone();
+                    let haiku_model = self.haiku_model.clone();
+                    async move {
+                        let result =
+                            execute_workers(worker_queries, search_api, haiku_client, haiku_model)
+                                .await;
+                        (count, result)
+                    }
+                })
+                .collect();
 
-                    stats.spawned += worker_queries.len();
+            let search_results = join_all(search_futures).await;
 
-                    match execute_workers(
-                        worker_queries,
-                        self.search_api.clone(),
-                        self.haiku_client.clone(),
-                        self.haiku_model.clone(),
-                    )
-                    .await
-                    {
-                        Ok(results) => {
-                            stats.succeeded += results.len();
-                            for result in results {
-                                all_entities.extend(result.entities);
-                            }
+            for (worker_count, result) in search_results {
+                stats.spawned += worker_count;
+                match result {
+                    Ok(results) => {
+                        stats.succeeded += results.len();
+                        for r in results {
+                            all_entities.extend(r.entities);
                         }
-                        Err(AgenticSearchError::AllWorkersFailed) => {
-                            warn!("All workers failed for query: {}", query);
-                            stats.failed += search_types.len();
-                        }
-                        Err(e) => {
-                            warn!("Workers partially failed: {}", e);
-                            stats.failed += 1;
-                        }
+                    }
+                    Err(AgenticSearchError::AllWorkersFailed) => {
+                        warn!("All workers failed for search operation");
+                        stats.failed += worker_count;
+                    }
+                    Err(e) => {
+                        warn!("Workers partially failed: {}", e);
+                        stats.failed += 1;
                     }
                 }
-                PlannedOperation::GraphTraversal {
-                    entity_id,
-                    relationship,
-                } => {
-                    stats.spawned += 1;
+            }
+        }
 
-                    match self
-                        .execute_graph_traversal(
-                            entity_id,
-                            relationship,
-                            &request.repository_ids,
-                            &all_entities,
-                        )
-                        .await
-                    {
-                        Ok(entities) => {
-                            stats.succeeded += 1;
-                            all_entities.extend(entities);
-                        }
-                        Err(e) => {
-                            // Silent fallback - continue with direct matches only
-                            debug!("Graph traversal failed (silent fallback): {}", e);
-                            stats.failed += 1;
-                        }
-                    }
+        // Execute graph traversals (need entities from searches to reference)
+        // These run after searches complete since they may reference newly found entities
+        for (entity_id, relationship) in graph_ops {
+            stats.spawned += 1;
+            match self
+                .execute_graph_traversal(
+                    &entity_id,
+                    &relationship,
+                    &request.repository_ids,
+                    &all_entities,
+                )
+                .await
+            {
+                Ok(entities) => {
+                    stats.succeeded += 1;
+                    all_entities.extend(entities);
+                }
+                Err(e) => {
+                    debug!("Graph traversal failed (silent fallback): {}", e);
+                    stats.failed += 1;
                 }
             }
         }
@@ -1052,5 +1087,72 @@ I prioritized semantic matches because they had the highest relevance scores.
         assert_eq!(decision.operations.len(), 2);
         assert_eq!(decision.operations[0].operation_type, "search");
         assert_eq!(decision.operations[1].operation_type, "graph_traversal");
+    }
+
+    // ========================================================================
+    // Quality Gate Result Parsing Tests
+    // ========================================================================
+
+    #[test]
+    fn test_quality_gate_result_parsing_valid() {
+        let json = r#"[
+            {"entity_id": "e1", "track": "direct", "relevance_justification": "Main implementation"},
+            {"entity_id": "e2", "track": "graph", "relevance_justification": "Calls the main function"}
+        ]"#;
+        let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].entity_id, "e1");
+        assert_eq!(parsed[0].relevance_justification, "Main implementation");
+        assert_eq!(parsed[1].entity_id, "e2");
+    }
+
+    #[test]
+    fn test_quality_gate_result_parsing_without_track() {
+        // track is optional
+        let json = r#"[{"entity_id": "e1", "relevance_justification": "Direct match"}]"#;
+        let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].entity_id, "e1");
+        assert!(parsed[0].track.is_none());
+    }
+
+    #[test]
+    fn test_quality_gate_result_parsing_empty_array() {
+        let json = r#"[]"#;
+        let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(json).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn test_extract_result_list_fallback_no_tags() {
+        // When result_list tags are missing, extract_result_list should error
+        let response = r#"Here are the results: [{"entity_id": "e1"}]"#;
+        let result = extract_result_list(response);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing <result_list>"));
+    }
+
+    #[test]
+    fn test_extract_result_list_with_chatty_llm_response() {
+        // Simulates a chatty LLM that adds commentary before and after
+        let response = r#"
+Based on my analysis of the candidates, I've composed the following result list:
+
+<result_list>
+[
+    {"entity_id": "primary-1", "track": "direct", "relevance_justification": "Core functionality"}
+]
+</result_list>
+
+I prioritized direct matches because they had the highest semantic relevance.
+The graph context entities were less relevant for this particular query.
+"#;
+        let result = extract_result_list(response).unwrap();
+        let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].entity_id, "primary-1");
     }
 }

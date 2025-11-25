@@ -2,6 +2,18 @@
 
 use thiserror::Error;
 
+/// Maximum length for LLM responses included in error messages
+const MAX_ERROR_RESPONSE_LENGTH: usize = 500;
+
+/// Truncate a response for inclusion in error messages
+pub(crate) fn truncate_for_error(response: &str) -> String {
+    if response.len() <= MAX_ERROR_RESPONSE_LENGTH {
+        response.to_string()
+    } else {
+        format!("{}...[truncated]", &response[..MAX_ERROR_RESPONSE_LENGTH])
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AgenticSearchError {
     #[error("Configuration error: {0}")]

@@ -159,8 +159,6 @@ async fn test_orchestrator_initialization() {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
         worker_model: "claude-haiku-4-5".to_string(),
-        max_workers: 5,
-        timeout_secs: 120,
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
@@ -176,8 +174,6 @@ async fn test_orchestrator_requires_api_key() {
         api_key: None,
         orchestrator_model: "claude-sonnet-4-5".to_string(),
         worker_model: "claude-haiku-4-5".to_string(),
-        max_workers: 5,
-        timeout_secs: 120,
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
@@ -207,8 +203,6 @@ async fn test_end_to_end_search() {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
         worker_model: "claude-haiku-4-5".to_string(),
-        max_workers: 5,
-        timeout_secs: 120,
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
@@ -317,8 +311,6 @@ async fn test_dual_track_metadata_population() {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
         worker_model: "claude-haiku-4-5".to_string(),
-        max_workers: 5,
-        timeout_secs: 120,
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 

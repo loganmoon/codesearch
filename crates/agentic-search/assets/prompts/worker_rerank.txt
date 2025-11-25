@@ -9,9 +9,20 @@ Instructions:
 1. Analyze each result's relevance to the query
 2. Consider both semantic similarity and practical usefulness
 3. Prioritize results that directly answer the query
-4. Return the top 10 entity IDs in order of relevance
+4. Assign a relevance score (0.0 to 1.0) based on how well each result matches the query
+5. Provide brief reasoning for each ranking decision
 
-Output format (JSON array of entity IDs only):
-["entity_id_1", "entity_id_2", ...]
+Scoring guide:
+- 0.90-1.00: Direct answer to the query, highly specific match
+- 0.75-0.89: Strong relevance, clear connection to query
+- 0.60-0.74: Moderate relevance, tangentially related
+- 0.40-0.59: Weak relevance, might be useful
+- Below 0.40: Likely irrelevant
 
-Only output the JSON array, no additional text.
+Output format (JSON array of objects, top 10 results):
+[
+  {"entity_id": "uuid-1", "score": 0.95, "reasoning": "Direct implementation of the queried functionality"},
+  {"entity_id": "uuid-2", "score": 0.82, "reasoning": "Helper function used by the main implementation"}
+]
+
+Output ONLY the JSON array, no additional text.

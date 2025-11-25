@@ -8,9 +8,22 @@
 //! This crate exports a minimal public API following the principle of limiting
 //! public exports to traits, models, errors, and factory functions:
 //!
+//! ## Main Entry Point
+//! - [`AgenticSearchOrchestrator`] - Main orchestrator that executes agentic search
+//!
+//! ## Request/Response Models
 //! - [`AgenticSearchRequest`] - Input request model
-//! - [`AgenticSearchResponse`] - Output response model
-//! - [`AgenticSearchConfig`] - Configuration
+//! - [`AgenticSearchResponse`] - Output response model with results and metadata
+//! - [`AgenticSearchMetadata`] - Execution metadata (iterations, cost, etc.)
+//! - [`AgenticEntity`] - Entity result enriched with retrieval source
+//! - [`RetrievalSource`] - How an entity was retrieved (semantic, fulltext, graph)
+//! - [`RerankingMethod`] - Which reranking method was used
+//!
+//! ## Configuration
+//! - [`AgenticSearchConfig`] - Main configuration
+//! - [`QualityGateConfig`] - Quality gate thresholds
+//!
+//! ## Error Handling
 //! - [`AgenticSearchError`] - Error types
 //! - [`Result`] - Result type alias
 //!

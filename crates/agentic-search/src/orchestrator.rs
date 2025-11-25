@@ -19,6 +19,27 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 const MAX_ITERATIONS: usize = 5;
+const MAX_LLM_QUERY_LENGTH: usize = 1000;
+const VALID_RELATIONSHIPS: &[&str] = &[
+    "callers",
+    "called_by",
+    "who_calls",
+    "callees",
+    "calls",
+    "what_calls",
+    "implementations",
+    "implements",
+    "implementors",
+    "hierarchy",
+    "extends",
+    "inherits",
+    "contains",
+    "module_contents",
+    "in_module",
+    "dependencies",
+    "imports",
+    "uses",
+];
 
 // ============================================================================
 // Helper Functions
@@ -51,6 +72,16 @@ fn extract_result_list(response: &str) -> Result<String> {
     }
 
     Ok(response[start + start_tag.len()..end].trim().to_string())
+}
+
+/// Validate entity_id has reasonable format (not empty, reasonable length)
+fn is_valid_entity_id(entity_id: &str) -> bool {
+    !entity_id.is_empty() && entity_id.len() <= 100
+}
+
+/// Check if relationship is in the allowed whitelist
+fn is_valid_relationship(relationship: &str) -> bool {
+    VALID_RELATIONSHIPS.contains(&relationship.to_lowercase().as_str())
 }
 
 /// Map relationship strings from orchestrator to GraphQueryType
@@ -353,15 +384,26 @@ impl AgenticSearchOrchestrator {
             decision.operations.len()
         );
 
-        Ok(OrchestratorDecision {
-            should_stop: decision.should_stop,
-            reason: decision.reason,
-            operations: decision
-                .operations
-                .into_iter()
-                .map(|op| match op.operation_type.as_str() {
-                    "search" => PlannedOperation::Search {
-                        query: op.query.unwrap_or_default(),
+        // Parse and validate operations, filtering out invalid ones
+        let operations: Vec<PlannedOperation> = decision
+            .operations
+            .into_iter()
+            .filter_map(|op| match op.operation_type.as_str() {
+                "search" => {
+                    let search_query = op.query.unwrap_or_default();
+                    // Validate query length
+                    if search_query.len() > MAX_LLM_QUERY_LENGTH {
+                        warn!(
+                            "LLM returned query exceeding max length ({} > {}), truncating",
+                            search_query.len(),
+                            MAX_LLM_QUERY_LENGTH
+                        );
+                    }
+                    let truncated_query: String =
+                        search_query.chars().take(MAX_LLM_QUERY_LENGTH).collect();
+
+                    Some(PlannedOperation::Search {
+                        query: truncated_query,
                         search_types: op
                             .search_types
                             .unwrap_or_else(|| vec!["unified".to_string()])
@@ -373,17 +415,52 @@ impl AgenticSearchOrchestrator {
                                 _ => None,
                             })
                             .collect(),
-                    },
-                    "graph_traversal" => PlannedOperation::GraphTraversal {
-                        entity_id: op.entity_id.unwrap_or_default(),
-                        relationship: op.relationship.unwrap_or_default(),
-                    },
-                    _ => PlannedOperation::Search {
+                    })
+                }
+                "graph_traversal" => {
+                    let entity_id = op.entity_id.unwrap_or_default();
+                    let relationship = op.relationship.unwrap_or_default();
+
+                    // Validate entity_id
+                    if !is_valid_entity_id(&entity_id) {
+                        warn!(
+                            "LLM returned invalid entity_id '{}', skipping graph traversal",
+                            truncate_for_error(&entity_id)
+                        );
+                        return None;
+                    }
+
+                    // Validate relationship against whitelist
+                    if !is_valid_relationship(&relationship) {
+                        warn!(
+                            "LLM returned unknown relationship '{}', skipping graph traversal",
+                            relationship
+                        );
+                        return None;
+                    }
+
+                    Some(PlannedOperation::GraphTraversal {
+                        entity_id,
+                        relationship,
+                    })
+                }
+                _ => {
+                    warn!(
+                        "LLM returned unknown operation type '{}', using default search",
+                        op.operation_type
+                    );
+                    Some(PlannedOperation::Search {
                         query: query.to_string(),
                         search_types: vec![WorkerType::Unified],
-                    },
-                })
-                .collect(),
+                    })
+                }
+            })
+            .collect();
+
+        Ok(OrchestratorDecision {
+            should_stop: decision.should_stop,
+            reason: decision.reason,
+            operations,
             iteration_cost: 0.01,
         })
     }
@@ -937,6 +1014,37 @@ mod tests {
     }
 
     // ========================================================================
+    // LLM Input Validation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_is_valid_entity_id() {
+        assert!(is_valid_entity_id("abc-123"));
+        assert!(is_valid_entity_id("a"));
+        assert!(is_valid_entity_id(&"x".repeat(100)));
+
+        // Invalid cases
+        assert!(!is_valid_entity_id(""));
+        assert!(!is_valid_entity_id(&"x".repeat(101)));
+    }
+
+    #[test]
+    fn test_is_valid_relationship() {
+        // Valid relationships
+        assert!(is_valid_relationship("callers"));
+        assert!(is_valid_relationship("CALLERS")); // case insensitive
+        assert!(is_valid_relationship("callees"));
+        assert!(is_valid_relationship("implementations"));
+        assert!(is_valid_relationship("hierarchy"));
+        assert!(is_valid_relationship("dependencies"));
+
+        // Invalid relationships
+        assert!(!is_valid_relationship("unknown"));
+        assert!(!is_valid_relationship(""));
+        assert!(!is_valid_relationship("drop_table"));
+    }
+
+    // ========================================================================
     // Phase 3 Unit Tests: XML Parsing
     // ========================================================================
 
@@ -1013,12 +1121,10 @@ I prioritized semantic matches because they had the highest relevance scores.
 [
   {
     "entity_id": "uuid-1",
-    "track": "direct",
     "relevance_justification": "Core implementation of the search functionality"
   },
   {
     "entity_id": "uuid-2",
-    "track": "graph",
     "relevance_justification": "Entry point that calls the search"
   }
 ]
@@ -1096,8 +1202,8 @@ I prioritized semantic matches because they had the highest relevance scores.
     #[test]
     fn test_quality_gate_result_parsing_valid() {
         let json = r#"[
-            {"entity_id": "e1", "track": "direct", "relevance_justification": "Main implementation"},
-            {"entity_id": "e2", "track": "graph", "relevance_justification": "Calls the main function"}
+            {"entity_id": "e1", "relevance_justification": "Main implementation"},
+            {"entity_id": "e2", "relevance_justification": "Calls the main function"}
         ]"#;
         let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.len(), 2);
@@ -1107,13 +1213,12 @@ I prioritized semantic matches because they had the highest relevance scores.
     }
 
     #[test]
-    fn test_quality_gate_result_parsing_without_track() {
-        // track is optional
+    fn test_quality_gate_result_parsing_minimal() {
         let json = r#"[{"entity_id": "e1", "relevance_justification": "Direct match"}]"#;
         let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].entity_id, "e1");
-        assert!(parsed[0].track.is_none());
+        assert_eq!(parsed[0].relevance_justification, "Direct match");
     }
 
     #[test]
@@ -1143,7 +1248,7 @@ Based on my analysis of the candidates, I've composed the following result list:
 
 <result_list>
 [
-    {"entity_id": "primary-1", "track": "direct", "relevance_justification": "Core functionality"}
+    {"entity_id": "primary-1", "relevance_justification": "Core functionality"}
 ]
 </result_list>
 

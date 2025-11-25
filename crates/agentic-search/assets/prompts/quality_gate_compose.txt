@@ -51,8 +51,8 @@ Return ONLY:
 
 <result_list>
 [
-  {"entity_id": "...", "track": "direct", "relevance_justification": "..."},
-  {"entity_id": "...", "track": "graph", "relevance_justification": "..."}
+  {"entity_id": "...", "relevance_justification": "..."},
+  {"entity_id": "...", "relevance_justification": "..."}
 ]
 </result_list>
 

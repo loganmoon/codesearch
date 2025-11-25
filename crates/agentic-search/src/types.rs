@@ -123,8 +123,5 @@ impl AgenticEntity {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct QualityGateResult {
     pub entity_id: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub track: Option<String>,
     pub relevance_justification: String,
 }

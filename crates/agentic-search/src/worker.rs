@@ -235,6 +235,10 @@ async fn rerank_worker_results(
             ))
         })?;
 
+    // Build HashMap index for O(1) lookup instead of O(n) per entity
+    let results_map: std::collections::HashMap<&str, &EntityResult> =
+        results.iter().map(|e| (e.entity_id.as_str(), e)).collect();
+
     // Map back to AgenticEntity with updated scores and reasoning
     let mut reranked_entities = Vec::new();
     let retrieval_source = match worker_type {
@@ -244,12 +248,9 @@ async fn rerank_worker_results(
     };
 
     for reranked in reranked_list.iter().take(10) {
-        if let Some(mut entity) = results
-            .iter()
-            .find(|e| e.entity_id == reranked.entity_id)
-            .cloned()
-        {
-            // Update score and reasoning
+        if let Some(&entity_ref) = results_map.get(reranked.entity_id.as_str()) {
+            // Clone and update score/reasoning
+            let mut entity = entity_ref.clone();
             entity.score = reranked.score;
             entity.reasoning = Some(reranked.reasoning.clone());
 
@@ -258,6 +259,11 @@ async fn rerank_worker_results(
             agentic_entity.relevance_justification = reranked.reasoning.clone();
 
             reranked_entities.push(agentic_entity);
+        } else {
+            warn!(
+                "Reranking returned unknown entity_id '{}', skipping (possible LLM hallucination)",
+                reranked.entity_id
+            );
         }
     }
 

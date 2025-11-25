@@ -92,3 +92,50 @@ impl AgenticEntity {
         matches!(self.source, RetrievalSource::Graph { .. })
     }
 }
+
+// ============================================================================
+// LLM Response Types (for parsing prompt outputs)
+// These are internal types used only for deserializing LLM responses.
+// Fields may not be directly read but define the expected JSON shape.
+// ============================================================================
+
+/// Response from fusion rerank prompt (Stage 2 cross-worker fusion)
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct FusionRerankResult {
+    pub entity_id: String,
+    pub confidence: f32,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    pub reasoning: String,
+}
+
+/// Response from graph evaluate prompt
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct GraphEvaluateResult {
+    pub entity_id: String,
+    pub structural_relevance_score: f32,
+    #[serde(default)]
+    pub relationship_type: Option<String>,
+    pub reasoning: String,
+}
+
+/// Response from quality gate compose prompt
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct QualityGateResponse {
+    pub results: Vec<QualityGateResult>,
+    #[serde(default)]
+    pub composition_summary: Option<String>,
+}
+
+/// Individual result from quality gate composition
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct QualityGateResult {
+    pub entity_id: String,
+    #[serde(default)]
+    pub track: Option<String>,
+    pub relevance_justification: String,
+}

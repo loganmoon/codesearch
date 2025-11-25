@@ -28,6 +28,12 @@ pub enum AgenticSearchError {
     #[error("Search API error: {0}")]
     SearchApi(String),
 
+    #[error("Graph traversal error: {0}")]
+    GraphTraversal(String),
+
+    #[error("Quality gate error: {0}")]
+    QualityGate(String),
+
     #[error("Claudius SDK error: {0}")]
     Claudius(String),
 

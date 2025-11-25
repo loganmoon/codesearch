@@ -21,19 +21,20 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-// Public modules - exported API
-pub mod config;
-pub mod error;
-pub mod orchestrator;
-pub mod types;
+// Private modules - implementation details
+mod config;
+mod content_selection;
+mod error;
+mod orchestrator;
+mod prompts;
+mod types;
+mod worker;
 
 // Public re-exports - narrow API surface
-pub use config::AgenticSearchConfig;
+pub use config::{AgenticSearchConfig, QualityGateConfig};
 pub use error::{AgenticSearchError, Result};
 pub use orchestrator::AgenticSearchOrchestrator;
-pub use types::{AgenticEntity, AgenticSearchRequest, AgenticSearchResponse, RetrievalSource};
-
-// Private modules - implementation details not exported
-mod content_selection;
-mod prompts;
-mod worker;
+pub use types::{
+    AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
+    RerankingMethod, RetrievalSource,
+};

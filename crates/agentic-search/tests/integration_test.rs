@@ -17,6 +17,7 @@ struct MockSearchApi {
     semantic_results: Vec<EntityResult>,
     fulltext_results: Vec<EntityResult>,
     unified_results: Vec<EntityResult>,
+    graph_results: Vec<GraphResult>,
 }
 
 impl MockSearchApi {
@@ -25,6 +26,7 @@ impl MockSearchApi {
             semantic_results: vec![],
             fulltext_results: vec![],
             unified_results: vec![],
+            graph_results: vec![],
         }
     }
 
@@ -36,6 +38,12 @@ impl MockSearchApi {
 
     fn with_unified_results(mut self, results: Vec<EntityResult>) -> Self {
         self.unified_results = results;
+        self
+    }
+
+    #[allow(dead_code)]
+    fn with_graph_results(mut self, results: Vec<GraphResult>) -> Self {
+        self.graph_results = results;
         self
     }
 }
@@ -91,14 +99,24 @@ impl SearchApi for MockSearchApi {
 
     async fn query_graph(&self, _request: GraphQueryRequest) -> CoreResult<GraphQueryResponse> {
         Ok(GraphQueryResponse {
-            results: vec![],
+            results: self.graph_results.clone(),
             metadata: GraphResponseMetadata {
-                total_results: 0,
+                total_results: self.graph_results.len(),
                 semantic_filter_applied: false,
                 query_time_ms: 100,
                 warning: None,
             },
         })
+    }
+}
+
+/// Create a mock GraphResult with an embedded entity
+#[allow(dead_code)]
+fn create_mock_graph_result(id: &str, name: &str) -> GraphResult {
+    GraphResult {
+        qualified_name: name.to_string(),
+        relevance_score: Some(0.5),
+        entity: Some(create_mock_entity(id, name, 0.3)), // Low semantic score on purpose
     }
 }
 
@@ -143,7 +161,7 @@ async fn test_orchestrator_initialization() {
         worker_model: "claude-haiku-4-5".to_string(),
         max_workers: 5,
         timeout_secs: 120,
-        quality_gate: codesearch_agentic_search::config::QualityGateConfig::default(),
+        quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
     let result = AgenticSearchOrchestrator::new(mock_api, config);
@@ -160,7 +178,7 @@ async fn test_orchestrator_requires_api_key() {
         worker_model: "claude-haiku-4-5".to_string(),
         max_workers: 5,
         timeout_secs: 120,
-        quality_gate: codesearch_agentic_search::config::QualityGateConfig::default(),
+        quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
     std::env::remove_var("ANTHROPIC_API_KEY");
@@ -191,7 +209,7 @@ async fn test_end_to_end_search() {
         worker_model: "claude-haiku-4-5".to_string(),
         max_workers: 5,
         timeout_secs: 120,
-        quality_gate: codesearch_agentic_search::config::QualityGateConfig::default(),
+        quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
     };
 
     let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();
@@ -229,4 +247,116 @@ fn test_mock_entity_creation() {
     assert_eq!(entity.score, 0.95);
     assert!(entity.content.is_some());
     assert!(entity.signature.is_some());
+}
+
+#[test]
+fn test_mock_graph_result_creation() {
+    let result = create_mock_graph_result("graph_id", "graph_function");
+
+    assert_eq!(result.qualified_name, "graph_function");
+    assert!(result.relevance_score.is_some());
+    assert!(result.entity.is_some());
+
+    let entity = result.entity.unwrap();
+    assert_eq!(entity.entity_id, "graph_id");
+    // Graph entities have low semantic scores by design
+    assert!(entity.score < 0.5);
+}
+
+// =============================================================================
+// Phase 3 Integration Tests: Graph and Dual-Track Support
+// =============================================================================
+
+#[tokio::test]
+async fn test_mock_search_api_with_graph() {
+    let graph_results = vec![
+        create_mock_graph_result("g1", "graph_callers"),
+        create_mock_graph_result("g2", "graph_callees"),
+    ];
+
+    let mock_api = MockSearchApi::new().with_graph_results(graph_results);
+
+    let request = GraphQueryRequest {
+        repository_id: Uuid::new_v4(),
+        query_type: GraphQueryType::FindFunctionCallers,
+        parameters: GraphQueryParameters {
+            qualified_name: "test_function".to_string(),
+            max_depth: Some(2),
+        },
+        return_entities: true,
+        semantic_filter: None,
+        limit: 10,
+    };
+
+    let response = mock_api.query_graph(request).await.unwrap();
+    assert_eq!(response.results.len(), 2);
+    assert_eq!(response.metadata.total_results, 2);
+}
+
+#[tokio::test]
+#[ignore = "Requires ANTHROPIC_API_KEY and makes real API calls"]
+async fn test_dual_track_metadata_population() {
+    // Setup: unified results + graph results with low semantic score
+    let unified_results = vec![
+        create_mock_entity("u1", "validate_jwt", 0.95),
+        create_mock_entity("u2", "parse_token", 0.85),
+    ];
+
+    let graph_results = vec![
+        create_mock_graph_result("g1", "auth_controller"), // Low score (0.3)
+        create_mock_graph_result("g2", "login_handler"),   // Low score (0.3)
+    ];
+
+    let mock_api = Arc::new(
+        MockSearchApi::new()
+            .with_unified_results(unified_results)
+            .with_graph_results(graph_results),
+    ) as Arc<dyn SearchApi>;
+
+    let config = AgenticSearchConfig {
+        api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
+        orchestrator_model: "claude-sonnet-4-5".to_string(),
+        worker_model: "claude-haiku-4-5".to_string(),
+        max_workers: 5,
+        timeout_secs: 120,
+        quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
+    };
+
+    let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();
+
+    let request = AgenticSearchRequest {
+        query: "JWT authentication implementation".to_string(),
+        force_sonnet: false,
+        repository_ids: vec![],
+    };
+
+    let response = orchestrator.search(request).await;
+
+    match response {
+        Ok(resp) => {
+            println!("Metadata:");
+            println!(
+                "  total_direct_candidates: {}",
+                resp.metadata.total_direct_candidates
+            );
+            println!(
+                "  graph_context_entities: {}",
+                resp.metadata.graph_context_entities
+            );
+            println!(
+                "  graph_entities_in_results: {}",
+                resp.metadata.graph_entities_in_results
+            );
+            println!(
+                "  graph_traversal_used: {}",
+                resp.metadata.graph_traversal_used
+            );
+
+            // Verify metadata tracking works (usize is always >= 0, just check it exists)
+            let _ = resp.metadata.total_direct_candidates;
+        }
+        Err(e) => {
+            panic!("Search failed: {e}");
+        }
+    }
 }

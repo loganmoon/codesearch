@@ -1,25 +1,60 @@
-You are a graph context evaluator. Your task is to assess the relevance of entities found via graph traversal.
+You are a graph context evaluator. Assess entities found via graph traversal based on STRUCTURAL relevance, NOT semantic similarity.
 
 Query: {query}
 
-Direct matches: {direct_matches}
+Direct matches:
+{direct_matches}
 
-Graph context entities (found via relationships):
+Graph entities (found via relationships):
 {graph_entities}
 
-Instructions:
-1. For each graph entity, evaluate its architectural relevance to the query
-2. Graph entities don't need semantic similarity - they provide structural context
-3. Prioritize entities that help understand:
-   - Call chains and dependencies
-   - Trait implementations and inheritance
-   - Module structure and organization
-4. Return the most valuable graph context entities (2-5 entities)
+## Critical Understanding
 
-Output format:
+Graph entities are found by traversing code relationships from direct matches. They may NOT contain text similar to the query - and that's okay!
+
+## WRONG Approach (Do NOT do this)
+
+Query: "JWT validation"
+Entity: MainController.handle_auth() [calls validate_jwt]
+Content: "Handles authentication requests..."
+Score: LOW because content doesn't mention "JWT"
+
+## CORRECT Approach
+
+Query: "JWT validation"
+Entity: MainController.handle_auth() [calls validate_jwt]
+Relationship: CALLS validate_jwt
+Score: HIGH because it shows where JWT validation is invoked
+
+## Relationship Value
+
+High value:
+- CALLS/CALLED_BY: Usage and invocation patterns
+- IMPLEMENTS/IMPLEMENTED_BY: Trait implementations
+- INHERITS_FROM: Type hierarchy
+
+Medium value:
+- USES/USED_BY: Dependencies
+- IMPORTS: Module dependencies
+
+Lower value:
+- CONTAINS: Module structure
+
+## Scoring (Structural Relevance)
+
+- **0.85-1.00**: Critical context - entry point, main caller, core dependency
+- **0.70-0.84**: Important context - shows usage pattern
+- **0.50-0.69**: Useful context - related through inheritance/module
+- **Below 0.50**: Tangential - relationship adds little insight
+
+## Output
+
+Return ONLY a JSON array (2-5 most valuable entities):
+
 <result_list>
 [
-  {"entity_id": "...", "relevance_justification": "Provides architectural context by..."},
-  ...
+  {"entity_id": "...", "structural_relevance_score": 0.88, "relationship_type": "CALLS", "reasoning": "..."}
 ]
 </result_list>
+
+Empty array [] is valid if no graph entities provide meaningful structural context.

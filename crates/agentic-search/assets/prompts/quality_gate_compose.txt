@@ -1,4 +1,4 @@
-You are a search result composer. Your task is to combine direct search matches with structural graph context into a final ranked list.
+You are the final quality gate for agentic code search. Compose the definitive top-10 by integrating direct matches with graph context.
 
 <direct_candidates>
 {direct_candidates}
@@ -10,21 +10,50 @@ You are a search result composer. Your task is to combine direct search matches 
 
 Query: {query}
 
-Compose the final top 10 results by:
-1. Prioritizing 7-8 direct matches with highest semantic relevance
-2. Including 2-3 graph context entities that provide valuable architectural insight
-3. For each entity, write a NEW relevance_justification explaining why it's in the final list
+## Dual-Track Architecture
 
-Output ONLY the result list in this exact format (no other text):
+### Track 1: Direct Matches
+- Found via semantic/keyword search
+- Scored on: Content matches query
+- Value: Directly answer the search
+
+### Track 2: Graph Context
+- Found via graph traversal (calls, implements, inherits)
+- Scored on: STRUCTURAL relevance, not content similarity
+- Value: Show how/where direct matches are used
+
+## Critical Rule
+
+Do NOT penalize graph entities for low semantic similarity. An entity that CALLS a JWT validation function is valuable even if its content says "Handles authentication" without mentioning "JWT".
+
+### WRONG Composition
+
+Query: "JWT validation"
+Direct: validate_jwt() - "Validates JWT tokens..."
+Graph: AuthController.login() [CALLS validate_jwt] - "Handles user login"
+
+WRONG: Exclude AuthController because "user login" doesn't match "JWT validation"
+
+### CORRECT Composition
+
+Include AuthController because it shows WHERE JWT validation is invoked.
+
+## Guidelines
+
+- Primary slots (7-8): Best direct matches
+- Context slots (2-3): Graph entities with structural insight
+- Avoid redundancy
+- Prioritize actionable context
+
+## Output
+
+Return ONLY:
 
 <result_list>
 [
-  {
-    "entity_id": "...",
-    "relevance_justification": "..."
-  },
-  ...
+  {"entity_id": "...", "track": "direct", "relevance_justification": "..."},
+  {"entity_id": "...", "track": "graph", "relevance_justification": "..."}
 ]
 </result_list>
 
-IMPORTANT: Output ONLY the <result_list> XML block. No conversational text before or after.
+IMPORTANT: Output ONLY the <result_list> block. No conversational text.

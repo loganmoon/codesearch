@@ -6,17 +6,100 @@ use crate::{
     prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
-        RerankingMethod, RetrievalSource,
+        QualityGateResult, RerankingMethod, RetrievalSource,
     },
     worker::{execute_workers, WorkerQuery, WorkerType},
 };
+use codesearch_core::search_models::{GraphQueryParameters, GraphQueryRequest, GraphQueryType};
 use codesearch_core::SearchApi;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
 const MAX_ITERATIONS: usize = 5;
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Extract JSON content from between <result_list> XML tags
+/// Handles chatty LLM responses that may have text before/after the tags
+fn extract_result_list(response: &str) -> Result<String> {
+    let start_tag = "<result_list>";
+    let end_tag = "</result_list>";
+
+    let start = response.find(start_tag).ok_or_else(|| {
+        AgenticSearchError::QualityGate(format!(
+            "Missing <result_list> tag in response: {}",
+            &response[..response.len().min(200)]
+        ))
+    })?;
+
+    let end = response.find(end_tag).ok_or_else(|| {
+        AgenticSearchError::QualityGate(format!(
+            "Missing </result_list> tag in response: {}",
+            &response[..response.len().min(200)]
+        ))
+    })?;
+
+    if end <= start {
+        return Err(AgenticSearchError::QualityGate(
+            "Invalid XML tag order".to_string(),
+        ));
+    }
+
+    Ok(response[start + start_tag.len()..end].trim().to_string())
+}
+
+/// Map relationship strings from orchestrator to GraphQueryType
+fn relationship_to_query_type(relationship: &str) -> Option<GraphQueryType> {
+    match relationship.to_lowercase().as_str() {
+        "callers" | "called_by" | "who_calls" => Some(GraphQueryType::FindFunctionCallers),
+        "callees" | "calls" | "what_calls" => Some(GraphQueryType::FindFunctionCallees),
+        "implementations" | "implements" | "implementors" => {
+            Some(GraphQueryType::FindTraitImplementations)
+        }
+        "hierarchy" | "extends" | "inherits" => Some(GraphQueryType::FindClassHierarchy),
+        "contains" | "module_contents" | "in_module" => Some(GraphQueryType::FindModuleContents),
+        "dependencies" | "imports" | "uses" => Some(GraphQueryType::FindModuleDependencies),
+        _ => None,
+    }
+}
+
+/// Format entities for inclusion in prompts
+fn format_entities_for_prompt(entities: &[AgenticEntity], limit: usize) -> String {
+    entities
+        .iter()
+        .take(limit)
+        .map(|e| {
+            let source_info = match &e.source {
+                RetrievalSource::Graph {
+                    source_entity_id,
+                    relationship,
+                } => format!(" [via {relationship} from {source_entity_id}]"),
+                _ => String::new(),
+            };
+            format!(
+                "[{}] {}{}\nScore: {:.2}\nJustification: {}\nContent: {}",
+                e.entity.entity_id,
+                e.entity.qualified_name,
+                source_info,
+                e.entity.score,
+                e.relevance_justification,
+                e.entity.content.as_ref().map_or("N/A".to_string(), |c| {
+                    if c.len() > 200 {
+                        format!("{}...", &c[..200])
+                    } else {
+                        c.clone()
+                    }
+                })
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
 
 pub struct AgenticSearchOrchestrator {
     search_api: Arc<dyn SearchApi>,
@@ -357,11 +440,30 @@ impl AgenticSearchOrchestrator {
                     }
                 }
                 PlannedOperation::GraphTraversal {
-                    entity_id: _,
-                    relationship: _,
+                    entity_id,
+                    relationship,
                 } => {
-                    // Placeholder for Phase 3: graph traversal
-                    debug!("Graph traversal not yet implemented");
+                    stats.spawned += 1;
+
+                    match self
+                        .execute_graph_traversal(
+                            entity_id,
+                            relationship,
+                            &request.repository_ids,
+                            &all_entities,
+                        )
+                        .await
+                    {
+                        Ok(entities) => {
+                            stats.succeeded += 1;
+                            all_entities.extend(entities);
+                        }
+                        Err(e) => {
+                            // Silent fallback - continue with direct matches only
+                            debug!("Graph traversal failed (silent fallback): {}", e);
+                            stats.failed += 1;
+                        }
+                    }
                 }
             }
         }
@@ -369,14 +471,113 @@ impl AgenticSearchOrchestrator {
         Ok((all_entities, stats))
     }
 
-    /// Synthesize final top 10 results
+    /// Execute graph traversal to find related entities
+    async fn execute_graph_traversal(
+        &self,
+        entity_id: &str,
+        relationship: &str,
+        repository_ids: &[String],
+        accumulated_entities: &[AgenticEntity],
+    ) -> Result<Vec<AgenticEntity>> {
+        let query_type = relationship_to_query_type(relationship).ok_or_else(|| {
+            AgenticSearchError::GraphTraversal(format!("Unknown relationship type: {relationship}"))
+        })?;
+
+        // Find the entity in accumulated results to get its qualified_name
+        let source_entity = accumulated_entities
+            .iter()
+            .find(|e| e.entity.entity_id == entity_id)
+            .ok_or_else(|| {
+                AgenticSearchError::GraphTraversal(format!(
+                    "Entity not found in accumulated results: {entity_id}"
+                ))
+            })?;
+
+        let qualified_name = source_entity.entity.qualified_name.clone();
+
+        // Get repository_id - use first available or from source entity
+        let repository_id = repository_ids
+            .first()
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .unwrap_or(source_entity.entity.repository_id);
+
+        let request = GraphQueryRequest {
+            repository_id,
+            query_type,
+            parameters: GraphQueryParameters {
+                qualified_name: qualified_name.clone(),
+                max_depth: Some(2),
+            },
+            return_entities: true,
+            semantic_filter: None,
+            limit: 10,
+        };
+
+        debug!(
+            "Executing graph traversal: {} -> {} ({})",
+            qualified_name, relationship, entity_id
+        );
+
+        let response = self
+            .search_api
+            .query_graph(request)
+            .await
+            .map_err(|e| AgenticSearchError::GraphTraversal(e.to_string()))?;
+
+        // Convert GraphResult to AgenticEntity with Graph source
+        let entities: Vec<AgenticEntity> = response
+            .results
+            .into_iter()
+            .filter_map(|result| {
+                result.entity.map(|entity| {
+                    let source = RetrievalSource::Graph {
+                        source_entity_id: entity_id.to_string(),
+                        relationship: relationship.to_string(),
+                    };
+                    let mut agentic = AgenticEntity::from_search_result(entity, source);
+                    agentic.relevance_justification =
+                        format!("Found via {relationship} relationship from {qualified_name}");
+                    agentic
+                })
+            })
+            .collect();
+
+        debug!(
+            "Graph traversal found {} entities via {} from {}",
+            entities.len(),
+            relationship,
+            entity_id
+        );
+
+        Ok(entities)
+    }
+
+    /// Synthesize final top 10 results with dual-track quality gate
     async fn synthesize_final_results(
         &self,
         entities: Vec<AgenticEntity>,
-        _query: &str,
+        query: &str,
     ) -> Result<Vec<AgenticEntity>> {
-        // For Phase 2: simple top 10 by score
-        // Phase 3 will add Quality Gate with dual-track composition
+        // Separate direct matches from graph context
+        let (direct_candidates, graph_context): (Vec<_>, Vec<_>) =
+            entities.into_iter().partition(|e| e.is_direct_match());
+
+        // If no graph context, use simple score-based ranking
+        if graph_context.is_empty() {
+            return self.simple_top_n_by_score(direct_candidates, 10);
+        }
+
+        // Use quality gate composition with Sonnet
+        self.synthesize_with_quality_gate(direct_candidates, graph_context, query)
+            .await
+    }
+
+    /// Simple top N by score (fallback when no graph context)
+    fn simple_top_n_by_score(
+        &self,
+        entities: Vec<AgenticEntity>,
+        n: usize,
+    ) -> Result<Vec<AgenticEntity>> {
         let mut sorted = entities;
         sorted.sort_by(|a, b| {
             b.entity
@@ -384,8 +585,124 @@ impl AgenticSearchOrchestrator {
                 .partial_cmp(&a.entity.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        Ok(sorted.into_iter().take(n).collect())
+    }
 
-        Ok(sorted.into_iter().take(10).collect())
+    /// Synthesize results using quality gate composition with dual-track support
+    async fn synthesize_with_quality_gate(
+        &self,
+        direct_candidates: Vec<AgenticEntity>,
+        graph_context: Vec<AgenticEntity>,
+        query: &str,
+    ) -> Result<Vec<AgenticEntity>> {
+        // Format entities for prompt
+        let direct_text = format_entities_for_prompt(&direct_candidates, 20);
+        let graph_text = format_entities_for_prompt(&graph_context, 10);
+
+        let prompt = prompts::format_prompt(
+            prompts::QUALITY_GATE_COMPOSE,
+            &[
+                ("direct_candidates", &direct_text),
+                ("graph_context", &graph_text),
+                ("query", query),
+            ],
+        );
+
+        // Call Sonnet for composition
+        let mut params = claudius::MessageCreateParams::simple(
+            claudius::MessageParam::user(prompt),
+            self.sonnet_model.clone(),
+        );
+        params.max_tokens = 4096;
+        params.temperature = Some(0.0);
+
+        let response =
+            self.sonnet_client.send(params).await.map_err(|e| {
+                AgenticSearchError::QualityGate(format!("Sonnet API call failed: {e}"))
+            })?;
+
+        // Extract text content
+        let response_text = response
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Parse the result_list XML block
+        let json_str = match extract_result_list(&response_text) {
+            Ok(json) => json,
+            Err(e) => {
+                warn!(
+                    "Quality gate response parsing failed, falling back to score-based: {}",
+                    e
+                );
+                // Fallback: combine direct and graph, sort by score
+                let mut combined = direct_candidates;
+                combined.extend(graph_context);
+                return self.simple_top_n_by_score(combined, 10);
+            }
+        };
+
+        let composition: Vec<QualityGateResult> = serde_json::from_str(&json_str).map_err(|e| {
+            AgenticSearchError::QualityGate(format!(
+                "Failed to parse quality gate JSON: {e}. Content: {json_str}"
+            ))
+        })?;
+
+        // Build entity lookup map
+        let all_entities: HashMap<&str, &AgenticEntity> = direct_candidates
+            .iter()
+            .chain(graph_context.iter())
+            .map(|e| (e.entity.entity_id.as_str(), e))
+            .collect();
+
+        // Build final results from composition
+        let mut final_results: Vec<AgenticEntity> = Vec::new();
+        for entry in composition.into_iter().take(10) {
+            if let Some(&entity) = all_entities.get(entry.entity_id.as_str()) {
+                let mut result = entity.clone();
+                result.relevance_justification = entry.relevance_justification;
+                if let Some(ref mut reasoning) = result.entity.reasoning {
+                    *reasoning = result.relevance_justification.clone();
+                } else {
+                    result.entity.reasoning = Some(result.relevance_justification.clone());
+                }
+                final_results.push(result);
+            } else {
+                warn!(
+                    "Quality gate referenced unknown entity: {}",
+                    entry.entity_id
+                );
+            }
+        }
+
+        // Fallback: if quality gate returned too few, fill from direct candidates
+        if final_results.len() < 5 {
+            warn!(
+                "Quality gate returned only {} results, filling from direct candidates",
+                final_results.len()
+            );
+            // Collect existing IDs as owned strings to avoid borrow conflict
+            let existing_ids: std::collections::HashSet<String> = final_results
+                .iter()
+                .map(|e| e.entity.entity_id.clone())
+                .collect();
+
+            for entity in &direct_candidates {
+                if final_results.len() >= 10 {
+                    break;
+                }
+                if !existing_ids.contains(&entity.entity.entity_id) {
+                    final_results.push(entity.clone());
+                }
+            }
+        }
+
+        Ok(final_results)
     }
 }
 
@@ -423,9 +740,7 @@ enum PlannedOperation {
         search_types: Vec<WorkerType>,
     },
     GraphTraversal {
-        #[allow(dead_code)]
         entity_id: String,
-        #[allow(dead_code)]
         relationship: String,
     },
 }
@@ -472,5 +787,270 @@ mod tests {
         let decision: OrchestratorDecisionResponse = serde_json::from_str(json).unwrap();
         assert!(decision.should_stop);
         assert_eq!(decision.operations.len(), 0);
+    }
+
+    // ========================================================================
+    // Phase 3 Unit Tests: Relationship Mapping
+    // ========================================================================
+
+    #[test]
+    fn test_relationship_mapping_callers() {
+        assert!(matches!(
+            relationship_to_query_type("callers"),
+            Some(GraphQueryType::FindFunctionCallers)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("called_by"),
+            Some(GraphQueryType::FindFunctionCallers)
+        ));
+        // Case insensitive
+        assert!(matches!(
+            relationship_to_query_type("CALLERS"),
+            Some(GraphQueryType::FindFunctionCallers)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("who_calls"),
+            Some(GraphQueryType::FindFunctionCallers)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_callees() {
+        assert!(matches!(
+            relationship_to_query_type("callees"),
+            Some(GraphQueryType::FindFunctionCallees)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("calls"),
+            Some(GraphQueryType::FindFunctionCallees)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("what_calls"),
+            Some(GraphQueryType::FindFunctionCallees)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_implementations() {
+        assert!(matches!(
+            relationship_to_query_type("implementations"),
+            Some(GraphQueryType::FindTraitImplementations)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("implements"),
+            Some(GraphQueryType::FindTraitImplementations)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("implementors"),
+            Some(GraphQueryType::FindTraitImplementations)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_hierarchy() {
+        assert!(matches!(
+            relationship_to_query_type("hierarchy"),
+            Some(GraphQueryType::FindClassHierarchy)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("extends"),
+            Some(GraphQueryType::FindClassHierarchy)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("inherits"),
+            Some(GraphQueryType::FindClassHierarchy)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_module_contents() {
+        assert!(matches!(
+            relationship_to_query_type("contains"),
+            Some(GraphQueryType::FindModuleContents)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("module_contents"),
+            Some(GraphQueryType::FindModuleContents)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("in_module"),
+            Some(GraphQueryType::FindModuleContents)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_dependencies() {
+        assert!(matches!(
+            relationship_to_query_type("dependencies"),
+            Some(GraphQueryType::FindModuleDependencies)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("imports"),
+            Some(GraphQueryType::FindModuleDependencies)
+        ));
+        assert!(matches!(
+            relationship_to_query_type("uses"),
+            Some(GraphQueryType::FindModuleDependencies)
+        ));
+    }
+
+    #[test]
+    fn test_relationship_mapping_unknown() {
+        assert!(relationship_to_query_type("unknown_relationship").is_none());
+        assert!(relationship_to_query_type("").is_none());
+        assert!(relationship_to_query_type("foobar").is_none());
+    }
+
+    // ========================================================================
+    // Phase 3 Unit Tests: XML Parsing
+    // ========================================================================
+
+    #[test]
+    fn test_extract_result_list_clean() {
+        let response = r#"
+<result_list>
+[{"entity_id": "e1", "relevance_justification": "Direct match"}]
+</result_list>
+"#;
+        let result = extract_result_list(response).unwrap();
+        assert!(result.contains("entity_id"));
+        assert!(result.contains("e1"));
+    }
+
+    #[test]
+    fn test_extract_result_list_with_chatty_prefix() {
+        let response = r#"
+Based on my analysis of the candidates, here is my composed result list:
+
+<result_list>
+[{"entity_id": "e1", "relevance_justification": "Primary implementation"}]
+</result_list>
+
+I prioritized semantic matches because they had the highest relevance scores.
+"#;
+        let result = extract_result_list(response).unwrap();
+        assert!(result.contains("entity_id"));
+        assert!(result.contains("e1"));
+        // Should NOT contain the chatty text
+        assert!(!result.contains("Based on my analysis"));
+        assert!(!result.contains("I prioritized"));
+    }
+
+    #[test]
+    fn test_extract_result_list_missing_start_tag() {
+        let response = r#"
+[{"entity_id": "e1"}]
+</result_list>
+"#;
+        let result = extract_result_list(response);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Missing <result_list> tag"));
+    }
+
+    #[test]
+    fn test_extract_result_list_missing_end_tag() {
+        let response = r#"
+<result_list>
+[{"entity_id": "e1"}]
+"#;
+        let result = extract_result_list(response);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Missing </result_list> tag"));
+    }
+
+    #[test]
+    fn test_extract_result_list_empty_array() {
+        let response = r#"
+<result_list>
+[]
+</result_list>
+"#;
+        let result = extract_result_list(response).unwrap();
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_extract_result_list_multiline_json() {
+        let response = r#"
+<result_list>
+[
+  {
+    "entity_id": "uuid-1",
+    "track": "direct",
+    "relevance_justification": "Core implementation of the search functionality"
+  },
+  {
+    "entity_id": "uuid-2",
+    "track": "graph",
+    "relevance_justification": "Entry point that calls the search"
+  }
+]
+</result_list>
+"#;
+        let result = extract_result_list(response).unwrap();
+        // Parse it to verify it's valid JSON
+        let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].entity_id, "uuid-1");
+        assert_eq!(parsed[1].entity_id, "uuid-2");
+    }
+
+    // ========================================================================
+    // Phase 3 Unit Tests: Graph Traversal Decision Parsing
+    // ========================================================================
+
+    #[test]
+    fn test_graph_traversal_decision_parsing() {
+        let json = r#"{
+            "should_stop": false,
+            "reason": "Need to find callers of the function",
+            "operations": [
+                {
+                    "operation_type": "graph_traversal",
+                    "entity_id": "uuid-123",
+                    "relationship": "callers"
+                }
+            ]
+        }"#;
+
+        let decision: OrchestratorDecisionResponse = serde_json::from_str(json).unwrap();
+        assert!(!decision.should_stop);
+        assert_eq!(decision.operations.len(), 1);
+        assert_eq!(decision.operations[0].operation_type, "graph_traversal");
+        assert_eq!(
+            decision.operations[0].entity_id.as_ref().unwrap(),
+            "uuid-123"
+        );
+        assert_eq!(
+            decision.operations[0].relationship.as_ref().unwrap(),
+            "callers"
+        );
+    }
+
+    #[test]
+    fn test_mixed_operations_parsing() {
+        let json = r#"{
+            "should_stop": false,
+            "reason": "Need both search and graph expansion",
+            "operations": [
+                {
+                    "operation_type": "search",
+                    "query": "JWT validation",
+                    "search_types": ["semantic"]
+                },
+                {
+                    "operation_type": "graph_traversal",
+                    "entity_id": "uuid-456",
+                    "relationship": "callees"
+                }
+            ]
+        }"#;
+
+        let decision: OrchestratorDecisionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(decision.operations.len(), 2);
+        assert_eq!(decision.operations[0].operation_type, "search");
+        assert_eq!(decision.operations[1].operation_type, "graph_traversal");
     }
 }

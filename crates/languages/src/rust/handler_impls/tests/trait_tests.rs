@@ -1,7 +1,7 @@
 //! Tests for trait extraction handler
 
 use super::*;
-use crate::rust::handlers::type_handlers::handle_trait;
+use crate::rust::handler_impls::type_handlers::handle_trait_impl;
 use codesearch_core::entities::EntityType;
 
 #[test]
@@ -12,7 +12,7 @@ trait SimpleTrait {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
@@ -36,7 +36,7 @@ trait Container<T> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
@@ -68,7 +68,7 @@ trait Iterator {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     // Debug output
@@ -115,7 +115,7 @@ trait DefaultMethods {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
@@ -144,7 +144,7 @@ trait Complex: Display + Send + Sync + 'static {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 2);
@@ -195,7 +195,7 @@ unsafe trait UnsafeMarker {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
@@ -228,7 +228,7 @@ where
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);
@@ -265,7 +265,7 @@ pub trait Serialize {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait)
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
     assert_eq!(entities.len(), 1);

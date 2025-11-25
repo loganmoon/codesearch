@@ -16,10 +16,10 @@ pub(crate) mod type_handlers;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use constant_handlers::handle_constant;
-pub(crate) use function_handlers::handle_function;
-pub(crate) use impl_handlers::{handle_impl, handle_impl_trait};
-pub(crate) use macro_handlers::handle_macro;
-pub(crate) use module_handlers::handle_module;
-pub(crate) use type_alias_handlers::handle_type_alias;
-pub(crate) use type_handlers::{handle_enum, handle_struct, handle_trait};
+pub use constant_handlers::handle_constant_impl;
+pub use function_handlers::handle_function_impl;
+pub use impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
+pub use macro_handlers::handle_macro_impl;
+pub use module_handlers::handle_module_impl;
+pub use type_alias_handlers::handle_type_alias_impl;
+pub use type_handlers::{handle_enum_impl, handle_struct_impl, handle_trait_impl};

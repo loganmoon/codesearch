@@ -1,7 +1,7 @@
 //! Tests for module extraction handler
 
 use super::*;
-use crate::rust::handlers::module_handlers::handle_module;
+use crate::rust::handler_impls::module_handlers::handle_module_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -14,7 +14,7 @@ mod utils {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract module");
 
     assert_eq!(entities.len(), 1);
@@ -30,7 +30,7 @@ fn test_file_module() {
 mod network;
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract file module");
 
     assert_eq!(entities.len(), 1);
@@ -50,7 +50,7 @@ pub mod api {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract public module");
 
     assert_eq!(entities.len(), 1);
@@ -69,7 +69,7 @@ mod outer {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract nested modules");
 
     assert_eq!(entities.len(), 2);
@@ -97,7 +97,7 @@ pub(crate) mod internal {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract pub(crate) module");
 
     assert_eq!(entities.len(), 1);
@@ -117,7 +117,7 @@ pub mod utils {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract module with doc comments");
 
     assert_eq!(entities.len(), 1);
@@ -142,7 +142,7 @@ mod parent {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract modules for qualified names");
 
     assert_eq!(entities.len(), 3);
@@ -175,7 +175,7 @@ mod module2 {
 pub mod module3;
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract multiple modules");
 
     assert_eq!(entities.len(), 3);
@@ -203,7 +203,7 @@ mod tests {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract cfg test module");
 
     assert_eq!(entities.len(), 1);
@@ -222,7 +222,7 @@ pub mod advanced {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module)
+    let entities = extract_with_handler(source, queries::MODULE_QUERY, handle_module_impl)
         .expect("Failed to extract module with attributes");
 
     assert_eq!(entities.len(), 1);

@@ -7,10 +7,10 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::rust::handlers::common::{
+use crate::rust::handler_impls::common::{
     build_entity, extract_common_components, find_capture_node, node_to_text, require_capture_node,
 };
-use crate::rust::handlers::constants::capture_names;
+use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
@@ -40,7 +40,7 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
 }
 
 /// Process a module query match and extract entity data
-pub fn handle_module(
+pub fn handle_module_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,

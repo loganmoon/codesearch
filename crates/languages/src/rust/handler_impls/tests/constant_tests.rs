@@ -1,7 +1,7 @@
 //! Tests for constant and static extraction handler
 
 use super::*;
-use crate::rust::handlers::constant_handlers::handle_constant;
+use crate::rust::handler_impls::constant_handlers::handle_constant_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -10,7 +10,7 @@ fn test_simple_const() {
 const X: i32 = 42;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract constant");
 
     assert_eq!(entities.len(), 1);
@@ -27,7 +27,7 @@ fn test_const_with_type() {
 const NAME: &str = "value";
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract const with type");
 
     assert_eq!(entities.len(), 1);
@@ -48,7 +48,7 @@ fn test_static_item() {
 static GLOBAL: AtomicI32 = AtomicI32::new(0);
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract static");
 
     assert_eq!(entities.len(), 1);
@@ -65,7 +65,7 @@ fn test_static_mut() {
 static mut COUNTER: i32 = 0;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract static mut");
 
     assert_eq!(entities.len(), 1);
@@ -91,7 +91,7 @@ fn test_public_const() {
 pub const MAX: usize = 100;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract public const");
 
     assert_eq!(entities.len(), 1);
@@ -109,7 +109,7 @@ const CONFIG: Config = Config {
 };
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract const with complex value");
 
     assert_eq!(entities.len(), 1);
@@ -127,7 +127,7 @@ fn test_const_function_call() {
 const SIZE: usize = calculate_size();
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract const with function call");
 
     assert_eq!(entities.len(), 1);
@@ -149,7 +149,7 @@ fn test_const_with_doc_comments() {
 pub const MAX_RETRIES: u32 = 3;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract const with doc comments");
 
     assert_eq!(entities.len(), 1);
@@ -171,7 +171,7 @@ static C: i32 = 3;
 pub const D: i32 = 4;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract multiple constants");
 
     assert_eq!(entities.len(), 4);
@@ -196,7 +196,7 @@ fn test_const_with_type_annotation() {
 pub const PI: f64 = 3.14159;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant)
+    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract const with type annotation");
 
     assert_eq!(entities.len(), 1);

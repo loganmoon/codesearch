@@ -7,10 +7,10 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::rust::handlers::common::{
+use crate::rust::handler_impls::common::{
     build_entity, extract_common_components, find_capture_node, node_to_text, require_capture_node,
 };
-use crate::rust::handlers::constants::capture_names;
+use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
@@ -18,7 +18,7 @@ use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
 /// Process a constant or static query match and extract entity data
-pub fn handle_constant(
+pub fn handle_constant_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,

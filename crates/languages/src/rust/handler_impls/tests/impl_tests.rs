@@ -1,7 +1,7 @@
 //! Tests for impl block extraction handler
 
 use super::*;
-use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
+use crate::rust::handler_impls::impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -26,7 +26,7 @@ impl Counter {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl block");
 
     // Should extract the impl block itself + 3 methods
@@ -63,7 +63,7 @@ impl Display for Point {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_TRAIT_QUERY, handle_impl_trait)
+    let entities = extract_with_handler(source, queries::IMPL_TRAIT_QUERY, handle_impl_trait_impl)
         .expect("Failed to extract trait impl");
 
     assert!(!entities.is_empty(), "Should extract trait impl");
@@ -102,7 +102,7 @@ impl<T: Clone> Container<T> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract generic impl");
 
     assert!(entities.len() >= 2, "Should extract multiple impl blocks");
@@ -128,7 +128,7 @@ where
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with where clause");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -156,7 +156,7 @@ impl AsyncService {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with async methods");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -190,7 +190,7 @@ impl RawPointer {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with unsafe methods");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -227,7 +227,7 @@ impl ConstCompute {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with const methods");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -256,7 +256,7 @@ impl SelfTest {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with self parameters");
 
     assert!(entities.len() >= 4, "Should extract all methods");
@@ -294,7 +294,7 @@ mod network {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract nested impl");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -333,11 +333,12 @@ impl Clone for Multi {
 }
 "#;
 
-    let inherent_entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let inherent_entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract inherent impls");
 
-    let trait_entities = extract_with_handler(source, queries::IMPL_TRAIT_QUERY, handle_impl_trait)
-        .expect("Failed to extract trait impl");
+    let trait_entities =
+        extract_with_handler(source, queries::IMPL_TRAIT_QUERY, handle_impl_trait_impl)
+            .expect("Failed to extract trait impl");
 
     assert!(
         inherent_entities.len() >= 2,
@@ -361,7 +362,7 @@ impl Config {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with associated constants");
 
     assert!(!entities.is_empty(), "Should extract impl block");
@@ -415,7 +416,7 @@ impl Public {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl with visibility");
 
     assert!(entities.len() >= 3, "Should extract all methods");
@@ -462,7 +463,7 @@ impl<T: Clone> Container<T> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl)
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
         .expect("Failed to extract impl blocks");
 
     // Find all 'new' methods

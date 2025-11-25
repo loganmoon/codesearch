@@ -1,0 +1,59 @@
+//! Error types for agentic search operations
+
+use thiserror::Error;
+
+/// Maximum length for LLM responses included in error messages
+const MAX_ERROR_RESPONSE_LENGTH: usize = 500;
+
+/// Truncate a response for inclusion in error messages
+pub(crate) fn truncate_for_error(response: &str) -> String {
+    if response.len() <= MAX_ERROR_RESPONSE_LENGTH {
+        response.to_string()
+    } else {
+        format!("{}...[truncated]", &response[..MAX_ERROR_RESPONSE_LENGTH])
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum AgenticSearchError {
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    #[error("API key not configured")]
+    MissingApiKey,
+
+    #[error("Orchestrator error: {0}")]
+    Orchestrator(String),
+
+    #[error("Worker error: {0}")]
+    Worker(String),
+
+    #[error("Reranking error: {0}")]
+    Reranking(String),
+
+    #[error("All workers failed")]
+    AllWorkersFailed,
+
+    #[error("Partial worker failure: {successful}/{total} succeeded")]
+    PartialWorkerFailure { successful: usize, total: usize },
+
+    #[error("Search API error: {0}")]
+    SearchApi(String),
+
+    #[error("Graph traversal error: {0}")]
+    GraphTraversal(String),
+
+    #[error("Quality gate error: {0}")]
+    QualityGate(String),
+
+    #[error("Claudius SDK error: {0}")]
+    Claudius(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+pub type Result<T> = std::result::Result<T, AgenticSearchError>;

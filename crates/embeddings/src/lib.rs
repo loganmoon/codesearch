@@ -45,7 +45,7 @@ fn parse_provider_type(provider: &str) -> EmbeddingProviderType {
 /// This is a convenience function that converts from the main Config's EmbeddingsConfig
 /// to the embeddings crate's EmbeddingConfig and creates an EmbeddingManager.
 ///
-/// It also handles reading the API key from the VLLM_API_KEY environment variable
+/// It also handles reading the API key from the EMBEDDING_API_KEY environment variable
 /// if not specified in the config.
 pub async fn create_embedding_manager_from_app_config(
     embeddings_config: &codesearch_core::config::EmbeddingsConfig,
@@ -64,7 +64,7 @@ pub async fn create_embedding_manager_from_app_config(
     let api_key = embeddings_config
         .api_key
         .clone()
-        .or_else(|| std::env::var("VLLM_API_KEY").ok());
+        .or_else(|| std::env::var("EMBEDDING_API_KEY").ok());
     if let Some(key) = api_key {
         config_builder = config_builder.api_key(key);
     }
@@ -173,4 +173,76 @@ pub fn create_sparse_manager(avgdl: f32) -> Result<Arc<SparseEmbeddingManager>> 
         Arc::new(provider),
         "bm25-v2.3".to_string(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_embedding_api_key_from_env() {
+        let embeddings_config = codesearch_core::config::EmbeddingsConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            embedding_dimension: 384,
+            texts_per_api_request: 10,
+            max_concurrent_api_requests: 4,
+            device: "cpu".to_string(),
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: None,
+            default_bge_instruction: "Represent this sentence for searching relevant passages:"
+                .to_string(),
+        };
+
+        std::env::set_var("EMBEDDING_API_KEY", "test-api-key-from-env");
+
+        let result = create_embedding_manager_from_app_config(&embeddings_config).await;
+        assert!(result.is_ok());
+
+        std::env::remove_var("EMBEDDING_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn test_embedding_api_key_from_config_takes_precedence() {
+        let embeddings_config = codesearch_core::config::EmbeddingsConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            embedding_dimension: 384,
+            texts_per_api_request: 10,
+            max_concurrent_api_requests: 4,
+            device: "cpu".to_string(),
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: Some("config-api-key".to_string()),
+            default_bge_instruction: "Represent this sentence for searching relevant passages:"
+                .to_string(),
+        };
+
+        std::env::set_var("EMBEDDING_API_KEY", "env-api-key");
+
+        let result = create_embedding_manager_from_app_config(&embeddings_config).await;
+        assert!(result.is_ok());
+
+        std::env::remove_var("EMBEDDING_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn test_embedding_no_api_key() {
+        let embeddings_config = codesearch_core::config::EmbeddingsConfig {
+            provider: "mock".to_string(),
+            model: "test-model".to_string(),
+            embedding_dimension: 384,
+            texts_per_api_request: 10,
+            max_concurrent_api_requests: 4,
+            device: "cpu".to_string(),
+            api_base_url: Some("http://localhost:8000".to_string()),
+            api_key: None,
+            default_bge_instruction: "Represent this sentence for searching relevant passages:"
+                .to_string(),
+        };
+
+        std::env::remove_var("EMBEDDING_API_KEY");
+
+        let result = create_embedding_manager_from_app_config(&embeddings_config).await;
+        assert!(result.is_ok());
+    }
 }

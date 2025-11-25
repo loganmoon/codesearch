@@ -9,6 +9,7 @@ mod fulltext_search;
 mod graph_search;
 pub mod models;
 mod reranking_helpers;
+pub mod search_impl;
 mod semantic_search;
 mod unified_search;
 
@@ -17,5 +18,6 @@ pub use entity_operations::{get_entities_batch, list_repositories};
 pub use fulltext_search::search_fulltext;
 pub use graph_search::query_graph;
 pub use models::*;
+pub use search_impl::SearchApiImpl;
 pub use semantic_search::search_semantic;
 pub use unified_search::search_unified;

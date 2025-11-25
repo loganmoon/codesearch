@@ -18,6 +18,8 @@ pub mod config;
 pub mod entities;
 pub mod entity_id;
 pub mod error;
+pub mod search_api;
+pub mod search_models;
 
 // Re-export main types for convenience
 pub use config::{
@@ -30,6 +32,15 @@ pub use entities::{
 };
 pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};
+pub use search_api::SearchApi;
+pub use search_models::{
+    BatchEntityRequest, BatchEntityResponse, EmbeddingRequest, EmbeddingResponse, EntityResult,
+    FulltextSearchRequest, FulltextSearchResponse, GraphQueryParameters, GraphQueryRequest,
+    GraphQueryResponse, GraphQueryType, GraphResponseMetadata, GraphResult,
+    ListRepositoriesResponse, QuerySpec, RepositoryInfo, ResponseMetadata, SearchFilters,
+    SemanticSearchRequest, SemanticSearchResponse, UnifiedResponseMetadata, UnifiedSearchRequest,
+    UnifiedSearchResponse,
+};
 
 /// Version of the core library
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

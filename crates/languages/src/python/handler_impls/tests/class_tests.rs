@@ -159,13 +159,8 @@ class Calculator:
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "multiply");
-    // Note: Current implementation builds qualified name with class from both
-    // AST traversal and explicit extraction, resulting in doubled class name
-    assert_eq!(entity.qualified_name, "Calculator.Calculator.multiply");
-    assert_eq!(
-        entity.parent_scope.as_deref(),
-        Some("Calculator.Calculator")
-    );
+    assert_eq!(entity.qualified_name, "Calculator.multiply");
+    assert_eq!(entity.parent_scope.as_deref(), Some("Calculator"));
 }
 
 #[test]
@@ -283,12 +278,8 @@ class Calculator:
     assert_eq!(entities[2].name, "multiply");
 
     for entity in &entities {
-        // Note: Current implementation doubles the class name in qualified name
-        assert_eq!(
-            entity.parent_scope.as_deref(),
-            Some("Calculator.Calculator")
-        );
-        assert!(entity.qualified_name.starts_with("Calculator.Calculator."));
+        assert_eq!(entity.parent_scope.as_deref(), Some("Calculator"));
+        assert!(entity.qualified_name.starts_with("Calculator."));
     }
 }
 
@@ -353,8 +344,7 @@ class Person:
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "__init__");
-    // Note: Current implementation doubles the class name
-    assert_eq!(entity.qualified_name, "Person.Person.__init__");
+    assert_eq!(entity.qualified_name, "Person.__init__");
 }
 
 #[test]

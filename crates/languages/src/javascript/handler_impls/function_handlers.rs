@@ -92,15 +92,16 @@ pub fn handle_arrow_function_impl(
     let name = extract_arrow_function_name(arrow_function_node, source)?;
 
     // Build qualified name
-    let qualified_name = crate::qualified_name::build_qualified_name_from_ast(
+    let scope_result = crate::qualified_name::build_qualified_name_from_ast(
         arrow_function_node,
         source,
         "javascript",
     );
-    let full_qualified_name = if qualified_name.is_empty() {
+    let parent_scope = scope_result.parent_scope;
+    let full_qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
-        format!("{qualified_name}.{name}")
+        format!("{parent_scope}.{name}")
     };
 
     // Extract parameters from the arrow function node
@@ -115,7 +116,9 @@ pub fn handle_arrow_function_impl(
     let documentation = extract_jsdoc_comments(arrow_function_node, source);
 
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = codesearch_core::entity_id::generate_entity_id(
         repository_id,
         file_path_str,
@@ -128,10 +131,10 @@ pub fn handle_arrow_function_impl(
         repository_id: repository_id.to_string(),
         name,
         qualified_name: full_qualified_name,
-        parent_scope: if qualified_name.is_empty() {
+        parent_scope: if parent_scope.is_empty() {
             None
         } else {
-            Some(qualified_name)
+            Some(parent_scope)
         },
         file_path: file_path.to_path_buf(),
         location: SourceLocation::from_tree_sitter_node(arrow_function_node),

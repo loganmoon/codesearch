@@ -87,10 +87,10 @@ pub fn extract_common_components(
     }
 
     // Build qualified name via parent traversal using language-specific separator
-    let parent_scope = build_qualified_name_from_ast(main_node, ctx.source, language);
+    let scope_result = build_qualified_name_from_ast(main_node, ctx.source, language);
+    let parent_scope = scope_result.parent_scope;
+    let separator = scope_result.separator;
 
-    // Get separator for this language to build full qualified name
-    let separator = get_separator_for_language(language);
     let qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
@@ -152,20 +152,4 @@ pub fn build_entity(
         .file_path(components.file_path)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
-}
-
-/// Get the separator for a language (for building qualified names)
-///
-/// This is a fallback for cases where the inventory lookup hasn't been done yet.
-/// The primary source of truth is the ScopeConfiguration registered via inventory.
-fn get_separator_for_language(language: &str) -> &'static str {
-    use crate::qualified_name::ScopeConfiguration;
-
-    inventory::iter::<ScopeConfiguration>()
-        .find(|config| config.language == language)
-        .map(|config| config.separator)
-        .unwrap_or(match language {
-            "rust" => "::",
-            _ => ".",
-        })
 }

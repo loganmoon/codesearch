@@ -1,10 +1,7 @@
 //! Python class and method handler implementations
 
 use crate::common::{
-    entity_building::{
-        build_entity, extract_common_components, CommonEntityComponents, EntityDetails,
-        ExtractionContext,
-    },
+    entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
     find_capture_node, node_to_text,
     python_common::{
         extract_base_classes, extract_decorators, extract_docstring, extract_python_parameters,
@@ -13,10 +10,7 @@ use crate::common::{
     require_capture_node,
 };
 use codesearch_core::{
-    entities::{
-        EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
-    },
-    entity_id::generate_entity_id,
+    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
     error::Result,
     CodeEntity,
 };
@@ -92,32 +86,16 @@ pub fn handle_method_impl(
 ) -> Result<Vec<CodeEntity>> {
     let method_node = require_capture_node(query_match, query, "method")?;
 
-    // Extract name
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
-
-    // Get the class name for qualified name construction
-    let class_name = find_capture_node(query_match, query, "class")
-        .and_then(|class_node| class_node.child_by_field_name("name"))
-        .and_then(|name_node| node_to_text(name_node, source).ok());
-
-    // Build qualified name - method within class
-    let base_qualified_name =
-        crate::qualified_name::build_qualified_name_from_ast(method_node, source, "python");
-
-    let full_qualified_name = match (&class_name, base_qualified_name.is_empty()) {
-        (Some(class), true) => format!("{class}.{name}"),
-        (Some(class), false) => format!("{base_qualified_name}.{class}.{name}"),
-        (None, true) => name.clone(),
-        (None, false) => format!("{base_qualified_name}.{name}"),
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
     };
 
-    let parent_scope = match (&class_name, base_qualified_name.is_empty()) {
-        (Some(class), true) => Some(class.clone()),
-        (Some(class), false) => Some(format!("{base_qualified_name}.{class}")),
-        (None, true) => None,
-        (None, false) => Some(base_qualified_name),
-    };
+    // Extract common components (name, qualified_name, entity_id, location)
+    let components = extract_common_components(&ctx, "name", method_node, "python")?;
 
     // Extract parameters from query capture (filter self/cls for display)
     let raw_parameters = if let Some(params_node) = find_capture_node(query_match, query, "params")
@@ -176,21 +154,6 @@ pub fn handle_method_impl(
             .attributes
             .insert("property".to_string(), "true".to_string());
     }
-
-    // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
-
-    // Build entity using shared helper (with manually constructed components)
-    let components = CommonEntityComponents {
-        entity_id,
-        repository_id: repository_id.to_string(),
-        name,
-        qualified_name: full_qualified_name,
-        parent_scope,
-        file_path: file_path.to_path_buf(),
-        location: SourceLocation::from_tree_sitter_node(method_node),
-    };
 
     let entity = build_entity(
         components,

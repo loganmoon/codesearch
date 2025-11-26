@@ -343,7 +343,8 @@ pub fn extract_common_components(
     let name = extract_entity_name(query_match, query, source, name_capture);
 
     // Build qualified name via parent traversal
-    let parent_scope = build_qualified_name_from_ast(main_node, source, "rust");
+    let scope_result = build_qualified_name_from_ast(main_node, source, "rust");
+    let parent_scope = scope_result.parent_scope;
     let qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {

@@ -24,8 +24,24 @@ pub struct ScopeConfiguration {
 
 inventory::collect!(ScopeConfiguration);
 
-/// Build qualified name by traversing AST parents to find scope containers
-pub fn build_qualified_name_from_ast(node: Node, source: &str, language: &str) -> String {
+/// Result of building a qualified name, including the separator for the language
+pub struct QualifiedNameResult {
+    /// The parent scope (without the current entity's name)
+    pub parent_scope: String,
+    /// The separator for this language (e.g., "::" for Rust, "." for Python)
+    pub separator: &'static str,
+}
+
+/// Build parent scope by traversing AST parents to find scope containers
+///
+/// Returns the parent scope path (without the current entity's name) and the
+/// language-specific separator. The caller should combine these with the entity
+/// name to form the full qualified name.
+pub fn build_qualified_name_from_ast(
+    node: Node,
+    source: &str,
+    language: &str,
+) -> QualifiedNameResult {
     let mut scope_parts = Vec::new();
     let mut current = node;
 
@@ -34,7 +50,13 @@ pub fn build_qualified_name_from_ast(node: Node, source: &str, language: &str) -
 
     let (patterns, separator) = match config {
         Some(cfg) => (cfg.patterns, cfg.separator),
-        None => (&[] as &[ScopePattern], "::"),
+        None => (
+            &[] as &[ScopePattern],
+            match language {
+                "rust" => "::",
+                _ => ".",
+            },
+        ),
     };
 
     // Walk up the tree collecting scope names
@@ -50,7 +72,10 @@ pub fn build_qualified_name_from_ast(node: Node, source: &str, language: &str) -
 
     // Reverse to get root-to-leaf order
     scope_parts.reverse();
-    scope_parts.join(separator)
+    QualifiedNameResult {
+        parent_scope: scope_parts.join(separator),
+        separator,
+    }
 }
 
 /// Extract scope name using pattern configuration

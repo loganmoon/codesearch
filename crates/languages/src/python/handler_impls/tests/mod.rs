@@ -30,9 +30,9 @@ where
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = matches_iter.next() {
-        if let Ok(entities) = handler(query_match, &query, source, path, repository_id) {
-            all_entities.extend(entities);
-        }
+        let entities = handler(query_match, &query, source, path, repository_id)
+            .expect("Handler should not fail during test extraction");
+        all_entities.extend(entities);
     }
 
     Ok(all_entities)

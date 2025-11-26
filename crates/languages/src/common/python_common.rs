@@ -29,51 +29,45 @@ pub fn extract_python_parameters(
             "typed_parameter" => {
                 // In tree-sitter-python, typed_parameter has identifier as first child
                 // and type annotation as the "type" field
-                let name = child
-                    .named_child(0)
-                    .and_then(|n| {
-                        if n.kind() == "identifier" {
-                            node_to_text(n, source).ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
-                let type_hint = child
-                    .child_by_field_name("type")
-                    .and_then(|n| node_to_text(n, source).ok());
-                parameters.push((name, type_hint));
+                if let Some(name) = child.named_child(0).and_then(|n| {
+                    if n.kind() == "identifier" {
+                        node_to_text(n, source).ok()
+                    } else {
+                        None
+                    }
+                }) {
+                    let type_hint = child
+                        .child_by_field_name("type")
+                        .and_then(|n| node_to_text(n, source).ok());
+                    parameters.push((name, type_hint));
+                }
             }
             "default_parameter" => {
                 // default_parameter structure: identifier = value
-                let name = child
-                    .named_child(0)
-                    .and_then(|n| {
-                        if n.kind() == "identifier" {
-                            node_to_text(n, source).ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
-                parameters.push((name, None));
+                if let Some(name) = child.named_child(0).and_then(|n| {
+                    if n.kind() == "identifier" {
+                        node_to_text(n, source).ok()
+                    } else {
+                        None
+                    }
+                }) {
+                    parameters.push((name, None));
+                }
             }
             "typed_default_parameter" => {
                 // typed_default_parameter structure: identifier : type = value
-                let name = child
-                    .named_child(0)
-                    .and_then(|n| {
-                        if n.kind() == "identifier" {
-                            node_to_text(n, source).ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
-                let type_hint = child
-                    .child_by_field_name("type")
-                    .and_then(|n| node_to_text(n, source).ok());
-                parameters.push((name, type_hint));
+                if let Some(name) = child.named_child(0).and_then(|n| {
+                    if n.kind() == "identifier" {
+                        node_to_text(n, source).ok()
+                    } else {
+                        None
+                    }
+                }) {
+                    let type_hint = child
+                        .child_by_field_name("type")
+                        .and_then(|n| node_to_text(n, source).ok());
+                    parameters.push((name, type_hint));
+                }
             }
             "list_splat_pattern" => {
                 let name = child

@@ -7,48 +7,20 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::{
+    build_entity, extract_common_components, EntityDetails, ExtractionContext,
+};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
-    build_entity, extract_common_components, extract_generics_from_node, find_capture_node,
-    node_to_text, require_capture_node,
+    extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
+    find_capture_node, node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
-use codesearch_core::entities::{EntityMetadata, EntityType, Visibility};
+use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
-
-// ============================================================================
-// Extraction Context
-// ============================================================================
-
-/// Context for type extraction operations
-struct ExtractionContext<'a, 'b> {
-    query_match: &'a QueryMatch<'a, 'b>,
-    query: &'a Query,
-    source: &'a str,
-    file_path: &'a Path,
-    repository_id: &'a str,
-}
-
-impl<'a, 'b> ExtractionContext<'a, 'b> {
-    fn new(
-        query_match: &'a QueryMatch<'a, 'b>,
-        query: &'a Query,
-        source: &'a str,
-        file_path: &'a Path,
-        repository_id: &'a str,
-    ) -> Self {
-        Self {
-            query_match,
-            query,
-            source,
-            file_path,
-            repository_id,
-        }
-    }
-}
 
 // ============================================================================
 // Type Handler Implementations
@@ -78,7 +50,13 @@ pub fn handle_struct_impl(
     file_path: &Path,
     repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
+    };
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -116,7 +94,13 @@ pub fn handle_enum_impl(
     file_path: &Path,
     repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
+    };
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -147,7 +131,13 @@ pub fn handle_trait_impl(
     file_path: &Path,
     repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext::new(query_match, query, source, file_path, repository_id);
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
+    };
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         let generics = extract_generics(ctx);
         let bounds = extract_trait_bounds(ctx);
@@ -200,18 +190,26 @@ fn build_entity_data(
     metadata: EntityMetadata,
 ) -> Result<CodeEntity> {
     // Extract common components using the shared helper
-    let components = extract_common_components(
-        ctx.query_match,
-        ctx.query,
-        ctx.source,
-        ctx.file_path,
-        ctx.repository_id,
-        capture_names::NAME,
-        main_node,
-    )?;
+    let components = extract_common_components(ctx, capture_names::NAME, main_node, "rust")?;
 
-    // Build the entity using the common helper
-    build_entity(components, entity_type, metadata, None)
+    // Extract Rust-specific: visibility, documentation, content
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(main_node, ctx.source);
+    let content = node_to_text(main_node, ctx.source).ok();
+
+    // Build the entity using the shared helper
+    build_entity(
+        components,
+        EntityDetails {
+            entity_type,
+            language: Language::Rust,
+            visibility,
+            documentation,
+            content,
+            metadata,
+            signature: None,
+        },
+    )
 }
 
 // ============================================================================

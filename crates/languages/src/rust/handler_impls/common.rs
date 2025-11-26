@@ -11,8 +11,7 @@ use crate::rust::handler_impls::constants::{
     capture_names, doc_prefixes, node_kinds, punctuation, visibility_keywords,
 };
 use codesearch_core::entities::Visibility;
-use codesearch_core::error::{Error, Result};
-use std::path::Path;
+use codesearch_core::error::Result;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryMatch};
 
@@ -288,127 +287,6 @@ pub fn extract_function_modifiers(modifiers_node: Node) -> (bool, bool, bool) {
     }
 
     (has_async, has_unsafe, has_const)
-}
-
-// ============================================================================
-// Common Entity Extraction
-// ============================================================================
-
-use crate::qualified_name::build_qualified_name_from_ast;
-use codesearch_core::entities::{
-    CodeEntityBuilder, EntityMetadata, EntityType, Language, SourceLocation,
-};
-use codesearch_core::entity_id::generate_entity_id;
-use codesearch_core::CodeEntity;
-
-/// Common components extracted from all entity types
-pub struct CommonEntityComponents {
-    pub entity_id: String,
-    pub repository_id: String,
-    pub name: String,
-    pub qualified_name: String,
-    pub parent_scope: Option<String>,
-    pub file_path: std::path::PathBuf,
-    pub location: SourceLocation,
-    pub visibility: Visibility,
-    pub documentation: Option<String>,
-    pub content: Option<String>,
-}
-
-/// Extract entity name from query match with fallback to anonymous
-pub fn extract_entity_name(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    name_capture: &str,
-) -> String {
-    use crate::rust::handler_impls::constants::special_idents;
-
-    find_capture_node(query_match, query, name_capture)
-        .and_then(|node| node_to_text(node, source).ok())
-        .unwrap_or_else(|| special_idents::ANONYMOUS.to_string())
-}
-
-/// Extract common components shared across all entity types
-pub fn extract_common_components(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    name_capture: &str,
-    main_node: Node,
-) -> Result<CommonEntityComponents> {
-    // Extract name
-    let name = extract_entity_name(query_match, query, source, name_capture);
-
-    // Build qualified name via parent traversal
-    let scope_result = build_qualified_name_from_ast(main_node, source, "rust");
-    let parent_scope = scope_result.parent_scope;
-    let qualified_name = if parent_scope.is_empty() {
-        name.clone()
-    } else {
-        format!("{parent_scope}::{name}")
-    };
-
-    // Generate entity_id from repository + file_path + qualified name
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
-
-    // Extract visibility
-    let visibility = extract_visibility(query_match, query);
-
-    // Extract documentation
-    let documentation = extract_preceding_doc_comments(main_node, source);
-
-    // Get location and content
-    let location = SourceLocation::from_tree_sitter_node(main_node);
-    let content = node_to_text(main_node, source).ok();
-
-    Ok(CommonEntityComponents {
-        entity_id,
-        repository_id: repository_id.to_string(),
-        name,
-        qualified_name,
-        parent_scope: if parent_scope.is_empty() {
-            None
-        } else {
-            Some(parent_scope)
-        },
-        file_path: file_path.to_path_buf(),
-        location,
-        visibility,
-        documentation,
-        content,
-    })
-}
-
-/// Build a CodeEntity from common components and entity-specific metadata
-pub fn build_entity(
-    components: CommonEntityComponents,
-    entity_type: EntityType,
-    metadata: EntityMetadata,
-    signature: Option<codesearch_core::entities::FunctionSignature>,
-) -> Result<CodeEntity> {
-    CodeEntityBuilder::default()
-        .entity_id(components.entity_id)
-        .repository_id(components.repository_id)
-        .name(components.name)
-        .qualified_name(components.qualified_name)
-        .parent_scope(components.parent_scope)
-        .entity_type(entity_type)
-        .location(components.location)
-        .visibility(components.visibility)
-        .documentation_summary(components.documentation)
-        .content(components.content)
-        .metadata(metadata)
-        .signature(signature)
-        .language(Language::Rust)
-        .file_path(components.file_path)
-        .build()
-        .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }
 
 // ============================================================================

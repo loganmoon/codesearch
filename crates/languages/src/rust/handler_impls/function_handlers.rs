@@ -7,13 +7,16 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::{
+    build_entity, extract_common_components, EntityDetails, ExtractionContext,
+};
 use crate::rust::handler_impls::common::{
-    build_entity, extract_common_components, extract_function_calls, extract_function_modifiers,
-    extract_function_parameters, extract_generics_from_node, find_capture_node, node_to_text,
-    require_capture_node,
+    extract_function_calls, extract_function_modifiers, extract_function_parameters,
+    extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
+    find_capture_node, node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityType, FunctionSignature};
+use codesearch_core::entities::{EntityMetadata, EntityType, FunctionSignature, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -42,16 +45,22 @@ pub fn handle_function_impl(
         }
     }
 
-    // Extract common components
-    let components = extract_common_components(
+    // Create extraction context
+    let ctx = ExtractionContext {
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        capture_names::NAME,
-        function_node,
-    )?;
+    };
+
+    // Extract common components
+    let components = extract_common_components(&ctx, capture_names::NAME, function_node, "rust")?;
+
+    // Extract Rust-specific: visibility, documentation, content
+    let visibility = extract_visibility(query_match, query);
+    let documentation = extract_preceding_doc_comments(function_node, source);
+    let content = node_to_text(function_node, source).ok();
 
     // Extract and parse modifiers
     let (is_async, is_unsafe, is_const) =
@@ -100,19 +109,27 @@ pub fn handle_function_impl(
         }
     }
 
-    // Build signature
-    let signature = FunctionSignature {
-        parameters: parameters
-            .iter()
-            .map(|(name, ty)| (name.clone(), Some(ty.clone())))
-            .collect(),
-        return_type: return_type.clone(),
-        is_async,
-        generics: generics.clone(),
-    };
-
-    // Build the entity using the common helper
-    let entity = build_entity(components, EntityType::Function, metadata, Some(signature))?;
+    // Build the entity using the shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Function,
+            language: Language::Rust,
+            visibility,
+            documentation,
+            content,
+            metadata,
+            signature: Some(FunctionSignature {
+                parameters: parameters
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Some(ty.clone())))
+                    .collect(),
+                return_type,
+                is_async,
+                generics,
+            }),
+        },
+    )?;
 
     Ok(vec![entity])
 }

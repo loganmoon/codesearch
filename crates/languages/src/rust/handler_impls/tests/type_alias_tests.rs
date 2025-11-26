@@ -1,7 +1,7 @@
 //! Tests for type alias extraction handler
 
 use super::*;
-use crate::rust::handlers::type_alias_handlers::handle_type_alias;
+use crate::rust::handler_impls::type_alias_handlers::handle_type_alias_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -10,7 +10,7 @@ fn test_simple_type_alias() {
 type Result<T> = std::result::Result<T, Error>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -38,7 +38,7 @@ fn test_type_alias_no_generics() {
 type Callback = Box<dyn Fn()>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -66,7 +66,7 @@ fn test_complex_type_alias() {
 type Handler = Arc<Mutex<Box<dyn Fn() + Send>>>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -91,7 +91,7 @@ fn test_generic_type_alias() {
 type Pair<T, U> = (T, U);
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -120,7 +120,7 @@ fn test_public_type_alias() {
 pub type PublicAlias = String;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -144,7 +144,7 @@ fn test_type_alias_with_bounds() {
 type Bounded<T: Clone> = Vec<T>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -188,7 +188,7 @@ fn test_type_alias_with_doc_comments() {
 pub type Result<T> = std::result::Result<T, Error>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -208,7 +208,7 @@ fn test_nested_generic_alias() {
 type Complex<T> = HashMap<String, Vec<T>>;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);
@@ -240,7 +240,7 @@ type Second<T> = Option<T>;
 pub type Third = String;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type aliases");
 
     assert_eq!(entities.len(), 3);
@@ -262,7 +262,7 @@ fn test_type_alias_with_lifetime() {
 type StringRef<'a> = &'a str;
 "#;
 
-    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias)
+    let entities = extract_with_handler(source, queries::TYPE_ALIAS_QUERY, handle_type_alias_impl)
         .expect("Failed to extract type alias");
 
     assert_eq!(entities.len(), 1);

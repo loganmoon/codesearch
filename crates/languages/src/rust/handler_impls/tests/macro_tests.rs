@@ -1,7 +1,7 @@
 //! Tests for macro extraction handler
 
 use super::*;
-use crate::rust::handlers::macro_handlers::handle_macro;
+use crate::rust::handler_impls::macro_handlers::handle_macro_impl;
 use codesearch_core::entities::EntityType;
 
 #[test]
@@ -14,7 +14,7 @@ macro_rules! simple {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -50,7 +50,7 @@ macro_rules! exported {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -83,7 +83,7 @@ macro_rules! with_arms {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -113,7 +113,7 @@ macro_rules! message {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -140,7 +140,7 @@ macro_rules! complex {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -165,7 +165,7 @@ macro_rules! vec_of {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);
@@ -196,7 +196,7 @@ macro_rules! third {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macros");
 
     assert_eq!(entities.len(), 3);
@@ -244,7 +244,7 @@ macro_rules! debug_log {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro)
+    let entities = extract_with_handler(source, queries::MACRO_QUERY, handle_macro_impl)
         .expect("Failed to extract macro");
 
     assert_eq!(entities.len(), 1);

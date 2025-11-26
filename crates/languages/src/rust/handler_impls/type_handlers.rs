@@ -8,11 +8,11 @@
 #![deny(clippy::expect_used)]
 
 use crate::rust::entities::{FieldInfo, VariantInfo};
-use crate::rust::handlers::common::{
+use crate::rust::handler_impls::common::{
     build_entity, extract_common_components, extract_generics_from_node, find_capture_node,
     node_to_text, require_capture_node,
 };
-use crate::rust::handlers::constants::{capture_names, keywords, node_kinds, punctuation};
+use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{EntityMetadata, EntityType, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
@@ -71,7 +71,7 @@ fn extract_type_entity(
 // ============================================================================
 
 /// Process a struct query match and extract entity data
-pub fn handle_struct(
+pub fn handle_struct_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
@@ -109,7 +109,7 @@ pub fn handle_struct(
 }
 
 /// Process an enum query match and extract entity data
-pub fn handle_enum(
+pub fn handle_enum_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
@@ -140,7 +140,7 @@ pub fn handle_enum(
 }
 
 /// Process a trait query match and extract entity data
-pub fn handle_trait(
+pub fn handle_trait_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,

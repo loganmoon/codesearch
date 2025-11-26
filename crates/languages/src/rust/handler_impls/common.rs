@@ -7,7 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::rust::handlers::constants::{
+use crate::rust::handler_impls::constants::{
     capture_names, doc_prefixes, node_kinds, punctuation, visibility_keywords,
 };
 use codesearch_core::entities::Visibility;
@@ -203,7 +203,7 @@ pub fn extract_function_parameters(
     params_node: Node,
     source: &str,
 ) -> Result<Vec<(String, String)>> {
-    use crate::rust::handlers::constants::{keywords, special_idents};
+    use crate::rust::handler_impls::constants::{keywords, special_idents};
 
     let mut parameters = Vec::new();
     let mut cursor = params_node.walk();
@@ -271,7 +271,7 @@ pub fn extract_parameter_parts(node: Node, source: &str) -> Result<Option<(Strin
 
 /// Extract function modifiers (async, unsafe, const) from a modifiers node
 pub fn extract_function_modifiers(modifiers_node: Node) -> (bool, bool, bool) {
-    use crate::rust::handlers::constants::function_modifiers;
+    use crate::rust::handler_impls::constants::function_modifiers;
 
     let mut has_async = false;
     let mut has_unsafe = false;
@@ -322,7 +322,7 @@ pub fn extract_entity_name(
     source: &str,
     name_capture: &str,
 ) -> String {
-    use crate::rust::handlers::constants::special_idents;
+    use crate::rust::handler_impls::constants::special_idents;
 
     find_capture_node(query_match, query, name_capture)
         .and_then(|node| node_to_text(node, source).ok())

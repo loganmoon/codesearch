@@ -1,14 +1,14 @@
 //! Edge case tests for Rust extraction handlers
 
 use super::*;
-use crate::rust::handlers::function_handlers::handle_function;
-use crate::rust::handlers::type_handlers::handle_struct;
+use crate::rust::handler_impls::function_handlers::handle_function_impl;
+use crate::rust::handler_impls::type_handlers::handle_struct_impl;
 
 #[test]
 fn test_empty_source() {
     let source = "";
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should handle empty source");
     assert_eq!(entities.len(), 0);
 }
@@ -22,7 +22,7 @@ fn test_only_comments() {
 /// Doc comment without code
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should handle comment-only source");
     assert_eq!(entities.len(), 0);
 }
@@ -39,12 +39,13 @@ struct Données {
 }
 "#;
 
-    let function_entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
-        .expect("Should handle unicode in functions");
+    let function_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Should handle unicode in functions");
     assert_eq!(function_entities.len(), 1);
     assert_eq!(function_entities[0].name, "你好世界");
 
-    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle unicode in structs");
     assert_eq!(struct_entities.len(), 1);
     assert_eq!(struct_entities[0].name, "Données");
@@ -58,7 +59,7 @@ fn this_is_an_extremely_long_function_name_that_goes_on_and_on_and_on_and_on_and
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should handle long identifiers");
     assert_eq!(entities.len(), 1);
     assert!(entities[0].name.len() > 100);
@@ -78,7 +79,7 @@ fn outer() {
 
     // Note: Tree-sitter queries typically don't match nested functions
     // This documents the current behavior
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should handle nested functions");
 
     // Depending on the query, this might only match the outer function
@@ -104,7 +105,7 @@ generate_struct!(Generated);
 // So Generated struct won't be found
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle macro code");
 
     // Macro-generated code is not visible to tree-sitter
@@ -120,7 +121,7 @@ fn incomplete() {
 "#;
 
     // tree-sitter is error-tolerant but incomplete functions may not match queries
-    let result = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function);
+    let result = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl);
 
     // Should not panic - gracefully handles malformed code
     assert!(result.is_ok(), "Should not panic on incomplete syntax");
@@ -140,7 +141,7 @@ fn incomplete() {
 fn test_multiple_items_in_one_line() {
     let source = "fn a() {} fn b() {} fn c() {}";
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should handle multiple items on one line");
 
     assert_eq!(entities.len(), 3);
@@ -161,13 +162,14 @@ struct r#struct {
 }
 "#;
 
-    let function_entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
-        .expect("Should handle raw identifiers in functions");
+    let function_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Should handle raw identifiers in functions");
     assert_eq!(function_entities.len(), 1);
     // Raw identifiers might be extracted with or without r# prefix
     assert!(function_entities[0].name == "type" || function_entities[0].name == "r#type");
 
-    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle raw identifiers in structs");
     assert_eq!(struct_entities.len(), 1);
 }
@@ -189,11 +191,12 @@ struct FFIStruct {
 }
 "#;
 
-    let function_entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
-        .expect("Should handle attributes");
+    let function_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Should handle attributes");
     assert_eq!(function_entities.len(), 1);
 
-    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle attributes");
     assert_eq!(struct_entities.len(), 1);
 }
@@ -210,12 +213,13 @@ fn fixed_array<const SIZE: usize>() -> [u8; SIZE] {
 }
 "#;
 
-    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle const generics in structs");
     assert_eq!(struct_entities.len(), 1);
 
-    let function_entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
-        .expect("Should handle const generics in functions");
+    let function_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Should handle const generics in functions");
     assert_eq!(function_entities.len(), 1);
 }
 
@@ -231,8 +235,9 @@ struct Nested {
 }
 "#;
 
-    let function_entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
-        .expect("Should handle complex nested types");
+    let function_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Should handle complex nested types");
     assert_eq!(function_entities.len(), 1);
 
     // Check that the complex return type is captured
@@ -248,7 +253,7 @@ struct Nested {
 
 #[test]
 fn test_multibyte_utf8_in_struct_fields() {
-    use crate::rust::handlers::type_handlers::handle_struct;
+    use crate::rust::handler_impls::type_handlers::handle_struct_impl;
 
     // Test UTF-8 safety fixes in type_handlers.rs
     let source = r#"
@@ -259,7 +264,7 @@ struct User {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should not panic with multi-byte UTF-8 in struct fields");
 
     assert_eq!(entities.len(), 1);
@@ -272,7 +277,7 @@ struct User {
 
 #[test]
 fn test_multibyte_utf8_in_enum_variants() {
-    use crate::rust::handlers::type_handlers::handle_enum;
+    use crate::rust::handler_impls::type_handlers::handle_enum_impl;
 
     // Test UTF-8 safety in enum variant parsing
     let source = r#"
@@ -283,7 +288,7 @@ enum 状態 {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Should not panic with multi-byte UTF-8 in enum variants");
 
     assert_eq!(entities.len(), 1);
@@ -292,7 +297,7 @@ enum 状態 {
 
 #[test]
 fn test_multibyte_utf8_in_function_parameters() {
-    use crate::rust::handlers::function_handlers::handle_function;
+    use crate::rust::handler_impls::function_handlers::handle_function_impl;
 
     // Test UTF-8 safety in parameter extraction
     let source = r#"
@@ -301,7 +306,7 @@ fn プロセス(名前: String, 年齢: u32) -> String {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Should not panic with multi-byte UTF-8 in parameters");
 
     assert_eq!(entities.len(), 1);
@@ -315,7 +320,7 @@ fn プロセス(名前: String, 年齢: u32) -> String {
 
 #[test]
 fn test_derive_with_multibyte_utf8() {
-    use crate::rust::handlers::type_handlers::handle_struct;
+    use crate::rust::handler_impls::type_handlers::handle_struct_impl;
 
     // Test UTF-8 safety in derive attribute parsing
     let source = r#"
@@ -325,7 +330,7 @@ struct データ {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should not panic with multi-byte UTF-8 in derives");
 
     assert_eq!(entities.len(), 1);

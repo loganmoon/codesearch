@@ -1,7 +1,7 @@
 //! Tests for enum extraction handler
 
 use super::*;
-use crate::rust::handlers::type_handlers::handle_enum;
+use crate::rust::handler_impls::type_handlers::handle_enum_impl;
 use codesearch_core::entities::EntityType;
 
 #[test]
@@ -14,7 +14,7 @@ enum SimpleEnum {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -41,7 +41,7 @@ enum StatusCode {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -68,7 +68,7 @@ enum Message {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -95,7 +95,7 @@ enum Event {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -121,7 +121,7 @@ enum Option<T> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -153,7 +153,7 @@ enum Comparison {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);
@@ -195,7 +195,7 @@ enum ComplexEnum<'a, T: Clone> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     // Should extract both enums
@@ -239,7 +239,7 @@ pub enum ConnectionState {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum)
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
     assert_eq!(entities.len(), 1);

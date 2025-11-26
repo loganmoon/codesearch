@@ -3,13 +3,15 @@
 use super::*;
 use codesearch_core::entities::{EntityType, Visibility};
 
-use crate::rust::handlers::constant_handlers::handle_constant;
-use crate::rust::handlers::function_handlers::handle_function;
-use crate::rust::handlers::impl_handlers::{handle_impl, handle_impl_trait};
-use crate::rust::handlers::macro_handlers::handle_macro;
-use crate::rust::handlers::module_handlers::handle_module;
-use crate::rust::handlers::type_alias_handlers::handle_type_alias;
-use crate::rust::handlers::type_handlers::{handle_enum, handle_struct, handle_trait};
+use crate::rust::handler_impls::constant_handlers::handle_constant_impl;
+use crate::rust::handler_impls::function_handlers::handle_function_impl;
+use crate::rust::handler_impls::impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
+use crate::rust::handler_impls::macro_handlers::handle_macro_impl;
+use crate::rust::handler_impls::module_handlers::handle_module_impl;
+use crate::rust::handler_impls::type_alias_handlers::handle_type_alias_impl;
+use crate::rust::handler_impls::type_handlers::{
+    handle_enum_impl, handle_struct_impl, handle_trait_impl,
+};
 
 /// Large comprehensive Rust code sample (100+ lines)
 const LARGE_RUST_SAMPLE: &str = r####"
@@ -266,9 +268,12 @@ pub mod utils {
 #[test]
 fn test_large_file_extraction() {
     // Test function extraction
-    let function_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::FUNCTION_QUERY, handle_function)
-            .expect("Failed to extract functions from large sample");
+    let function_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::FUNCTION_QUERY,
+        handle_function_impl,
+    )
+    .expect("Failed to extract functions from large sample");
 
     // Should find multiple functions
     assert!(function_entities.len() >= 5);
@@ -319,7 +324,7 @@ fn test_large_file_extraction() {
 #[test]
 fn test_large_file_struct_extraction() {
     let struct_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct)
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct_impl)
             .expect("Failed to extract structs from large sample");
 
     // Should find multiple structs
@@ -377,8 +382,9 @@ fn test_large_file_struct_extraction() {
 
 #[test]
 fn test_large_file_enum_extraction() {
-    let enum_entities = extract_with_handler(LARGE_RUST_SAMPLE, queries::ENUM_QUERY, handle_enum)
-        .expect("Failed to extract enums from large sample");
+    let enum_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::ENUM_QUERY, handle_enum_impl)
+            .expect("Failed to extract enums from large sample");
 
     // Should find Message and ProcessError enums
     assert!(enum_entities.len() >= 2);
@@ -407,7 +413,7 @@ fn test_large_file_enum_extraction() {
 #[test]
 fn test_large_file_trait_extraction() {
     let trait_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::TRAIT_QUERY, handle_trait)
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::TRAIT_QUERY, handle_trait_impl)
             .expect("Failed to extract traits from large sample");
 
     // Should find Processable and Container traits
@@ -462,7 +468,7 @@ fn test_large_file_trait_extraction() {
 #[test]
 fn test_documentation_extraction() {
     let struct_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct)
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct_impl)
             .expect("Failed to extract structs");
 
     // Config struct should have documentation
@@ -478,9 +484,12 @@ fn test_documentation_extraction() {
 
 #[test]
 fn test_visibility_extraction() {
-    let function_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::FUNCTION_QUERY, handle_function)
-            .expect("Failed to extract functions");
+    let function_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::FUNCTION_QUERY,
+        handle_function_impl,
+    )
+    .expect("Failed to extract functions");
 
     // Most functions should be public
     let public_count = function_entities
@@ -497,25 +506,30 @@ fn test_extremely_large_extraction_performance() {
     // Note: No timing assertions as performance is machine-dependent
 
     // Run all extractors on the large sample
-    let functions =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::FUNCTION_QUERY, handle_function);
+    let functions = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::FUNCTION_QUERY,
+        handle_function_impl,
+    );
     assert!(functions.is_ok(), "Function extraction should succeed");
 
-    let structs = extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct);
+    let structs =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::STRUCT_QUERY, handle_struct_impl);
     assert!(structs.is_ok(), "Struct extraction should succeed");
 
-    let enums = extract_with_handler(LARGE_RUST_SAMPLE, queries::ENUM_QUERY, handle_enum);
+    let enums = extract_with_handler(LARGE_RUST_SAMPLE, queries::ENUM_QUERY, handle_enum_impl);
     assert!(enums.is_ok(), "Enum extraction should succeed");
 
-    let traits = extract_with_handler(LARGE_RUST_SAMPLE, queries::TRAIT_QUERY, handle_trait);
+    let traits = extract_with_handler(LARGE_RUST_SAMPLE, queries::TRAIT_QUERY, handle_trait_impl);
     assert!(traits.is_ok(), "Trait extraction should succeed");
 }
 
 #[test]
 fn test_large_file_impl_extraction() {
     // Test inherent impl extraction
-    let impl_entities = extract_with_handler(LARGE_RUST_SAMPLE, queries::IMPL_QUERY, handle_impl)
-        .expect("Failed to extract impl blocks");
+    let impl_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::IMPL_QUERY, handle_impl_impl)
+            .expect("Failed to extract impl blocks");
 
     assert!(impl_entities.len() >= 2); // Config::new, Config::is_debug, Reference::new, Reference::get
 
@@ -527,7 +541,7 @@ fn test_large_file_impl_extraction() {
     let trait_impl_entities = extract_with_handler(
         LARGE_RUST_SAMPLE,
         queries::IMPL_TRAIT_QUERY,
-        handle_impl_trait,
+        handle_impl_trait_impl,
     )
     .expect("Failed to extract trait impls");
 
@@ -548,7 +562,7 @@ fn test_large_file_impl_extraction() {
 #[test]
 fn test_large_file_module_extraction() {
     let module_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::MODULE_QUERY, handle_module)
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::MODULE_QUERY, handle_module_impl)
             .expect("Failed to extract modules");
 
     assert!(module_entities.len() >= 2); // tests, utils
@@ -578,9 +592,12 @@ fn test_large_file_module_extraction() {
 
 #[test]
 fn test_large_file_constant_extraction() {
-    let const_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::CONSTANT_QUERY, handle_constant)
-            .expect("Failed to extract constants");
+    let const_entities = extract_with_handler(
+        LARGE_RUST_SAMPLE,
+        queries::CONSTANT_QUERY,
+        handle_constant_impl,
+    )
+    .expect("Failed to extract constants");
 
     assert!(const_entities.len() >= 3); // MAX_CONNECTIONS, DEFAULT_TIMEOUT, CONFIG
 
@@ -607,7 +624,7 @@ fn test_large_file_type_alias_extraction() {
     let alias_entities = extract_with_handler(
         LARGE_RUST_SAMPLE,
         queries::TYPE_ALIAS_QUERY,
-        handle_type_alias,
+        handle_type_alias_impl,
     )
     .expect("Failed to extract type aliases");
 
@@ -651,7 +668,7 @@ fn test_large_file_type_alias_extraction() {
 #[test]
 fn test_large_file_macro_extraction() {
     let macro_entities =
-        extract_with_handler(LARGE_RUST_SAMPLE, queries::MACRO_QUERY, handle_macro)
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::MACRO_QUERY, handle_macro_impl)
             .expect("Failed to extract macros");
 
     assert!(macro_entities.len() >= 2); // message, debug_log

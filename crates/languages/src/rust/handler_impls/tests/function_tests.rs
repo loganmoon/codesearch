@@ -1,7 +1,7 @@
 //! Tests for function extraction handler
 
 use super::*;
-use crate::rust::handlers::function_handlers::handle_function;
+use crate::rust::handler_impls::function_handlers::handle_function_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -12,7 +12,7 @@ fn simple_function() {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -41,7 +41,7 @@ async fn fetch_data() -> Result<String, Error> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -68,7 +68,7 @@ unsafe fn dangerous_operation(ptr: *mut u8) {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -99,7 +99,7 @@ const fn compile_time_computation(x: i32) -> i32 {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -129,7 +129,7 @@ where
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -165,7 +165,7 @@ pub fn documented_function(x: i32) -> i32 {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -186,7 +186,7 @@ fn lifetime_func<'a, 'b: 'a>(x: &'a str, y: &'b str) -> &'a str {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -219,7 +219,7 @@ impl MyStruct {
 
     // Note: This might not match with FUNCTION_QUERY as it's inside an impl block
     // This test documents the current behavior
-    let _entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let _entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Extraction should not fail");
 
     // Currently, functions inside impl blocks might not be matched by FUNCTION_QUERY
@@ -238,7 +238,7 @@ fn complex_params(
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract function");
 
     assert_eq!(entities.len(), 1);
@@ -263,7 +263,7 @@ fn private_function() {}
 pub(crate) fn crate_public() {}
 "#;
 
-    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function)
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
         .expect("Failed to extract functions");
 
     // Should extract all three functions

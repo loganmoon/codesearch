@@ -26,3 +26,6 @@ docs/
 # User-specific configuration
 # Auto-generated on first run
 codesearch.toml
+
+node_modules/
+package-lock.json

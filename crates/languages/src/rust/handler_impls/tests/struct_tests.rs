@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::rust::entities::FieldInfo;
-use crate::rust::handlers::type_handlers::handle_struct;
+use crate::rust::handler_impls::type_handlers::handle_struct_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -11,7 +11,7 @@ fn test_unit_struct() {
 struct UnitStruct;
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -30,7 +30,7 @@ fn test_tuple_struct() {
 struct TupleStruct(i32, String, bool);
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -69,7 +69,7 @@ struct User {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -110,7 +110,7 @@ where
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -143,7 +143,7 @@ struct DerivedStruct {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -176,7 +176,7 @@ struct Reference<'a, 'b: 'a> {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -212,7 +212,7 @@ pub struct DocumentedUser {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -236,7 +236,7 @@ where
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);
@@ -268,7 +268,7 @@ pub struct MixedVisibility {
 }
 "#;
 
-    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct)
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
     assert_eq!(entities.len(), 1);

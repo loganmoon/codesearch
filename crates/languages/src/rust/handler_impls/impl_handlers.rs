@@ -9,12 +9,12 @@
 #![deny(clippy::expect_used)]
 
 use crate::qualified_name::build_qualified_name_from_ast;
-use crate::rust::handlers::common::{
+use crate::rust::handler_impls::common::{
     extract_function_calls, extract_function_modifiers, extract_function_parameters,
     extract_generics_from_node, extract_preceding_doc_comments, find_capture_node, node_to_text,
     require_capture_node,
 };
-use crate::rust::handlers::constants::{capture_names, node_kinds, special_idents};
+use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
     Visibility,
@@ -26,7 +26,7 @@ use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Process an inherent impl block query match and extract entities
-pub fn handle_impl(
+pub fn handle_impl_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
@@ -128,7 +128,7 @@ pub fn handle_impl(
 }
 
 /// Process a trait impl block query match and extract entities
-pub fn handle_impl_trait(
+pub fn handle_impl_trait_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,

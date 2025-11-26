@@ -4,8 +4,9 @@
 //! integrating the service layer from codesearch-api-service.
 
 use crate::api::{
-    generate_embeddings, get_entities_batch, list_repositories, query_graph, search_fulltext,
-    search_semantic, search_unified, BackendClients, BatchEntityRequest, BatchEntityResponse,
+    generate_embeddings, get_entities_batch, list_repositories, query_graph, search_agentic,
+    search_fulltext, search_semantic, search_unified, AgenticSearchApiRequest,
+    AgenticSearchApiResponse, BackendClients, BatchEntityRequest, BatchEntityResponse,
     EmbeddingRequest, EmbeddingResponse, FulltextSearchRequest, FulltextSearchResponse,
     GraphQueryRequest, GraphQueryResponse, ListRepositoriesResponse, RepositoryInfo, SearchConfig,
     SemanticSearchRequest, SemanticSearchResponse, UnifiedSearchRequest, UnifiedSearchResponse,
@@ -42,6 +43,7 @@ pub(crate) fn build_router(state: AppState, server_config: &ServerConfig) -> Rou
         .route("/api/v1/search/semantic", post(semantic_search_handler))
         .route("/api/v1/search/fulltext", post(fulltext_search_handler))
         .route("/api/v1/search/unified", post(unified_search_handler))
+        .route("/api/v1/search/agentic", post(agentic_search_handler))
         .route("/api/v1/graph/query", post(graph_query_handler))
         // Entity operations
         .route("/api/v1/entities/batch", post(entities_batch_handler))
@@ -162,6 +164,36 @@ async fn unified_search_handler(
     );
 
     let response = search_unified(request, &state.clients, &state.config).await?;
+    Ok(Json(response))
+}
+
+/// POST /api/v1/search/agentic
+#[utoipa::path(
+    post,
+    path = "/api/v1/search/agentic",
+    request_body = AgenticSearchApiRequest,
+    responses(
+        (status = 200, description = "Agentic search results with multi-agent orchestration", body = AgenticSearchApiResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "search"
+)]
+async fn agentic_search_handler(
+    State(state): State<AppState>,
+    Json(request): Json<AgenticSearchApiRequest>,
+) -> Result<Json<AgenticSearchApiResponse>, ApiError> {
+    tracing::info!(
+        "Agentic search request: query='{}', {} repositories",
+        request.query,
+        if request.repository_ids.is_empty() {
+            "all".to_string()
+        } else {
+            request.repository_ids.len().to_string()
+        }
+    );
+
+    let response = search_agentic(request, &state.clients, &state.config).await?;
     Ok(Json(response))
 }
 
@@ -371,6 +403,7 @@ impl From<anyhow::Error> for ApiError {
         semantic_search_handler,
         fulltext_search_handler,
         unified_search_handler,
+        agentic_search_handler,
         graph_query_handler,
         entities_batch_handler,
         embed_handler,
@@ -384,6 +417,9 @@ impl From<anyhow::Error> for ApiError {
         FulltextSearchResponse,
         UnifiedSearchRequest,
         UnifiedSearchResponse,
+        AgenticSearchApiRequest,
+        AgenticSearchApiResponse,
+        crate::api::AgenticSearchApiMetadata,
         GraphQueryRequest,
         GraphQueryResponse,
         BatchEntityRequest,
@@ -393,7 +429,7 @@ impl From<anyhow::Error> for ApiError {
         ListRepositoriesResponse
     )),
     tags(
-        (name = "search", description = "Semantic and full-text search endpoints"),
+        (name = "search", description = "Semantic, full-text, and agentic search endpoints"),
         (name = "graph", description = "Code graph query endpoints"),
         (name = "entities", description = "Entity retrieval endpoints"),
         (name = "embeddings", description = "Embedding generation endpoints"),

@@ -21,6 +21,8 @@ codesearch-languages = { path = "../languages" }
 codesearch-server = { path = "../server" }
 codesearch-indexer = { path = "../indexer" }
 codesearch-outbox-processor = { path = "../outbox-processor" }
+codesearch-mcp-server = { path = "../mcp-server" }
+codesearch-agentic-search = { path = "../agentic-search" }
 
 # CLI framework
 clap = { workspace = true }

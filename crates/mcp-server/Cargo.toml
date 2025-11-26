@@ -1,0 +1,37 @@
+[package]
+name = "codesearch-mcp-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Workspace crates
+codesearch-agentic-search = { path = "../agentic-search" }
+codesearch-core = { path = "../core" }
+
+# MCP SDK
+rmcp = { version = "0.9.0", features = ["server", "transport-io", "macros"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = "1.0"
+schemars = "1.0"
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4.4"

@@ -1,6 +1,7 @@
 //! Python function handler implementations
 
 use crate::common::{
+    entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
     find_capture_node, node_to_text,
     python_common::{
         extract_decorators, extract_docstring, extract_python_parameters, extract_return_type,
@@ -9,12 +10,8 @@ use crate::common::{
     require_capture_node,
 };
 use codesearch_core::{
-    entities::{
-        CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-        Visibility,
-    },
-    entity_id::generate_entity_id,
-    error::{Error, Result},
+    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
+    error::Result,
     CodeEntity,
 };
 use std::path::Path;
@@ -30,18 +27,16 @@ pub fn handle_function_impl(
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
-    // Extract name
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
-
-    // Build qualified name (Python uses "." separator)
-    let qualified_name =
-        crate::qualified_name::build_qualified_name_from_ast(function_node, source, "python");
-    let full_qualified_name = if qualified_name.is_empty() {
-        name.clone()
-    } else {
-        format!("{qualified_name}.{name}")
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
     };
+
+    // Extract common components
+    let components = extract_common_components(&ctx, "name", function_node, "python")?;
 
     // Extract parameters from query capture
     let parameters = if let Some(params_node) = find_capture_node(query_match, query, "params") {
@@ -62,53 +57,28 @@ pub fn handle_function_impl(
     // Extract decorators
     let decorators = extract_decorators(function_node, source);
 
-    // Build metadata
-    let metadata = EntityMetadata {
-        is_async,
-        decorators,
-        ..EntityMetadata::default()
-    };
-
-    // Build signature
-    let signature = FunctionSignature {
-        parameters,
-        return_type,
-        generics: Vec::new(),
-        is_async,
-    };
-
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
-
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
-            None
-        } else {
-            Some(qualified_name)
-        })
-        .entity_type(EntityType::Function)
-        .location(SourceLocation::from_tree_sitter_node(function_node))
-        .visibility(Visibility::Public) // Python doesn't have visibility keywords
-        .documentation_summary(documentation)
-        .content(node_to_text(function_node, source).ok())
-        .metadata(metadata)
-        .signature(Some(signature))
-        .language(Language::Python)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| {
-            codesearch_core::error::Error::entity_extraction(format!(
-                "Failed to build CodeEntity: {e}"
-            ))
-        })?;
+    // Build entity using shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Function,
+            language: Language::Python,
+            visibility: Visibility::Public, // Python doesn't have visibility keywords
+            documentation,
+            content: node_to_text(function_node, source).ok(),
+            metadata: EntityMetadata {
+                is_async,
+                decorators,
+                ..EntityMetadata::default()
+            },
+            signature: Some(FunctionSignature {
+                parameters,
+                return_type,
+                generics: Vec::new(),
+                is_async,
+            }),
+        },
+    )?;
 
     Ok(vec![entity])
 }

@@ -4,7 +4,28 @@ pub(crate) mod entities;
 pub(crate) mod handler_impls;
 pub(crate) mod queries;
 
+use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
+
+/// Scope patterns for Rust qualified name building
+const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
+    ScopePattern {
+        node_kind: "mod_item",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "impl_item",
+        field_name: "type",
+    },
+];
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "rust",
+        separator: "::",
+        patterns: RUST_SCOPE_PATTERNS,
+    }
+}
 
 define_language_extractor! {
     language: Rust,

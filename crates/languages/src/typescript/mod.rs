@@ -3,7 +3,32 @@
 pub(crate) mod handler_impls;
 pub(crate) mod queries;
 
+use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
+
+/// Scope patterns for TypeScript qualified name building
+const TYPESCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
+    ScopePattern {
+        node_kind: "class_declaration",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "function_declaration",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "interface_declaration",
+        field_name: "name",
+    },
+];
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "typescript",
+        separator: ".",
+        patterns: TYPESCRIPT_SCOPE_PATTERNS,
+    }
+}
 
 define_language_extractor! {
     language: TypeScript,

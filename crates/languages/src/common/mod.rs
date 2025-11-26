@@ -2,6 +2,7 @@
 //!
 //! These utilities work across all languages using tree-sitter.
 
+pub mod entity_building;
 pub mod js_ts_common;
 pub mod python_common;
 

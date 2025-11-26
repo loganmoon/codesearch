@@ -3,7 +3,28 @@
 pub(crate) mod handler_impls;
 pub(crate) mod queries;
 
+use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
+
+/// Scope patterns for Python qualified name building
+const PYTHON_SCOPE_PATTERNS: &[ScopePattern] = &[
+    ScopePattern {
+        node_kind: "class_definition",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "function_definition",
+        field_name: "name",
+    },
+];
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "python",
+        separator: ".",
+        patterns: PYTHON_SCOPE_PATTERNS,
+    }
+}
 
 define_language_extractor! {
     language: Python,

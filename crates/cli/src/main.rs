@@ -8,7 +8,7 @@
 
 // Use the library modules
 use codesearch::init::{ensure_storage_initialized, get_api_base_url_if_local_api};
-use codesearch::{docker, infrastructure};
+use codesearch::{docker, infrastructure, initialize_backends};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
@@ -55,6 +55,8 @@ enum Commands {
     /// Manage embedding cache
     #[command(subcommand)]
     Cache(CacheCommands),
+    /// Start MCP server for Claude Code integration (stdio transport)
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -88,6 +90,7 @@ async fn main() -> Result<()> {
         Some(Commands::Cache(cache_cmd)) => {
             handle_cache_command(cache_cmd, cli.config.as_deref()).await
         }
+        Some(Commands::Mcp) => mcp(cli.config.as_deref()).await,
         None => {
             // Default behavior - show help
             println!(
@@ -147,21 +150,11 @@ fn find_repository_root() -> Result<PathBuf> {
 async fn serve(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to start multi-repository REST API server...");
 
-    // Load configuration (no collection_name needed)
-    let (config, _sources) = Config::load_layered(config_path)?;
-    config.validate()?;
-
-    // Ensure infrastructure is running
-    if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
-        let api_base_url = get_api_base_url_if_local_api(&config);
-        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
-    }
-
-    // Connect to PostgreSQL
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to connect to Postgres")?;
+    // Shared initialization
+    let backends = initialize_backends(config_path).await?;
+    let config = backends.config;
+    let postgres_client = backends.postgres_client;
+    let valid_repos = backends.valid_repos;
 
     // Run migrations ONCE before starting services
     info!("Running database migrations");
@@ -170,53 +163,6 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Failed to run database migrations")?;
     info!("Database migrations completed successfully");
-
-    // Load ALL indexed repositories from database
-    let all_repos = postgres_client
-        .list_all_repositories()
-        .await
-        .context("Failed to list repositories")?;
-
-    if all_repos.is_empty() {
-        anyhow::bail!(
-            "No indexed repositories found.\n\
-            Run 'codesearch index' from a git repository to create an index."
-        );
-    }
-
-    info!("Found {} indexed repositories:", all_repos.len());
-
-    // Filter out repositories with non-existent paths
-    let valid_repos: Vec<_> = all_repos
-        .into_iter()
-        .filter(|(repo_id, collection_name, path)| {
-            if path.exists() {
-                info!(
-                    "  - {} ({}) at {}",
-                    collection_name,
-                    repo_id,
-                    path.display()
-                );
-                true
-            } else {
-                warn!(
-                    "Skipping repository '{}' ({}) - path {} no longer exists (may have been moved or deleted)",
-                    collection_name,
-                    repo_id,
-                    path.display()
-                );
-                false
-            }
-        })
-        .collect();
-
-    if valid_repos.is_empty() {
-        anyhow::bail!(
-            "No valid repositories found to serve.\n\
-            All indexed repositories have non-existent paths.\n\
-            Run 'codesearch index' from a valid repository directory to re-index."
-        );
-    }
 
     // Create Qdrant config for outbox processor
     let qdrant_config = codesearch_storage::QdrantConfig {
@@ -268,6 +214,120 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 
     // Return server result after cleanup is complete
     server_result
+}
+
+/// Start MCP server for Claude Code integration
+async fn mcp(config_path: Option<&Path>) -> Result<()> {
+    info!("Starting MCP server for Claude Code integration...");
+
+    // Shared initialization
+    let backends = initialize_backends(config_path).await?;
+    let config = backends.config;
+    let postgres_client = backends.postgres_client;
+    let valid_repos = backends.valid_repos;
+
+    // Initialize embedding manager
+    let embedding_manager =
+        codesearch_embeddings::create_embedding_manager_from_app_config(&config.embeddings)
+            .await
+            .context("Failed to create embedding manager")?;
+
+    // Initialize reranker if enabled
+    let reranker: Option<std::sync::Arc<dyn codesearch_reranking::RerankerProvider>> =
+        if config.reranking.enabled {
+            let api_base_url = config
+                .reranking
+                .api_base_url
+                .clone()
+                .or_else(|| config.embeddings.api_base_url.clone())
+                .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
+
+            match codesearch_reranking::create_reranker_provider(
+                config.reranking.model.clone(),
+                api_base_url,
+                config.reranking.timeout_secs,
+                config.reranking.max_concurrent_requests,
+            )
+            .await
+            {
+                Ok(provider) => {
+                    info!("Reranker initialized successfully");
+                    Some(provider)
+                }
+                Err(e) => {
+                    warn!("Failed to initialize reranker: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+    // Get first valid storage client
+    let (_, first_collection, _) = &valid_repos[0];
+    let qdrant_client =
+        codesearch_storage::create_storage_client(&config.storage, first_collection)
+            .await
+            .context("Failed to create storage client")?;
+
+    // Initialize Neo4j client if enabled
+    let neo4j_client = match codesearch_storage::create_neo4j_client(&config.storage).await {
+        Ok(client) => {
+            info!("Neo4j client initialized successfully");
+            Some(client)
+        }
+        Err(e) => {
+            warn!("Failed to initialize Neo4j client: {e}");
+            None
+        }
+    };
+
+    // Build BackendClients
+    let backend_clients = std::sync::Arc::new(codesearch_server::api::BackendClients {
+        postgres: postgres_client,
+        qdrant: qdrant_client,
+        neo4j: neo4j_client,
+        embedding_manager,
+        reranker,
+    });
+
+    // Build SearchConfig
+    let search_config = std::sync::Arc::new(codesearch_server::api::SearchConfig {
+        hybrid_search: config.hybrid_search.clone(),
+        reranking: config.reranking.clone(),
+        default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
+        max_batch_size: config.storage.max_entities_per_db_operation,
+    });
+
+    // Create SearchApiImpl
+    let search_api: std::sync::Arc<dyn codesearch_core::SearchApi> = std::sync::Arc::new(
+        codesearch_server::api::SearchApiImpl::new(backend_clients, search_config),
+    );
+
+    // Build indexed repositories for MCP server
+    let indexed_repositories: Vec<codesearch_mcp_server::IndexedRepository> = valid_repos
+        .iter()
+        .map(
+            |(id, name, path)| codesearch_mcp_server::IndexedRepository {
+                id: *id,
+                name: name.clone(),
+                path: path.display().to_string(),
+            },
+        )
+        .collect();
+
+    // Create agentic search config
+    let agentic_config = codesearch_agentic_search::AgenticSearchConfig::default();
+
+    // Get current working directory for repository inference
+    let cwd = env::current_dir().context("Failed to get current directory")?;
+
+    // Run MCP server
+    codesearch_mcp_server::run_mcp_server(search_api, agentic_config, indexed_repositories, cwd)
+        .await
+        .map_err(|e| anyhow!("MCP server error: {e}"))?;
+
+    Ok(())
 }
 
 /// Index the repository

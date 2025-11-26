@@ -20,6 +20,7 @@ codesearch-reranking = { path = "../reranking" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-languages = { path = "../languages" }
 codesearch-indexer = { path = "../indexer" }
+codesearch-agentic-search = { path = "../agentic-search" }
 
 # External dependencies from workspace
 anyhow.workspace = true

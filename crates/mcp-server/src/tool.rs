@@ -19,7 +19,7 @@ pub struct AgenticCodeSearchInput {
     /// - Multiple repos: `["repo-a", "repo-b"]`
     /// - All indexed: `["all"]`
     #[schemars(
-        description = "Repository names, UUIDs, or paths to search. Omit to infer from CWD."
+        description = "Repository names, UUIDs, or paths to search. Use [\"all\"] for all indexed repos. Omit to infer from CWD."
     )]
     pub repositories: Option<Vec<String>>,
 

@@ -91,9 +91,10 @@ pub fn format_response(response: AgenticSearchResponse, verbose: bool) -> Format
         None
     };
 
+    let result_count = results.len();
     FormattedSearchResponse {
         results,
-        metadata: format_metadata(response.metadata),
+        metadata: format_metadata(response.metadata, result_count),
         note,
     }
 }
@@ -104,25 +105,17 @@ fn format_entity(entity: EntityResult, full_content: bool) -> FormattedResult {
     let content = if full_content {
         ContentFormat::Full(entity.content.unwrap_or_default())
     } else {
-        let preview = entity
-            .content
-            .as_ref()
-            .map(|c| {
-                let lines: Vec<&str> = c.lines().take(5).collect();
-                if c.lines().count() > 5 {
-                    format!("{}...", lines.join("\n"))
-                } else {
-                    lines.join("\n")
-                }
-            })
-            .unwrap_or_default();
-        ContentFormat::Summary {
-            preview,
-            truncated: entity
-                .content
-                .as_ref()
-                .is_some_and(|c| c.lines().count() > 5),
-        }
+        let (preview, truncated) = entity.content.as_ref().map_or((String::new(), false), |c| {
+            let lines: Vec<&str> = c.lines().take(6).collect();
+            let truncated = lines.len() > 5;
+            let preview = if truncated {
+                format!("{}...", lines[..5].join("\n"))
+            } else {
+                lines.join("\n")
+            };
+            (preview, truncated)
+        });
+        ContentFormat::Summary { preview, truncated }
     };
 
     FormattedResult {
@@ -137,9 +130,9 @@ fn format_entity(entity: EntityResult, full_content: bool) -> FormattedResult {
     }
 }
 
-fn format_metadata(metadata: AgenticSearchMetadata) -> FormattedMetadata {
+fn format_metadata(metadata: AgenticSearchMetadata, result_count: usize) -> FormattedMetadata {
     FormattedMetadata {
-        total_results: metadata.workers_succeeded,
+        total_results: result_count,
         query_time_ms: metadata.query_time_ms,
         iterations: metadata.iterations,
         graph_context_used: metadata.graph_traversal_used,
@@ -203,7 +196,10 @@ mod tests {
 
         let formatted = format_response(response, false);
         assert!(formatted.note.is_none());
-        matches!(formatted.results[0].content, ContentFormat::Full(_));
+        assert!(matches!(
+            formatted.results[0].content,
+            ContentFormat::Full(_)
+        ));
     }
 
     #[test]
@@ -215,7 +211,10 @@ mod tests {
 
         let formatted = format_response(response, false);
         assert!(formatted.note.is_some());
-        matches!(formatted.results[0].content, ContentFormat::Summary { .. });
+        assert!(matches!(
+            formatted.results[0].content,
+            ContentFormat::Summary { .. }
+        ));
     }
 
     #[test]
@@ -227,6 +226,9 @@ mod tests {
 
         let formatted = format_response(response, true);
         assert!(formatted.note.is_none());
-        matches!(formatted.results[0].content, ContentFormat::Full(_));
+        assert!(matches!(
+            formatted.results[0].content,
+            ContentFormat::Full(_)
+        ));
     }
 }

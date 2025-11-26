@@ -8,7 +8,7 @@
 
 // Use the library modules
 use codesearch::init::{ensure_storage_initialized, get_api_base_url_if_local_api};
-use codesearch::{docker, infrastructure};
+use codesearch::{docker, infrastructure, initialize_backends};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
@@ -150,21 +150,11 @@ fn find_repository_root() -> Result<PathBuf> {
 async fn serve(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to start multi-repository REST API server...");
 
-    // Load configuration (no collection_name needed)
-    let (config, _sources) = Config::load_layered(config_path)?;
-    config.validate()?;
-
-    // Ensure infrastructure is running
-    if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
-        let api_base_url = get_api_base_url_if_local_api(&config);
-        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
-    }
-
-    // Connect to PostgreSQL
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to connect to Postgres")?;
+    // Shared initialization
+    let backends = initialize_backends(config_path).await?;
+    let config = backends.config;
+    let postgres_client = backends.postgres_client;
+    let valid_repos = backends.valid_repos;
 
     // Run migrations ONCE before starting services
     info!("Running database migrations");
@@ -173,53 +163,6 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
         .await
         .context("Failed to run database migrations")?;
     info!("Database migrations completed successfully");
-
-    // Load ALL indexed repositories from database
-    let all_repos = postgres_client
-        .list_all_repositories()
-        .await
-        .context("Failed to list repositories")?;
-
-    if all_repos.is_empty() {
-        anyhow::bail!(
-            "No indexed repositories found.\n\
-            Run 'codesearch index' from a git repository to create an index."
-        );
-    }
-
-    info!("Found {} indexed repositories:", all_repos.len());
-
-    // Filter out repositories with non-existent paths
-    let valid_repos: Vec<_> = all_repos
-        .into_iter()
-        .filter(|(repo_id, collection_name, path)| {
-            if path.exists() {
-                info!(
-                    "  - {} ({}) at {}",
-                    collection_name,
-                    repo_id,
-                    path.display()
-                );
-                true
-            } else {
-                warn!(
-                    "Skipping repository '{}' ({}) - path {} no longer exists (may have been moved or deleted)",
-                    collection_name,
-                    repo_id,
-                    path.display()
-                );
-                false
-            }
-        })
-        .collect();
-
-    if valid_repos.is_empty() {
-        anyhow::bail!(
-            "No valid repositories found to serve.\n\
-            All indexed repositories have non-existent paths.\n\
-            Run 'codesearch index' from a valid repository directory to re-index."
-        );
-    }
 
     // Create Qdrant config for outbox processor
     let qdrant_config = codesearch_storage::QdrantConfig {
@@ -277,66 +220,11 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
 async fn mcp(config_path: Option<&Path>) -> Result<()> {
     info!("Starting MCP server for Claude Code integration...");
 
-    // Load configuration
-    let (config, _sources) = Config::load_layered(config_path)?;
-    config.validate()?;
-
-    // Ensure infrastructure is running
-    if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
-        let api_base_url = get_api_base_url_if_local_api(&config);
-        docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
-    }
-
-    // Connect to PostgreSQL
-    let postgres_client = codesearch_storage::create_postgres_client(&config.storage)
-        .await
-        .context("Failed to connect to Postgres")?;
-
-    // Load ALL indexed repositories from database
-    let all_repos = postgres_client
-        .list_all_repositories()
-        .await
-        .context("Failed to list repositories")?;
-
-    if all_repos.is_empty() {
-        anyhow::bail!(
-            "No indexed repositories found.\n\
-            Run 'codesearch index' from a git repository to create an index."
-        );
-    }
-
-    info!("Found {} indexed repositories", all_repos.len());
-
-    // Filter out repositories with non-existent paths
-    let valid_repos: Vec<_> = all_repos
-        .into_iter()
-        .filter(|(repo_id, collection_name, path)| {
-            if path.exists() {
-                info!(
-                    "  - {} ({}) at {}",
-                    collection_name,
-                    repo_id,
-                    path.display()
-                );
-                true
-            } else {
-                warn!(
-                    "Skipping repository '{}' - path {} no longer exists",
-                    collection_name,
-                    path.display()
-                );
-                false
-            }
-        })
-        .collect();
-
-    if valid_repos.is_empty() {
-        anyhow::bail!(
-            "No valid repositories found to serve.\n\
-            All indexed repositories have non-existent paths."
-        );
-    }
+    // Shared initialization
+    let backends = initialize_backends(config_path).await?;
+    let config = backends.config;
+    let postgres_client = backends.postgres_client;
+    let valid_repos = backends.valid_repos;
 
     // Initialize embedding manager
     let embedding_manager =

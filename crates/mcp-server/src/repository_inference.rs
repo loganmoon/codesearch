@@ -5,6 +5,7 @@
 
 use crate::error::{McpError, Result};
 use std::path::Path;
+use tracing::warn;
 use uuid::Uuid;
 
 /// Repository info from database
@@ -30,13 +31,23 @@ pub fn infer_repository_from_cwd(
     }
 
     // Try to find a repository that contains the CWD
-    let cwd_canonical = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let cwd_canonical = cwd.canonicalize().unwrap_or_else(|e| {
+        warn!(
+            "Failed to canonicalize CWD '{}': {e}. Using original path.",
+            cwd.display()
+        );
+        cwd.to_path_buf()
+    });
 
     for repo in indexed_repos {
         let repo_path = Path::new(&repo.path);
-        let repo_canonical = repo_path
-            .canonicalize()
-            .unwrap_or_else(|_| repo_path.to_path_buf());
+        let repo_canonical = repo_path.canonicalize().unwrap_or_else(|e| {
+            warn!(
+                "Failed to canonicalize repository path '{}': {e}. Using original path.",
+                repo_path.display()
+            );
+            repo_path.to_path_buf()
+        });
 
         // Check if CWD is within this repository
         if cwd_canonical.starts_with(&repo_canonical) {
@@ -179,5 +190,19 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("No indexed repositories"));
+    }
+
+    #[test]
+    fn test_resolve_by_path() {
+        let repos = make_repos();
+        let result = resolve_repositories(
+            &Some(vec!["/home/user/projects/repo-a".to_string()]),
+            Path::new("/tmp"),
+            &repos,
+        );
+        assert!(result.is_ok());
+        let ids = result.unwrap();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], "11111111-1111-1111-1111-111111111111");
     }
 }

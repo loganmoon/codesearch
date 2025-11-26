@@ -78,12 +78,13 @@ pub fn handle_interface_impl(
     let name = node_to_text(name_node, source)?;
 
     // Build qualified name
-    let qualified_name =
+    let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(interface_node, source, "typescript");
-    let full_qualified_name = if qualified_name.is_empty() {
+    let parent_scope = scope_result.parent_scope;
+    let full_qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
-        format!("{qualified_name}.{name}")
+        format!("{parent_scope}.{name}")
     };
 
     // Extract generics (type_parameters)
@@ -104,7 +105,9 @@ pub fn handle_interface_impl(
     }
 
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
     // Build entity
@@ -113,10 +116,10 @@ pub fn handle_interface_impl(
         .repository_id(repository_id.to_string())
         .name(name)
         .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
+        .parent_scope(if parent_scope.is_empty() {
             None
         } else {
-            Some(qualified_name)
+            Some(parent_scope)
         })
         .entity_type(EntityType::Interface)
         .location(SourceLocation::from_tree_sitter_node(interface_node))
@@ -161,12 +164,13 @@ pub fn handle_type_alias_impl(
     let name = node_to_text(name_node, source)?;
 
     // Build qualified name
-    let qualified_name =
+    let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(type_alias_node, source, "typescript");
-    let full_qualified_name = if qualified_name.is_empty() {
+    let parent_scope = scope_result.parent_scope;
+    let full_qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
-        format!("{qualified_name}.{name}")
+        format!("{parent_scope}.{name}")
     };
 
     // Extract generics
@@ -187,7 +191,9 @@ pub fn handle_type_alias_impl(
     }
 
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
     // Build entity
@@ -196,10 +202,10 @@ pub fn handle_type_alias_impl(
         .repository_id(repository_id.to_string())
         .name(name)
         .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
+        .parent_scope(if parent_scope.is_empty() {
             None
         } else {
-            Some(qualified_name)
+            Some(parent_scope)
         })
         .entity_type(EntityType::TypeAlias)
         .location(SourceLocation::from_tree_sitter_node(type_alias_node))
@@ -244,12 +250,13 @@ pub fn handle_enum_impl(
     let name = node_to_text(name_node, source)?;
 
     // Build qualified name
-    let qualified_name =
+    let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(enum_node, source, "typescript");
-    let full_qualified_name = if qualified_name.is_empty() {
+    let parent_scope = scope_result.parent_scope;
+    let full_qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
-        format!("{qualified_name}.{name}")
+        format!("{parent_scope}.{name}")
     };
 
     // Extract enum members from the node itself
@@ -267,7 +274,9 @@ pub fn handle_enum_impl(
     }
 
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
     // Build entity
@@ -276,10 +285,10 @@ pub fn handle_enum_impl(
         .repository_id(repository_id.to_string())
         .name(name)
         .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
+        .parent_scope(if parent_scope.is_empty() {
             None
         } else {
-            Some(qualified_name)
+            Some(parent_scope)
         })
         .entity_type(EntityType::Enum)
         .location(SourceLocation::from_tree_sitter_node(enum_node))

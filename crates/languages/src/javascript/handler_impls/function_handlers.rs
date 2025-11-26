@@ -1,16 +1,13 @@
 //! JavaScript function handler implementations
 
 use crate::common::{
+    entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
     find_capture_node,
     js_ts_common::{extract_jsdoc_comments, extract_parameters},
     node_to_text, require_capture_node,
 };
 use codesearch_core::{
-    entities::{
-        CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-        Visibility,
-    },
-    entity_id::generate_entity_id,
+    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
     error::Result,
     CodeEntity,
 };
@@ -27,18 +24,16 @@ pub fn handle_function_impl(
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
-    // Extract name
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
-
-    // Build qualified name (JavaScript uses "." separator)
-    let qualified_name =
-        crate::qualified_name::build_qualified_name_from_ast(function_node, source, "javascript");
-    let full_qualified_name = if qualified_name.is_empty() {
-        name.clone()
-    } else {
-        format!("{qualified_name}.{name}")
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
     };
+
+    // Extract common components (name, qualified_name, entity_id, location)
+    let components = extract_common_components(&ctx, "name", function_node, "javascript")?;
 
     // Extract parameters
     let parameters = if let Some(params_node) = find_capture_node(query_match, query, "params") {
@@ -55,50 +50,27 @@ pub fn handle_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(function_node, source);
 
-    // Build metadata
-    let metadata = EntityMetadata {
-        is_async,
-        ..EntityMetadata::default()
-    };
-
-    // Build signature
-    let signature = FunctionSignature {
-        parameters,
-        return_type: None, // JavaScript has no type annotations
-        generics: Vec::new(),
-        is_async,
-    };
-
-    // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
-
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
-            None
-        } else {
-            Some(qualified_name)
-        })
-        .entity_type(EntityType::Function)
-        .location(SourceLocation::from_tree_sitter_node(function_node))
-        .visibility(Visibility::Public)
-        .documentation_summary(documentation)
-        .content(node_to_text(function_node, source).ok())
-        .metadata(metadata)
-        .signature(Some(signature))
-        .language(Language::JavaScript)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| {
-            codesearch_core::error::Error::entity_extraction(format!(
-                "Failed to build CodeEntity: {e}"
-            ))
-        })?;
+    // Build entity using shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Function,
+            language: Language::JavaScript,
+            visibility: Visibility::Public,
+            documentation,
+            content: node_to_text(function_node, source).ok(),
+            metadata: EntityMetadata {
+                is_async,
+                ..EntityMetadata::default()
+            },
+            signature: Some(FunctionSignature {
+                parameters,
+                return_type: None,
+                generics: Vec::new(),
+                is_async,
+            }),
+        },
+    )?;
 
     Ok(vec![entity])
 }
@@ -111,21 +83,25 @@ pub fn handle_arrow_function_impl(
     file_path: &Path,
     repository_id: &str,
 ) -> Result<Vec<CodeEntity>> {
+    use crate::common::entity_building::CommonEntityComponents;
+    use codesearch_core::entities::SourceLocation;
+
     let arrow_function_node = require_capture_node(query_match, query, "arrow_function")?;
 
-    // Extract name from parent variable_declarator
+    // Arrow functions need special name extraction from parent context
     let name = extract_arrow_function_name(arrow_function_node, source)?;
 
     // Build qualified name
-    let qualified_name = crate::qualified_name::build_qualified_name_from_ast(
+    let scope_result = crate::qualified_name::build_qualified_name_from_ast(
         arrow_function_node,
         source,
         "javascript",
     );
-    let full_qualified_name = if qualified_name.is_empty() {
+    let parent_scope = scope_result.parent_scope;
+    let full_qualified_name = if parent_scope.is_empty() {
         name.clone()
     } else {
-        format!("{qualified_name}.{name}")
+        format!("{parent_scope}.{name}")
     };
 
     // Extract parameters from the arrow function node
@@ -139,50 +115,51 @@ pub fn handle_arrow_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(arrow_function_node, source);
 
-    // Build metadata
-    let metadata = EntityMetadata {
-        is_async,
-        ..EntityMetadata::default()
-    };
-
-    // Build signature
-    let signature = FunctionSignature {
-        parameters,
-        return_type: None,
-        generics: Vec::new(),
-        is_async,
-    };
-
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = codesearch_core::entity_id::generate_entity_id(
+        repository_id,
+        file_path_str,
+        &full_qualified_name,
+    );
 
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
+    // Build entity using shared helper (with manually constructed components)
+    let components = CommonEntityComponents {
+        entity_id,
+        repository_id: repository_id.to_string(),
+        name,
+        qualified_name: full_qualified_name,
+        parent_scope: if parent_scope.is_empty() {
             None
         } else {
-            Some(qualified_name)
-        })
-        .entity_type(EntityType::Function)
-        .location(SourceLocation::from_tree_sitter_node(arrow_function_node))
-        .visibility(Visibility::Public)
-        .documentation_summary(documentation)
-        .content(node_to_text(arrow_function_node, source).ok())
-        .metadata(metadata)
-        .signature(Some(signature))
-        .language(Language::JavaScript)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| {
-            codesearch_core::error::Error::entity_extraction(format!(
-                "Failed to build CodeEntity: {e}"
-            ))
-        })?;
+            Some(parent_scope)
+        },
+        file_path: file_path.to_path_buf(),
+        location: SourceLocation::from_tree_sitter_node(arrow_function_node),
+    };
+
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Function,
+            language: Language::JavaScript,
+            visibility: Visibility::Public,
+            documentation,
+            content: node_to_text(arrow_function_node, source).ok(),
+            metadata: EntityMetadata {
+                is_async,
+                ..EntityMetadata::default()
+            },
+            signature: Some(FunctionSignature {
+                parameters,
+                return_type: None,
+                generics: Vec::new(),
+                is_async,
+            }),
+        },
+    )?;
 
     Ok(vec![entity])
 }

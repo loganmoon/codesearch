@@ -1,6 +1,7 @@
 //! Python class and method handler implementations
 
 use crate::common::{
+    entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
     find_capture_node, node_to_text,
     python_common::{
         extract_base_classes, extract_decorators, extract_docstring, extract_python_parameters,
@@ -9,12 +10,8 @@ use crate::common::{
     require_capture_node,
 };
 use codesearch_core::{
-    entities::{
-        CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-        Visibility,
-    },
-    entity_id::generate_entity_id,
-    error::{Error, Result},
+    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
+    error::Result,
     CodeEntity,
 };
 use std::path::Path;
@@ -30,18 +27,16 @@ pub fn handle_class_impl(
 ) -> Result<Vec<CodeEntity>> {
     let class_node = require_capture_node(query_match, query, "class")?;
 
-    // Extract name
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
-
-    // Build qualified name
-    let qualified_name =
-        crate::qualified_name::build_qualified_name_from_ast(class_node, source, "python");
-    let full_qualified_name = if qualified_name.is_empty() {
-        name.clone()
-    } else {
-        format!("{qualified_name}.{name}")
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
     };
+
+    // Extract common components
+    let components = extract_common_components(&ctx, "name", class_node, "python")?;
 
     // Extract base classes
     let base_classes = extract_base_classes(class_node, source);
@@ -64,37 +59,19 @@ pub fn handle_class_impl(
             .insert("bases".to_string(), base_classes.join(", "));
     }
 
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
-
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
-        .parent_scope(if qualified_name.is_empty() {
-            None
-        } else {
-            Some(qualified_name)
-        })
-        .entity_type(EntityType::Class)
-        .location(SourceLocation::from_tree_sitter_node(class_node))
-        .visibility(Visibility::Public)
-        .documentation_summary(documentation)
-        .content(node_to_text(class_node, source).ok())
-        .metadata(metadata)
-        .language(Language::Python)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| {
-            codesearch_core::error::Error::entity_extraction(format!(
-                "Failed to build CodeEntity: {e}"
-            ))
-        })?;
+    // Build entity using shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Class,
+            language: Language::Python,
+            visibility: Visibility::Public,
+            documentation,
+            content: node_to_text(class_node, source).ok(),
+            metadata,
+            signature: None,
+        },
+    )?;
 
     Ok(vec![entity])
 }
@@ -109,32 +86,16 @@ pub fn handle_method_impl(
 ) -> Result<Vec<CodeEntity>> {
     let method_node = require_capture_node(query_match, query, "method")?;
 
-    // Extract name
-    let name_node = require_capture_node(query_match, query, "name")?;
-    let name = node_to_text(name_node, source)?;
-
-    // Get the class name for qualified name construction
-    let class_name = find_capture_node(query_match, query, "class")
-        .and_then(|class_node| class_node.child_by_field_name("name"))
-        .and_then(|name_node| node_to_text(name_node, source).ok());
-
-    // Build qualified name - method within class
-    let base_qualified_name =
-        crate::qualified_name::build_qualified_name_from_ast(method_node, source, "python");
-
-    let full_qualified_name = match (&class_name, base_qualified_name.is_empty()) {
-        (Some(class), true) => format!("{class}.{name}"),
-        (Some(class), false) => format!("{base_qualified_name}.{class}.{name}"),
-        (None, true) => name.clone(),
-        (None, false) => format!("{base_qualified_name}.{name}"),
+    let ctx = ExtractionContext {
+        query_match,
+        query,
+        source,
+        file_path,
+        repository_id,
     };
 
-    let parent_scope = match (&class_name, base_qualified_name.is_empty()) {
-        (Some(class), true) => Some(class.clone()),
-        (Some(class), false) => Some(format!("{base_qualified_name}.{class}")),
-        (None, true) => None,
-        (None, false) => Some(base_qualified_name),
-    };
+    // Extract common components (name, qualified_name, entity_id, location)
+    let components = extract_common_components(&ctx, "name", method_node, "python")?;
 
     // Extract parameters from query capture (filter self/cls for display)
     let raw_parameters = if let Some(params_node) = find_capture_node(query_match, query, "params")
@@ -194,42 +155,23 @@ pub fn handle_method_impl(
             .insert("property".to_string(), "true".to_string());
     }
 
-    // Build signature
-    let signature = FunctionSignature {
-        parameters,
-        return_type,
-        generics: Vec::new(),
-        is_async,
-    };
-
-    // Generate entity_id
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
-
-    // Build entity
-    let entity = CodeEntityBuilder::default()
-        .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
-        .parent_scope(parent_scope)
-        .entity_type(EntityType::Method)
-        .location(SourceLocation::from_tree_sitter_node(method_node))
-        .visibility(Visibility::Public)
-        .documentation_summary(documentation)
-        .content(node_to_text(method_node, source).ok())
-        .metadata(metadata)
-        .signature(Some(signature))
-        .language(Language::Python)
-        .file_path(file_path.to_path_buf())
-        .build()
-        .map_err(|e| {
-            codesearch_core::error::Error::entity_extraction(format!(
-                "Failed to build CodeEntity: {e}"
-            ))
-        })?;
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Method,
+            language: Language::Python,
+            visibility: Visibility::Public,
+            documentation,
+            content: node_to_text(method_node, source).ok(),
+            metadata,
+            signature: Some(FunctionSignature {
+                parameters,
+                return_type,
+                generics: Vec::new(),
+                is_async,
+            }),
+        },
+    )?;
 
     Ok(vec![entity])
 }

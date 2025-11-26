@@ -10,11 +10,14 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::{
+    build_entity, extract_common_components, EntityDetails, ExtractionContext,
+};
 use crate::rust::handler_impls::common::{
-    build_entity, extract_common_components, node_to_text, require_capture_node,
+    extract_preceding_doc_comments, node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityType};
+use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -31,16 +34,22 @@ pub fn handle_macro_impl(
     // Extract the main macro node
     let main_node = require_capture_node(query_match, query, "macro")?;
 
-    // Extract common components
-    let components = extract_common_components(
+    // Create extraction context
+    let ctx = ExtractionContext {
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        capture_names::NAME,
-        main_node,
-    )?;
+    };
+
+    // Extract common components
+    let components = extract_common_components(&ctx, capture_names::NAME, main_node, "rust")?;
+
+    // Extract Rust-specific: documentation, content
+    // Macros use #[macro_export] for visibility, not pub keyword
+    let documentation = extract_preceding_doc_comments(main_node, source);
+    let content = node_to_text(main_node, source).ok();
 
     // Check for #[macro_export] attribute
     // Use the first capture node like extract_derives does
@@ -50,6 +59,13 @@ pub fn handle_macro_impl(
         .map(|c| c.node)
         .unwrap_or(main_node);
     let is_exported = check_macro_export(check_node, source);
+
+    // Macros with #[macro_export] are effectively public
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
@@ -64,8 +80,19 @@ pub fn handle_macro_impl(
         .attributes
         .insert("exported".to_string(), is_exported.to_string());
 
-    // Build the entity using the common helper
-    let entity = build_entity(components, EntityType::Macro, metadata, None)?;
+    // Build the entity using the shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Macro,
+            language: Language::Rust,
+            visibility,
+            documentation,
+            content,
+            metadata,
+            signature: None,
+        },
+    )?;
 
     Ok(vec![entity])
 }

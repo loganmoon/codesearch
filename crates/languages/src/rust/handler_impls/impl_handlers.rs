@@ -55,7 +55,8 @@ pub fn handle_impl_impl(
     // Use "impl <Type> at line <N>" to distinguish from the struct/type itself
     // and to handle multiple impl blocks for the same type
     let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
-    let parent_scope = build_qualified_name_from_ast(impl_node, source, "rust");
+    let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
+    let parent_scope = scope_result.parent_scope;
     let impl_qualified_name = if parent_scope.is_empty() {
         format!("impl {for_type} at line {}", location.start_line)
     } else {
@@ -154,7 +155,8 @@ pub fn handle_impl_trait_impl(
 
     // Build qualified name: "Trait for Type at line N" to handle multiple trait impls
     let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
-    let parent_scope = build_qualified_name_from_ast(impl_node, source, "rust");
+    let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
+    let parent_scope = scope_result.parent_scope;
     let impl_qualified_name = if parent_scope.is_empty() {
         format!(
             "{trait_name} for {for_type} at line {}",

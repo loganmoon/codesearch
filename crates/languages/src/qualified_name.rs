@@ -3,105 +3,61 @@
 use tree_sitter::Node;
 
 /// Configuration for extracting scope names from AST nodes
-struct ScopePattern {
-    node_kind: &'static str,
-    field_name: &'static str,
+#[derive(Debug)]
+pub struct ScopePattern {
+    pub node_kind: &'static str,
+    pub field_name: &'static str,
 }
 
-/// Scope extraction configurations for each language
-const SCOPE_CONFIGS: &[(&str, &[ScopePattern])] = &[
-    (
-        "rust",
-        &[
-            ScopePattern {
-                node_kind: "mod_item",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "impl_item",
-                field_name: "type",
-            },
-        ],
-    ),
-    (
-        "python",
-        &[
-            ScopePattern {
-                node_kind: "class_definition",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "function_definition",
-                field_name: "name",
-            },
-        ],
-    ),
-    (
-        "javascript",
-        &[
-            ScopePattern {
-                node_kind: "class_declaration",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "function_declaration",
-                field_name: "name",
-            },
-        ],
-    ),
-    (
-        "typescript",
-        &[
-            ScopePattern {
-                node_kind: "class_declaration",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "function_declaration",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "interface_declaration",
-                field_name: "name",
-            },
-        ],
-    ),
-    (
-        "go",
-        &[
-            ScopePattern {
-                node_kind: "type_declaration",
-                field_name: "name",
-            },
-            ScopePattern {
-                node_kind: "method_declaration",
-                field_name: "receiver",
-            },
-        ],
-    ),
-];
-
-/// Get scope separator for a language
-fn get_separator(language: &str) -> &'static str {
-    match language {
-        "rust" => "::",
-        "javascript" | "typescript" | "python" => ".",
-        "go" => ".",
-        _ => "::",
-    }
+/// Language-specific scope configuration for qualified name building
+///
+/// Register this via inventory to add scope support for a new language
+/// without modifying this module.
+pub struct ScopeConfiguration {
+    /// Language identifier (e.g., "rust", "python", "javascript")
+    pub language: &'static str,
+    /// Separator between scope parts (e.g., "::" for Rust, "." for Python)
+    pub separator: &'static str,
+    /// Patterns for identifying scope containers in the AST
+    pub patterns: &'static [ScopePattern],
 }
 
-/// Build qualified name by traversing AST parents to find scope containers
-pub fn build_qualified_name_from_ast(node: Node, source: &str, language: &str) -> String {
+inventory::collect!(ScopeConfiguration);
+
+/// Result of building a qualified name, including the separator for the language
+pub struct QualifiedNameResult {
+    /// The parent scope (without the current entity's name)
+    pub parent_scope: String,
+    /// The separator for this language (e.g., "::" for Rust, "." for Python)
+    pub separator: &'static str,
+}
+
+/// Build parent scope by traversing AST parents to find scope containers
+///
+/// Returns the parent scope path (without the current entity's name) and the
+/// language-specific separator. The caller should combine these with the entity
+/// name to form the full qualified name.
+pub fn build_qualified_name_from_ast(
+    node: Node,
+    source: &str,
+    language: &str,
+) -> QualifiedNameResult {
     let mut scope_parts = Vec::new();
     let mut current = node;
 
-    // Get patterns for this language
-    let patterns = SCOPE_CONFIGS
-        .iter()
-        .find(|(lang, _)| *lang == language)
-        .map(|(_, patterns)| *patterns)
-        .unwrap_or(&[]);
+    // Find configuration for this language via inventory lookup
+    let config = inventory::iter::<ScopeConfiguration>().find(|config| config.language == language);
+
+    let (patterns, separator) = match config {
+        Some(cfg) => (cfg.patterns, cfg.separator),
+        None => (
+            &[] as &[ScopePattern],
+            match language {
+                "rust" => "::",
+                _ => ".",
+            },
+        ),
+    };
 
     // Walk up the tree collecting scope names
     while let Some(parent) = current.parent() {
@@ -116,7 +72,10 @@ pub fn build_qualified_name_from_ast(node: Node, source: &str, language: &str) -
 
     // Reverse to get root-to-leaf order
     scope_parts.reverse();
-    scope_parts.join(get_separator(language))
+    QualifiedNameResult {
+        parent_scope: scope_parts.join(separator),
+        separator,
+    }
 }
 
 /// Extract scope name using pattern configuration

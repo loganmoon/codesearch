@@ -7,11 +7,15 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::{
+    build_entity, extract_common_components, EntityDetails, ExtractionContext,
+};
 use crate::rust::handler_impls::common::{
-    build_entity, extract_common_components, find_capture_node, node_to_text, require_capture_node,
+    extract_preceding_doc_comments, extract_visibility, find_capture_node, node_to_text,
+    require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityType};
+use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -40,16 +44,22 @@ pub fn handle_constant_impl(
         }
     }
 
-    // Extract common components
-    let components = extract_common_components(
+    // Create extraction context
+    let ctx = ExtractionContext {
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        capture_names::NAME,
-        constant_node,
-    )?;
+    };
+
+    // Extract common components
+    let components = extract_common_components(&ctx, capture_names::NAME, constant_node, "rust")?;
+
+    // Extract Rust-specific: visibility, documentation, content
+    let visibility = extract_visibility(query_match, query);
+    let documentation = extract_preceding_doc_comments(constant_node, source);
+    let content = node_to_text(constant_node, source).ok();
 
     // Determine if this is const or static
     let is_const = find_capture_node(query_match, query, "const").is_some();
@@ -90,8 +100,19 @@ pub fn handle_constant_impl(
             .insert("mutable".to_string(), "true".to_string());
     }
 
-    // Build the entity using the common helper
-    let entity = build_entity(components, EntityType::Constant, metadata, None)?;
+    // Build the entity using the shared helper
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Constant,
+            language: Language::Rust,
+            visibility,
+            documentation,
+            content,
+            metadata,
+            signature: None,
+        },
+    )?;
 
     Ok(vec![entity])
 }

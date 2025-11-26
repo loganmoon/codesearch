@@ -14,7 +14,7 @@ use codesearch_core::{
         Visibility,
     },
     entity_id::generate_entity_id,
-    error::Result,
+    error::{Error, Result},
     CodeEntity,
 };
 use std::path::Path;
@@ -78,7 +78,9 @@ pub fn handle_function_impl(
     };
 
     // Generate entity_id
-    let file_path_str = file_path.to_str().unwrap_or_default();
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
     // Build entity

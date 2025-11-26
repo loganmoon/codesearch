@@ -549,3 +549,209 @@ def 计算(数值: int) -> int:
     assert_eq!(entities.len(), 1);
     assert_eq!(entities[0].name, "计算");
 }
+
+#[test]
+fn test_extract_empty_source() {
+    let source = "";
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    assert!(entities.is_empty());
+}
+
+#[test]
+fn test_extract_whitespace_only_source() {
+    let source = "   \n\n  \t  \n";
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    assert!(entities.is_empty());
+}
+
+#[test]
+fn test_extract_comment_only_source() {
+    let source = r#"
+# This is a comment
+# Another comment
+"""
+Module docstring
+"""
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    // No functions or classes, just comments
+    assert!(entities.is_empty());
+}
+
+#[test]
+fn test_extract_positional_only_parameters() {
+    // Python 3.8+ positional-only parameters with /
+    let source = r#"
+def func(a, b, /, c, d):
+    pass
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    if let Some(signature) = &entity.signature {
+        // Should have: a, b, /, c, d
+        assert_eq!(signature.parameters.len(), 5);
+        assert_eq!(signature.parameters[0].0, "a");
+        assert_eq!(signature.parameters[1].0, "b");
+        assert_eq!(signature.parameters[2].0, "/");
+        assert_eq!(signature.parameters[3].0, "c");
+        assert_eq!(signature.parameters[4].0, "d");
+    } else {
+        panic!("Expected function signature");
+    }
+}
+
+#[test]
+fn test_extract_keyword_only_parameters() {
+    // Python 3.0+ keyword-only parameters with bare *
+    let source = r#"
+def func(a, *, b, c):
+    pass
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    if let Some(signature) = &entity.signature {
+        // Should have: a, *, b, c
+        assert_eq!(signature.parameters.len(), 4);
+        assert_eq!(signature.parameters[0].0, "a");
+        assert_eq!(signature.parameters[1].0, "*");
+        assert_eq!(signature.parameters[2].0, "b");
+        assert_eq!(signature.parameters[3].0, "c");
+    } else {
+        panic!("Expected function signature");
+    }
+}
+
+#[test]
+fn test_extract_combined_parameter_syntax() {
+    // Python 3.8+ with both positional-only and keyword-only
+    let source = r#"
+def func(pos_only, /, standard, *, kw_only):
+    pass
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    if let Some(signature) = &entity.signature {
+        // Should have: pos_only, /, standard, *, kw_only
+        assert_eq!(signature.parameters.len(), 5);
+        assert_eq!(signature.parameters[0].0, "pos_only");
+        assert_eq!(signature.parameters[1].0, "/");
+        assert_eq!(signature.parameters[2].0, "standard");
+        assert_eq!(signature.parameters[3].0, "*");
+        assert_eq!(signature.parameters[4].0, "kw_only");
+    } else {
+        panic!("Expected function signature");
+    }
+}
+
+#[test]
+fn test_extract_async_method() {
+    let source = r#"
+class Client:
+    async def fetch(self, url: str) -> dict:
+        pass
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    let method = entities
+        .iter()
+        .find(|e| e.name == "fetch")
+        .expect("Should find fetch method");
+
+    assert_eq!(
+        method.entity_type,
+        codesearch_core::entities::EntityType::Method
+    );
+    assert!(method.metadata.is_async);
+}
+
+#[test]
+fn test_extract_multiple_inheritance() {
+    let source = r#"
+class Child(Parent1, Parent2, Parent3):
+    pass
+    "#;
+
+    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+        .expect("Failed to create extractor")
+        .expect("No extractor for .py");
+
+    let entities = extractor
+        .extract(source, Path::new("test.py"))
+        .expect("Failed to extract entities");
+
+    let class_entity = entities
+        .iter()
+        .find(|e| e.name == "Child")
+        .expect("Should find Child class");
+
+    let bases = class_entity
+        .metadata
+        .attributes
+        .get("bases")
+        .expect("Should have bases attribute");
+
+    assert!(bases.contains("Parent1"));
+    assert!(bases.contains("Parent2"));
+    assert!(bases.contains("Parent3"));
+}

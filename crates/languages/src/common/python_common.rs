@@ -12,6 +12,8 @@ use tree_sitter::Node;
 /// - Default parameters (name=value)
 /// - Typed default parameters (name: Type = value)
 /// - Variadic (*args, **kwargs)
+/// - Positional-only separator (/) - Python 3.8+
+/// - Keyword-only marker (*) - Python 3.0+
 pub fn extract_python_parameters(
     params_node: Node,
     source: &str,
@@ -89,6 +91,16 @@ pub fn extract_python_parameters(
                     .unwrap_or_else(|| "**kwargs".to_string());
                 parameters.push((name, None));
             }
+            // Python 3.8+ positional-only separator: def f(a, /, b)
+            // Parameters before / are positional-only, represented as "/" marker
+            "positional_separator" => {
+                parameters.push(("/".to_string(), None));
+            }
+            // Python 3.0+ keyword-only marker: def f(*, a, b)
+            // A bare * without a name indicates keyword-only parameters follow
+            "keyword_separator" => {
+                parameters.push(("*".to_string(), None));
+            }
             _ => {}
         }
     }
@@ -160,19 +172,6 @@ pub fn is_async_function(node: Node) -> bool {
         // Stop after reaching the function keyword
         if child.kind() == "def" {
             break;
-        }
-    }
-    false
-}
-
-/// Check if a function is inside a class (i.e., is a method)
-pub fn is_method_context(node: Node) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        match parent.kind() {
-            "class_definition" => return true,
-            "module" => return false,
-            _ => current = parent.parent(),
         }
     }
     false

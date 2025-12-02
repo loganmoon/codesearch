@@ -97,3 +97,94 @@ pub async fn start_outbox_processor(
         }
     }
 }
+
+/// Start outbox processor with drain mode support
+///
+/// This function starts the outbox processor and runs concurrently with other operations.
+/// When the drain signal is received, it continues processing until the outbox is completely
+/// empty, then exits cleanly.
+///
+/// # Arguments
+/// * `postgres_client` - Arc to PostgreSQL client implementing PostgresClientTrait
+/// * `qdrant_config` - Configuration for connecting to Qdrant
+/// * `storage_config` - Storage configuration
+/// * `config` - Outbox processor configuration (poll interval, batch size, etc.)
+/// * `drain_rx` - Oneshot receiver that signals when to enter drain mode
+///
+/// # Drain Mode Behavior
+/// When the drain signal is received:
+/// 1. The processor continues processing batches
+/// 2. After each batch, it checks if the outbox is empty
+/// 3. When empty, it returns Ok(()) indicating successful drain
+///
+/// This is useful for `codesearch index` where we want to run the outbox processor
+/// concurrently during indexing, then drain any remaining entries after indexing completes.
+pub async fn start_outbox_processor_with_drain(
+    postgres_client: Arc<dyn PostgresClientTrait>,
+    qdrant_config: &QdrantConfig,
+    storage_config: codesearch_core::StorageConfig,
+    config: &OutboxConfig,
+    drain_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<()> {
+    let processor = OutboxProcessor::new(
+        Arc::clone(&postgres_client),
+        qdrant_config.clone(),
+        storage_config,
+        Duration::from_millis(config.poll_interval_ms),
+        config.entries_per_poll,
+        config.max_retries,
+        config.max_embedding_dim,
+        config.max_cached_collections as u64,
+    );
+
+    info!("Outbox processor started (with drain mode support)");
+
+    // Use a watch channel to track drain mode
+    let (drain_flag_tx, mut drain_flag_rx) = tokio::sync::watch::channel(false);
+
+    // Spawn task to listen for drain signal
+    tokio::spawn(async move {
+        let _ = drain_rx.await;
+        let _ = drain_flag_tx.send(true);
+    });
+
+    loop {
+        // Process batch
+        if let Err(e) = processor.process_batch().await {
+            error!("Outbox batch processing error: {e}");
+            // Continue processing despite errors
+        }
+
+        // Check if we're in drain mode
+        let in_drain_mode = *drain_flag_rx.borrow();
+
+        if in_drain_mode {
+            // In drain mode: check if outbox is empty
+            match postgres_client.count_pending_outbox_entries().await {
+                Ok(0) => {
+                    info!("Outbox drained successfully, processor exiting");
+                    return Ok(());
+                }
+                Ok(count) => {
+                    info!("Drain mode: {} entries remaining", count);
+                    // Short sleep before next batch in drain mode
+                    sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    error!("Failed to count pending outbox entries: {e}");
+                    // Continue trying
+                    sleep(Duration::from_millis(config.poll_interval_ms)).await;
+                }
+            }
+        } else {
+            // Normal mode: use select for the sleep to detect drain signal
+            tokio::select! {
+                _ = sleep(Duration::from_millis(config.poll_interval_ms)) => {},
+                _ = drain_flag_rx.changed() => {
+                    info!("Drain signal received, will process until outbox is empty");
+                    // Continue loop - drain mode is now active
+                }
+            }
+        }
+    }
+}

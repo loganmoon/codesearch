@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   vllm-embeddings:
-    image: vllm/vllm-openai:v0.11.0
+    image: vllm/vllm-openai:v0.11.2
     container_name: codesearch-vllm
     ports:
       - "127.0.0.1:8000:8000"  # OpenAI-compatible API - localhost only
@@ -67,6 +67,7 @@ services:
               capabilities: [gpu]
     ipc: host
     command:
+      - "--enforce-eager" 
       - "--model"
       - "BAAI/bge-code-v1"
       - "--revision"
@@ -100,7 +101,7 @@ services:
     restart: unless-stopped
 
   vllm-reranker:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.11.2
     container_name: codesearch-vllm-reranker
     ports:
       - "127.0.0.1:8001:8000"  # OpenAI-compatible API - localhost only (port 8001 on host)

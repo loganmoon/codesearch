@@ -1562,6 +1562,22 @@ impl PostgresClient {
         Ok(())
     }
 
+    /// Count pending (unprocessed) outbox entries across all target stores
+    ///
+    /// Returns the total number of outbox entries that have not yet been processed.
+    /// This is used to determine when the outbox has been fully drained.
+    pub async fn count_pending_outbox_entries(&self) -> Result<i64> {
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    Error::storage(format!("Failed to count pending outbox entries: {e}"))
+                })?;
+
+        Ok(count.0)
+    }
+
     /// Get the last indexed commit for a repository
     ///
     /// Retrieves the commit hash of the most recently indexed commit for the specified repository.
@@ -2454,6 +2470,10 @@ impl super::PostgresClientTrait for PostgresClient {
 
     async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()> {
         self.record_outbox_failure(outbox_id, error).await
+    }
+
+    async fn count_pending_outbox_entries(&self) -> Result<i64> {
+        self.count_pending_outbox_entries().await
     }
 
     async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>> {

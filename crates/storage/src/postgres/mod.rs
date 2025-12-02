@@ -430,6 +430,9 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Increment retry count and record error
     async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()>;
 
+    /// Count pending (unprocessed) outbox entries across all target stores
+    async fn count_pending_outbox_entries(&self) -> Result<i64>;
+
     /// Get the last indexed commit for a repository
     async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>>;
 

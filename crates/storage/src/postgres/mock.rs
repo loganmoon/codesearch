@@ -785,6 +785,16 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(())
     }
 
+    async fn count_pending_outbox_entries(&self) -> Result<i64> {
+        let data = self.data.lock().unwrap();
+        let count = data
+            .outbox
+            .iter()
+            .filter(|e| e.processed_at.is_none())
+            .count();
+        Ok(count as i64)
+    }
+
     async fn get_last_indexed_commit(&self, _repository_id: Uuid) -> Result<Option<String>> {
         // Mock implementation: return None (not tracking commits in mock)
         Ok(None)

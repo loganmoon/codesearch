@@ -914,16 +914,22 @@ async fn stage_update_snapshots(
         .collect();
     let file_data = file_data?;
 
-    // Batch fetch all old snapshots
+    // Batch fetch all old snapshots (chunked to avoid PostgreSQL stack depth limit)
     let file_refs: Vec<(Uuid, String)> = file_data
         .iter()
         .map(|(path, _)| (repo_id, path.clone()))
         .collect();
 
-    let old_snapshots = postgres_client
-        .get_file_snapshots_batch(&file_refs)
-        .await
-        .storage_err("Failed to batch fetch file snapshots")?;
+    // Chunk into batches of 1000 to avoid "stack depth limit exceeded" error
+    const SNAPSHOT_BATCH_SIZE: usize = 1000;
+    let mut old_snapshots = std::collections::HashMap::new();
+    for chunk in file_refs.chunks(SNAPSHOT_BATCH_SIZE) {
+        let chunk_results = postgres_client
+            .get_file_snapshots_batch(chunk)
+            .await
+            .storage_err("Failed to batch fetch file snapshots")?;
+        old_snapshots.extend(chunk_results);
+    }
 
     // Compute stale entities for all files
     let mut all_stale_ids = Vec::new();
@@ -987,10 +993,13 @@ async fn stage_update_snapshots(
         .map(|(file_path, entity_ids)| (file_path, entity_ids, git_commit.cloned()))
         .collect();
 
-    postgres_client
-        .update_file_snapshots_batch(repo_id, &snapshot_updates)
-        .await
-        .storage_err("Failed to batch update file snapshots")?;
+    // Chunk updates to avoid PostgreSQL stack depth limit
+    for chunk in snapshot_updates.chunks(SNAPSHOT_BATCH_SIZE) {
+        postgres_client
+            .update_file_snapshots_batch(repo_id, chunk)
+            .await
+            .storage_err("Failed to batch update file snapshots")?;
+    }
     info!(
         "Stage 5: Successfully updated {} file snapshots",
         total_snapshots

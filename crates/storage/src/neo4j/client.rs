@@ -3,8 +3,15 @@ use codesearch_core::{CodeEntity, EntityType, StorageConfig};
 use neo4rs::{Graph, Query};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Neo4j edition - determines available features
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Neo4jEdition {
+    Community,
+    Enterprise,
+}
 
 /// Allowed relationship types for Neo4j (prevents Cypher injection)
 pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
@@ -53,6 +60,7 @@ fn validate_property_key(key: &str) -> Result<()> {
 pub struct Neo4jClient {
     graph: Arc<Graph>,
     current_database: Arc<RwLock<Option<String>>>,
+    edition: Neo4jEdition,
 }
 
 impl Neo4jClient {
@@ -72,14 +80,62 @@ impl Neo4jClient {
             .await
             .context("Failed to connect to Neo4j")?;
 
+        // Detect Neo4j edition
+        let edition = Self::detect_edition(&graph).await.unwrap_or_else(|e| {
+            warn!("Failed to detect Neo4j edition, assuming Community: {e}");
+            Neo4jEdition::Community
+        });
+
+        info!("Neo4j edition detected: {:?}", edition);
+
+        if edition == Neo4jEdition::Community {
+            info!("Running in Community Edition mode - using shared 'neo4j' database with repository_id isolation");
+        }
+
         Ok(Self {
             graph: Arc::new(graph),
             current_database: Arc::new(RwLock::new(None)),
+            edition,
         })
     }
 
+    /// Detect the Neo4j edition (Community or Enterprise)
+    async fn detect_edition(graph: &Graph) -> Result<Neo4jEdition> {
+        let query = Query::new("CALL dbms.components() YIELD edition RETURN edition".to_string());
+
+        let mut result = graph.execute(query).await?;
+
+        if let Some(row) = result.next().await? {
+            let edition: String = row.get("edition")?;
+            if edition.to_lowercase() == "enterprise" {
+                return Ok(Neo4jEdition::Enterprise);
+            }
+        }
+
+        Ok(Neo4jEdition::Community)
+    }
+
+    /// Get the Neo4j edition
+    #[allow(dead_code)]
+    pub fn edition(&self) -> Neo4jEdition {
+        self.edition
+    }
+
     /// Create a new database for a repository
+    ///
+    /// For Community Edition: This is a no-op since multi-database is not supported.
+    /// The default 'neo4j' database is used with repository_id property for isolation.
+    ///
+    /// For Enterprise Edition: Creates a per-repository database.
     pub async fn create_database(&self, database_name: &str) -> Result<()> {
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Skipping database creation for '{}' - Community Edition uses shared 'neo4j' database",
+                database_name
+            );
+            return Ok(());
+        }
+
         info!("Creating Neo4j database: {}", database_name);
 
         let query = Query::new(format!("CREATE DATABASE `{database_name}` IF NOT EXISTS"));
@@ -93,7 +149,18 @@ impl Neo4jClient {
     }
 
     /// Drop a database
+    ///
+    /// For Community Edition: This is a no-op. Entities are deleted by repository_id.
+    /// For Enterprise Edition: Drops the per-repository database.
     pub async fn drop_database(&self, database_name: &str) -> Result<()> {
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Skipping database drop for '{}' - Community Edition uses shared 'neo4j' database",
+                database_name
+            );
+            return Ok(());
+        }
+
         info!("Dropping Neo4j database: {}", database_name);
 
         let query = Query::new(format!("DROP DATABASE `{database_name}` IF EXISTS"));
@@ -107,10 +174,20 @@ impl Neo4jClient {
     }
 
     /// Switch to a specific database
+    ///
+    /// For Community Edition: Sets the current database context to "neo4j" but
+    /// tracks the repository database name for isolation purposes.
     pub async fn use_database(&self, database_name: &str) -> Result<()> {
         let mut current = self.current_database.write().await;
         *current = Some(database_name.to_string());
-        debug!("Switched to database: {}", database_name);
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Using shared 'neo4j' database with logical context: {}",
+                database_name
+            );
+        } else {
+            debug!("Switched to database: {}", database_name);
+        }
         Ok(())
     }
 
@@ -386,30 +463,41 @@ impl Neo4jClient {
     }
 
     /// Create indexes for a database
+    ///
+    /// All indexes are created on the `Entity` label, which is shared by all nodes.
     async fn create_indexes(&self, database_name: &str) -> Result<()> {
         self.use_database(database_name).await?;
 
         info!("Creating indexes for database: {}", database_name);
 
-        // Core entity lookup
-        self.run_query("CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n) ON (n.id)")
-            .await?;
-        self.run_query("CREATE INDEX repository_id_idx IF NOT EXISTS FOR (n) ON (n.repository_id)")
+        // Migration: add Entity label to any existing nodes that don't have it
+        let _ = self
+            .run_query("MATCH (n) WHERE NOT n:Entity SET n:Entity")
+            .await;
+
+        // Core entity lookup on common Entity label
+        self.run_query("CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)")
             .await?;
         self.run_query(
-            "CREATE INDEX qualified_name_idx IF NOT EXISTS FOR (n) ON (n.qualified_name)",
+            "CREATE INDEX repository_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.repository_id)",
+        )
+        .await?;
+        self.run_query(
+            "CREATE INDEX qualified_name_idx IF NOT EXISTS FOR (n:Entity) ON (n.qualified_name)",
         )
         .await?;
 
         // Filtering
-        self.run_query("CREATE INDEX language_idx IF NOT EXISTS FOR (n) ON (n.language)")
+        self.run_query("CREATE INDEX language_idx IF NOT EXISTS FOR (n:Entity) ON (n.language)")
             .await?;
-        self.run_query("CREATE INDEX visibility_idx IF NOT EXISTS FOR (n) ON (n.visibility)")
-            .await?;
+        self.run_query(
+            "CREATE INDEX visibility_idx IF NOT EXISTS FOR (n:Entity) ON (n.visibility)",
+        )
+        .await?;
 
         // Composite index for repository queries
         self.run_query(
-            "CREATE INDEX repo_entity_idx IF NOT EXISTS FOR (n) ON (n.repository_id, n.id)",
+            "CREATE INDEX repo_entity_idx IF NOT EXISTS FOR (n:Entity) ON (n.repository_id, n.id)",
         )
         .await?;
 
@@ -738,22 +826,25 @@ impl Neo4jClient {
     }
 
     /// Get Neo4j labels for an entity type
+    ///
+    /// All nodes include the `Entity` label for common index support,
+    /// plus type-specific labels for semantic queries.
     fn get_entity_labels(&self, entity_type: &EntityType) -> &'static [&'static str] {
         match entity_type {
-            EntityType::Function => &["Function"],
-            EntityType::Method => &["Method"],
-            EntityType::Class => &["Class"],
-            EntityType::Struct => &["Struct", "Class"],
-            EntityType::Interface => &["Interface"],
-            EntityType::Trait => &["Trait", "Interface"],
-            EntityType::Enum => &["Enum"],
-            EntityType::Module => &["Module"],
-            EntityType::Package => &["Package"],
-            EntityType::Constant => &["Constant"],
-            EntityType::Variable => &["Variable"],
-            EntityType::TypeAlias => &["TypeAlias"],
-            EntityType::Macro => &["Macro"],
-            EntityType::Impl => &["ImplBlock"],
+            EntityType::Function => &["Entity", "Function"],
+            EntityType::Method => &["Entity", "Method"],
+            EntityType::Class => &["Entity", "Class"],
+            EntityType::Struct => &["Entity", "Struct", "Class"],
+            EntityType::Interface => &["Entity", "Interface"],
+            EntityType::Trait => &["Entity", "Trait", "Interface"],
+            EntityType::Enum => &["Entity", "Enum"],
+            EntityType::Module => &["Entity", "Module"],
+            EntityType::Package => &["Entity", "Package"],
+            EntityType::Constant => &["Entity", "Constant"],
+            EntityType::Variable => &["Entity", "Variable"],
+            EntityType::TypeAlias => &["Entity", "TypeAlias"],
+            EntityType::Macro => &["Entity", "Macro"],
+            EntityType::Impl => &["Entity", "ImplBlock"],
         }
     }
 

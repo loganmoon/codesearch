@@ -123,6 +123,10 @@ pub struct EmbeddingsConfig {
     /// Default instruction for BGE embedding models
     #[serde(default = "default_bge_instruction")]
     pub default_bge_instruction: String,
+
+    /// Number of retry attempts for failed embedding requests
+    #[serde(default = "default_embedding_retry_attempts")]
+    pub retry_attempts: usize,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -140,6 +144,7 @@ impl std::fmt::Debug for EmbeddingsConfig {
                 &self.max_concurrent_api_requests,
             )
             .field("default_bge_instruction", &self.default_bge_instruction)
+            .field("retry_attempts", &self.retry_attempts)
             .finish()
     }
 }
@@ -383,7 +388,7 @@ fn default_enabled_languages() -> Vec<String> {
 }
 
 fn default_texts_per_api_request() -> usize {
-    128
+    64
 }
 
 fn default_device() -> String {
@@ -407,11 +412,15 @@ fn default_embedding_dimension() -> usize {
 }
 
 fn default_max_concurrent_api_requests() -> usize {
-    64
+    4 // Reduced from 64 to prevent vLLM OOM
 }
 
 fn default_bge_instruction() -> String {
     DEFAULT_BGE_INSTRUCTION.to_string()
+}
+
+fn default_embedding_retry_attempts() -> usize {
+    5
 }
 
 fn default_debounce_ms() -> u64 {
@@ -486,7 +495,7 @@ fn default_neo4j_password() -> String {
 }
 
 fn default_entities_per_embedding_batch() -> usize {
-    2000
+    500 // Reduced from 2000 to prevent vLLM OOM
 }
 
 pub fn default_max_entities_per_db_operation() -> usize {
@@ -577,6 +586,7 @@ impl Default for EmbeddingsConfig {
             embedding_dimension: default_embedding_dimension(),
             max_concurrent_api_requests: default_max_concurrent_api_requests(),
             default_bge_instruction: default_bge_instruction(),
+            retry_attempts: default_embedding_retry_attempts(),
         }
     }
 }

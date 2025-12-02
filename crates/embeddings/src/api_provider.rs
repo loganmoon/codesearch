@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use codesearch_core::error::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
@@ -17,8 +18,9 @@ pub struct OpenAiApiProvider {
     dimensions: usize,
     max_context: usize,
     batch_size: usize,
-    max_workers: usize,
+    max_concurrent: usize,
     concurrency_limiter: Arc<Semaphore>,
+    retry_attempts: usize,
 }
 
 impl OpenAiApiProvider {
@@ -32,6 +34,12 @@ impl OpenAiApiProvider {
         info!("Initializing OpenAI-compatible API embeddings");
         info!("  Model: {}", config.model);
         info!("  Dimensions: {}", config.embedding_dimension);
+        info!("  Batch size: {}", config.texts_per_api_request);
+        info!(
+            "  Max concurrent requests: {}",
+            config.max_concurrent_api_requests
+        );
+        info!("  Retry attempts: {}", config.retry_attempts);
 
         // Get base URL (required)
         let base_url = config
@@ -65,8 +73,9 @@ impl OpenAiApiProvider {
             dimensions: config.embedding_dimension,
             max_context,
             batch_size: config.texts_per_api_request,
-            max_workers: config.max_concurrent_api_requests,
+            max_concurrent: config.max_concurrent_api_requests,
             concurrency_limiter: Arc::new(Semaphore::new(config.max_concurrent_api_requests)),
+            retry_attempts: config.retry_attempts,
         })
     }
 
@@ -113,6 +122,7 @@ impl EmbeddingProvider for OpenAiApiProvider {
                 let model = self.model.clone();
                 let max_context = self.max_context;
                 let dimensions = self.dimensions;
+                let retry_attempts = self.retry_attempts;
 
                 async move {
                     // Pre-filter texts by length (simple char-based heuristic)
@@ -120,19 +130,25 @@ impl EmbeddingProvider for OpenAiApiProvider {
                     let mut indices_to_embed = Vec::new();
                     let mut chunk_results = vec![None; chunk.len()];
 
+                    let mut skipped_count = 0;
                     for (i, text) in chunk.iter().enumerate() {
-                        if text.chars().count() <= max_context {
+                        let char_count = text.chars().count();
+                        if char_count <= max_context {
                             texts_to_embed.push(text.clone());
                             indices_to_embed.push(i);
                         } else {
+                            skipped_count += 1;
                             debug!(
-                                "Text at index {} exceeds max_context ({} > {}), skipping",
-                                i,
-                                text.len(),
-                                max_context
+                                "Text at index {i} exceeds max_context ({char_count} > {max_context} chars), skipping"
                             );
                         }
                         // Texts exceeding limit remain as None
+                    }
+                    if skipped_count > 0 {
+                        warn!(
+                            "Skipped {skipped_count}/{} texts exceeding max length of {max_context} chars",
+                            chunk.len()
+                        );
                     }
 
                     if texts_to_embed.is_empty() {
@@ -146,47 +162,73 @@ impl EmbeddingProvider for OpenAiApiProvider {
                         ))
                     })?;
 
-                    // Generate embeddings via API call
-                    let request = CreateEmbeddingRequest {
-                        model: model.clone(),
-                        input: EmbeddingInput::StringArray(texts_to_embed),
-                        encoding_format: None,
-                        dimensions: None,
-                        user: None,
-                    };
+                    // Retry loop with exponential backoff
+                    let mut attempt = 0;
 
-                    let response = client.embeddings().create(request).await.map_err(|e| {
-                        EmbeddingError::InferenceError(format!("API request failed: {e}"))
-                    })?;
+                    loop {
+                        // Generate embeddings via API call
+                        let request = CreateEmbeddingRequest {
+                            model: model.clone(),
+                            input: EmbeddingInput::StringArray(texts_to_embed.clone()),
+                            encoding_format: None,
+                            dimensions: None,
+                            user: None,
+                        };
 
-                    // Extract embeddings and sort by index
-                    let mut sorted_embeddings: Vec<(usize, Vec<f32>)> = response
-                        .data
-                        .into_iter()
-                        .map(|emb| (emb.index as usize, emb.embedding))
-                        .collect();
-                    sorted_embeddings.sort_by_key(|(idx, _)| *idx);
+                        match client.embeddings().create(request).await {
+                            Ok(response) => {
+                                // Extract embeddings and sort by index
+                                let mut sorted_embeddings: Vec<(usize, Vec<f32>)> = response
+                                    .data
+                                    .into_iter()
+                                    .map(|emb| (emb.index as usize, emb.embedding))
+                                    .collect();
+                                sorted_embeddings.sort_by_key(|(idx, _)| *idx);
 
-                    // Validate dimensions
-                    for (_, embedding) in &sorted_embeddings {
-                        if embedding.len() != dimensions {
-                            return Err(EmbeddingError::InferenceError(format!(
-                                "Dimension mismatch: expected {}, got {}",
-                                dimensions,
-                                embedding.len()
-                            )));
+                                // Validate dimensions
+                                for (_, embedding) in &sorted_embeddings {
+                                    if embedding.len() != dimensions {
+                                        return Err(EmbeddingError::InferenceError(format!(
+                                            "Dimension mismatch: expected {}, got {}",
+                                            dimensions,
+                                            embedding.len()
+                                        )));
+                                    }
+                                }
+
+                                // Place embeddings at their original indices
+                                for (result_idx, orig_idx) in
+                                    indices_to_embed.into_iter().enumerate()
+                                {
+                                    chunk_results[orig_idx] =
+                                        Some(sorted_embeddings[result_idx].1.clone());
+                                }
+
+                                return Ok(chunk_results);
+                            }
+                            Err(e) if attempt < retry_attempts => {
+                                attempt += 1;
+
+                                // Exponential backoff: 10s, 20s, 40s, 60s (capped)
+                                // vLLM can take 30-60s to restart after a crash
+                                let backoff_secs = (10 * 2u64.pow(attempt as u32 - 1)).min(60);
+                                let backoff = Duration::from_secs(backoff_secs);
+                                warn!(
+                                    "Embedding batch failed (attempt {}/{}), retrying in {:?}: {}",
+                                    attempt, retry_attempts, backoff, e
+                                );
+                                tokio::time::sleep(backoff).await;
+                            }
+                            Err(e) => {
+                                return Err(EmbeddingError::InferenceError(format!(
+                                    "API request failed after {retry_attempts} attempts: {e}"
+                                )));
+                            }
                         }
                     }
-
-                    // Place embeddings at their original indices
-                    for (result_idx, orig_idx) in indices_to_embed.into_iter().enumerate() {
-                        chunk_results[orig_idx] = Some(sorted_embeddings[result_idx].1.clone());
-                    }
-
-                    Ok(chunk_results)
                 }
             })
-            .buffer_unordered(self.max_workers)
+            .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()
             .await;
 

@@ -55,7 +55,8 @@ pub async fn create_embedding_manager_from_app_config(
         .model(embeddings_config.model.clone())
         .texts_per_api_request(embeddings_config.texts_per_api_request)
         .embedding_dimension(embeddings_config.embedding_dimension)
-        .max_concurrent_api_requests(embeddings_config.max_concurrent_api_requests);
+        .max_concurrent_api_requests(embeddings_config.max_concurrent_api_requests)
+        .retry_attempts(embeddings_config.retry_attempts);
 
     if let Some(ref api_base_url) = embeddings_config.api_base_url {
         config_builder = config_builder.api_base_url(api_base_url.clone());
@@ -192,6 +193,7 @@ mod tests {
             api_key: None,
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
+            retry_attempts: 3,
         };
 
         std::env::set_var("EMBEDDING_API_KEY", "test-api-key-from-env");
@@ -215,6 +217,7 @@ mod tests {
             api_key: Some("config-api-key".to_string()),
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
+            retry_attempts: 3,
         };
 
         std::env::set_var("EMBEDDING_API_KEY", "env-api-key");
@@ -238,6 +241,7 @@ mod tests {
             api_key: None,
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
+            retry_attempts: 3,
         };
 
         std::env::remove_var("EMBEDDING_API_KEY");

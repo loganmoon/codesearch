@@ -363,6 +363,36 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         "Repository ID retrieved for indexing"
     );
 
+    // Create Qdrant config for outbox processor
+    let qdrant_config = codesearch_storage::QdrantConfig {
+        host: config.storage.qdrant_host.clone(),
+        port: config.storage.qdrant_port,
+        rest_port: config.storage.qdrant_rest_port,
+    };
+
+    // Create outbox processor drain channel
+    let (outbox_drain_tx, outbox_drain_rx) = tokio::sync::oneshot::channel();
+
+    // Spawn outbox processor as background task with drain mode
+    let postgres_client_for_outbox = postgres_client.clone();
+    let storage_config = config.storage.clone();
+    let outbox_config = config.outbox.clone();
+    let outbox_handle = tokio::spawn(async move {
+        if let Err(e) = codesearch_outbox_processor::start_outbox_processor_with_drain(
+            postgres_client_for_outbox,
+            &qdrant_config,
+            storage_config,
+            &outbox_config,
+            outbox_drain_rx,
+        )
+        .await
+        {
+            error!("Outbox processor task failed: {e}");
+        }
+    });
+
+    info!("Outbox processor started (will drain after indexing completes)");
+
     // Create GitRepository if possible
     let git_repo = match codesearch_watcher::GitRepository::open(repo_root) {
         Ok(repo) => {
@@ -426,11 +456,18 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         }
     }
 
-    // Note: Relationship resolution now happens automatically in the outbox processor
-    // after entities are created in Neo4j. No manual resolution step required.
-    info!(
-        "Indexing completed. Relationships will be resolved automatically by the outbox processor."
-    );
+    // Signal the outbox processor to drain remaining entries
+    info!("Indexing complete. Signaling outbox processor to drain remaining entries...");
+    let _ = outbox_drain_tx.send(());
+
+    // Wait for outbox processor to finish draining
+    match tokio::time::timeout(std::time::Duration::from_secs(300), outbox_handle).await {
+        Ok(Ok(())) => info!("Outbox processor drained and stopped successfully"),
+        Ok(Err(e)) => warn!("Outbox processor task panicked: {e}"),
+        Err(_) => warn!("Outbox processor drain timed out after 5 minutes"),
+    }
+
+    info!("Repository indexing and outbox processing completed.");
 
     Ok(())
 }

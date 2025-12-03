@@ -33,6 +33,18 @@ pub trait Neo4jClientTrait: Send + Sync {
     /// * `Result<()>` - Success or error
     async fn drop_database(&self, database_name: &str) -> Result<()>;
 
+    /// Delete all data for a repository from Neo4j
+    ///
+    /// For Enterprise Edition: Drops the per-repository database.
+    /// For Community Edition: Deletes all nodes/relationships with matching repository_id.
+    ///
+    /// # Arguments
+    /// * `repository_id` - UUID of the repository to delete
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()>;
+
     /// Switch to a specific database for subsequent operations
     ///
     /// # Arguments

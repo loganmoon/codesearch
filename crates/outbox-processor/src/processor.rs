@@ -1032,36 +1032,50 @@ impl OutboxProcessor {
                                                 target_qname.clone(),
                                             ));
                                         } else {
-                                            // Unresolved relationship: target not yet in DB, need to resolve by name later
-                                            // from_id = source entity that has this relationship
-                                            // to_name = qualified name of target entity to find
-                                            let from_id = match rel["from_id"].as_str() {
-                                                Some(id) if !id.is_empty() => id,
-                                                _ => {
-                                                    warn!(
-                                                    "Missing or empty from_id for unresolved {} relationship on entity {}, skipping",
-                                                    rel_type, entry.entity_id
-                                                );
-                                                    continue;
-                                                }
-                                            };
-                                            let to_name = match rel["to_name"].as_str() {
-                                                Some(name) if !name.is_empty() => name,
-                                                _ => {
-                                                    warn!(
-                                                    "Missing or empty to_name for unresolved {} relationship on entity {}, skipping",
-                                                    rel_type, entry.entity_id
-                                                );
-                                                    continue;
-                                                }
+                                            // Unresolved relationship: need to resolve by name later
+                                            // Two patterns supported:
+                                            // 1. from_id + to_name: source known, target needs resolution
+                                            // 2. from_name + to_id: source needs resolution, target known
+                                            let from_id =
+                                                rel["from_id"].as_str().filter(|s| !s.is_empty());
+                                            let from_name =
+                                                rel["from_name"].as_str().filter(|s| !s.is_empty());
+                                            let to_name =
+                                                rel["to_name"].as_str().filter(|s| !s.is_empty());
+                                            let to_id =
+                                                rel["to_id"].as_str().filter(|s| !s.is_empty());
+
+                                            // Determine which pattern we have
+                                            let (source_identifier, target_identifier) = if let (
+                                                Some(from),
+                                                Some(to),
+                                            ) =
+                                                (from_id, to_name)
+                                            {
+                                                // Pattern 1: from_id -> to_name (e.g., CALLS, USES)
+                                                (from.to_string(), to.to_string())
+                                            } else if let (Some(from), Some(_to)) =
+                                                (from_name, to_id)
+                                            {
+                                                // Pattern 2: from_name -> to_id (e.g., CONTAINS)
+                                                // Use target's qualified_name for resolution
+                                                let target_qname =
+                                                    &entities_to_create[idx].qualified_name;
+                                                (from.to_string(), target_qname.clone())
+                                            } else {
+                                                warn!(
+                                                        "Invalid unresolved {} relationship on entity {}: need (from_id + to_name) or (from_name + to_id), skipping",
+                                                        rel_type, entry.entity_id
+                                                    );
+                                                continue;
                                             };
 
                                             // Collect for batch insert to PostgreSQL
-                                            // Format: (source_entity_id, rel_type, target_qualified_name)
+                                            // Format: (source_identifier, rel_type, target_identifier)
                                             unresolved_relationships.push((
-                                                from_id.to_string(),
+                                                source_identifier,
                                                 rel_type.to_string(),
-                                                to_name.to_string(),
+                                                target_identifier,
                                             ));
                                         }
                                     }

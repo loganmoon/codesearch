@@ -71,9 +71,10 @@ pub fn build_contains_relationship_json(
             }));
         } else {
             // Parent not in batch, store for deferred resolution
+            // Use from_name (not from_id) since we need to resolve the parent
             relationships.push(json!({
                 "type": "CONTAINS",
-                "from_qualified_name": parent_qname,
+                "from_name": parent_qname,
                 "to_id": entity.entity_id.clone(),
                 "resolved": false
             }));
@@ -515,7 +516,7 @@ mod tests {
 
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0]["type"], "CONTAINS");
-        assert_eq!(relationships[0]["from_qualified_name"], "test::Parent");
+        assert_eq!(relationships[0]["from_name"], "test::Parent");
         assert_eq!(relationships[0]["to_id"], "child_id");
         assert_eq!(relationships[0]["resolved"], false);
     }

@@ -173,6 +173,38 @@ impl Neo4jClient {
         Ok(())
     }
 
+    /// Delete all data for a repository from Neo4j
+    ///
+    /// For Enterprise Edition: Drops the per-repository database.
+    /// For Community Edition: Deletes all nodes/relationships with matching repository_id.
+    pub async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()> {
+        let db_name = format!("codesearch_{}", repository_id.simple());
+
+        if self.edition == Neo4jEdition::Community {
+            info!(
+                "Deleting repository data for {} from shared Neo4j database",
+                repository_id
+            );
+
+            // Delete all nodes (and their relationships via DETACH) for this repository
+            let query =
+                Query::new("MATCH (n {repository_id: $repo_id}) DETACH DELETE n".to_string())
+                    .param("repo_id", repository_id.to_string());
+
+            self.graph
+                .run(query)
+                .await
+                .context("Failed to delete repository nodes from Neo4j")?;
+
+            info!("Deleted all nodes for repository {}", repository_id);
+        } else {
+            // Enterprise Edition: drop the entire database
+            self.drop_database(&db_name).await?;
+        }
+
+        Ok(())
+    }
+
     /// Switch to a specific database
     ///
     /// For Community Edition: Sets the current database context to "neo4j" but
@@ -983,6 +1015,10 @@ impl Neo4jClientTrait for Neo4jClient {
 
     async fn drop_database(&self, database_name: &str) -> Result<()> {
         Self::drop_database(self, database_name).await
+    }
+
+    async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()> {
+        Self::delete_repository_data(self, repository_id).await
     }
 
     async fn use_database(&self, database_name: &str) -> Result<()> {

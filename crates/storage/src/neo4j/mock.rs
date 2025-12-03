@@ -89,6 +89,17 @@ impl Neo4jClientTrait for MockNeo4jClient {
         Ok(())
     }
 
+    async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()> {
+        let mut data = self.data.lock().unwrap();
+        // Remove nodes belonging to this repository
+        let repo_id_str = repository_id.to_string();
+        data.nodes
+            .retain(|_, node| node.entity.repository_id != repo_id_str);
+        // Remove database mapping
+        data.database_mappings.remove(&repository_id);
+        Ok(())
+    }
+
     async fn use_database(&self, database_name: &str) -> Result<()> {
         let mut data = self.data.lock().unwrap();
         data.current_database = Some(database_name.to_string());

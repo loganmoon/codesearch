@@ -570,7 +570,8 @@ fn confirm_deletion() -> Result<bool> {
 ///
 /// Deletion is performed in this order:
 /// 1. Qdrant collection (if it exists - warns but continues if missing)
-/// 2. PostgreSQL repository data (cascades to all child tables)
+/// 2. Neo4j graph data (handles both Enterprise and Community editions)
+/// 3. PostgreSQL repository data (cascades to all child tables)
 async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to drop indexed data");
 
@@ -592,6 +593,9 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     let collection_manager = codesearch_storage::create_collection_manager(&config.storage)
         .await
         .context("Failed to create collection manager")?;
+    let neo4j_client = codesearch_storage::create_neo4j_client(&config.storage)
+        .await
+        .context("Failed to create Neo4j client")?;
 
     // List all repositories
     let all_repos = postgres_client
@@ -654,6 +658,16 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
                 "  Warning: Qdrant collection '{collection_name}' not found (may already be deleted)"
             );
         }
+
+        // Delete from Neo4j (handles both Enterprise and Community editions)
+        neo4j_client
+            .delete_repository_data(*repo_id)
+            .await
+            .context(format!(
+                "Failed to delete Neo4j graph data: {}",
+                repo_path.display()
+            ))?;
+        info!("Deleted Neo4j data for repository {repo_id}");
 
         // Delete from Postgres (cascades to all child tables)
         postgres_client

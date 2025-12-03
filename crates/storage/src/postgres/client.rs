@@ -91,6 +91,9 @@ type SparseEmbeddingRow = (Vec<f32>, Option<Vec<i64>>, Option<Vec<f32>>);
 /// Type alias for validated sparse embedding arrays: (sparse_indices, sparse_values)
 type ValidatedSparseArrays = (Option<Vec<i64>>, Option<Vec<f32>>);
 
+/// Type alias for batch embedding row: (id, dense_embedding, sparse_indices, sparse_values)
+type BatchEmbeddingRow = (i64, Vec<f32>, Option<Vec<i64>>, Option<Vec<f32>>);
+
 /// Operation type for outbox pattern
 ///
 /// Represents the type of operation to be performed on the target data store.
@@ -1933,6 +1936,38 @@ impl PostgresClient {
             .transpose()
     }
 
+    /// Batch fetch embeddings by IDs from entity_embeddings table
+    ///
+    /// Optimized batch version for fetching embeddings for many entities at once.
+    /// Uses a single query with ANY() instead of N individual queries.
+    pub async fn get_embeddings_with_sparse_by_ids(
+        &self,
+        embedding_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        if embedding_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<BatchEmbeddingRow> = sqlx::query_as(
+            "SELECT id, embedding, sparse_indices, sparse_values FROM entity_embeddings WHERE id = ANY($1)",
+        )
+        .bind(embedding_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to batch fetch embeddings by IDs: {e}")))?;
+
+        let mut result = std::collections::HashMap::with_capacity(rows.len());
+        for (id, dense, sparse_indices, sparse_values) in rows {
+            let sparse = match (sparse_indices, sparse_values) {
+                (Some(indices), Some(values)) => Some(arrays_to_sparse_embedding(indices, values)?),
+                _ => None,
+            };
+            result.insert(id, (dense, sparse));
+        }
+
+        Ok(result)
+    }
+
     /// Fetch cached dense embeddings for entities by qualified names within a single repository
     pub async fn get_embeddings_by_qualified_names(
         &self,
@@ -2147,6 +2182,98 @@ impl PostgresClient {
         // Serialize to JSON
         serde_json::to_value(&payload)
             .map_err(|e| Error::storage(format!("Failed to serialize Neo4j payload: {e}")))
+    }
+
+    // ========================================================================
+    // Pending Relationship Methods
+    // ========================================================================
+
+    /// Insert pending relationships for later resolution
+    pub async fn insert_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        relationships: &[(String, String, String)],
+    ) -> Result<u64> {
+        if relationships.is_empty() {
+            return Ok(0);
+        }
+
+        // Build UNNEST query for bulk insert
+        let source_ids: Vec<&str> = relationships.iter().map(|(s, _, _)| s.as_str()).collect();
+        let rel_types: Vec<&str> = relationships.iter().map(|(_, r, _)| r.as_str()).collect();
+        let target_qnames: Vec<&str> = relationships.iter().map(|(_, _, t)| t.as_str()).collect();
+
+        let result = sqlx::query(
+            "INSERT INTO pending_relationships (repository_id, source_entity_id, relationship_type, target_qualified_name)
+             SELECT $1, * FROM UNNEST($2::text[], $3::text[], $4::text[])
+             ON CONFLICT (repository_id, source_entity_id, relationship_type, target_qualified_name) DO NOTHING",
+        )
+        .bind(repository_id)
+        .bind(&source_ids)
+        .bind(&rel_types)
+        .bind(&target_qnames)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to insert pending relationships: {e}")))?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Resolve pending relationships using efficient JOIN
+    pub async fn resolve_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<(i64, String, String, String)>> {
+        let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+            "SELECT pr.id::BIGINT, pr.source_entity_id, e.entity_id AS target_entity_id, pr.relationship_type
+             FROM pending_relationships pr
+             JOIN entity_metadata e
+               ON pr.target_qualified_name = e.qualified_name
+               AND pr.repository_id = e.repository_id
+             WHERE pr.repository_id = $1
+               AND e.deleted_at IS NULL
+             LIMIT $2",
+        )
+        .bind(repository_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to resolve pending relationships: {e}")))?;
+
+        Ok(rows)
+    }
+
+    /// Delete resolved pending relationships by ID
+    pub async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()> {
+        if pending_ids.is_empty() {
+            return Ok(());
+        }
+
+        sqlx::query("DELETE FROM pending_relationships WHERE id = ANY($1)")
+            .bind(pending_ids)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::storage(format!("Failed to delete pending relationships: {e}")))?;
+
+        Ok(())
+    }
+
+    /// Count pending relationships for a repository
+    pub async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as count FROM pending_relationships WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to count pending relationships: {e}")))?;
+
+        let count: i64 = row
+            .try_get("count")
+            .map_err(|e| Error::storage(format!("Failed to extract count: {e}")))?;
+
+        Ok(count)
     }
 }
 
@@ -2521,6 +2648,13 @@ impl super::PostgresClientTrait for PostgresClient {
         self.get_embedding_with_sparse_by_id(embedding_id).await
     }
 
+    async fn get_embeddings_with_sparse_by_ids(
+        &self,
+        embedding_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        self.get_embeddings_with_sparse_by_ids(embedding_ids).await
+    }
+
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
         self.get_cache_stats().await
     }
@@ -2545,6 +2679,32 @@ impl super::PostgresClientTrait for PostgresClient {
     ) -> Result<std::collections::HashMap<String, CodeEntity>> {
         self.get_entities_by_qualified_names(repository_id, qualified_names)
             .await
+    }
+
+    async fn insert_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        relationships: &[(String, String, String)],
+    ) -> Result<u64> {
+        self.insert_pending_relationships(repository_id, relationships)
+            .await
+    }
+
+    async fn resolve_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<(i64, String, String, String)>> {
+        self.resolve_pending_relationships(repository_id, limit)
+            .await
+    }
+
+    async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()> {
+        self.delete_pending_relationships(pending_ids).await
+    }
+
+    async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64> {
+        self.count_pending_relationships(repository_id).await
     }
 }
 

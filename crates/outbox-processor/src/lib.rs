@@ -15,7 +15,7 @@ use tracing::{error, info};
 
 // Re-export for ease of use
 pub use neo4j_relationship_resolver::{
-    resolve_contains_relationships, resolve_relationships_generic, CallGraphResolver,
+    resolve_pending_from_postgres, resolve_relationships_generic, CallGraphResolver,
     ImportsResolver, InheritanceResolver, RelationshipResolver, TraitImplResolver,
     TypeUsageResolver,
 };
@@ -60,6 +60,7 @@ pub async fn start_outbox_processor(
         config.max_retries,
         config.max_embedding_dim,
         config.max_cached_collections as u64,
+        true, // Enable per-batch resolution for serve mode (incremental updates)
     );
 
     info!("Outbox processor started");
@@ -135,6 +136,7 @@ pub async fn start_outbox_processor_with_drain(
         config.max_retries,
         config.max_embedding_dim,
         config.max_cached_collections as u64,
+        false, // Defer resolution until outbox drains (bulk indexing optimization)
     );
 
     info!("Outbox processor started (with drain mode support)");
@@ -162,7 +164,12 @@ pub async fn start_outbox_processor_with_drain(
             // In drain mode: check if outbox is empty
             match postgres_client.count_pending_outbox_entries().await {
                 Ok(0) => {
-                    info!("Outbox drained successfully, processor exiting");
+                    // Resolve all pending relationships now that all entities are indexed
+                    info!("Outbox drained. Resolving pending relationships...");
+                    if let Err(e) = processor.resolve_pending_relationships().await {
+                        error!("Failed to resolve pending relationships: {e}");
+                    }
+                    info!("Outbox drained and relationships resolved, processor exiting");
                     return Ok(());
                 }
                 Ok(count) => {

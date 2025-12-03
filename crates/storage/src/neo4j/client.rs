@@ -548,85 +548,6 @@ impl Neo4jClient {
         Ok(())
     }
 
-    /// Find all nodes with unresolved CONTAINS relationships
-    pub async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
-        let _db = self.get_current_database().await?;
-
-        let query = Query::new(
-            "MATCH (child)
-             WHERE child.unresolved_contains_parent IS NOT NULL
-             RETURN child.id AS child_id, child.unresolved_contains_parent AS parent_qname"
-                .to_string(),
-        );
-
-        let mut result = self.graph.execute(query).await?;
-
-        let mut nodes = Vec::new();
-        while let Some(row) = result.next().await? {
-            let child_id: String = row.get("child_id")?;
-            let parent_qname: String = row.get("parent_qname")?;
-            nodes.push((child_id, parent_qname));
-        }
-
-        Ok(nodes)
-    }
-
-    /// Batch resolve CONTAINS relationships using UNWIND for performance
-    ///
-    /// This method resolves multiple unresolved CONTAINS relationships in just 2 queries
-    /// instead of 3N queries, providing significant performance improvement for large repositories.
-    ///
-    /// # Arguments
-    /// * `unresolved_nodes` - Vec of (child_id, parent_qualified_name) pairs
-    ///
-    /// # Returns
-    /// * `Result<usize>` - Number of relationships successfully created
-    pub async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize> {
-        let _db = self.get_current_database().await?;
-
-        if unresolved_nodes.is_empty() {
-            return Ok(0);
-        }
-
-        // Convert to format Neo4j expects: Vec<HashMap<String, String>>
-        let nodes_data: Vec<std::collections::HashMap<String, String>> = unresolved_nodes
-            .iter()
-            .map(|(child_id, parent_qname)| {
-                let mut map = std::collections::HashMap::new();
-                map.insert("child_id".to_string(), child_id.clone());
-                map.insert("parent_qname".to_string(), parent_qname.clone());
-                map
-            })
-            .collect();
-
-        // Query 1: Batch lookup parents, create relationships, and cleanup in one query
-        // Using UNWIND for maximum efficiency
-        let batch_query = Query::new(
-            "UNWIND $nodes AS node
-             MATCH (parent {qualified_name: node.parent_qname})
-             MATCH (child {id: node.child_id})
-             MERGE (parent)-[:CONTAINS]->(child)
-             REMOVE child.unresolved_contains_parent
-             RETURN count(*) AS resolved_count"
-                .to_string(),
-        )
-        .param("nodes", nodes_data);
-
-        let mut result = self.graph.execute(batch_query).await?;
-
-        let resolved_count = if let Some(row) = result.next().await? {
-            let count: i64 = row.get("resolved_count")?;
-            count as usize
-        } else {
-            0
-        };
-
-        Ok(resolved_count)
-    }
-
     /// Create a relationship between two entities with Cypher injection protection
     ///
     /// # Arguments
@@ -692,60 +613,6 @@ impl Neo4jClient {
         }
 
         self.graph.run(q).await?;
-
-        Ok(())
-    }
-
-    /// Store an unresolved relationship as a node property for later resolution
-    ///
-    /// When a relationship target doesn't exist yet, we store the relationship
-    /// information as a temporary node property. Later resolution processes will
-    /// query for these properties and create actual relationship edges.
-    ///
-    /// # Arguments
-    /// * `entity_id` - ID of the entity with unresolved relationship
-    /// * `relationship_type` - Type of relationship (must be in allowed list)
-    /// * `target_qualified_name` - Qualified name of the target entity
-    ///
-    /// # Property Naming
-    /// Property is stored as `unresolved_{rel_type}_parent` (lowercase)
-    ///
-    /// # Security
-    /// - Validates `relationship_type` against `ALLOWED_RELATIONSHIP_TYPES`
-    /// - Uses parameterized queries for all values
-    /// - Property name derived from validated constant (safe from injection)
-    pub async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()> {
-        let _db = self.get_current_database().await?;
-
-        // Validate relationship type (Cypher injection protection)
-        if !ALLOWED_RELATIONSHIP_TYPES.contains(&relationship_type) {
-            return Err(anyhow!(
-                "Invalid relationship type '{relationship_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
-            ));
-        }
-
-        let property_name = format!("unresolved_{}_parent", relationship_type.to_lowercase());
-
-        // Use parameterized query for values, format string for property name
-        // (property name is derived from validated relationship_type constant)
-        let query_str = format!(
-            "MATCH (n {{id: $entity_id}})
-             SET n.`{property_name}` = $target_qname"
-        );
-
-        let query = Query::new(query_str)
-            .param("entity_id", entity_id)
-            .param("target_qname", target_qualified_name);
-
-        self.graph
-            .run(query)
-            .await
-            .context("Failed to store unresolved relationship")?;
 
         Ok(())
     }
@@ -1179,32 +1046,6 @@ impl Neo4jClientTrait for Neo4jClient {
         relationships: &[(String, String, String)],
     ) -> Result<()> {
         Self::batch_create_relationships(self, relationships).await
-    }
-
-    async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()> {
-        Self::store_unresolved_relationship(
-            self,
-            entity_id,
-            relationship_type,
-            target_qualified_name,
-        )
-        .await
-    }
-
-    async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
-        Self::find_unresolved_contains_nodes(self).await
-    }
-
-    async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize> {
-        Self::resolve_contains_relationships_batch(self, unresolved_nodes).await
     }
 
     async fn run_query_with_params(

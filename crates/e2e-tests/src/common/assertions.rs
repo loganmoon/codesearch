@@ -267,6 +267,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore] // Requires Docker
     async fn test_assertions_with_real_qdrant() -> Result<()> {
         // This test requires a running Qdrant instance
         let qdrant = TestQdrant::start().await?;

@@ -31,14 +31,6 @@ struct Relationship {
     rel_type: String,
 }
 
-/// In-memory unresolved relationship data
-#[derive(Debug, Clone)]
-struct UnresolvedRelationship {
-    entity_id: String,
-    rel_type: String,
-    target_qualified_name: String,
-}
-
 #[derive(Debug, Default)]
 struct MockData {
     databases: HashMap<String, bool>, // database_name -> exists
@@ -46,7 +38,6 @@ struct MockData {
     nodes: HashMap<String, Node>,             // entity_id -> Node
     node_id_counter: i64,                     // Auto-increment for internal IDs
     relationships: Vec<Relationship>,         // List of relationships
-    unresolved: Vec<UnresolvedRelationship>,  // List of unresolved relationships
     database_mappings: HashMap<Uuid, String>, // repository_id -> database_name
 }
 
@@ -75,13 +66,6 @@ impl MockNeo4jClient {
     #[allow(dead_code)]
     pub fn relationship_count(&self) -> usize {
         self.data.lock().unwrap().relationships.len()
-    }
-
-    /// Get number of unresolved relationships stored
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn unresolved_count(&self) -> usize {
-        self.data.lock().unwrap().unresolved.len()
     }
 }
 
@@ -207,72 +191,6 @@ impl Neo4jClientTrait for MockNeo4jClient {
                 .await?;
         }
         Ok(())
-    }
-
-    async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()> {
-        let mut data = self.data.lock().unwrap();
-        data.unresolved.push(UnresolvedRelationship {
-            entity_id: entity_id.to_string(),
-            rel_type: relationship_type.to_string(),
-            target_qualified_name: target_qualified_name.to_string(),
-        });
-        Ok(())
-    }
-
-    async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
-        let data = self.data.lock().unwrap();
-        let mut result = Vec::new();
-        for unresolved in &data.unresolved {
-            if unresolved.rel_type == "CONTAINS" {
-                result.push((
-                    unresolved.entity_id.clone(),
-                    unresolved.target_qualified_name.clone(),
-                ));
-            }
-        }
-        Ok(result)
-    }
-
-    async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize> {
-        let mut data = self.data.lock().unwrap();
-        let mut resolved_count = 0;
-
-        for (child_id, parent_qname) in unresolved_nodes {
-            // Find parent by qualified name and clone the entity_id to avoid borrow checker issues
-            let parent_entity_id = data
-                .nodes
-                .values()
-                .find(|n| n.entity.qualified_name == *parent_qname)
-                .map(|parent| parent.entity_id.clone());
-
-            if let Some(parent_id) = parent_entity_id {
-                // Create relationship
-                data.relationships.push(Relationship {
-                    from_id: parent_id,
-                    to_id: child_id.clone(),
-                    rel_type: "CONTAINS".to_string(),
-                });
-
-                // Remove from unresolved
-                data.unresolved.retain(|u| {
-                    !(u.entity_id == *child_id
-                        && u.rel_type == "CONTAINS"
-                        && u.target_qualified_name == *parent_qname)
-                });
-
-                resolved_count += 1;
-            }
-        }
-
-        Ok(resolved_count)
     }
 
     async fn run_query_with_params(

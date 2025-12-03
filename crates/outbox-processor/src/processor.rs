@@ -33,6 +33,7 @@ pub struct OutboxProcessor {
     max_embedding_dim: usize,
     client_cache: Cache<String, Arc<dyn StorageClient>>,
     neo4j_client: Arc<Mutex<Option<Arc<dyn Neo4jClientTrait>>>>,
+    enable_per_batch_resolution: bool,
 }
 
 impl OutboxProcessor {
@@ -49,6 +50,7 @@ impl OutboxProcessor {
         max_retries: i32,
         max_embedding_dim: usize,
         max_cached_collections: u64,
+        enable_per_batch_resolution: bool,
     ) -> Self {
         Self {
             postgres_client,
@@ -62,6 +64,7 @@ impl OutboxProcessor {
                 .max_capacity(max_cached_collections)
                 .build(),
             neo4j_client: Arc::new(Mutex::new(None)),
+            enable_per_batch_resolution,
         }
     }
 
@@ -110,11 +113,19 @@ impl OutboxProcessor {
         info!("Outbox processor started");
 
         loop {
-            if let Err(e) = self.process_batch().await {
-                error!("Outbox processing error: {e}");
+            match self.process_batch().await {
+                Ok(had_work) => {
+                    // Only sleep when queue was empty; process immediately when there's a backlog
+                    if !had_work {
+                        sleep(self.poll_interval).await;
+                    }
+                }
+                Err(e) => {
+                    error!("Outbox processing error: {e}");
+                    // Sleep on error to avoid tight error loops
+                    sleep(self.poll_interval).await;
+                }
             }
-
-            sleep(self.poll_interval).await;
         }
     }
 
@@ -162,6 +173,10 @@ impl OutboxProcessor {
 
     /// Process a single batch of outbox entries using a single transaction.
     ///
+    /// # Returns
+    /// `Ok(true)` if entries were processed (potentially more waiting)
+    /// `Ok(false)` if queue was empty (caller should sleep)
+    ///
     /// # Guarantees
     /// 1. All entries processed within a single PostgreSQL transaction
     /// 2. Qdrant writes occur BEFORE PostgreSQL commits (write-ahead pattern)
@@ -176,7 +191,7 @@ impl OutboxProcessor {
     /// - Qdrant failures: Rollback transaction, record failures separately
     /// - Entry preparation failures: Fail entire batch (all-or-nothing)
     /// - Max retry entries: Mark processed without Qdrant write
-    pub async fn process_batch(&self) -> Result<()> {
+    pub async fn process_batch(&self) -> Result<bool> {
         // Step 1: Begin single transaction for entire batch
         let mut tx = self
             .postgres_client
@@ -209,7 +224,7 @@ impl OutboxProcessor {
         // Step 3: Early return if no work (drop transaction without commit to avoid overhead)
         if entries.is_empty() {
             drop(tx);
-            return Ok(());
+            return Ok(false); // No work, caller should sleep
         }
 
         // Step 4: Split entries by target_store
@@ -233,7 +248,7 @@ impl OutboxProcessor {
             tx.commit()
                 .await
                 .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-            return Ok(());
+            return Ok(true); // Had Neo4j work, check for more
         }
 
         let total_entries = qdrant_entries.len();
@@ -322,7 +337,9 @@ impl OutboxProcessor {
                                 .first()
                                 .map(|e| e.entity_id.as_str()),
                         };
-                        return self.handle_qdrant_write_failure(tx, ids, e, context).await;
+                        self.handle_qdrant_write_failure(tx, ids, e, context)
+                            .await?;
+                        unreachable!("handle_qdrant_write_failure always returns Err");
                     }
                 };
 
@@ -388,7 +405,9 @@ impl OutboxProcessor {
                         entry_count: delete_entries.len(),
                         first_entity_id: delete_entries.first().map(|e| e.entity_id.as_str()),
                     };
-                    return self.handle_qdrant_write_failure(tx, ids, e, context).await;
+                    self.handle_qdrant_write_failure(tx, ids, e, context)
+                        .await?;
+                    unreachable!("handle_qdrant_write_failure always returns Err");
                 }
 
                 // Update BM25 statistics after successful deletion (subtract token counts)
@@ -469,91 +488,15 @@ impl OutboxProcessor {
 
         // Step 6: Resolve pending relationships after successful batch processing
         // This runs outside the transaction to avoid holding locks during resolution
-        if let Err(e) = self.resolve_pending_relationships().await {
-            warn!("Failed to resolve pending relationships: {}", e);
-            // Don't fail the batch processing if resolution fails - it will be retried next cycle
+        // In drain mode (index command), resolution is deferred until the outbox drains
+        if self.enable_per_batch_resolution {
+            if let Err(e) = self.resolve_pending_relationships().await {
+                warn!("Failed to resolve pending relationships: {}", e);
+                // Don't fail the batch processing if resolution fails - it will be retried next cycle
+            }
         }
 
-        Ok(())
-    }
-
-    /// Prepare an embedded entity from an outbox entry (fetches embedding by ID)
-    pub(crate) async fn prepare_embedded_entity(
-        &self,
-        entry: &OutboxEntry,
-    ) -> Result<EmbeddedEntity> {
-        // Extract entity from payload
-        let entity: codesearch_core::entities::CodeEntity = serde_json::from_value(
-            entry
-                .payload
-                .get("entity")
-                .ok_or_else(|| Error::storage("Missing entity in payload"))?
-                .clone(),
-        )
-        .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
-
-        // Fetch both dense and sparse embeddings by ID from entity_embeddings table
-        let embedding_id = entry
-            .embedding_id
-            .ok_or_else(|| Error::storage("Missing embedding_id in outbox entry"))?;
-
-        let (dense_embedding, sparse_embedding) = self
-            .postgres_client
-            .get_embedding_with_sparse_by_id(embedding_id)
-            .await?
-            .ok_or_else(|| {
-                Error::storage(format!(
-                    "Embedding ID {embedding_id} not found in entity_embeddings table"
-                ))
-            })?;
-
-        let sparse_embedding = sparse_embedding.ok_or_else(|| {
-            Error::storage(format!(
-                "Sparse embedding not found for embedding ID {embedding_id}"
-            ))
-        })?;
-
-        let qdrant_point_id: String = serde_json::from_value(
-            entry
-                .payload
-                .get("qdrant_point_id")
-                .ok_or_else(|| Error::storage("Missing qdrant_point_id in payload"))?
-                .clone(),
-        )
-        .map_err(|e| Error::storage(format!("Failed to deserialize qdrant_point_id: {e}")))?;
-
-        let qdrant_point_id = codesearch_storage::Uuid::parse_str(&qdrant_point_id)
-            .map_err(|e| Error::storage(format!("Invalid qdrant_point_id: {e}")))?;
-
-        // Validate embedding dimensions (prevent memory exhaustion)
-        if dense_embedding.len() > self.max_embedding_dim {
-            return Err(Error::storage(format!(
-                "Embedding dimensions {} exceeds maximum allowed size of {}",
-                dense_embedding.len(),
-                self.max_embedding_dim
-            )));
-        }
-
-        // Fetch token count from entity_metadata
-        let token_counts = self
-            .postgres_client
-            .get_entity_token_counts(&[(entry.repository_id, entity.entity_id.clone())])
-            .await?;
-
-        let bm25_token_count = token_counts.first().copied().ok_or_else(|| {
-            Error::storage(format!(
-                "BM25 token count not found for entity {} in repository {}",
-                entity.entity_id, entry.repository_id
-            ))
-        })?;
-
-        Ok(EmbeddedEntity {
-            entity,
-            dense_embedding,
-            sparse_embedding,
-            bm25_token_count,
-            qdrant_point_id,
-        })
+        Ok(true) // Work was done, check for more immediately
     }
 
     /// Mark multiple outbox entries as processed within an existing transaction
@@ -657,24 +600,166 @@ impl OutboxProcessor {
         let mut repo_token_counts = Vec::with_capacity(entries.len());
         let mut failed_entries: Vec<(Uuid, String)> = Vec::new();
 
-        // Prepare entities (fetches embeddings from database)
-        // Per-entry failure handling: collect failures instead of failing entire batch
+        // Collect all embedding IDs and entity refs for batch queries
+        let mut embedding_ids: Vec<i64> = Vec::with_capacity(entries.len());
+        let mut entity_refs: Vec<(Uuid, String)> = Vec::with_capacity(entries.len());
+        let mut valid_entries: Vec<&OutboxEntry> = Vec::with_capacity(entries.len());
+
+        // First pass: collect IDs and validate entries
         for entry in entries {
-            match self.prepare_embedded_entity(entry).await {
-                Ok(embedded) => {
-                    repo_token_counts.push((entry.repository_id, embedded.bm25_token_count));
-                    embedded_entities.push(embedded);
+            // Extract embedding_id
+            let embedding_id = match entry.embedding_id {
+                Some(id) => id,
+                None => {
+                    failed_entries.push((
+                        entry.outbox_id,
+                        "Missing embedding_id in outbox entry".to_string(),
+                    ));
+                    continue;
                 }
-                Err(e) => {
-                    error!(
-                        outbox_id = %entry.outbox_id,
-                        error = %e,
-                        "Failed to prepare entry, will retry"
-                    );
-                    // Record failure for retry, continue processing other entries
-                    failed_entries.push((entry.outbox_id, e.to_string()));
+            };
+
+            // Extract entity from payload to get entity_id for token count lookup
+            let entity_json = match entry.payload.get("entity") {
+                Some(e) => e,
+                None => {
+                    failed_entries.push((entry.outbox_id, "Missing entity in payload".to_string()));
+                    continue;
                 }
+            };
+
+            let entity: codesearch_core::entities::CodeEntity =
+                match serde_json::from_value(entity_json.clone()) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        failed_entries.push((
+                            entry.outbox_id,
+                            format!("Failed to deserialize entity: {e}"),
+                        ));
+                        continue;
+                    }
+                };
+
+            embedding_ids.push(embedding_id);
+            entity_refs.push((entry.repository_id, entity.entity_id.clone()));
+            valid_entries.push(entry);
+        }
+
+        // Batch fetch all embeddings in one query (instead of N queries)
+        let embeddings_map = self
+            .postgres_client
+            .get_embeddings_with_sparse_by_ids(&embedding_ids)
+            .await?;
+
+        // Batch fetch all token counts in one query (instead of N queries)
+        let token_counts_vec = self
+            .postgres_client
+            .get_entity_token_counts(&entity_refs)
+            .await?;
+
+        // Build token counts lookup map
+        let mut token_counts_map: HashMap<(Uuid, String), usize> =
+            HashMap::with_capacity(entity_refs.len());
+        for (i, token_count) in token_counts_vec.into_iter().enumerate() {
+            if i < entity_refs.len() {
+                token_counts_map.insert(entity_refs[i].clone(), token_count);
             }
+        }
+
+        // Second pass: build EmbeddedEntity from cached data
+        for (i, entry) in valid_entries.iter().enumerate() {
+            let embedding_id = embedding_ids[i];
+            let entity_ref = &entity_refs[i];
+
+            // Get embedding from batch result
+            let (dense_embedding, sparse_embedding) = match embeddings_map.get(&embedding_id) {
+                Some((dense, sparse)) => (dense.clone(), sparse.clone()),
+                None => {
+                    failed_entries.push((
+                        entry.outbox_id,
+                        format!("Embedding ID {embedding_id} not found in entity_embeddings table"),
+                    ));
+                    continue;
+                }
+            };
+
+            // Validate sparse embedding exists
+            let sparse_embedding = match sparse_embedding {
+                Some(sparse) => sparse,
+                None => {
+                    failed_entries.push((
+                        entry.outbox_id,
+                        format!("Sparse embedding not found for embedding ID {embedding_id}"),
+                    ));
+                    continue;
+                }
+            };
+
+            // Get token count from batch result
+            let bm25_token_count = match token_counts_map.get(entity_ref) {
+                Some(&count) => count,
+                None => {
+                    failed_entries.push((
+                        entry.outbox_id,
+                        format!(
+                            "BM25 token count not found for entity {} in repository {}",
+                            entity_ref.1, entity_ref.0
+                        ),
+                    ));
+                    continue;
+                }
+            };
+
+            // Validate embedding dimensions
+            if dense_embedding.len() > self.max_embedding_dim {
+                failed_entries.push((
+                    entry.outbox_id,
+                    format!(
+                        "Embedding dimensions {} exceeds maximum allowed size of {}",
+                        dense_embedding.len(),
+                        self.max_embedding_dim
+                    ),
+                ));
+                continue;
+            }
+
+            // Extract qdrant_point_id from payload
+            let qdrant_point_id: String = match entry
+                .payload
+                .get("qdrant_point_id")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+            {
+                Some(id) => id,
+                None => {
+                    failed_entries.push((
+                        entry.outbox_id,
+                        "Missing or invalid qdrant_point_id in payload".to_string(),
+                    ));
+                    continue;
+                }
+            };
+
+            let qdrant_point_id = match codesearch_storage::Uuid::parse_str(&qdrant_point_id) {
+                Ok(id) => id,
+                Err(e) => {
+                    failed_entries.push((entry.outbox_id, format!("Invalid qdrant_point_id: {e}")));
+                    continue;
+                }
+            };
+
+            // Re-parse entity (we already validated it above)
+            let entity: codesearch_core::entities::CodeEntity =
+                serde_json::from_value(entry.payload.get("entity").cloned().unwrap_or_default())
+                    .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
+
+            repo_token_counts.push((entry.repository_id, bm25_token_count));
+            embedded_entities.push(EmbeddedEntity {
+                entity,
+                dense_embedding,
+                sparse_embedding,
+                bm25_token_count,
+                qdrant_point_id,
+            });
         }
 
         // Bulk load successful entries to Qdrant
@@ -789,6 +874,7 @@ impl OutboxProcessor {
             let mut processed_ids = Vec::new();
             let mut failed_ids = Vec::new();
             let mut resolved_relationships: Vec<(String, String, String)> = Vec::new();
+            let mut unresolved_relationships: Vec<(String, String, String)> = Vec::new();
 
             // Batch process INSERT/UPDATE operations
             if !insert_update_entries.is_empty() {
@@ -822,28 +908,21 @@ impl OutboxProcessor {
                 if !entities_to_create.is_empty() {
                     match neo4j_client.batch_create_nodes(&entities_to_create).await {
                         Ok(neo4j_node_ids) => {
-                            // Update neo4j_node_id in PostgreSQL and process relationships
+                            // Collect all neo4j_node_id updates for bulk UPDATE
+                            let mut node_id_updates: Vec<(Uuid, String, i64)> =
+                                Vec::with_capacity(entity_entry_map.len());
+
+                            // Process relationships and collect node ID updates
                             for (idx, entry, payload) in entity_entry_map {
                                 if idx < neo4j_node_ids.len() {
                                     let neo4j_node_id = neo4j_node_ids[idx];
 
-                                    // Store neo4j_node_id in PostgreSQL
-                                    if let Err(e) = sqlx::query(
-                                        "UPDATE entity_metadata
-                                         SET neo4j_node_id = $1
-                                         WHERE repository_id = $2 AND entity_id = $3",
-                                    )
-                                    .bind(neo4j_node_id)
-                                    .bind(entry.repository_id)
-                                    .bind(&entry.entity_id)
-                                    .execute(&mut **tx)
-                                    .await
-                                    {
-                                        warn!(
-                                            "Failed to update neo4j_node_id for {}: {}",
-                                            entry.entity_id, e
-                                        );
-                                    }
+                                    // Collect for bulk update
+                                    node_id_updates.push((
+                                        entry.repository_id,
+                                        entry.entity_id.clone(),
+                                        neo4j_node_id,
+                                    ));
 
                                     // Process relationships
                                     let relationships: Vec<serde_json::Value> =
@@ -937,21 +1016,41 @@ impl OutboxProcessor {
                                                 }
                                             };
 
-                                            // Use validated API method instead of graph() escape hatch
-                                            if let Err(e) = neo4j_client
-                                                .store_unresolved_relationship(
-                                                    to_id, rel_type, from_qname,
-                                                )
-                                                .await
-                                            {
-                                                debug!(
-                                                    "Failed to store unresolved {rel_type}: {e}"
-                                                );
-                                            }
+                                            // Collect for batch insert to PostgreSQL
+                                            unresolved_relationships.push((
+                                                to_id.to_string(),
+                                                rel_type.to_string(),
+                                                from_qname.to_string(),
+                                            ));
                                         }
                                     }
 
                                     processed_ids.push(entry.outbox_id);
+                                }
+                            }
+
+                            // Bulk update neo4j_node_id in PostgreSQL (single query instead of N queries)
+                            if !node_id_updates.is_empty() {
+                                let repo_ids: Vec<Uuid> =
+                                    node_id_updates.iter().map(|(r, _, _)| *r).collect();
+                                let entity_ids: Vec<&str> =
+                                    node_id_updates.iter().map(|(_, e, _)| e.as_str()).collect();
+                                let node_ids: Vec<i64> =
+                                    node_id_updates.iter().map(|(_, _, n)| *n).collect();
+
+                                if let Err(e) = sqlx::query(
+                                    "UPDATE entity_metadata AS em
+                                     SET neo4j_node_id = data.node_id
+                                     FROM unnest($1::uuid[], $2::text[], $3::bigint[]) AS data(repository_id, entity_id, node_id)
+                                     WHERE em.repository_id = data.repository_id AND em.entity_id = data.entity_id",
+                                )
+                                .bind(&repo_ids)
+                                .bind(&entity_ids)
+                                .bind(&node_ids)
+                                .execute(&mut **tx)
+                                .await
+                                {
+                                    warn!("Failed to bulk update neo4j_node_ids: {}", e);
                                 }
                             }
                         }
@@ -995,6 +1094,25 @@ impl OutboxProcessor {
                         resolved_relationships.len(),
                         e
                     );
+                }
+            }
+
+            // Batch insert unresolved relationships to PostgreSQL for later resolution
+            if !unresolved_relationships.is_empty() {
+                match self
+                    .postgres_client
+                    .insert_pending_relationships(repository_id, &unresolved_relationships)
+                    .await
+                {
+                    Ok(count) => {
+                        debug!(
+                            "Inserted {} pending relationships for later resolution",
+                            count
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to insert pending relationships: {}", e);
+                    }
                 }
             }
 
@@ -1045,12 +1163,10 @@ impl OutboxProcessor {
     /// and runs all relationship resolvers to create relationship edges in Neo4j.
     ///
     /// Called after processing batches of entity outbox entries to ensure relationships
-    /// are resolved as entities become available.
-    async fn resolve_pending_relationships(&self) -> Result<()> {
-        use crate::neo4j_relationship_resolver::{
-            resolve_contains_relationships, resolve_relationships_generic, CallGraphResolver,
-            ImportsResolver, InheritanceResolver, TraitImplResolver, TypeUsageResolver,
-        };
+    /// are resolved as entities become available. In serve mode, this runs after each batch.
+    /// In index mode (drain mode), this is called once when the outbox drains.
+    pub async fn resolve_pending_relationships(&self) -> Result<()> {
+        use crate::neo4j_relationship_resolver::resolve_pending_from_postgres;
 
         // Get repositories that need resolution
         let repo_ids = self
@@ -1097,46 +1213,28 @@ impl OutboxProcessor {
 
             neo4j_client.use_database(&db_name).await?;
 
-            // Run all resolvers
-            let resolvers: Vec<Box<dyn crate::neo4j_relationship_resolver::RelationshipResolver>> = vec![
-                Box::new(TraitImplResolver),
-                Box::new(InheritanceResolver),
-                Box::new(TypeUsageResolver),
-                Box::new(CallGraphResolver),
-                Box::new(ImportsResolver),
-            ];
-
-            for resolver in resolvers {
-                if let Err(e) = resolve_relationships_generic(
-                    &self.postgres_client,
-                    neo4j_client.as_ref(),
-                    repository_id,
-                    resolver.as_ref(),
-                )
-                .await
-                {
-                    warn!(
-                        "Failed to resolve {} for repository {}: {}",
-                        resolver.name(),
-                        repository_id,
-                        e
-                    );
-                    // Continue with other resolvers even if one fails
-                }
-            }
-
-            // Resolve CONTAINS relationships (special case with batch optimization)
-            if let Err(e) = resolve_contains_relationships(
+            // Resolve pending relationships from PostgreSQL table
+            // This is the efficient approach using JOINs instead of JSONB scans
+            match resolve_pending_from_postgres(
                 &self.postgres_client,
                 neo4j_client.as_ref(),
                 repository_id,
             )
             .await
             {
-                warn!(
-                    "Failed to resolve CONTAINS relationships for repository {}: {}",
-                    repository_id, e
-                );
+                Ok(count) if count > 0 => {
+                    info!(
+                        "Resolved {} relationships from PostgreSQL for repository {}",
+                        count, repository_id
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(
+                        "Failed to resolve pending relationships from PostgreSQL for repository {}: {}",
+                        repository_id, e
+                    );
+                }
             }
 
             // Clear the pending flag and set graph_ready

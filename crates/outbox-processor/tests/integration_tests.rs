@@ -97,7 +97,8 @@ async fn test_outbox_processor_basic_initialization() {
         10,
         3,
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
+        200,  // max_cached_collections
+        true, // enable_per_batch_resolution
     );
 
     // If we get here, initialization succeeded
@@ -236,7 +237,8 @@ async fn test_client_cache_reuses_clients() {
         10,
         3,
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
+        200,  // max_cached_collections
+        true, // enable_per_batch_resolution
     );
 
     // Access the cache through a method call

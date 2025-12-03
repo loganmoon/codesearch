@@ -559,7 +559,7 @@ fn default_outbox_poll_interval_ms() -> u64 {
 }
 
 fn default_outbox_entries_per_poll() -> i64 {
-    100
+    500
 }
 
 fn default_outbox_max_retries() -> i32 {
@@ -2152,7 +2152,7 @@ mod tests {
         let result = config.validate();
         assert!(result.is_ok());
         assert_eq!(config.outbox.poll_interval_ms, 1000);
-        assert_eq!(config.outbox.entries_per_poll, 100);
+        assert_eq!(config.outbox.entries_per_poll, 500);
         assert_eq!(config.outbox.max_retries, 3);
         assert_eq!(config.outbox.max_embedding_dim, 100_000);
         assert_eq!(config.outbox.max_cached_collections, 200);

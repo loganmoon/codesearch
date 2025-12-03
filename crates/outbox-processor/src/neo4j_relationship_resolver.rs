@@ -9,14 +9,14 @@
 //! Relationships are stored in two ways during entity indexing:
 //! 1. **Resolved relationships**: Both source and target entities exist in the same batch.
 //!    These are created directly as edges in Neo4j during outbox processing.
-//! 2. **Unresolved relationships**: The target entity doesn't exist yet (not in batch).
-//!    These are stored as node properties (e.g., `unresolved_contains_parent`) for later resolution.
+//! 2. **Pending relationships**: The target entity doesn't exist yet (not in batch).
+//!    These are stored in the PostgreSQL `pending_relationships` table for efficient
+//!    resolution via JOINs when the target entity is later indexed.
 //!
-//! This module handles resolving the unresolved relationships by:
-//! - Querying for entities with unresolved relationship properties
-//! - Looking up target entities by qualified name
-//! - Creating relationship edges in Neo4j
-//! - Cleaning up the temporary unresolved properties
+//! This module handles resolving pending relationships by:
+//! - Querying PostgreSQL for relationships where the target entity now exists (JOIN query)
+//! - Batch creating relationship edges in Neo4j
+//! - Deleting resolved rows from PostgreSQL
 //!
 //! # Resolution Triggers
 //!
@@ -33,7 +33,9 @@
 //! - `TypeUsageResolver`: USES relationships (field type dependencies)
 //! - `CallGraphResolver`: CALLS relationships (function/method calls)
 //! - `ImportsResolver`: IMPORTS relationships (module imports)
-//! - CONTAINS relationships: Special case handled by dedicated batch resolution
+//!
+//! The `resolve_pending_from_postgres` function handles all relationship types uniformly
+//! by querying the pending_relationships table and batch creating edges in Neo4j.
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -67,19 +69,25 @@ pub trait RelationshipResolver: Send + Sync {
 /// Generic function to resolve relationships using a resolver implementation
 ///
 /// This function provides the common infrastructure for all relationship resolvers:
-/// 1. Ensures the Neo4j database is selected
-/// 2. Calls the resolver's `resolve()` method to extract relationships
-/// 3. Batch creates all relationships in Neo4j
-/// 4. Logs progress and results
+/// 1. Calls the resolver's `resolve()` method to extract relationships
+/// 2. Batch creates all relationships in Neo4j
+/// 3. Logs progress and results
+///
+/// # Prerequisites
+/// The caller MUST ensure the Neo4j database is already selected via `use_database()`
+/// before calling this function. This is typically done once per repository in
+/// `resolve_pending_relationships()`.
 ///
 /// # Arguments
 /// * `postgres` - PostgreSQL client for fetching entity data
-/// * `neo4j` - Neo4j client for creating relationships
+/// * `neo4j` - Neo4j client for creating relationships (must have database already selected)
 /// * `repository_id` - UUID of the repository to resolve relationships for
 /// * `resolver` - Implementation of the RelationshipResolver trait
 ///
 /// # Example
 /// ```ignore
+/// // Caller must select database first
+/// neo4j.use_database(&db_name).await?;
 /// let resolver = TraitImplResolver;
 /// resolve_relationships_generic(&postgres, &neo4j, repository_id, &resolver).await?;
 /// ```
@@ -90,12 +98,6 @@ pub async fn resolve_relationships_generic(
     resolver: &dyn RelationshipResolver,
 ) -> Result<()> {
     info!("Resolving {} relationships...", resolver.name());
-
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
 
     // Resolve relationships
     let relationships = resolver.resolve(postgres, repository_id).await?;
@@ -115,70 +117,86 @@ pub async fn resolve_relationships_generic(
     Ok(())
 }
 
-/// Resolve CONTAINS relationships after entities are indexed
+/// Resolve pending relationships from PostgreSQL table
 ///
-/// CONTAINS relationships are special because they form the parent-child hierarchy
-/// of code entities. This function uses a dedicated batch resolution method for
-/// performance (2 queries instead of N queries).
+/// This function queries the `pending_relationships` table for relationships
+/// that can now be resolved (target entity exists in entity_metadata), creates
+/// the edges in Neo4j, and deletes the resolved rows.
 ///
-/// # Process
-/// 1. Query for all nodes with `unresolved_contains_parent` property
-/// 2. Batch resolve using qualified name lookup
-/// 3. Create relationship edges
-/// 4. Clean up the temporary property
+/// # Prerequisites
+/// The caller MUST ensure the Neo4j database is already selected via `use_database()`
+/// before calling this function.
 ///
 /// # Arguments
-/// * `postgres` - PostgreSQL client for database context
-/// * `neo4j` - Neo4j client for graph operations
-/// * `repository_id` - UUID of the repository
+/// * `postgres` - PostgreSQL client for querying pending relationships
+/// * `neo4j` - Neo4j client for creating relationship edges (must have database already selected)
+/// * `repository_id` - UUID of the repository to resolve relationships for
 ///
-/// # Example
-/// ```ignore
-/// resolve_contains_relationships(&postgres, &neo4j, repository_id).await?;
-/// ```
-pub async fn resolve_contains_relationships(
+/// # Returns
+/// * Number of relationships resolved
+pub async fn resolve_pending_from_postgres(
     postgres: &std::sync::Arc<dyn PostgresClientTrait>,
     neo4j: &dyn Neo4jClientTrait,
     repository_id: Uuid,
-) -> Result<()> {
-    // Ensure Neo4j database context
-    let db_name = neo4j
-        .ensure_repository_database(repository_id, postgres.as_ref())
-        .await?;
-    neo4j.use_database(&db_name).await?;
+) -> Result<usize> {
+    const BATCH_SIZE: i64 = 1000;
+    let mut total_resolved = 0;
 
-    // Find all nodes with unresolved parent
-    info!("Searching for unresolved CONTAINS relationships...");
+    loop {
+        // Query PostgreSQL for resolvable relationships
+        let resolved = postgres
+            .resolve_pending_relationships(repository_id, BATCH_SIZE)
+            .await
+            .context("Failed to query pending relationships")?;
 
-    let unresolved_nodes = neo4j.find_unresolved_contains_nodes().await?;
+        if resolved.is_empty() {
+            break;
+        }
 
-    info!("Found {} unresolved nodes", unresolved_nodes.len());
+        let batch_count = resolved.len();
+        let pending_ids: Vec<i64> = resolved.iter().map(|(id, _, _, _)| *id).collect();
 
-    if unresolved_nodes.is_empty() {
-        return Ok(());
-    }
+        // Build relationship tuples for Neo4j
+        // For CONTAINS: target (parent) -[CONTAINS]-> source (child)
+        // For other types: source -[REL_TYPE]-> target
+        let relationships: Vec<(String, String, String)> = resolved
+            .into_iter()
+            .map(|(_, source_entity_id, target_entity_id, rel_type)| {
+                if rel_type == "CONTAINS" {
+                    // CONTAINS is inverted: parent contains child
+                    (target_entity_id, source_entity_id, rel_type)
+                } else {
+                    // Other relationships: source -> target
+                    (source_entity_id, target_entity_id, rel_type)
+                }
+            })
+            .collect();
 
-    // Batch resolve all nodes in a single operation for performance
-    let total_nodes = unresolved_nodes.len();
-    let resolved_count = neo4j
-        .resolve_contains_relationships_batch(&unresolved_nodes)
-        .await?;
+        // Batch create edges in Neo4j
+        neo4j
+            .batch_create_relationships(&relationships)
+            .await
+            .context("Failed to batch create relationship edges")?;
 
-    let failed_count = total_nodes - resolved_count;
+        // Delete resolved rows from PostgreSQL
+        postgres
+            .delete_pending_relationships(&pending_ids)
+            .await
+            .context("Failed to delete resolved pending relationships")?;
 
-    if failed_count > 0 {
-        tracing::warn!(
-            "{} CONTAINS relationships could not be resolved (parents not found)",
-            failed_count
+        total_resolved += batch_count;
+        info!(
+            "Resolved {} pending relationships from PostgreSQL",
+            batch_count
         );
+
+        // If we got less than batch size, we're done
+        if batch_count < BATCH_SIZE as usize {
+            break;
+        }
     }
 
-    info!(
-        "Resolved {} CONTAINS relationships ({} failed)",
-        resolved_count, failed_count
-    );
-
-    Ok(())
+    Ok(total_resolved)
 }
 
 // ============================================================================

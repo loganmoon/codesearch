@@ -63,7 +63,11 @@ pub async fn start_outbox_processor(
         true, // Enable per-batch resolution for serve mode (incremental updates)
     );
 
-    info!("Outbox processor started");
+    info!(
+        entries_per_poll = config.entries_per_poll,
+        poll_interval_ms = config.poll_interval_ms,
+        "Outbox processor started"
+    );
 
     // Use a watch channel to allow graceful shutdown that completes current batch
     let (shutdown_flag_tx, mut shutdown_flag_rx) = tokio::sync::watch::channel(false);
@@ -139,7 +143,12 @@ pub async fn start_outbox_processor_with_drain(
         false, // Defer resolution until outbox drains (bulk indexing optimization)
     );
 
-    info!("Outbox processor started (with drain mode support)");
+    info!(
+        entries_per_poll = config.entries_per_poll,
+        poll_interval_ms = config.poll_interval_ms,
+        drain_timeout_secs = config.drain_timeout_secs,
+        "Outbox processor started (with drain mode support)"
+    );
 
     // Use a watch channel to track drain mode
     let (drain_flag_tx, mut drain_flag_rx) = tokio::sync::watch::channel(false);
@@ -152,15 +161,27 @@ pub async fn start_outbox_processor_with_drain(
 
     loop {
         // Process batch
-        if let Err(e) = processor.process_batch().await {
-            error!("Outbox batch processing error: {e}");
-            // Continue processing despite errors
+        let mut work_done = false;
+        match processor.process_batch().await {
+            Ok(had_work) => {
+                work_done = had_work;
+            }
+            Err(e) => {
+                error!("Outbox batch processing error: {e}");
+                // Continue processing despite errors
+            }
         }
 
         // Check if we're in drain mode
         let in_drain_mode = *drain_flag_rx.borrow();
 
         if in_drain_mode {
+            // Optimization: If we processed a batch, immediately try to process another
+            // without sleep or expensive count check
+            if work_done {
+                continue;
+            }
+
             // In drain mode: check if outbox is empty
             match postgres_client.count_pending_outbox_entries().await {
                 Ok(0) => {

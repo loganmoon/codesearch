@@ -67,6 +67,7 @@ async fn create_qdrant_collection(
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     };
 
     let collection_manager = create_collection_manager(&storage_config).await?;
@@ -411,6 +412,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     };
     let _processor = OutboxProcessor::new(
         Arc::clone(&postgres_client),

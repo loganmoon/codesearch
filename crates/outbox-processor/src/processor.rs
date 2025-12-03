@@ -192,16 +192,24 @@ impl OutboxProcessor {
     /// - Entry preparation failures: Fail entire batch (all-or-nothing)
     /// - Max retry entries: Mark processed without Qdrant write
     pub async fn process_batch(&self) -> Result<bool> {
+        let batch_start = std::time::Instant::now();
+
         // Step 1: Begin single transaction for entire batch
+        let tx_begin_start = std::time::Instant::now();
         let mut tx = self
             .postgres_client
             .get_pool()
             .begin()
             .await
             .map_err(|e| Error::storage(format!("Failed to begin transaction: {e}")))?;
+        debug!(
+            elapsed_ms = tx_begin_start.elapsed().as_millis() as u64,
+            "Transaction BEGIN completed"
+        );
 
         // Step 2: Single query across ALL target stores with CTE
         // Uses CTE to select batch with global ordering, then sorts by target_store and collection
+        let fetch_start = std::time::Instant::now();
         let entries: Vec<OutboxEntry> = sqlx::query_as(
             "WITH batch AS (
                  SELECT outbox_id, repository_id, entity_id, operation, target_store,
@@ -220,6 +228,12 @@ impl OutboxProcessor {
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| Error::storage(format!("Failed to fetch outbox entries: {e}")))?;
+        debug!(
+            elapsed_ms = fetch_start.elapsed().as_millis() as u64,
+            count = entries.len(),
+            batch_size = self.batch_size,
+            "Outbox entry fetch completed"
+        );
 
         // Step 3: Early return if no work (drop transaction without commit to avoid overhead)
         if entries.is_empty() {
@@ -239,8 +253,14 @@ impl OutboxProcessor {
 
         // Process Neo4j entries first
         if !neo4j_entries.is_empty() {
+            let neo4j_start = std::time::Instant::now();
             debug!("Processing {} Neo4j outbox entries", neo4j_entries.len());
             self.process_neo4j_batch(&mut tx, &neo4j_entries).await?;
+            info!(
+                elapsed_ms = neo4j_start.elapsed().as_millis() as u64,
+                count = neo4j_entries.len(),
+                "Neo4j batch processing completed"
+            );
         }
 
         // Process Qdrant entries grouped by collection
@@ -476,14 +496,22 @@ impl OutboxProcessor {
         }
 
         // Step 5: Commit entire batch
+        let commit_start = std::time::Instant::now();
         tx.commit()
             .await
             .map_err(|e| Error::storage(format!("Failed to commit transaction: {e}")))?;
-
         debug!(
+            elapsed_ms = commit_start.elapsed().as_millis() as u64,
+            "Transaction COMMIT completed"
+        );
+
+        info!(
             total_entries = total_entries,
+            qdrant_entries = qdrant_entries.len(),
+            neo4j_entries = neo4j_entries.len(),
             collections = collection_count,
-            "Successfully processed entire batch"
+            total_elapsed_ms = batch_start.elapsed().as_millis() as u64,
+            "Batch processing completed"
         );
 
         // Step 6: Resolve pending relationships after successful batch processing
@@ -646,16 +674,28 @@ impl OutboxProcessor {
         }
 
         // Batch fetch all embeddings in one query (instead of N queries)
+        let embeddings_start = std::time::Instant::now();
         let embeddings_map = self
             .postgres_client
             .get_embeddings_with_sparse_by_ids(&embedding_ids)
             .await?;
+        debug!(
+            elapsed_ms = embeddings_start.elapsed().as_millis() as u64,
+            count = embedding_ids.len(),
+            "Batch embeddings fetch completed"
+        );
 
         // Batch fetch all token counts in one query (instead of N queries)
+        let token_counts_start = std::time::Instant::now();
         let token_counts_vec = self
             .postgres_client
             .get_entity_token_counts(&entity_refs)
             .await?;
+        debug!(
+            elapsed_ms = token_counts_start.elapsed().as_millis() as u64,
+            count = entity_refs.len(),
+            "Batch token counts fetch completed"
+        );
 
         // Build token counts lookup map
         let mut token_counts_map: HashMap<(Uuid, String), usize> =
@@ -764,11 +804,14 @@ impl OutboxProcessor {
 
         // Bulk load successful entries to Qdrant
         if !embedded_entities.is_empty() {
+            let qdrant_write_start = std::time::Instant::now();
+            let entity_count = embedded_entities.len();
             storage_client.bulk_load_entities(embedded_entities).await?;
-            debug!(
-                "Successfully wrote {} entities to Qdrant ({} failed preparation)",
-                repo_token_counts.len(),
-                failed_entries.len()
+            info!(
+                elapsed_ms = qdrant_write_start.elapsed().as_millis() as u64,
+                count = entity_count,
+                failed = failed_entries.len(),
+                "Qdrant bulk_load_entities completed"
             );
         }
 
@@ -873,7 +916,6 @@ impl OutboxProcessor {
 
             let mut processed_ids = Vec::new();
             let mut failed_ids = Vec::new();
-            let mut resolved_relationships: Vec<(String, String, String)> = Vec::new();
             let mut unresolved_relationships: Vec<(String, String, String)> = Vec::new();
 
             // Batch process INSERT/UPDATE operations
@@ -906,6 +948,8 @@ impl OutboxProcessor {
 
                 // Batch create all nodes in Neo4j
                 if !entities_to_create.is_empty() {
+                    let neo4j_create_start = std::time::Instant::now();
+                    let entity_count = entities_to_create.len();
                     match neo4j_client.batch_create_nodes(&entities_to_create).await {
                         Ok(neo4j_node_ids) => {
                             // Collect all neo4j_node_id updates for bulk UPDATE
@@ -963,7 +1007,8 @@ impl OutboxProcessor {
                                         }
 
                                         if resolved {
-                                            // Resolved relationship: collect for batch creation
+                                            // Resolved relationship: store in pending_relationships for post-batch resolution
+                                            // For CONTAINS: from_id is parent, current entity is child (target)
                                             let from_id = match rel["from_id"].as_str() {
                                                 Some(id) if !id.is_empty() => id,
                                                 _ => {
@@ -974,42 +1019,37 @@ impl OutboxProcessor {
                                                     continue;
                                                 }
                                             };
-                                            let to_id = match rel["to_id"].as_str() {
-                                                Some(id) if !id.is_empty() => id,
-                                                _ => {
-                                                    warn!(
-                                                    "Missing or empty to_id for {} relationship on entity {}, skipping",
-                                                    rel_type, entry.entity_id
-                                                );
-                                                    continue;
-                                                }
-                                            };
 
-                                            // Collect relationship for batch creation after all nodes are processed
-                                            resolved_relationships.push((
+                                            // Get the current entity's qualified_name for pending_relationships
+                                            let target_qname =
+                                                &entities_to_create[idx].qualified_name;
+
+                                            // Store for batch insert to PostgreSQL (same as unresolved)
+                                            // Format: (source_entity_id, rel_type, target_qualified_name)
+                                            unresolved_relationships.push((
                                                 from_id.to_string(),
-                                                to_id.to_string(),
                                                 rel_type.to_string(),
+                                                target_qname.clone(),
                                             ));
                                         } else {
-                                            // Unresolved relationship: store as node property for later resolution
-                                            let to_id = match rel["to_id"].as_str() {
+                                            // Unresolved relationship: target not yet in DB, need to resolve by name later
+                                            // from_id = source entity that has this relationship
+                                            // to_name = qualified name of target entity to find
+                                            let from_id = match rel["from_id"].as_str() {
                                                 Some(id) if !id.is_empty() => id,
                                                 _ => {
                                                     warn!(
-                                                    "Missing or empty to_id for unresolved {} relationship on entity {}, skipping",
+                                                    "Missing or empty from_id for unresolved {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
                                                     continue;
                                                 }
                                             };
-                                            let from_qname = match rel["from_qualified_name"]
-                                                .as_str()
-                                            {
-                                                Some(qname) if !qname.is_empty() => qname,
+                                            let to_name = match rel["to_name"].as_str() {
+                                                Some(name) if !name.is_empty() => name,
                                                 _ => {
                                                     warn!(
-                                                    "Missing or empty from_qualified_name for unresolved {} relationship on entity {}, skipping",
+                                                    "Missing or empty to_name for unresolved {} relationship on entity {}, skipping",
                                                     rel_type, entry.entity_id
                                                 );
                                                     continue;
@@ -1017,10 +1057,11 @@ impl OutboxProcessor {
                                             };
 
                                             // Collect for batch insert to PostgreSQL
+                                            // Format: (source_entity_id, rel_type, target_qualified_name)
                                             unresolved_relationships.push((
-                                                to_id.to_string(),
+                                                from_id.to_string(),
                                                 rel_type.to_string(),
-                                                from_qname.to_string(),
+                                                to_name.to_string(),
                                             ));
                                         }
                                     }
@@ -1053,6 +1094,11 @@ impl OutboxProcessor {
                                     warn!("Failed to bulk update neo4j_node_ids: {}", e);
                                 }
                             }
+                            info!(
+                                elapsed_ms = neo4j_create_start.elapsed().as_millis() as u64,
+                                count = entity_count,
+                                "Neo4j batch_create_nodes completed"
+                            );
                         }
                         Err(e) => {
                             warn!("Failed to batch create Neo4j nodes: {}", e);
@@ -1083,21 +1129,8 @@ impl OutboxProcessor {
                 }
             }
 
-            // Batch create all resolved relationships (reduces network round-trips)
-            if !resolved_relationships.is_empty() {
-                if let Err(e) = neo4j_client
-                    .batch_create_relationships(&resolved_relationships)
-                    .await
-                {
-                    warn!(
-                        "Failed to batch create {} relationships: {}",
-                        resolved_relationships.len(),
-                        e
-                    );
-                }
-            }
-
-            // Batch insert unresolved relationships to PostgreSQL for later resolution
+            // Batch insert ALL relationships to PostgreSQL for post-batch resolution
+            // Both "resolved" (CONTAINS) and "unresolved" relationships are stored here
             if !unresolved_relationships.is_empty() {
                 match self
                     .postgres_client

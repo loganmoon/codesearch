@@ -217,6 +217,7 @@ async fn test_search_finds_relevant_entities() -> Result<()> {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     };
 
     let storage_client = create_storage_client(&storage_config, &collection_name).await?;
@@ -552,6 +553,7 @@ fn broken( {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     };
     let collection_manager = create_collection_manager(&storage_config).await?;
     assert!(

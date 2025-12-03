@@ -73,10 +73,19 @@ enum CacheCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tokio-console if feature is enabled
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
     let cli = Cli::parse();
 
-    // Initialize logging
+    // Initialize logging (skip if tokio-console is handling it)
+    #[cfg(not(feature = "tokio-console"))]
     init_logging(cli.verbose)?;
+    #[cfg(feature = "tokio-console")]
+    if cli.verbose {
+        eprintln!("Note: verbose flag ignored when tokio-console is enabled");
+    }
 
     // Execute commands
     match cli.command {
@@ -461,10 +470,19 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
     let _ = outbox_drain_tx.send(());
 
     // Wait for outbox processor to finish draining
-    match tokio::time::timeout(std::time::Duration::from_secs(300), outbox_handle).await {
+    let drain_timeout_secs = config.outbox.drain_timeout_secs;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(drain_timeout_secs),
+        outbox_handle,
+    )
+    .await
+    {
         Ok(Ok(())) => info!("Outbox processor drained and stopped successfully"),
         Ok(Err(e)) => warn!("Outbox processor task panicked: {e}"),
-        Err(_) => warn!("Outbox processor drain timed out after 5 minutes"),
+        Err(_) => warn!(
+            "Outbox processor drain timed out after {drain_timeout_secs} seconds. \
+            Configure [outbox].drain_timeout_secs to increase."
+        ),
     }
 
     info!("Repository indexing and outbox processing completed.");

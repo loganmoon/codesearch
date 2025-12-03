@@ -86,6 +86,7 @@ async fn test_outbox_processor_basic_initialization() {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
+        postgres_pool_size: 20,
     };
 
     // Create processor
@@ -227,6 +228,7 @@ async fn test_client_cache_reuses_clients() {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
+        postgres_pool_size: 20,
     };
 
     let processor = OutboxProcessor::new(

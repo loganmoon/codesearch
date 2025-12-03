@@ -68,6 +68,7 @@ pub async fn ensure_storage_initialized(
             neo4j_user: "neo4j".to_string(),
             neo4j_password: "codesearch".to_string(),
             max_entities_per_db_operation: default_max_entities_per_db_operation(),
+            postgres_pool_size: 20,
         };
 
         let config = Config::builder(storage_config).build();

@@ -677,9 +677,10 @@ impl Neo4jClient {
                 .collect();
 
             // UNWIND query: processes entire list in single network call
+            // IMPORTANT: Include :Entity label to enable index usage on (n:Entity).id
             let query_str = format!(
                 "UNWIND $relationships AS rel
-                 MATCH (from {{id: rel.from_id}}), (to {{id: rel.to_id}})
+                 MATCH (from:Entity {{id: rel.from_id}}), (to:Entity {{id: rel.to_id}})
                  MERGE (from)-[:{rel_type}]->(to)"
             );
 

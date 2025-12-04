@@ -34,6 +34,7 @@ pub(crate) struct AppState {
     pub(crate) clients: Arc<BackendClients>,
     pub(crate) config: Arc<SearchConfig>,
     pub(crate) repositories: Arc<RwLock<HashMap<Uuid, RepositoryInfo>>>,
+    pub(crate) enable_agentic: bool,
 }
 
 /// Build the Axum router with all endpoints
@@ -175,6 +176,7 @@ async fn unified_search_handler(
     responses(
         (status = 200, description = "Agentic search results with multi-agent orchestration", body = AgenticSearchApiResponse),
         (status = 400, description = "Invalid request"),
+        (status = 501, description = "Agentic search not enabled"),
         (status = 500, description = "Internal server error")
     ),
     tag = "search"
@@ -183,6 +185,13 @@ async fn agentic_search_handler(
     State(state): State<AppState>,
     Json(request): Json<AgenticSearchApiRequest>,
 ) -> Result<Json<AgenticSearchApiResponse>, ApiError> {
+    // Check if agentic search is enabled
+    if !state.enable_agentic {
+        return Err(ApiError::NotImplemented(
+            "Agentic search not enabled. Start server with --enable-agentic flag".into(),
+        ));
+    }
+
     tracing::info!(
         "Agentic search request: query='{}', {} repositories",
         request.query,
@@ -338,6 +347,11 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
     } else {
         "disabled"
     };
+    let agentic_status = if state.enable_agentic {
+        "enabled"
+    } else {
+        "disabled"
+    };
 
     let health_status = json!({
         "status": "healthy",
@@ -348,6 +362,7 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
             "neo4j": {"status": neo4j_status},
             "embedding_manager": {"status": "initialized"},
             "reranker": {"status": reranker_status},
+            "agentic_search": {"status": agentic_status},
             "repositories": {"count": repo_count}
         }
     });
@@ -361,6 +376,7 @@ async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
 pub enum ApiError {
     InvalidRequest(String),
     ServiceUnavailable(String),
+    NotImplemented(String),
     Internal(anyhow::Error),
 }
 
@@ -369,6 +385,7 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
+            ApiError::NotImplemented(msg) => (StatusCode::NOT_IMPLEMENTED, msg),
             ApiError::Internal(err) => {
                 // Log the full error details for debugging
                 tracing::error!("Internal server error: {err:?}");

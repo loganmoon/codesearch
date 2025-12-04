@@ -54,4 +54,4 @@ If stopping, use:
   "operations": []
 }
 
-Output ONLY the JSON object, no additional text.
+Output ONLY the JSON object, no additional text. Do NOT wrap in markdown code blocks.

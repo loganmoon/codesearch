@@ -3,7 +3,7 @@
 use crate::{
     content_selection::{select_content_for_reranking, RerankStage},
     error::{truncate_for_error, AgenticSearchError, Result},
-    prompts,
+    extract_json, prompts,
     types::{AgenticEntity, RetrievalSource},
 };
 use codesearch_core::search_models::*;
@@ -226,14 +226,20 @@ async fn rerank_worker_results(
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Parse JSON array response
-    let reranked_list: Vec<RerankingResponse> =
-        serde_json::from_str(&response_text).map_err(|e| {
-            AgenticSearchError::Reranking(format!(
-                "Failed to parse Haiku reranking response: {e}. Response: {}",
-                truncate_for_error(&response_text)
-            ))
-        })?;
+    // Parse JSON array response - extract JSON from potentially chatty LLM response
+    let json_str = extract_json(&response_text).ok_or_else(|| {
+        AgenticSearchError::Reranking(format!(
+            "No valid JSON found in Haiku response: {}",
+            truncate_for_error(&response_text)
+        ))
+    })?;
+
+    let reranked_list: Vec<RerankingResponse> = serde_json::from_str(json_str).map_err(|e| {
+        AgenticSearchError::Reranking(format!(
+            "Failed to parse Haiku reranking response: {e}. Response: {}",
+            truncate_for_error(&response_text)
+        ))
+    })?;
 
     // Build HashMap index for O(1) lookup instead of O(n) per entity
     let results_map: std::collections::HashMap<&str, &EntityResult> =

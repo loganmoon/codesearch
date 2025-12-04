@@ -2220,6 +2220,11 @@ impl PostgresClient {
     }
 
     /// Resolve pending relationships using efficient JOIN
+    ///
+    /// The resolution strategy handles multiple name formats:
+    /// 1. Exact match on qualified_name
+    /// 2. Strip `external::` and `crate::` prefixes from target
+    /// 3. Strip generic parameters `<...>` from target
     pub async fn resolve_pending_relationships(
         &self,
         repository_id: Uuid,
@@ -2229,10 +2234,19 @@ impl PostgresClient {
             "SELECT pr.id::BIGINT, pr.source_entity_id, e.entity_id AS target_entity_id, pr.relationship_type
              FROM pending_relationships pr
              JOIN entity_metadata e
-               ON pr.target_qualified_name = e.qualified_name
-               AND pr.repository_id = e.repository_id
-             WHERE pr.repository_id = $1
+               ON pr.repository_id = e.repository_id
                AND e.deleted_at IS NULL
+               AND (
+                 -- Exact match
+                 e.qualified_name = pr.target_qualified_name
+                 -- Match after stripping external::/crate:: prefixes
+                 OR e.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', '')
+                 -- Match after stripping generic parameters <...>
+                 OR e.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '<[^>]*>$', '')
+                 -- Match after stripping both prefixes and generics
+                 OR e.qualified_name = REGEXP_REPLACE(REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', ''), '<[^>]*>$', '')
+               )
+             WHERE pr.repository_id = $1
              LIMIT $2",
         )
         .bind(repository_id)

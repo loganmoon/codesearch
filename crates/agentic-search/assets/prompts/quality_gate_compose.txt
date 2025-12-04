@@ -56,4 +56,4 @@ Return ONLY:
 ]
 </result_list>
 
-IMPORTANT: Output ONLY the <result_list> block. No conversational text.
+IMPORTANT: Output ONLY the <result_list> block with raw JSON inside. No markdown code blocks or conversational text.

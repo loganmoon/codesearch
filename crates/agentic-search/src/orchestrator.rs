@@ -3,7 +3,7 @@
 use crate::{
     config::AgenticSearchConfig,
     error::{truncate_for_error, AgenticSearchError, Result},
-    prompts,
+    extract_json, prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
         QualityGateResult, RerankingMethod, RetrievalSource,
@@ -46,7 +46,8 @@ const VALID_RELATIONSHIPS: &[&str] = &[
 // ============================================================================
 
 /// Extract JSON content from between <result_list> XML tags
-/// Handles chatty LLM responses that may have text before/after the tags
+/// Handles chatty LLM responses that may have text before/after the tags,
+/// as well as markdown code blocks inside the tags
 fn extract_result_list(response: &str) -> Result<String> {
     let start_tag = "<result_list>";
     let end_tag = "</result_list>";
@@ -71,7 +72,15 @@ fn extract_result_list(response: &str) -> Result<String> {
         ));
     }
 
-    Ok(response[start + start_tag.len()..end].trim().to_string())
+    let content = response[start + start_tag.len()..end].trim();
+
+    // Extract JSON from content (handles markdown code blocks, chatty text)
+    extract_json(content).map(|s| s.to_string()).ok_or_else(|| {
+        AgenticSearchError::QualityGate(format!(
+            "No valid JSON found inside <result_list> tags: {}",
+            &content[..content.len().min(200)]
+        ))
+    })
 }
 
 /// Validate entity_id has reasonable format (not empty, reasonable length)
@@ -369,9 +378,16 @@ impl AgenticSearchOrchestrator {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Parse JSON decision
+        // Parse JSON decision - extract JSON from potentially chatty LLM response
+        let json_str = extract_json(&response_text).ok_or_else(|| {
+            AgenticSearchError::Orchestrator(format!(
+                "No valid JSON found in Sonnet response: {}",
+                truncate_for_error(&response_text)
+            ))
+        })?;
+
         let decision: OrchestratorDecisionResponse =
-            serde_json::from_str(&response_text).map_err(|e| {
+            serde_json::from_str(json_str).map_err(|e| {
                 AgenticSearchError::Orchestrator(format!(
                     "Failed to parse Sonnet decision: {e}. Response: {}",
                     truncate_for_error(&response_text)

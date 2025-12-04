@@ -25,4 +25,4 @@ Output format (JSON array of objects, top 10 results):
   {"entity_id": "uuid-2", "score": 0.82, "reasoning": "Helper function used by the main implementation"}
 ]
 
-Output ONLY the JSON array, no additional text.
+Output ONLY the JSON array, no additional text. Do NOT wrap in markdown code blocks.

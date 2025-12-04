@@ -43,7 +43,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start REST API server with semantic code search
-    Serve,
+    Serve {
+        /// Enable agentic search endpoint (requires ANTHROPIC_API_KEY env var)
+        #[arg(long)]
+        enable_agentic: bool,
+    },
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -89,7 +93,9 @@ async fn main() -> Result<()> {
 
     // Execute commands
     match cli.command {
-        Some(Commands::Serve) => serve(cli.config.as_deref()).await,
+        Some(Commands::Serve { enable_agentic }) => {
+            serve(cli.config.as_deref(), enable_agentic).await
+        }
         Some(Commands::Index { force }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
@@ -156,8 +162,18 @@ fn find_repository_root() -> Result<PathBuf> {
 }
 
 /// Start the REST API server (multi-repository mode)
-async fn serve(config_path: Option<&Path>) -> Result<()> {
+async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
     info!("Preparing to start multi-repository REST API server...");
+
+    // Validate ANTHROPIC_API_KEY if agentic search is enabled
+    if enable_agentic {
+        if env::var("ANTHROPIC_API_KEY").is_err() {
+            return Err(anyhow!(
+                "--enable-agentic requires ANTHROPIC_API_KEY environment variable to be set"
+            ));
+        }
+        info!("Agentic search enabled (ANTHROPIC_API_KEY found)");
+    }
 
     // Shared initialization
     let backends = initialize_backends(config_path).await?;
@@ -204,9 +220,10 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
     info!("Outbox processor started successfully");
 
     // Run REST API server
-    let server_result = codesearch_server::run_rest_server(config, valid_repos, postgres_client)
-        .await
-        .map_err(|e| anyhow!("REST server error: {e}"));
+    let server_result =
+        codesearch_server::run_rest_server(config, valid_repos, postgres_client, enable_agentic)
+            .await
+            .map_err(|e| anyhow!("REST server error: {e}"));
 
     // Always perform graceful shutdown of outbox processor, regardless of server result
     // This ensures proper cleanup even if the server failed

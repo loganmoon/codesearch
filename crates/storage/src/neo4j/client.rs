@@ -497,7 +497,7 @@ impl Neo4jClient {
     async fn create_indexes(&self, database_name: &str) -> Result<()> {
         self.use_database(database_name).await?;
 
-        info!("Creating indexes for database: {}", database_name);
+        debug!("Creating indexes for database: {}", database_name);
 
         // Migration: add Entity label to any existing nodes that don't have it
         let _ = self
@@ -855,6 +855,13 @@ impl Neo4jClient {
              ORDER BY depth ASC"
         );
 
+        tracing::info!(
+            "find_function_callers: db={}, qname='{}', max_depth={}",
+            db_name,
+            function_qualified_name,
+            max_depth
+        );
+
         let query = Query::new(query_str).param("qname", function_qualified_name);
 
         let mut result = self.graph.execute(query).await?;
@@ -865,6 +872,7 @@ impl Neo4jClient {
                 callers.push((name, depth as usize));
             }
         }
+        tracing::info!("find_function_callers: found {} callers", callers.len());
         Ok(callers)
     }
 

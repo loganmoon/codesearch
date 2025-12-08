@@ -1047,6 +1047,15 @@ impl PostgresClient {
         query: &str,
         limit: i64,
     ) -> Result<Vec<CodeEntity>> {
+        // Create a pattern for qualified_name matching (replace spaces/:: with wildcards)
+        let qname_pattern = format!(
+            "%{}%",
+            query
+                .replace("::", "%")
+                .replace(' ', "%")
+                .replace("__", "%")
+        );
+
         let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
             "WITH query_tsv AS (
                  SELECT plainto_tsquery('english', $2) AS tsquery
@@ -1056,13 +1065,20 @@ impl PostgresClient {
              WHERE repository_id = $1
                AND deleted_at IS NULL
                AND content IS NOT NULL
-               AND content_tsv @@ query_tsv.tsquery
-             ORDER BY ts_rank(content_tsv, query_tsv.tsquery) DESC
+               AND (
+                   content_tsv @@ query_tsv.tsquery
+                   OR qualified_name ILIKE $4
+               )
+             ORDER BY
+               -- Boost exact qualified_name matches to the top
+               CASE WHEN qualified_name ILIKE $4 THEN 1 ELSE 0 END DESC,
+               ts_rank(content_tsv, query_tsv.tsquery) DESC
              LIMIT $3",
         )
         .bind(repository_id)
         .bind(query)
         .bind(limit)
+        .bind(&qname_pattern)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to search entities: {e}")))?;

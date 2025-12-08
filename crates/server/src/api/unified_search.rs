@@ -181,6 +181,16 @@ pub fn apply_rrf_fusion(
 ) -> Vec<(CodeEntity, f32)> {
     let mut scores: HashMap<String, (CodeEntity, f32)> = HashMap::new();
 
+    // Log first few fulltext results for debugging
+    for (i, entity) in fulltext_results.iter().take(3).enumerate() {
+        tracing::debug!(
+            "RRF fulltext[{}]: {} ({})",
+            i,
+            entity.qualified_name,
+            entity.entity_id
+        );
+    }
+
     for (rank, entity) in fulltext_results.into_iter().enumerate() {
         let rrf_score = 1.0 / ((k + rank + 1) as f32);
         scores.insert(entity.entity_id.clone(), (entity, rrf_score));

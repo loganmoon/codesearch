@@ -37,6 +37,7 @@ async fn setup_qdrant() -> Result<(TestQdrant, Arc<dyn StorageClient>, String)> 
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bulk_load_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -76,6 +77,7 @@ async fn test_bulk_load_entities() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_similar_no_filters() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -113,6 +115,7 @@ async fn test_search_similar_no_filters() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_similar_with_entity_type_filter() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -153,6 +156,7 @@ async fn test_search_similar_with_entity_type_filter() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_similar_with_language_filter() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -188,6 +192,7 @@ async fn test_search_similar_with_language_filter() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_similar_with_file_path_filter() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -243,6 +248,7 @@ async fn test_search_similar_with_file_path_filter() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_delete_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -287,6 +293,7 @@ async fn test_delete_entities() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_delete_entities_empty_list() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -300,6 +307,7 @@ async fn test_delete_entities_empty_list() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bulk_load_empty_list() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -313,6 +321,7 @@ async fn test_bulk_load_empty_list() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_no_results() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -332,6 +341,7 @@ async fn test_search_no_results() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_connection_error() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         // Create config with invalid host
@@ -362,6 +372,7 @@ async fn test_connection_error() -> Result<()> {
 // Phase 5: Error Handling Tests
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bulk_load_during_connection_loss() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (qdrant, client, _collection) = setup_qdrant().await?;
@@ -390,6 +401,7 @@ async fn test_bulk_load_during_connection_loss() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_invalid_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (qdrant, _original_client, _collection) = setup_qdrant().await?;
@@ -412,6 +424,7 @@ async fn test_search_invalid_collection() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_delete_from_empty_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -430,6 +443,7 @@ async fn test_delete_from_empty_collection() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_concurrent_bulk_loads() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -482,6 +496,7 @@ async fn test_concurrent_bulk_loads() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_basic() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -525,6 +540,7 @@ async fn test_hybrid_search_basic() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_respects_limit() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -563,6 +579,7 @@ async fn test_hybrid_search_respects_limit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_with_filters() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -611,6 +628,7 @@ async fn test_hybrid_search_with_filters() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_empty_collection() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -634,6 +652,7 @@ async fn test_hybrid_search_empty_collection() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_prefetch_multiplier() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -680,6 +699,7 @@ async fn test_hybrid_search_prefetch_multiplier() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_scores_ordered() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;
@@ -719,6 +739,7 @@ async fn test_hybrid_search_scores_ordered() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_hybrid_search_with_file_path_filter() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (_qdrant, client, _collection) = setup_qdrant().await?;

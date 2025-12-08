@@ -785,6 +785,16 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(())
     }
 
+    async fn count_pending_outbox_entries(&self) -> Result<i64> {
+        let data = self.data.lock().unwrap();
+        let count = data
+            .outbox
+            .iter()
+            .filter(|e| e.processed_at.is_none())
+            .count();
+        Ok(count as i64)
+    }
+
     async fn get_last_indexed_commit(&self, _repository_id: Uuid) -> Result<Option<String>> {
         // Mock implementation: return None (not tracking commits in mock)
         Ok(None)
@@ -883,6 +893,20 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(data.embedding_by_id.get(&embedding_id).cloned())
     }
 
+    async fn get_embeddings_with_sparse_by_ids(
+        &self,
+        embedding_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>> {
+        let data = self.data.lock().unwrap();
+        let mut result = std::collections::HashMap::with_capacity(embedding_ids.len());
+        for &id in embedding_ids {
+            if let Some(embedding) = data.embedding_by_id.get(&id) {
+                result.insert(id, embedding.clone());
+            }
+        }
+        Ok(result)
+    }
+
     async fn get_cache_stats(&self) -> Result<crate::CacheStats> {
         let data = self.data.lock().unwrap();
         Ok(crate::CacheStats {
@@ -955,6 +979,34 @@ impl PostgresClientTrait for MockPostgresClient {
         }
 
         Ok(result)
+    }
+
+    async fn insert_pending_relationships(
+        &self,
+        _repository_id: Uuid,
+        _relationships: &[(String, String, String)],
+    ) -> Result<u64> {
+        // Mock - not implemented (would need additional mock data structure)
+        Ok(0)
+    }
+
+    async fn resolve_pending_relationships(
+        &self,
+        _repository_id: Uuid,
+        _limit: i64,
+    ) -> Result<Vec<(i64, String, String, String)>> {
+        // Mock - return empty (no pending relationships in mock)
+        Ok(Vec::new())
+    }
+
+    async fn delete_pending_relationships(&self, _pending_ids: &[i64]) -> Result<()> {
+        // Mock - no-op
+        Ok(())
+    }
+
+    async fn count_pending_relationships(&self, _repository_id: Uuid) -> Result<i64> {
+        // Mock - return 0
+        Ok(0)
     }
 }
 
@@ -1134,7 +1186,7 @@ mod tests {
             .mark_entities_deleted_with_outbox(
                 repo_id,
                 "test_collection",
-                &[entity.entity_id.clone()],
+                std::slice::from_ref(&entity.entity_id),
                 &[42], // token count
             )
             .await
@@ -1200,7 +1252,7 @@ mod tests {
             .mark_entities_deleted_with_outbox(
                 repo_id,
                 "test_collection",
-                &[entity.entity_id.clone()],
+                std::slice::from_ref(&entity.entity_id),
                 &[42], // token count
             )
             .await

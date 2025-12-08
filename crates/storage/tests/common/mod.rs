@@ -84,6 +84,7 @@ pub fn create_storage_config(
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
+        postgres_pool_size: 20,
     }
 }
 

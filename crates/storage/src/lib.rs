@@ -19,7 +19,7 @@ use codesearch_core::{
     error::{Error, Result},
     CodeEntity,
 };
-use sqlx::postgres::PgConnectOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -228,6 +228,7 @@ pub struct PostgresConfig {
     pub database: String,
     pub user: String,
     pub password: String,
+    pub pool_size: u32,
     pub max_entities_per_db_operation: usize,
 }
 
@@ -317,7 +318,7 @@ pub async fn create_postgres_client(
     // Close connection to default database
     default_pool.close().await;
 
-    // Now connect to the target database
+    // Now connect to the target database with configured pool size
     let connect_options = PgConnectOptions::new()
         .host(&config.postgres_host)
         .port(config.postgres_port)
@@ -325,7 +326,9 @@ pub async fn create_postgres_client(
         .password(&config.postgres_password)
         .database(&config.postgres_database);
 
-    let pool = sqlx::PgPool::connect_with(connect_options)
+    let pool = PgPoolOptions::new()
+        .max_connections(config.postgres_pool_size)
+        .connect_with(connect_options)
         .await
         .map_err(|e| {
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))
@@ -397,7 +400,9 @@ pub async fn create_postgres_client_from_config(
         .password(&config.password)
         .database(&config.database);
 
-    let pool = sqlx::PgPool::connect_with(connect_options)
+    let pool = PgPoolOptions::new()
+        .max_connections(config.pool_size)
+        .connect_with(connect_options)
         .await
         .map_err(|e| {
             codesearch_core::error::Error::storage(format!("Failed to connect to Postgres: {e}"))

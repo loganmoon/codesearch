@@ -1,0 +1,936 @@
+{
+  "repository": "rust-analyzer",
+  "repository_path": "/home/logan/repos/rust-analyzer",
+  "description": "Evaluation queries for testing graph-based code search capabilities. Ground truth verified externally using ripgrep and IDE features.",
+  "queries": [
+    {
+      "id": "calls_001",
+      "category": "call_graph",
+      "query": "What functions call support::token?",
+      "expected": [
+        "AssocItemList::l_curly_token",
+        "BecomeExpr::become_token",
+        "Enum::enum_token",
+        "Fn::const_token",
+        "Const::underscore_token",
+        "ExternCrate::crate_token",
+        "Attr::l_brack_token",
+        "BlockExpr::async_token",
+        "AsmOption::att_syntax_token",
+        "ClosureExpr::gen_token"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Verified via: rg 'support::token\\(' --type rust -l. Found in nodes.rs, traits.rs, node_ext.rs, grammar.rs"
+    },
+    {
+      "id": "calls_002",
+      "category": "call_graph",
+      "query": "What functions call support::child?",
+      "expected_count_gte": 50,
+      "relationship_type": "CALLED_BY",
+      "notes": "Verified via: rg 'support::child\\(' --type rust -l. Found in 5 files."
+    },
+    {
+      "id": "calls_003",
+      "category": "call_graph",
+      "query": "What calls fn check in hir-ty tests?",
+      "expected": [
+        "hir_ty::tests::check",
+        "hir_ty::diagnostics::expr::check"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Verified via: rg 'fn check\\(' --type rust. Multiple check functions across test modules."
+    },
+    {
+      "id": "calls_004",
+      "category": "call_graph",
+      "query": "What calls goto_definition?",
+      "expected": [
+        "ide::goto_definition::goto_definition"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Core IDE navigation function"
+    },
+    {
+      "id": "calls_005",
+      "category": "call_graph",
+      "query": "What calls hover?",
+      "expected": [
+        "ide::hover::hover"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Core IDE hover function"
+    },
+    {
+      "id": "calls_006",
+      "category": "call_graph",
+      "query": "What calls rename?",
+      "expected": [
+        "ide::rename::rename",
+        "ide_db::rename::rename"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Rename functionality in IDE"
+    },
+    {
+      "id": "calls_007",
+      "category": "call_graph",
+      "query": "What calls syntax_highlighting?",
+      "expected": [
+        "ide::syntax_highlighting::highlight"
+      ],
+      "relationship_type": "CALLED_BY",
+      "notes": "Syntax highlighting entry point"
+    },
+    {
+      "id": "calls_008",
+      "category": "call_graph",
+      "query": "What calls infer in hir-ty?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Type inference function callers"
+    },
+    {
+      "id": "calls_009",
+      "category": "call_graph",
+      "query": "What calls resolve_path?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Path resolution function"
+    },
+    {
+      "id": "calls_010",
+      "category": "call_graph",
+      "query": "What calls diagnostics in ide-diagnostics?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Diagnostic generation callers"
+    },
+    {
+      "id": "calls_011",
+      "category": "call_graph",
+      "query": "What calls completion in ide-completion?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Completion entry point callers"
+    },
+    {
+      "id": "calls_012",
+      "category": "call_graph",
+      "query": "What calls parse in syntax?",
+      "expected_count_gte": 20,
+      "relationship_type": "CALLED_BY",
+      "notes": "Parser entry point callers"
+    },
+    {
+      "id": "calls_013",
+      "category": "call_graph",
+      "query": "What calls from_proto in rust-analyzer?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "LSP protocol conversion callers"
+    },
+    {
+      "id": "calls_014",
+      "category": "call_graph",
+      "query": "What calls to_proto in rust-analyzer?",
+      "expected_count_gte": 15,
+      "relationship_type": "CALLED_BY",
+      "notes": "LSP protocol conversion callers"
+    },
+    {
+      "id": "calls_015",
+      "category": "call_graph",
+      "query": "What calls find_refs in ide-db?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Reference finder callers"
+    },
+    {
+      "id": "calls_016",
+      "category": "call_graph",
+      "query": "What calls expand_macro?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Macro expansion callers"
+    },
+    {
+      "id": "calls_017",
+      "category": "call_graph",
+      "query": "What calls lower in hir-def?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "HIR lowering callers"
+    },
+    {
+      "id": "calls_018",
+      "category": "call_graph",
+      "query": "What calls unify in hir-ty?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Type unification callers"
+    },
+    {
+      "id": "calls_019",
+      "category": "call_graph",
+      "query": "What calls infer_expr?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Expression inference callers"
+    },
+    {
+      "id": "calls_020",
+      "category": "call_graph",
+      "query": "What calls collect_defs?",
+      "expected_count_gte": 3,
+      "relationship_type": "CALLED_BY",
+      "notes": "Definition collection callers"
+    },
+    {
+      "id": "implements_001",
+      "category": "trait_impl",
+      "query": "What types implement HasSource?",
+      "expected": [
+        "Field",
+        "Adt",
+        "VariantDef",
+        "Struct",
+        "Union",
+        "Enum",
+        "Variant",
+        "Function",
+        "Const",
+        "Static",
+        "Trait",
+        "TypeAlias",
+        "Macro",
+        "Impl",
+        "TypeOrConstParam",
+        "LifetimeParam",
+        "LocalSource",
+        "Param",
+        "SelfParam",
+        "Label",
+        "ExternCrateDecl",
+        "InlineAsmOperand"
+      ],
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Verified via: rg 'impl.*HasSource.*for' --type rust. Found 23 implementations in has_source.rs"
+    },
+    {
+      "id": "implements_002",
+      "category": "trait_impl",
+      "query": "What types implement HasResolver?",
+      "expected": [
+        "ModuleId",
+        "CrateRootModuleId",
+        "TraitId",
+        "FunctionId",
+        "ConstId",
+        "StaticId",
+        "TypeAliasId",
+        "ImplId",
+        "ExternBlockId",
+        "ExternCrateId",
+        "UseId",
+        "DefWithBodyId",
+        "ItemContainerId",
+        "GenericDefId",
+        "EnumVariantId",
+        "VariantId",
+        "MacroId",
+        "Macro2Id",
+        "ProcMacroId",
+        "MacroRulesId"
+      ],
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Verified via: rg 'impl.*HasResolver.*for' --type rust. Found 21 implementations in resolver.rs"
+    },
+    {
+      "id": "implements_003",
+      "category": "trait_impl",
+      "query": "What types implement ProcMacroExpander?",
+      "expected": [
+        "IdentityProcMacroExpander",
+        "Issue18089ProcMacroExpander",
+        "AttributeInputReplaceProcMacroExpander",
+        "Issue18840ProcMacroExpander",
+        "MirrorProcMacroExpander",
+        "ShortenProcMacroExpander",
+        "Issue17479ProcMacroExpander",
+        "Issue18898ProcMacroExpander",
+        "DisallowCfgProcMacroExpander",
+        "GenerateSuffixedTypeProcMacroExpander",
+        "Expander",
+        "IdentityWhenValidProcMacroExpander"
+      ],
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Verified via: rg 'impl.*ProcMacroExpander.*for' --type rust. Found 12 implementations."
+    },
+    {
+      "id": "implements_004",
+      "category": "trait_impl",
+      "query": "What implements Display?",
+      "expected": [
+        "Var",
+        "BinOp"
+      ],
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Verified via: rg 'impl\\s+Display\\s+for' --type rust. Note: many Display impls are auto-derived."
+    },
+    {
+      "id": "implements_005",
+      "category": "trait_impl",
+      "query": "What implements AstNode?",
+      "expected_count_gte": 100,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Core AST trait with many implementations"
+    },
+    {
+      "id": "implements_006",
+      "category": "trait_impl",
+      "query": "What implements Semantics?",
+      "expected_count_gte": 1,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Semantic analysis trait"
+    },
+    {
+      "id": "implements_007",
+      "category": "trait_impl",
+      "query": "What implements HasAttrs?",
+      "expected_count_gte": 15,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Attribute access trait"
+    },
+    {
+      "id": "implements_008",
+      "category": "trait_impl",
+      "query": "What implements HasVisibility?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Visibility access trait"
+    },
+    {
+      "id": "implements_009",
+      "category": "trait_impl",
+      "query": "What implements HasDocumentation?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Documentation access trait"
+    },
+    {
+      "id": "implements_010",
+      "category": "trait_impl",
+      "query": "What implements HasName?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Name access trait for AST nodes"
+    },
+    {
+      "id": "implements_011",
+      "category": "trait_impl",
+      "query": "What implements TypeWalk?",
+      "expected_count_gte": 5,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Type walking trait"
+    },
+    {
+      "id": "implements_012",
+      "category": "trait_impl",
+      "query": "What implements ToChalk?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Chalk type conversion trait"
+    },
+    {
+      "id": "implements_013",
+      "category": "trait_impl",
+      "query": "What implements FromChalk?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Chalk type conversion trait"
+    },
+    {
+      "id": "implements_014",
+      "category": "trait_impl",
+      "query": "What implements HirDisplay?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "HIR display formatting trait"
+    },
+    {
+      "id": "implements_015",
+      "category": "trait_impl",
+      "query": "What implements Request?",
+      "expected_count_gte": 30,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "LSP request handler trait"
+    },
+    {
+      "id": "implements_016",
+      "category": "trait_impl",
+      "query": "What implements Notification?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "LSP notification handler trait"
+    },
+    {
+      "id": "implements_017",
+      "category": "trait_impl",
+      "query": "What implements Assist?",
+      "expected_count_gte": 50,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Code assist trait"
+    },
+    {
+      "id": "implements_018",
+      "category": "trait_impl",
+      "query": "What implements DiagnosticCode?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Diagnostic code trait"
+    },
+    {
+      "id": "implements_019",
+      "category": "trait_impl",
+      "query": "What implements RootDatabase?",
+      "expected_count_gte": 1,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "Root database trait"
+    },
+    {
+      "id": "implements_020",
+      "category": "trait_impl",
+      "query": "What implements FileLoader?",
+      "expected_count_gte": 2,
+      "relationship_type": "IMPLEMENTED_BY",
+      "notes": "File loading trait"
+    },
+    {
+      "id": "uses_001",
+      "category": "type_usage",
+      "query": "What types use SyntaxNode?",
+      "expected_count_gte": 25,
+      "relationship_type": "USED_BY",
+      "notes": "Verified via: rg 'SyntaxNode' --type rust -l. Found in 30+ files across syntax, ide, hir crates."
+    },
+    {
+      "id": "uses_002",
+      "category": "type_usage",
+      "query": "What types use InFile?",
+      "expected_count_gte": 25,
+      "relationship_type": "USED_BY",
+      "notes": "Verified via: rg 'InFile' --type rust -l. Found in 30+ files."
+    },
+    {
+      "id": "uses_003",
+      "category": "type_usage",
+      "query": "What types use TextRange?",
+      "expected_count_gte": 25,
+      "relationship_type": "USED_BY",
+      "notes": "Verified via: rg 'TextRange' --type rust -l. Found in 30+ files."
+    },
+    {
+      "id": "uses_004",
+      "category": "type_usage",
+      "query": "What types use FileId?",
+      "expected_count_gte": 30,
+      "relationship_type": "USED_BY",
+      "notes": "Core file identifier used throughout codebase"
+    },
+    {
+      "id": "uses_005",
+      "category": "type_usage",
+      "query": "What types use HirFileId?",
+      "expected_count_gte": 15,
+      "relationship_type": "USED_BY",
+      "notes": "HIR-level file identifier"
+    },
+    {
+      "id": "uses_006",
+      "category": "type_usage",
+      "query": "What types use ModuleId?",
+      "expected_count_gte": 20,
+      "relationship_type": "USED_BY",
+      "notes": "Module identifier usage"
+    },
+    {
+      "id": "uses_007",
+      "category": "type_usage",
+      "query": "What types use DefId?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Definition identifier usage"
+    },
+    {
+      "id": "uses_008",
+      "category": "type_usage",
+      "query": "What types use Name?",
+      "expected_count_gte": 30,
+      "relationship_type": "USED_BY",
+      "notes": "Name type usage across codebase"
+    },
+    {
+      "id": "uses_009",
+      "category": "type_usage",
+      "query": "What types use Ty?",
+      "expected_count_gte": 20,
+      "relationship_type": "USED_BY",
+      "notes": "Type representation usage"
+    },
+    {
+      "id": "uses_010",
+      "category": "type_usage",
+      "query": "What types use Substitution?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Type substitution usage"
+    },
+    {
+      "id": "uses_011",
+      "category": "type_usage",
+      "query": "What types use Resolver?",
+      "expected_count_gte": 15,
+      "relationship_type": "USED_BY",
+      "notes": "Name resolver usage"
+    },
+    {
+      "id": "uses_012",
+      "category": "type_usage",
+      "query": "What types use DefMap?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Definition map usage"
+    },
+    {
+      "id": "uses_013",
+      "category": "type_usage",
+      "query": "What types use ItemTree?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Item tree usage"
+    },
+    {
+      "id": "uses_014",
+      "category": "type_usage",
+      "query": "What types use CrateId?",
+      "expected_count_gte": 20,
+      "relationship_type": "USED_BY",
+      "notes": "Crate identifier usage"
+    },
+    {
+      "id": "uses_015",
+      "category": "type_usage",
+      "query": "What types use SyntaxToken?",
+      "expected_count_gte": 15,
+      "relationship_type": "USED_BY",
+      "notes": "Syntax token usage"
+    },
+    {
+      "id": "uses_016",
+      "category": "type_usage",
+      "query": "What types use Span?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Span type usage"
+    },
+    {
+      "id": "uses_017",
+      "category": "type_usage",
+      "query": "What types use Diagnostic?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Diagnostic type usage"
+    },
+    {
+      "id": "uses_018",
+      "category": "type_usage",
+      "query": "What types use CompletionItem?",
+      "expected_count_gte": 5,
+      "relationship_type": "USED_BY",
+      "notes": "Completion item usage"
+    },
+    {
+      "id": "uses_019",
+      "category": "type_usage",
+      "query": "What types use NavigationTarget?",
+      "expected_count_gte": 5,
+      "relationship_type": "USED_BY",
+      "notes": "Navigation target usage"
+    },
+    {
+      "id": "uses_020",
+      "category": "type_usage",
+      "query": "What types use TextEdit?",
+      "expected_count_gte": 10,
+      "relationship_type": "USED_BY",
+      "notes": "Text edit usage"
+    },
+    {
+      "id": "contains_001",
+      "category": "module_structure",
+      "query": "What's defined in crates/syntax/src?",
+      "expected_contains": [
+        "SyntaxNode",
+        "SyntaxToken",
+        "SyntaxError",
+        "Parse",
+        "SourceFile"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Core syntax crate definitions"
+    },
+    {
+      "id": "contains_002",
+      "category": "module_structure",
+      "query": "What's defined in crates/hir/src?",
+      "expected_contains": [
+        "Function",
+        "Module",
+        "Struct",
+        "Enum",
+        "Trait"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "HIR crate definitions"
+    },
+    {
+      "id": "contains_003",
+      "category": "module_structure",
+      "query": "What's defined in crates/ide/src?",
+      "expected_contains": [
+        "Analysis",
+        "AnalysisHost",
+        "RootDatabase"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "IDE crate definitions"
+    },
+    {
+      "id": "contains_004",
+      "category": "module_structure",
+      "query": "What's in the syntax::ast module?",
+      "expected_contains": [
+        "Expr",
+        "Pat",
+        "Type",
+        "Item",
+        "Stmt"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "AST module contents"
+    },
+    {
+      "id": "contains_005",
+      "category": "module_structure",
+      "query": "What's in hir-def/src/resolver.rs?",
+      "expected_contains": [
+        "Resolver",
+        "HasResolver",
+        "ModuleItemMap"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Resolver module contents"
+    },
+    {
+      "id": "contains_006",
+      "category": "module_structure",
+      "query": "What's in hir-ty/src/infer?",
+      "expected_contains": [
+        "InferenceContext",
+        "InferResult",
+        "Expectation"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Type inference module contents"
+    },
+    {
+      "id": "contains_007",
+      "category": "module_structure",
+      "query": "What's in ide-completion/src?",
+      "expected_contains": [
+        "CompletionContext",
+        "CompletionItem",
+        "Completions"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Completion module contents"
+    },
+    {
+      "id": "contains_008",
+      "category": "module_structure",
+      "query": "What's in ide-assists/src?",
+      "expected_contains": [
+        "Assist",
+        "AssistContext",
+        "Assists"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Assists module contents"
+    },
+    {
+      "id": "contains_009",
+      "category": "module_structure",
+      "query": "What's in ide-diagnostics/src?",
+      "expected_contains": [
+        "Diagnostic",
+        "DiagnosticsContext",
+        "Severity"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Diagnostics module contents"
+    },
+    {
+      "id": "contains_010",
+      "category": "module_structure",
+      "query": "What's in rust-analyzer/src/handlers?",
+      "expected_contains": [
+        "handle_goto_definition",
+        "handle_hover",
+        "handle_completion"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "LSP request handlers"
+    },
+    {
+      "id": "contains_011",
+      "category": "module_structure",
+      "query": "What's in hir-expand/src?",
+      "expected_contains": [
+        "ExpandTo",
+        "MacroCallKind",
+        "MacroExpander"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Macro expansion module"
+    },
+    {
+      "id": "contains_012",
+      "category": "module_structure",
+      "query": "What's in proc-macro-api/src?",
+      "expected_contains": [
+        "ProcMacroClient",
+        "ProcMacroServer"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Proc macro API module"
+    },
+    {
+      "id": "contains_013",
+      "category": "module_structure",
+      "query": "What's in vfs/src?",
+      "expected_contains": [
+        "Vfs",
+        "VfsPath",
+        "FileId"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Virtual file system module"
+    },
+    {
+      "id": "contains_014",
+      "category": "module_structure",
+      "query": "What's in project-model/src?",
+      "expected_contains": [
+        "CargoWorkspace",
+        "ProjectManifest",
+        "CfgOptions"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Project model module"
+    },
+    {
+      "id": "contains_015",
+      "category": "module_structure",
+      "query": "What's in base-db/src?",
+      "expected_contains": [
+        "SourceDatabase",
+        "CrateGraph",
+        "Edition"
+      ],
+      "relationship_type": "CONTAINS",
+      "notes": "Base database module"
+    },
+    {
+      "id": "semantic_001",
+      "category": "semantic",
+      "query": "How is syntax token creation handled?",
+      "expected_entities": ["support::token", "SyntaxToken", "ast::support"],
+      "notes": "Semantic query about token handling architecture"
+    },
+    {
+      "id": "semantic_002",
+      "category": "semantic",
+      "query": "What is the source location tracking mechanism?",
+      "expected_entities": ["HasSource", "InFile", "HirFileId", "FilePosition"],
+      "notes": "Semantic query about source location tracking"
+    },
+    {
+      "id": "semantic_003",
+      "category": "semantic",
+      "query": "How does proc macro expansion work?",
+      "expected_entities": ["ProcMacroExpander", "Macro", "MacroExpander", "expand_macro"],
+      "notes": "Semantic query about macro system"
+    },
+    {
+      "id": "semantic_004",
+      "category": "semantic",
+      "query": "How does type inference work in rust-analyzer?",
+      "expected_entities": ["InferenceContext", "infer", "Ty", "unify"],
+      "notes": "Semantic query about type inference"
+    },
+    {
+      "id": "semantic_005",
+      "category": "semantic",
+      "query": "How does name resolution work?",
+      "expected_entities": ["Resolver", "resolve_path", "DefMap", "ItemScope"],
+      "notes": "Semantic query about name resolution"
+    },
+    {
+      "id": "semantic_006",
+      "category": "semantic",
+      "query": "How are diagnostics generated?",
+      "expected_entities": ["Diagnostic", "DiagnosticsContext", "AnyDiagnostic"],
+      "notes": "Semantic query about diagnostic generation"
+    },
+    {
+      "id": "semantic_007",
+      "category": "semantic",
+      "query": "How does completion work?",
+      "expected_entities": ["CompletionContext", "CompletionItem", "Completions"],
+      "notes": "Semantic query about completion system"
+    },
+    {
+      "id": "semantic_008",
+      "category": "semantic",
+      "query": "How are code assists implemented?",
+      "expected_entities": ["Assist", "AssistContext", "add_assist"],
+      "notes": "Semantic query about code assists"
+    },
+    {
+      "id": "semantic_009",
+      "category": "semantic",
+      "query": "How is the AST represented?",
+      "expected_entities": ["SyntaxNode", "AstNode", "SyntaxKind"],
+      "notes": "Semantic query about AST representation"
+    },
+    {
+      "id": "semantic_010",
+      "category": "semantic",
+      "query": "How does the HIR represent code?",
+      "expected_entities": ["Function", "Module", "DefWithBody", "Body"],
+      "notes": "Semantic query about HIR representation"
+    },
+    {
+      "id": "semantic_011",
+      "category": "semantic",
+      "query": "How does trait resolution work?",
+      "expected_entities": ["TraitSolver", "Obligation", "chalk"],
+      "notes": "Semantic query about trait resolution"
+    },
+    {
+      "id": "semantic_012",
+      "category": "semantic",
+      "query": "How are references found?",
+      "expected_entities": ["search", "find_refs", "SearchScope", "Definition"],
+      "notes": "Semantic query about reference finding"
+    },
+    {
+      "id": "semantic_013",
+      "category": "semantic",
+      "query": "How does syntax highlighting work?",
+      "expected_entities": ["highlight", "Highlight", "HlTag", "HlMod"],
+      "notes": "Semantic query about syntax highlighting"
+    },
+    {
+      "id": "semantic_014",
+      "category": "semantic",
+      "query": "How does go to definition work?",
+      "expected_entities": ["goto_definition", "NavigationTarget", "Definition"],
+      "notes": "Semantic query about go to definition"
+    },
+    {
+      "id": "semantic_015",
+      "category": "semantic",
+      "query": "How does hover information work?",
+      "expected_entities": ["hover", "HoverResult", "HoverConfig"],
+      "notes": "Semantic query about hover information"
+    },
+    {
+      "id": "discovery_001",
+      "category": "discovery",
+      "query": "Find the most connected functions",
+      "expected_top": ["check", "support::token", "support::child", "infer"],
+      "notes": "Discovery query for central functions"
+    },
+    {
+      "id": "discovery_002",
+      "category": "discovery",
+      "query": "Find traits with most implementations",
+      "expected_top": ["HasSource", "HasResolver", "AstNode", "HasName"],
+      "notes": "Discovery query for widely implemented traits"
+    },
+    {
+      "id": "discovery_003",
+      "category": "discovery",
+      "query": "Find most used types",
+      "expected_top": ["SyntaxNode", "FileId", "TextRange", "Name"],
+      "notes": "Discovery query for most used types"
+    },
+    {
+      "id": "discovery_004",
+      "category": "discovery",
+      "query": "Find central modules",
+      "expected_top": ["syntax", "hir", "ide", "hir-def"],
+      "notes": "Discovery query for central modules"
+    },
+    {
+      "id": "discovery_005",
+      "category": "discovery",
+      "query": "Find highest fanout functions",
+      "expected_top": ["Analysis::new", "RootDatabase::new"],
+      "notes": "Discovery query for functions that call many others"
+    },
+    {
+      "id": "complex_001",
+      "category": "complex",
+      "query": "Find functions that call functions implementing HasSource",
+      "relationship_chain": ["CALLS", "IMPLEMENTS"],
+      "notes": "Multi-hop: CALLS -> IMPLEMENTS"
+    },
+    {
+      "id": "complex_002",
+      "category": "complex",
+      "query": "Find types used by functions that call support::token",
+      "relationship_chain": ["CALLED_BY", "USES"],
+      "notes": "Multi-hop: CALLED_BY -> USES"
+    },
+    {
+      "id": "complex_003",
+      "category": "complex",
+      "query": "Find modules that contain types implementing HasResolver",
+      "relationship_chain": ["CONTAINS", "IMPLEMENTS"],
+      "notes": "Multi-hop: CONTAINS -> IMPLEMENTS"
+    },
+    {
+      "id": "complex_004",
+      "category": "complex",
+      "query": "Find functions called by implementations of Request",
+      "relationship_chain": ["IMPLEMENTED_BY", "CALLS"],
+      "notes": "Multi-hop: IMPLEMENTED_BY -> CALLS"
+    },
+    {
+      "id": "complex_005",
+      "category": "complex",
+      "query": "Find types that use types implementing AstNode",
+      "relationship_chain": ["IMPLEMENTS", "USED_BY"],
+      "notes": "Multi-hop: IMPLEMENTS -> USED_BY"
+    }
+  ],
+  "metrics": {
+    "recall_at_k": [1, 3, 5, 10],
+    "precision_at_k": [1, 3, 5, 10],
+    "mrr": true,
+    "ndcg": true
+  }
+}

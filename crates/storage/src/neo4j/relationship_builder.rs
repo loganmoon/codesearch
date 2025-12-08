@@ -71,9 +71,10 @@ pub fn build_contains_relationship_json(
             }));
         } else {
             // Parent not in batch, store for deferred resolution
+            // Use from_name (not from_id) since we need to resolve the parent
             relationships.push(json!({
                 "type": "CONTAINS",
-                "from_qualified_name": parent_qname,
+                "from_name": parent_qname,
                 "to_id": entity.entity_id.clone(),
                 "resolved": false
             }));
@@ -479,7 +480,7 @@ mod tests {
         );
 
         // Build name_to_id map
-        let entities = vec![parent.clone(), child.clone()];
+        let entities = [parent.clone(), child.clone()];
         let name_to_id: HashMap<&str, &str> = entities
             .iter()
             .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
@@ -505,7 +506,7 @@ mod tests {
         );
 
         // Build name_to_id map (parent not in map, so relationship will be unresolved)
-        let entities = vec![child.clone()];
+        let entities = [child.clone()];
         let name_to_id: HashMap<&str, &str> = entities
             .iter()
             .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
@@ -515,7 +516,7 @@ mod tests {
 
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0]["type"], "CONTAINS");
-        assert_eq!(relationships[0]["from_qualified_name"], "test::Parent");
+        assert_eq!(relationships[0]["from_name"], "test::Parent");
         assert_eq!(relationships[0]["to_id"], "child_id");
         assert_eq!(relationships[0]["resolved"], false);
     }

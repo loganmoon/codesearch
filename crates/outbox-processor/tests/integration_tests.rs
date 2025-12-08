@@ -39,6 +39,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_processor_basic_initialization() {
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
@@ -86,6 +87,7 @@ async fn test_outbox_processor_basic_initialization() {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
+        postgres_pool_size: 20,
     };
 
     // Create processor
@@ -97,13 +99,15 @@ async fn test_outbox_processor_basic_initialization() {
         10,
         3,
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
+        200,  // max_cached_collections
+        true, // enable_per_batch_resolution
     );
 
     // If we get here, initialization succeeded
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_entries_can_be_created_and_queried() {
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
@@ -183,6 +187,7 @@ async fn test_outbox_entries_can_be_created_and_queried() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_client_cache_reuses_clients() {
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
     let connection_string = format!(
@@ -226,6 +231,7 @@ async fn test_client_cache_reuses_clients() {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 1000,
+        postgres_pool_size: 20,
     };
 
     let processor = OutboxProcessor::new(
@@ -236,7 +242,8 @@ async fn test_client_cache_reuses_clients() {
         10,
         3,
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
+        200,  // max_cached_collections
+        true, // enable_per_batch_resolution
     );
 
     // Access the cache through a method call
@@ -247,6 +254,7 @@ async fn test_client_cache_reuses_clients() {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::error::Error>> {
     // Setup database
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
@@ -371,6 +379,7 @@ async fn test_process_batch_multiple_collections() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std::error::Error>> {
     // This test verifies that if Qdrant write fails, ALL entries remain unprocessed
     // Note: This test only verifies the database state, not actual Qdrant interaction
@@ -499,6 +508,7 @@ async fn test_transaction_rollback_on_qdrant_failure() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::error::Error>> {
     // Verify that entries are fetched in strict created_at order across collections
 
@@ -657,6 +667,7 @@ async fn test_global_ordering_across_collections() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std::error::Error>> {
     // Verify that entries exceeding max_retries are marked as processed
 
@@ -778,6 +789,7 @@ async fn test_retry_count_exceeded_marked_processed() -> Result<(), Box<dyn std:
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std::error::Error>> {
     // Test DELETE operation with entity_ids array in payload
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
@@ -863,6 +875,7 @@ async fn test_delete_operation_with_entity_ids_array() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_delete_operation_with_single_entity_id_fallback(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Test DELETE operation falling back to single entity_id when entity_ids not present
@@ -949,6 +962,7 @@ async fn test_delete_operation_with_single_entity_id_fallback(
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn std::error::Error>> {
     // Test that INSERT, UPDATE, and DELETE operations can be processed in the same batch
     let postgres_node = Postgres::default().with_tag("18").start().await.unwrap();
@@ -1117,6 +1131,7 @@ async fn test_mixed_insert_update_delete_in_same_batch() -> Result<(), Box<dyn s
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_concurrent_processor_isolation_with_skip_locked(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Verify that SELECT FOR UPDATE SKIP LOCKED prevents concurrent processors

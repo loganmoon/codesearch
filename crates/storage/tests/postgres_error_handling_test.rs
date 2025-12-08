@@ -39,6 +39,7 @@ async fn setup_postgres() -> Result<(
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_connection_pool_exhaustion() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -105,6 +106,7 @@ async fn test_connection_pool_exhaustion() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_store_entity_during_connection_loss() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let config = create_storage_config(6334, 6333, 9999, "codesearch");
@@ -121,6 +123,7 @@ async fn test_store_entity_during_connection_loss() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_concurrent_writes_same_entity() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -235,6 +238,7 @@ async fn test_concurrent_writes_same_entity() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_concurrent_snapshot_updates() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -285,6 +289,7 @@ async fn test_concurrent_snapshot_updates() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -325,6 +330,7 @@ async fn test_mark_deleted_nonexistent_entities() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_ids_some_missing() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -399,6 +405,7 @@ async fn test_get_entities_by_ids_some_missing() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_concurrent_writes() -> Result<()> {
     with_timeout(Duration::from_secs(60), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -474,6 +481,7 @@ async fn test_outbox_concurrent_writes() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_mark_processed_twice() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -541,6 +549,7 @@ async fn test_outbox_mark_processed_twice() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_migration_already_applied() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;

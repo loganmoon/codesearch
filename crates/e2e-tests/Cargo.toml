@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+# Note: This crate is excluded from the main workspace to avoid
+# compiling during normal builds. Run explicitly with:
+#   cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
+
 [dependencies]
-# Workspace crates
+# Workspace crates (path dependencies still work when excluded)
 codesearch-core = { path = "../core" }
 codesearch-storage = { path = "../storage" }
 codesearch-indexer = { path = "../indexer" }
@@ -14,18 +18,19 @@ codesearch-reranking = { path = "../reranking" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-outbox-processor = { path = "../outbox-processor" }
 
-# Test dependencies
-tokio = { workspace = true }
-anyhow = { workspace = true }
-tempfile = { workspace = true }
-uuid = { version = "1.11", features = ["v4"] }
-serde = { workspace = true }
-serde_json = { workspace = true }
+# Test dependencies (explicit versions since not in workspace)
+tokio = { version = "1.42", features = ["full"] }
+anyhow = "1.0"
+tempfile = "3.14"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 reqwest = { version = "0.12", features = ["json"] }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-sqlx = { workspace = true }
-glob = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "tls-rustls", "uuid", "chrono", "json", "migrate"] }
+glob = "0.3"
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
 chrono = "0.4"
+regex = "1.11"

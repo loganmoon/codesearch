@@ -10,6 +10,7 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::import_map::{parse_file_imports, resolve_reference, ImportMap};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
@@ -19,6 +20,7 @@ use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds,
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
+use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
@@ -57,6 +59,11 @@ pub fn handle_struct_impl(
         file_path,
         repository_id,
     };
+
+    // Build ImportMap from file's imports for type resolution
+    let struct_node = require_capture_node(query_match, query, capture_names::STRUCT)?;
+    let import_map = get_file_import_map(struct_node, source);
+
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -78,6 +85,14 @@ pub fn handle_struct_impl(
         if !fields.is_empty() {
             if let Ok(json) = serde_json::to_string(&fields) {
                 metadata.attributes.insert("fields".to_string(), json);
+            }
+
+            // Extract and resolve field types for USES relationships
+            let uses_types = extract_field_type_refs(&fields, &import_map);
+            if !uses_types.is_empty() {
+                if let Ok(json) = serde_json::to_string(&uses_types) {
+                    metadata.attributes.insert("uses_types".to_string(), json);
+                }
             }
         }
 
@@ -101,6 +116,11 @@ pub fn handle_enum_impl(
         file_path,
         repository_id,
     };
+
+    // Build ImportMap from file's imports for type resolution
+    let enum_node = require_capture_node(query_match, query, capture_names::ENUM)?;
+    let import_map = get_file_import_map(enum_node, source);
+
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         let generics = extract_generics(ctx);
         let derives = extract_derives(ctx);
@@ -115,6 +135,14 @@ pub fn handle_enum_impl(
         if !variants.is_empty() {
             if let Ok(json) = serde_json::to_string(&variants) {
                 metadata.attributes.insert("variants".to_string(), json);
+            }
+
+            // Extract and resolve field types from variants for USES relationships
+            let uses_types = extract_variant_type_refs(&variants, &import_map);
+            if !uses_types.is_empty() {
+                if let Ok(json) = serde_json::to_string(&uses_types) {
+                    metadata.attributes.insert("uses_types".to_string(), json);
+                }
             }
         }
 
@@ -538,4 +566,165 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
         }
     }
     false
+}
+
+// ============================================================================
+// Import Resolution Helpers
+// ============================================================================
+
+/// Get the ImportMap for a file by walking up to the AST root
+fn get_file_import_map(node: Node, source: &str) -> ImportMap {
+    // Walk up to the root node
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        current = parent;
+    }
+
+    // Parse imports from the root
+    parse_file_imports(current, source, Language::Rust)
+}
+
+/// Extract and resolve field types for USES relationships
+fn extract_field_type_refs(fields: &[FieldInfo], import_map: &ImportMap) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for field in fields {
+        for type_name in extract_type_names_from_field_type(&field.field_type) {
+            if !is_primitive_type(&type_name) {
+                let resolved = resolve_reference(&type_name, import_map, None, "::");
+                if seen.insert(resolved.clone()) {
+                    result.push(resolved);
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Extract and resolve types from enum variant fields for USES relationships
+fn extract_variant_type_refs(variants: &[VariantInfo], import_map: &ImportMap) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for variant in variants {
+        for field in &variant.fields {
+            for type_name in extract_type_names_from_field_type(&field.field_type) {
+                if !is_primitive_type(&type_name) {
+                    let resolved = resolve_reference(&type_name, import_map, None, "::");
+                    if seen.insert(resolved.clone()) {
+                        result.push(resolved);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Extract type names from a field type string
+///
+/// Handles common patterns:
+/// - Simple types: `Foo` -> ["Foo"]
+/// - Generic types: `Vec<Foo>` -> ["Vec", "Foo"]
+/// - References: `&Foo` or `&mut Foo` -> ["Foo"]
+/// - Option/Result: `Option<Bar>` -> ["Option", "Bar"]
+/// - Tuples: `(Foo, Bar)` -> ["Foo", "Bar"]
+/// - Paths: `std::io::Error` -> ["std::io::Error"]
+fn extract_type_names_from_field_type(field_type: &str) -> Vec<String> {
+    let mut types = Vec::new();
+    let mut current = String::new();
+    let mut depth: u32 = 0;
+
+    // Remove leading & and &mut
+    let cleaned = field_type
+        .trim()
+        .trim_start_matches('&')
+        .trim_start_matches("mut ")
+        .trim();
+
+    for ch in cleaned.chars() {
+        match ch {
+            '<' | '(' | '[' => {
+                if depth == 0 && !current.is_empty() {
+                    let trimmed = current.trim().to_string();
+                    if is_valid_type_name(&trimmed) {
+                        types.push(trimmed);
+                    }
+                    current.clear();
+                }
+                depth += 1;
+            }
+            '>' | ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && !current.is_empty() {
+                    let trimmed = current.trim().to_string();
+                    if is_valid_type_name(&trimmed) {
+                        types.push(trimmed);
+                    }
+                    current.clear();
+                }
+            }
+            ',' | ' ' if depth <= 1 => {
+                if !current.is_empty() {
+                    let trimmed = current.trim().to_string();
+                    if is_valid_type_name(&trimmed) {
+                        types.push(trimmed);
+                    }
+                    current.clear();
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    // Don't forget the last type
+    if !current.is_empty() {
+        let trimmed = current.trim().to_string();
+        if is_valid_type_name(&trimmed) {
+            types.push(trimmed);
+        }
+    }
+
+    types
+}
+
+/// Check if a string is a valid type name (not empty, not a keyword, not punctuation)
+fn is_valid_type_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.chars().all(|c| !c.is_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+}
+
+/// Check if a type name is a Rust primitive type
+fn is_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "bool"
+            | "char"
+            | "str"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "f32"
+            | "f64"
+            | "Self"
+            | "()"
+    )
 }

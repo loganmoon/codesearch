@@ -243,8 +243,7 @@ where
 
     // Check where clause constraints are captured
     let where_clause = entity.metadata.attributes.get("where_clause");
-    if where_clause.is_some() {
-        let where_str = where_clause.unwrap();
+    if let Some(where_str) = where_clause {
         assert!(where_str.contains("Clone") || where_str.contains("Debug"));
     }
 

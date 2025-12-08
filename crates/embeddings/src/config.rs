@@ -35,6 +35,9 @@ pub struct EmbeddingConfig {
 
     /// Maximum concurrent embedding API requests
     pub(crate) max_concurrent_api_requests: usize,
+
+    /// Number of retry attempts for failed embedding requests
+    pub(crate) retry_attempts: usize,
 }
 
 impl EmbeddingConfig {
@@ -67,11 +70,12 @@ impl Default for EmbeddingConfig {
         Self {
             provider: EmbeddingProviderType::default(),
             model: "BAAI/bge-code-v1".to_string(),
-            texts_per_api_request: 128,
+            texts_per_api_request: 64,
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
             embedding_dimension: 1536,
-            max_concurrent_api_requests: 64,
+            max_concurrent_api_requests: 4,
+            retry_attempts: 5,
         }
     }
 }
@@ -85,6 +89,7 @@ pub struct EmbeddingConfigBuilder {
     api_key: Option<Option<String>>,
     embedding_dimension: Option<usize>,
     max_concurrent_api_requests: Option<usize>,
+    retry_attempts: Option<usize>,
 }
 
 impl EmbeddingConfigBuilder {
@@ -98,6 +103,7 @@ impl EmbeddingConfigBuilder {
             api_key: None,
             embedding_dimension: None,
             max_concurrent_api_requests: None,
+            retry_attempts: None,
         }
     }
 
@@ -143,6 +149,12 @@ impl EmbeddingConfigBuilder {
         self
     }
 
+    /// Set the number of retry attempts
+    pub fn retry_attempts(mut self, retry_attempts: usize) -> Self {
+        self.retry_attempts = Some(retry_attempts);
+        self
+    }
+
     /// Build the configuration, using defaults for unset fields
     pub fn build(self) -> EmbeddingConfig {
         let defaults = EmbeddingConfig::default();
@@ -161,6 +173,7 @@ impl EmbeddingConfigBuilder {
             max_concurrent_api_requests: self
                 .max_concurrent_api_requests
                 .unwrap_or(defaults.max_concurrent_api_requests),
+            retry_attempts: self.retry_attempts.unwrap_or(defaults.retry_attempts),
         }
     }
 }

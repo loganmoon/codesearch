@@ -1,0 +1,630 @@
+{
+  "repository": "rust-analyzer",
+  "total_queries": 5,
+  "search_types_evaluated": [
+    "semantic",
+    "fulltext",
+    "unified",
+    "graph",
+    "agentic"
+  ],
+  "search_type_metrics": {
+    "unified": {
+      "search_type": "unified",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.0,
+      "avg_recall_at_10": 0.25,
+      "avg_precision_at_5": 0.0,
+      "avg_precision_at_10": 0.025,
+      "avg_mrr": 0.046875,
+      "avg_query_time_ms": 48.8,
+      "graph_usage_rate": 0.0
+    },
+    "graph": {
+      "search_type": "graph",
+      "queries_evaluated": 5,
+      "queries_failed": 5,
+      "avg_recall_at_5": null,
+      "avg_recall_at_10": null,
+      "avg_precision_at_5": null,
+      "avg_precision_at_10": null,
+      "avg_mrr": null,
+      "avg_query_time_ms": 0.0,
+      "graph_usage_rate": 0.0
+    },
+    "semantic": {
+      "search_type": "semantic",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.5,
+      "avg_recall_at_10": 0.775,
+      "avg_precision_at_5": 0.1,
+      "avg_precision_at_10": 0.1,
+      "avg_mrr": 0.5694444444444444,
+      "avg_query_time_ms": 51.4,
+      "graph_usage_rate": 0.0
+    },
+    "fulltext": {
+      "search_type": "fulltext",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.0,
+      "avg_recall_at_10": 0.0,
+      "avg_precision_at_5": 0.0,
+      "avg_precision_at_10": 0.0,
+      "avg_mrr": 0.0,
+      "avg_query_time_ms": 2.8,
+      "graph_usage_rate": 0.0
+    },
+    "agentic": {
+      "search_type": "agentic",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.625,
+      "avg_recall_at_10": 0.625,
+      "avg_precision_at_5": 0.2,
+      "avg_precision_at_10": 0.125,
+      "avg_mrr": 0.625,
+      "avg_query_time_ms": 36663.0,
+      "graph_usage_rate": 0.0
+    }
+  },
+  "category_metrics": [
+    {
+      "category": "call_graph",
+      "query_count": 5,
+      "by_search_type": {
+        "semantic": {
+          "avg_recall_at_5": 0.5,
+          "avg_recall_at_10": 0.775,
+          "avg_precision_at_5": 0.1,
+          "avg_mrr": 0.5694444444444444,
+          "avg_query_time_ms": 51.4
+        },
+        "fulltext": {
+          "avg_recall_at_5": 0.0,
+          "avg_recall_at_10": 0.0,
+          "avg_precision_at_5": 0.0,
+          "avg_mrr": 0.0,
+          "avg_query_time_ms": 2.8
+        },
+        "unified": {
+          "avg_recall_at_5": 0.0,
+          "avg_recall_at_10": 0.25,
+          "avg_precision_at_5": 0.0,
+          "avg_mrr": 0.046875,
+          "avg_query_time_ms": 48.8
+        },
+        "agentic": {
+          "avg_recall_at_5": 0.625,
+          "avg_recall_at_10": 0.625,
+          "avg_precision_at_5": 0.2,
+          "avg_mrr": 0.625,
+          "avg_query_time_ms": 36663.0
+        }
+      }
+    }
+  ],
+  "query_results": [
+    {
+      "query_id": "calls_001",
+      "category": "call_graph",
+      "results_by_type": {
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 48855,
+          "num_results": 10,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 10,
+          "top_results": [
+            "impl AsmOption at line 163",
+            "impl Fn at line 566",
+            "impl AsmExpr at line 104",
+            "impl Const at line 410",
+            "impl BlockExpr at line 320"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "graph": {
+          "search_type": "graph",
+          "query_time_ms": 0,
+          "num_results": 0,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 10,
+          "top_results": [],
+          "error": "Graph query returned error 422 Unprocessable Entity: Failed to deserialize the JSON body into the target type: query_type: unknown variant `find_related`, expected one of `FindFunctionCallers`, `FindFunctionCallees`, `FindTraitImplementations`, `FindClassHierarchy`, `FindModuleContents`, `FindModuleDependencies`, `FindUnusedFunctions`, `FindCircularDependencies` at line 1 column 83",
+          "graph_traversal_used": true
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 48,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 10,
+          "top_results": [
+            "impl ExternCrate at line 522",
+            "impl FindUsages<'a> at line 436",
+            "impl GlobalState at line 177",
+            "Const::semicolon_token (impl at line 410)",
+            "impl DefCollector<'db> at line 258"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 38,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.1,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.1111111111111111,
+          "expected_found": 1,
+          "expected_total": 10,
+          "top_results": [
+            "Fn::gen_token (impl at line 566)",
+            "server::Types for SpanIdServer at line 39",
+            "Fn::fn_token (impl at line 566)",
+            "server::Types for RaSpanServer at line 33",
+            "Fn::safe_token (impl at line 566)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 4,
+          "num_results": 6,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 10,
+          "top_results": [
+            "impl FindUsages<'a> at line 436",
+            "impl GlobalState at line 177",
+            "impl DefCollector<'db> at line 258",
+            "impl Config at line 1700",
+            "impl ExprCollector<'db> at line 519"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_002",
+      "category": "call_graph",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 3,
+          "num_results": 5,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl InferenceContext<'_, 'db> at line 60",
+            "tracing_infinite_repeat",
+            "impl GlobalState at line 177",
+            "impl Analysis at line 234",
+            "impl SourceToDefCtx<'_, '_> at line 176"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "graph": {
+          "search_type": "graph",
+          "query_time_ms": 0,
+          "num_results": 0,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [],
+          "error": "Graph query returned error 422 Unprocessable Entity: Failed to deserialize the JSON body into the target type: query_type: unknown variant `find_related`, expected one of `FindFunctionCallers`, `FindFunctionCallees`, `FindTraitImplementations`, `FindClassHierarchy`, `FindModuleContents`, `FindModuleDependencies`, `FindUnusedFunctions`, `FindCircularDependencies` at line 1 column 83",
+          "graph_traversal_used": true
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 59,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl InferenceContext<'_, 'db> at line 60",
+            "impl Static at line 512",
+            "ContinueExpr::lifetime (impl at line 463)",
+            "tracing_infinite_repeat",
+            "impl GlobalState at line 177"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 55047,
+          "num_results": 10,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "AsmOperandNamed::asm_operand (impl at line 154)",
+            "HasLoopBody",
+            "HasGenericParams",
+            "impl CastExpr at line 372",
+            "impl FieldExpr at line 550"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 58,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl CallExpr at line 364",
+            "NodeData",
+            "CallExpr::expr (impl at line 364)",
+            "impl MirLowerError<'_> at line 263",
+            "Fn::ret_type (impl at line 566)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_003",
+      "category": "call_graph",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 1,
+          "num_results": 0,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 2,
+          "top_results": [],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 67,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.16666666666666666,
+          "expected_found": 2,
+          "expected_total": 2,
+          "top_results": [
+            "hir_to_ast_plain_path",
+            "introduction_builder",
+            "hir_to_ast_type_anchor_path",
+            "tests::replaces_method_calls",
+            "Evaluator<'db>::size_of_sized (impl at line 630)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 45071,
+          "num_results": 10,
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "precision_at_5": 0.4,
+          "precision_at_10": 0.3,
+          "mrr": 1.0,
+          "expected_found": 1,
+          "expected_total": 2,
+          "top_results": [
+            "tests::check",
+            "hir_to_ast_plain_path",
+            "tests::unknown_assoc_ty",
+            "tests",
+            "check_closure_captures"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 55,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.125,
+          "expected_found": 2,
+          "expected_total": 2,
+          "top_results": [
+            "enum_variants_with_paths",
+            "tests::generates_no_ref_on_calls",
+            "tests::join_lines_multiline_in_block",
+            "hir_to_ast_plain_path",
+            "hir_fmt_tys"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "graph": {
+          "search_type": "graph",
+          "query_time_ms": 0,
+          "num_results": 0,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 2,
+          "top_results": [],
+          "error": "Graph query returned error 422 Unprocessable Entity: Failed to deserialize the JSON body into the target type: query_type: unknown variant `find_related`, expected one of `FindFunctionCallers`, `FindFunctionCallees`, `FindTraitImplementations`, `FindClassHierarchy`, `FindModuleContents`, `FindModuleDependencies`, `FindUnusedFunctions`, `FindCircularDependencies` at line 1 column 83",
+          "graph_traversal_used": true
+        }
+      }
+    },
+    {
+      "query_id": "calls_004",
+      "category": "call_graph",
+      "results_by_type": {
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 44,
+          "num_results": 20,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.1,
+          "mrr": 1.0,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "goto_definition",
+            "Config::goto_definition (impl at line 1700)",
+            "goto_type_definition",
+            "Analysis::goto_definition (impl at line 234)",
+            "Analysis::goto_type_definition (impl at line 234)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 43,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "impl NameRefClass<'db> at line 741",
+            "goto_type_definition",
+            "tests",
+            "call_hierarchy",
+            "tests"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "graph": {
+          "search_type": "graph",
+          "query_time_ms": 0,
+          "num_results": 0,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [],
+          "error": "Graph query returned error 422 Unprocessable Entity: Failed to deserialize the JSON body into the target type: query_type: unknown variant `find_related`, expected one of `FindFunctionCallers`, `FindFunctionCallees`, `FindTraitImplementations`, `FindClassHierarchy`, `FindModuleContents`, `FindModuleDependencies`, `FindUnusedFunctions`, `FindCircularDependencies` at line 1 column 83",
+          "graph_traversal_used": true
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 16626,
+          "num_results": 10,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.1,
+          "mrr": 0.5,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "Analysis::goto_definition (impl at line 234)",
+            "goto_definition",
+            "handle_goto_definition",
+            "goto_declaration",
+            "handle_goto_declaration"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 3,
+          "num_results": 10,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "tests",
+            "impl Analysis at line 234",
+            "tests",
+            "impl NameRefClass<'db> at line 741",
+            "call_hierarchy"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_005",
+      "category": "call_graph",
+      "results_by_type": {
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 50,
+          "num_results": 20,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.1,
+          "mrr": 1.0,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "hover",
+            "doctest_comment_to_doc",
+            "Analysis::hover (impl at line 234)",
+            "HoverRequest",
+            "what"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 17716,
+          "num_results": 10,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.1,
+          "mrr": 1.0,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "hover",
+            "prepare_hover_actions",
+            "handle_request",
+            "Request for HoverRequest at line 655",
+            "check_hover_no_links"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "graph": {
+          "search_type": "graph",
+          "query_time_ms": 0,
+          "num_results": 0,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [],
+          "error": "Graph query returned error 422 Unprocessable Entity: Failed to deserialize the JSON body into the target type: query_type: unknown variant `find_related`, expected one of `FindFunctionCallers`, `FindFunctionCallees`, `FindTraitImplementations`, `FindClassHierarchy`, `FindModuleContents`, `FindModuleDependencies`, `FindUnusedFunctions`, `FindCircularDependencies` at line 1 column 83",
+          "graph_traversal_used": true
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 3,
+          "num_results": 11,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "hover_ranged_macro_call",
+            "hover_call_parens",
+            "hover_offset",
+            "impl StaticIndex<'_> at line 159",
+            "StaticIndex<'_>::add_file (impl at line 159)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 39,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0625,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "hover_call_parens",
+            "hover_ranged_macro_call",
+            "PathSegments<'a>::strip_last (impl at line 226)",
+            "test_hover_variadic_function",
+            "hover_offset"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    }
+  ]
+}

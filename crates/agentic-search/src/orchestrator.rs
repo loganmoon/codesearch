@@ -3,7 +3,7 @@
 use crate::{
     config::AgenticSearchConfig,
     error::{truncate_for_error, AgenticSearchError, Result},
-    prompts,
+    extract_json, prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
         QualityGateResult, RerankingMethod, RetrievalSource,
@@ -46,7 +46,8 @@ const VALID_RELATIONSHIPS: &[&str] = &[
 // ============================================================================
 
 /// Extract JSON content from between <result_list> XML tags
-/// Handles chatty LLM responses that may have text before/after the tags
+/// Handles chatty LLM responses that may have text before/after the tags,
+/// as well as markdown code blocks inside the tags
 fn extract_result_list(response: &str) -> Result<String> {
     let start_tag = "<result_list>";
     let end_tag = "</result_list>";
@@ -71,12 +72,35 @@ fn extract_result_list(response: &str) -> Result<String> {
         ));
     }
 
-    Ok(response[start + start_tag.len()..end].trim().to_string())
+    let content = response[start + start_tag.len()..end].trim();
+
+    // Extract JSON from content (handles markdown code blocks, chatty text)
+    extract_json(content).map(|s| s.to_string()).ok_or_else(|| {
+        AgenticSearchError::QualityGate(format!(
+            "No valid JSON found inside <result_list> tags: {}",
+            &content[..content.len().min(200)]
+        ))
+    })
 }
 
-/// Validate entity_id has reasonable format (not empty, reasonable length)
+/// Validate entity_id matches the expected format from entity_id.rs:
+/// - Named entities: "entity-{32 lowercase hex chars}" (39 chars total)
+/// - Anonymous entities: "entity-anon-{32 lowercase hex chars}" (44 chars total)
 fn is_valid_entity_id(entity_id: &str) -> bool {
-    !entity_id.is_empty() && entity_id.len() <= 100
+    let is_named = entity_id.starts_with("entity-")
+        && !entity_id.starts_with("entity-anon-")
+        && entity_id.len() == 39;
+    let is_anon = entity_id.starts_with("entity-anon-") && entity_id.len() == 44;
+
+    if !is_named && !is_anon {
+        return false;
+    }
+
+    // Verify the hex portion contains only valid hex characters
+    let hex_start = if is_anon { 12 } else { 7 }; // "entity-anon-" = 12, "entity-" = 7
+    entity_id[hex_start..]
+        .chars()
+        .all(|c| c.is_ascii_hexdigit())
 }
 
 /// Check if relationship is in the allowed whitelist
@@ -100,6 +124,7 @@ fn relationship_to_query_type(relationship: &str) -> Option<GraphQueryType> {
 }
 
 /// Format entities for inclusion in prompts
+/// Entity ID is made prominent to help the LLM copy it correctly for graph_traversal
 fn format_entities_for_prompt(entities: &[AgenticEntity], limit: usize) -> String {
     entities
         .iter()
@@ -113,7 +138,11 @@ fn format_entities_for_prompt(entities: &[AgenticEntity], limit: usize) -> Strin
                 _ => String::new(),
             };
             format!(
-                "[{}] {}{}\nScore: {:.2}\nJustification: {}\nContent: {}",
+                "Entity ID: {} (use this exact ID for graph_traversal)\n\
+                 Name: {}{}\n\
+                 Score: {:.2}\n\
+                 Justification: {}\n\
+                 Content: {}",
                 e.entity.entity_id,
                 e.entity.qualified_name,
                 source_info,
@@ -369,9 +398,16 @@ impl AgenticSearchOrchestrator {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Parse JSON decision
+        // Parse JSON decision - extract JSON from potentially chatty LLM response
+        let json_str = extract_json(&response_text).ok_or_else(|| {
+            AgenticSearchError::Orchestrator(format!(
+                "No valid JSON found in Sonnet response: {}",
+                truncate_for_error(&response_text)
+            ))
+        })?;
+
         let decision: OrchestratorDecisionResponse =
-            serde_json::from_str(&response_text).map_err(|e| {
+            serde_json::from_str(json_str).map_err(|e| {
                 AgenticSearchError::Orchestrator(format!(
                     "Failed to parse Sonnet decision: {e}. Response: {}",
                     truncate_for_error(&response_text)
@@ -1019,13 +1055,35 @@ mod tests {
 
     #[test]
     fn test_is_valid_entity_id() {
-        assert!(is_valid_entity_id("abc-123"));
-        assert!(is_valid_entity_id("a"));
-        assert!(is_valid_entity_id(&"x".repeat(100)));
+        // Valid named entity IDs (entity- + 32 hex chars = 39 total)
+        assert!(is_valid_entity_id(
+            "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        ));
+        assert!(is_valid_entity_id(
+            "entity-00000000000000000000000000000000"
+        ));
+        assert!(is_valid_entity_id(
+            "entity-ffffffffffffffffffffffffffffffff"
+        ));
 
-        // Invalid cases
-        assert!(!is_valid_entity_id(""));
-        assert!(!is_valid_entity_id(&"x".repeat(101)));
+        // Valid anonymous entity IDs (entity-anon- + 32 hex chars = 44 total)
+        assert!(is_valid_entity_id(
+            "entity-anon-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        ));
+
+        // Invalid cases - wrong format
+        assert!(!is_valid_entity_id("")); // empty
+        assert!(!is_valid_entity_id("abc-123")); // wrong prefix
+        assert!(!is_valid_entity_id("entity-")); // missing hash
+        assert!(!is_valid_entity_id("entity-a1b2c3d4")); // too short
+        assert!(!is_valid_entity_id(
+            "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6extra"
+        )); // too long
+        assert!(!is_valid_entity_id(
+            "entity-g1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        )); // non-hex char 'g'
+        assert!(!is_valid_entity_id("entity-test_ty")); // hallucinated name-based ID
+        assert!(!is_valid_entity_id("b6830516fc831c8b98529312fca2a5d9")); // missing prefix
     }
 
     #[test]

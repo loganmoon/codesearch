@@ -12,10 +12,12 @@ members = [
     "crates/storage",
     "crates/server",
     "crates/outbox-processor",
-    "crates/e2e-tests",
     "crates/agentic-search",
     "crates/mcp-server",
 ]
+# E2E tests excluded from default builds - run explicitly with:
+#   cargo test --package codesearch-e2e-tests -- --ignored
+exclude = ["crates/e2e-tests"]
 
 [workspace.metadata]
 default-run = "codesearch"
@@ -23,7 +25,7 @@ default-run = "codesearch"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.91"
 authors = ["Logan Moon"]
 license = "MIT"
 repository = "https://github.com/loganmoon/codesearch"

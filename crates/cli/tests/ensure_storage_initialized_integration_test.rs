@@ -123,6 +123,7 @@ async fn test_generates_collection_name() -> Result<()> {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     })
     .build();
 
@@ -171,6 +172,7 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     })
     .build();
 
@@ -222,6 +224,7 @@ async fn test_handles_postgres_connection_failure() -> Result<()> {
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "codesearch".to_string(),
         max_entities_per_db_operation: 10000,
+        postgres_pool_size: 20,
     })
     .build();
 

@@ -3,8 +3,15 @@ use codesearch_core::{CodeEntity, EntityType, StorageConfig};
 use neo4rs::{Graph, Query};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Neo4j edition - determines available features
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Neo4jEdition {
+    Community,
+    Enterprise,
+}
 
 /// Allowed relationship types for Neo4j (prevents Cypher injection)
 pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
@@ -53,6 +60,7 @@ fn validate_property_key(key: &str) -> Result<()> {
 pub struct Neo4jClient {
     graph: Arc<Graph>,
     current_database: Arc<RwLock<Option<String>>>,
+    edition: Neo4jEdition,
 }
 
 impl Neo4jClient {
@@ -72,14 +80,62 @@ impl Neo4jClient {
             .await
             .context("Failed to connect to Neo4j")?;
 
+        // Detect Neo4j edition
+        let edition = Self::detect_edition(&graph).await.unwrap_or_else(|e| {
+            warn!("Failed to detect Neo4j edition, assuming Community: {e}");
+            Neo4jEdition::Community
+        });
+
+        info!("Neo4j edition detected: {:?}", edition);
+
+        if edition == Neo4jEdition::Community {
+            info!("Running in Community Edition mode - using shared 'neo4j' database with repository_id isolation");
+        }
+
         Ok(Self {
             graph: Arc::new(graph),
             current_database: Arc::new(RwLock::new(None)),
+            edition,
         })
     }
 
+    /// Detect the Neo4j edition (Community or Enterprise)
+    async fn detect_edition(graph: &Graph) -> Result<Neo4jEdition> {
+        let query = Query::new("CALL dbms.components() YIELD edition RETURN edition".to_string());
+
+        let mut result = graph.execute(query).await?;
+
+        if let Some(row) = result.next().await? {
+            let edition: String = row.get("edition")?;
+            if edition.to_lowercase() == "enterprise" {
+                return Ok(Neo4jEdition::Enterprise);
+            }
+        }
+
+        Ok(Neo4jEdition::Community)
+    }
+
+    /// Get the Neo4j edition
+    #[allow(dead_code)]
+    pub fn edition(&self) -> Neo4jEdition {
+        self.edition
+    }
+
     /// Create a new database for a repository
+    ///
+    /// For Community Edition: This is a no-op since multi-database is not supported.
+    /// The default 'neo4j' database is used with repository_id property for isolation.
+    ///
+    /// For Enterprise Edition: Creates a per-repository database.
     pub async fn create_database(&self, database_name: &str) -> Result<()> {
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Skipping database creation for '{}' - Community Edition uses shared 'neo4j' database",
+                database_name
+            );
+            return Ok(());
+        }
+
         info!("Creating Neo4j database: {}", database_name);
 
         let query = Query::new(format!("CREATE DATABASE `{database_name}` IF NOT EXISTS"));
@@ -93,7 +149,18 @@ impl Neo4jClient {
     }
 
     /// Drop a database
+    ///
+    /// For Community Edition: This is a no-op. Entities are deleted by repository_id.
+    /// For Enterprise Edition: Drops the per-repository database.
     pub async fn drop_database(&self, database_name: &str) -> Result<()> {
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Skipping database drop for '{}' - Community Edition uses shared 'neo4j' database",
+                database_name
+            );
+            return Ok(());
+        }
+
         info!("Dropping Neo4j database: {}", database_name);
 
         let query = Query::new(format!("DROP DATABASE `{database_name}` IF EXISTS"));
@@ -106,11 +173,53 @@ impl Neo4jClient {
         Ok(())
     }
 
+    /// Delete all data for a repository from Neo4j
+    ///
+    /// For Enterprise Edition: Drops the per-repository database.
+    /// For Community Edition: Deletes all nodes/relationships with matching repository_id.
+    pub async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()> {
+        let db_name = format!("codesearch_{}", repository_id.simple());
+
+        if self.edition == Neo4jEdition::Community {
+            info!(
+                "Deleting repository data for {} from shared Neo4j database",
+                repository_id
+            );
+
+            // Delete all nodes (and their relationships via DETACH) for this repository
+            let query =
+                Query::new("MATCH (n {repository_id: $repo_id}) DETACH DELETE n".to_string())
+                    .param("repo_id", repository_id.to_string());
+
+            self.graph
+                .run(query)
+                .await
+                .context("Failed to delete repository nodes from Neo4j")?;
+
+            info!("Deleted all nodes for repository {}", repository_id);
+        } else {
+            // Enterprise Edition: drop the entire database
+            self.drop_database(&db_name).await?;
+        }
+
+        Ok(())
+    }
+
     /// Switch to a specific database
+    ///
+    /// For Community Edition: Sets the current database context to "neo4j" but
+    /// tracks the repository database name for isolation purposes.
     pub async fn use_database(&self, database_name: &str) -> Result<()> {
         let mut current = self.current_database.write().await;
         *current = Some(database_name.to_string());
-        debug!("Switched to database: {}", database_name);
+        if self.edition == Neo4jEdition::Community {
+            debug!(
+                "Using shared 'neo4j' database with logical context: {}",
+                database_name
+            );
+        } else {
+            debug!("Switched to database: {}", database_name);
+        }
         Ok(())
     }
 
@@ -200,17 +309,14 @@ impl Neo4jClient {
 
         let _db = self.get_current_database().await?;
 
-        // Group entities by type (needed for label assignment)
-        let mut entities_by_type: Vec<(EntityType, Vec<&CodeEntity>)> = Vec::new();
+        // Group entities by type (needed for label assignment) - O(n) with HashMap
+        let mut entities_by_type: std::collections::HashMap<EntityType, Vec<&CodeEntity>> =
+            std::collections::HashMap::new();
         for entity in entities {
-            if let Some((_, group)) = entities_by_type
-                .iter_mut()
-                .find(|(t, _)| *t == entity.entity_type)
-            {
-                group.push(entity);
-            } else {
-                entities_by_type.push((entity.entity_type, vec![entity]));
-            }
+            entities_by_type
+                .entry(entity.entity_type)
+                .or_default()
+                .push(entity);
         }
 
         let mut all_node_ids = Vec::new();
@@ -386,30 +492,41 @@ impl Neo4jClient {
     }
 
     /// Create indexes for a database
+    ///
+    /// All indexes are created on the `Entity` label, which is shared by all nodes.
     async fn create_indexes(&self, database_name: &str) -> Result<()> {
         self.use_database(database_name).await?;
 
         info!("Creating indexes for database: {}", database_name);
 
-        // Core entity lookup
-        self.run_query("CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n) ON (n.id)")
-            .await?;
-        self.run_query("CREATE INDEX repository_id_idx IF NOT EXISTS FOR (n) ON (n.repository_id)")
+        // Migration: add Entity label to any existing nodes that don't have it
+        let _ = self
+            .run_query("MATCH (n) WHERE NOT n:Entity SET n:Entity")
+            .await;
+
+        // Core entity lookup on common Entity label
+        self.run_query("CREATE INDEX entity_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.id)")
             .await?;
         self.run_query(
-            "CREATE INDEX qualified_name_idx IF NOT EXISTS FOR (n) ON (n.qualified_name)",
+            "CREATE INDEX repository_id_idx IF NOT EXISTS FOR (n:Entity) ON (n.repository_id)",
+        )
+        .await?;
+        self.run_query(
+            "CREATE INDEX qualified_name_idx IF NOT EXISTS FOR (n:Entity) ON (n.qualified_name)",
         )
         .await?;
 
         // Filtering
-        self.run_query("CREATE INDEX language_idx IF NOT EXISTS FOR (n) ON (n.language)")
+        self.run_query("CREATE INDEX language_idx IF NOT EXISTS FOR (n:Entity) ON (n.language)")
             .await?;
-        self.run_query("CREATE INDEX visibility_idx IF NOT EXISTS FOR (n) ON (n.visibility)")
-            .await?;
+        self.run_query(
+            "CREATE INDEX visibility_idx IF NOT EXISTS FOR (n:Entity) ON (n.visibility)",
+        )
+        .await?;
 
         // Composite index for repository queries
         self.run_query(
-            "CREATE INDEX repo_entity_idx IF NOT EXISTS FOR (n) ON (n.repository_id, n.id)",
+            "CREATE INDEX repo_entity_idx IF NOT EXISTS FOR (n:Entity) ON (n.repository_id, n.id)",
         )
         .await?;
 
@@ -458,85 +575,6 @@ impl Neo4jClient {
             .await
             .context(format!("Failed to run query: {query_str}"))?;
         Ok(())
-    }
-
-    /// Find all nodes with unresolved CONTAINS relationships
-    pub async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
-        let _db = self.get_current_database().await?;
-
-        let query = Query::new(
-            "MATCH (child)
-             WHERE child.unresolved_contains_parent IS NOT NULL
-             RETURN child.id AS child_id, child.unresolved_contains_parent AS parent_qname"
-                .to_string(),
-        );
-
-        let mut result = self.graph.execute(query).await?;
-
-        let mut nodes = Vec::new();
-        while let Some(row) = result.next().await? {
-            let child_id: String = row.get("child_id")?;
-            let parent_qname: String = row.get("parent_qname")?;
-            nodes.push((child_id, parent_qname));
-        }
-
-        Ok(nodes)
-    }
-
-    /// Batch resolve CONTAINS relationships using UNWIND for performance
-    ///
-    /// This method resolves multiple unresolved CONTAINS relationships in just 2 queries
-    /// instead of 3N queries, providing significant performance improvement for large repositories.
-    ///
-    /// # Arguments
-    /// * `unresolved_nodes` - Vec of (child_id, parent_qualified_name) pairs
-    ///
-    /// # Returns
-    /// * `Result<usize>` - Number of relationships successfully created
-    pub async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize> {
-        let _db = self.get_current_database().await?;
-
-        if unresolved_nodes.is_empty() {
-            return Ok(0);
-        }
-
-        // Convert to format Neo4j expects: Vec<HashMap<String, String>>
-        let nodes_data: Vec<std::collections::HashMap<String, String>> = unresolved_nodes
-            .iter()
-            .map(|(child_id, parent_qname)| {
-                let mut map = std::collections::HashMap::new();
-                map.insert("child_id".to_string(), child_id.clone());
-                map.insert("parent_qname".to_string(), parent_qname.clone());
-                map
-            })
-            .collect();
-
-        // Query 1: Batch lookup parents, create relationships, and cleanup in one query
-        // Using UNWIND for maximum efficiency
-        let batch_query = Query::new(
-            "UNWIND $nodes AS node
-             MATCH (parent {qualified_name: node.parent_qname})
-             MATCH (child {id: node.child_id})
-             MERGE (parent)-[:CONTAINS]->(child)
-             REMOVE child.unresolved_contains_parent
-             RETURN count(*) AS resolved_count"
-                .to_string(),
-        )
-        .param("nodes", nodes_data);
-
-        let mut result = self.graph.execute(batch_query).await?;
-
-        let resolved_count = if let Some(row) = result.next().await? {
-            let count: i64 = row.get("resolved_count")?;
-            count as usize
-        } else {
-            0
-        };
-
-        Ok(resolved_count)
     }
 
     /// Create a relationship between two entities with Cypher injection protection
@@ -608,60 +646,6 @@ impl Neo4jClient {
         Ok(())
     }
 
-    /// Store an unresolved relationship as a node property for later resolution
-    ///
-    /// When a relationship target doesn't exist yet, we store the relationship
-    /// information as a temporary node property. Later resolution processes will
-    /// query for these properties and create actual relationship edges.
-    ///
-    /// # Arguments
-    /// * `entity_id` - ID of the entity with unresolved relationship
-    /// * `relationship_type` - Type of relationship (must be in allowed list)
-    /// * `target_qualified_name` - Qualified name of the target entity
-    ///
-    /// # Property Naming
-    /// Property is stored as `unresolved_{rel_type}_parent` (lowercase)
-    ///
-    /// # Security
-    /// - Validates `relationship_type` against `ALLOWED_RELATIONSHIP_TYPES`
-    /// - Uses parameterized queries for all values
-    /// - Property name derived from validated constant (safe from injection)
-    pub async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()> {
-        let _db = self.get_current_database().await?;
-
-        // Validate relationship type (Cypher injection protection)
-        if !ALLOWED_RELATIONSHIP_TYPES.contains(&relationship_type) {
-            return Err(anyhow!(
-                "Invalid relationship type '{relationship_type}'. Allowed types: {ALLOWED_RELATIONSHIP_TYPES:?}"
-            ));
-        }
-
-        let property_name = format!("unresolved_{}_parent", relationship_type.to_lowercase());
-
-        // Use parameterized query for values, format string for property name
-        // (property name is derived from validated relationship_type constant)
-        let query_str = format!(
-            "MATCH (n {{id: $entity_id}})
-             SET n.`{property_name}` = $target_qname"
-        );
-
-        let query = Query::new(query_str)
-            .param("entity_id", entity_id)
-            .param("target_qname", target_qualified_name);
-
-        self.graph
-            .run(query)
-            .await
-            .context("Failed to store unresolved relationship")?;
-
-        Ok(())
-    }
-
     /// Batch create relationships using UNWIND for better performance
     ///
     /// Creates multiple relationships in a single query per relationship type,
@@ -695,17 +679,14 @@ impl Neo4jClient {
             }
         }
 
-        // Group by relationship type
-        let mut rels_by_type: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+        // Group by relationship type - O(n) with HashMap
+        let mut rels_by_type: std::collections::HashMap<&str, Vec<(&str, &str)>> =
+            std::collections::HashMap::new();
         for (from_id, to_id, rel_type) in relationships {
-            if let Some((_, group)) = rels_by_type
-                .iter_mut()
-                .find(|(t, _)| *t == rel_type.as_str())
-            {
-                group.push((from_id.as_str(), to_id.as_str()));
-            } else {
-                rels_by_type.push((rel_type.as_str(), vec![(from_id.as_str(), to_id.as_str())]));
-            }
+            rels_by_type
+                .entry(rel_type.as_str())
+                .or_default()
+                .push((from_id.as_str(), to_id.as_str()));
         }
 
         // Process each relationship type group with a single UNWIND query
@@ -722,9 +703,10 @@ impl Neo4jClient {
                 .collect();
 
             // UNWIND query: processes entire list in single network call
+            // IMPORTANT: Include :Entity label to enable index usage on (n:Entity).id
             let query_str = format!(
                 "UNWIND $relationships AS rel
-                 MATCH (from {{id: rel.from_id}}), (to {{id: rel.to_id}})
+                 MATCH (from:Entity {{id: rel.from_id}}), (to:Entity {{id: rel.to_id}})
                  MERGE (from)-[:{rel_type}]->(to)"
             );
 
@@ -738,22 +720,25 @@ impl Neo4jClient {
     }
 
     /// Get Neo4j labels for an entity type
+    ///
+    /// All nodes include the `Entity` label for common index support,
+    /// plus type-specific labels for semantic queries.
     fn get_entity_labels(&self, entity_type: &EntityType) -> &'static [&'static str] {
         match entity_type {
-            EntityType::Function => &["Function"],
-            EntityType::Method => &["Method"],
-            EntityType::Class => &["Class"],
-            EntityType::Struct => &["Struct", "Class"],
-            EntityType::Interface => &["Interface"],
-            EntityType::Trait => &["Trait", "Interface"],
-            EntityType::Enum => &["Enum"],
-            EntityType::Module => &["Module"],
-            EntityType::Package => &["Package"],
-            EntityType::Constant => &["Constant"],
-            EntityType::Variable => &["Variable"],
-            EntityType::TypeAlias => &["TypeAlias"],
-            EntityType::Macro => &["Macro"],
-            EntityType::Impl => &["ImplBlock"],
+            EntityType::Function => &["Entity", "Function"],
+            EntityType::Method => &["Entity", "Method"],
+            EntityType::Class => &["Entity", "Class"],
+            EntityType::Struct => &["Entity", "Struct", "Class"],
+            EntityType::Interface => &["Entity", "Interface"],
+            EntityType::Trait => &["Entity", "Trait", "Interface"],
+            EntityType::Enum => &["Entity", "Enum"],
+            EntityType::Module => &["Entity", "Module"],
+            EntityType::Package => &["Entity", "Package"],
+            EntityType::Constant => &["Entity", "Constant"],
+            EntityType::Variable => &["Entity", "Variable"],
+            EntityType::TypeAlias => &["Entity", "TypeAlias"],
+            EntityType::Macro => &["Entity", "Macro"],
+            EntityType::Impl => &["Entity", "ImplBlock"],
         }
     }
 
@@ -1026,6 +1011,10 @@ impl Neo4jClientTrait for Neo4jClient {
         Self::drop_database(self, database_name).await
     }
 
+    async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()> {
+        Self::delete_repository_data(self, repository_id).await
+    }
+
     async fn use_database(&self, database_name: &str) -> Result<()> {
         Self::use_database(self, database_name).await
     }
@@ -1088,32 +1077,6 @@ impl Neo4jClientTrait for Neo4jClient {
         relationships: &[(String, String, String)],
     ) -> Result<()> {
         Self::batch_create_relationships(self, relationships).await
-    }
-
-    async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()> {
-        Self::store_unresolved_relationship(
-            self,
-            entity_id,
-            relationship_type,
-            target_qualified_name,
-        )
-        .await
-    }
-
-    async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>> {
-        Self::find_unresolved_contains_nodes(self).await
-    }
-
-    async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize> {
-        Self::resolve_contains_relationships_batch(self, unresolved_nodes).await
     }
 
     async fn run_query_with_params(

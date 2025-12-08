@@ -496,6 +496,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore] // Requires Docker
     async fn test_qdrant_starts_and_is_healthy() -> Result<()> {
         let qdrant = TestQdrant::start().await?;
 
@@ -508,6 +509,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires Docker
     async fn test_postgres_starts_and_is_healthy() -> Result<()> {
         let postgres = TestPostgres::start().await?;
 

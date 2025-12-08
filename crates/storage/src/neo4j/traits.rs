@@ -33,6 +33,18 @@ pub trait Neo4jClientTrait: Send + Sync {
     /// * `Result<()>` - Success or error
     async fn drop_database(&self, database_name: &str) -> Result<()>;
 
+    /// Delete all data for a repository from Neo4j
+    ///
+    /// For Enterprise Edition: Drops the per-repository database.
+    /// For Community Edition: Deletes all nodes/relationships with matching repository_id.
+    ///
+    /// # Arguments
+    /// * `repository_id` - UUID of the repository to delete
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    async fn delete_repository_data(&self, repository_id: Uuid) -> Result<()>;
+
     /// Switch to a specific database for subsequent operations
     ///
     /// # Arguments
@@ -170,52 +182,6 @@ pub trait Neo4jClientTrait: Send + Sync {
         &self,
         relationships: &[(String, String, String)],
     ) -> Result<()>;
-
-    /// Store an unresolved relationship as a node property for later resolution
-    ///
-    /// When a relationship target doesn't exist yet, we store the relationship
-    /// information as a temporary node property. Later resolution processes will
-    /// query for these properties and create actual relationship edges.
-    ///
-    /// # Arguments
-    /// * `entity_id` - ID of the entity with unresolved relationship
-    /// * `relationship_type` - Type of relationship (must be in allowed list)
-    /// * `target_qualified_name` - Qualified name of the target entity
-    ///
-    /// # Property Naming
-    /// Property is stored as `unresolved_{rel_type}_parent` (lowercase)
-    ///
-    /// # Security
-    /// - Validates `relationship_type` against `ALLOWED_RELATIONSHIP_TYPES`
-    /// - Uses parameterized queries for all values
-    /// - Property name derived from validated constant (safe from injection)
-    async fn store_unresolved_relationship(
-        &self,
-        entity_id: &str,
-        relationship_type: &str,
-        target_qualified_name: &str,
-    ) -> Result<()>;
-
-    /// Find all nodes with unresolved CONTAINS relationships
-    ///
-    /// # Returns
-    /// * `Result<Vec<(String, String)>>` - Vec of (child_id, parent_qualified_name) pairs
-    async fn find_unresolved_contains_nodes(&self) -> Result<Vec<(String, String)>>;
-
-    /// Batch resolve CONTAINS relationships using UNWIND for performance
-    ///
-    /// This method resolves multiple unresolved CONTAINS relationships in just 2 queries
-    /// instead of 3N queries, providing significant performance improvement for large repositories.
-    ///
-    /// # Arguments
-    /// * `unresolved_nodes` - Vec of (child_id, parent_qualified_name) pairs
-    ///
-    /// # Returns
-    /// * `Result<usize>` - Number of relationships successfully created
-    async fn resolve_contains_relationships_batch(
-        &self,
-        unresolved_nodes: &[(String, String)],
-    ) -> Result<usize>;
 
     // ===== Utilities =====
 

@@ -39,6 +39,7 @@ async fn setup_postgres() -> Result<(
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_ensure_repository_creates_new() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -66,6 +67,7 @@ async fn test_ensure_repository_creates_new() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_ensure_repository_idempotent() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -89,6 +91,7 @@ async fn test_ensure_repository_idempotent() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_store_entity_metadata_insert() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -146,6 +149,7 @@ async fn test_store_entity_metadata_insert() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_store_entity_metadata_update() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -232,6 +236,7 @@ async fn test_store_entity_metadata_update() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_file_snapshot() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -372,6 +377,7 @@ async fn test_get_file_snapshot() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_file_snapshot_create_and_retrieve() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -409,6 +415,7 @@ async fn test_file_snapshot_create_and_retrieve() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_file_snapshot_update() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -458,6 +465,7 @@ async fn test_file_snapshot_update() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_mark_entities_deleted() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -556,6 +564,7 @@ async fn test_mark_entities_deleted() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -591,6 +600,7 @@ async fn test_mark_entities_deleted_batch_size_limit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_ids() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -661,6 +671,7 @@ async fn test_get_entities_by_ids() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_ids_batch_limit() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -687,6 +698,7 @@ async fn test_get_entities_by_ids_batch_limit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_write_and_read() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -778,6 +790,7 @@ async fn test_outbox_write_and_read() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_mark_processed() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -837,6 +850,7 @@ async fn test_outbox_mark_processed() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_outbox_record_failure() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -907,6 +921,7 @@ async fn test_outbox_record_failure() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_connection_failure() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let config = create_storage_config(6334, 6333, 9999, "codesearch");
@@ -921,6 +936,7 @@ async fn test_connection_failure() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_transaction_rollback() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -978,6 +994,7 @@ async fn test_transaction_rollback() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_initialization() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1004,6 +1021,7 @@ async fn test_bm25_statistics_initialization() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_incremental_update() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1063,6 +1081,7 @@ async fn test_bm25_statistics_incremental_update() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_after_deletion() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1112,6 +1131,7 @@ async fn test_bm25_statistics_after_deletion() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_delete_all_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1151,6 +1171,7 @@ async fn test_bm25_statistics_delete_all_entities() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_single_entity() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1182,6 +1203,7 @@ async fn test_bm25_statistics_single_entity() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_empty_batch() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1219,6 +1241,7 @@ async fn test_bm25_statistics_empty_batch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_bm25_statistics_over_deletion() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1256,6 +1279,7 @@ async fn test_bm25_statistics_over_deletion() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_drop_single_repository() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1309,6 +1333,7 @@ async fn test_drop_single_repository() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_drop_nonexistent_repository() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1333,6 +1358,7 @@ async fn test_drop_nonexistent_repository() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_embeddings_by_qualified_names_found() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1459,6 +1485,7 @@ async fn test_get_embeddings_by_qualified_names_found() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_embeddings_by_qualified_names_missing() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1492,6 +1519,7 @@ async fn test_get_embeddings_by_qualified_names_missing() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_embeddings_by_qualified_names_partial() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1569,6 +1597,7 @@ async fn test_get_embeddings_by_qualified_names_partial() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_embeddings_by_qualified_names_empty_input() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1599,6 +1628,7 @@ async fn test_get_embeddings_by_qualified_names_empty_input() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_embeddings_by_qualified_names_deleted_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1673,6 +1703,7 @@ async fn test_get_embeddings_by_qualified_names_deleted_entities() -> Result<()>
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_qualified_names_basic() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1748,6 +1779,7 @@ async fn test_get_entities_by_qualified_names_basic() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_qualified_names_empty_input() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1774,6 +1806,7 @@ async fn test_get_entities_by_qualified_names_empty_input() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_qualified_names_partial_match() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1836,6 +1869,7 @@ async fn test_get_entities_by_qualified_names_partial_match() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_qualified_names_duplicates() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1902,6 +1936,7 @@ async fn test_get_entities_by_qualified_names_duplicates() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_get_entities_by_qualified_names_deleted() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -1969,6 +2004,7 @@ async fn test_get_entities_by_qualified_names_deleted() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_basic() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2059,6 +2095,7 @@ async fn test_search_entities_fulltext_basic() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_stemming() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2123,6 +2160,7 @@ async fn test_search_entities_fulltext_stemming() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_stop_words() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2182,6 +2220,7 @@ async fn test_search_entities_fulltext_stop_words() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_null_content() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2251,6 +2290,7 @@ async fn test_search_entities_fulltext_null_content() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_deleted_entities() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2324,6 +2364,7 @@ async fn test_search_entities_fulltext_deleted_entities() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_limit() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;
@@ -2396,6 +2437,7 @@ async fn test_search_entities_fulltext_limit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Requires Docker for testcontainers"]
 async fn test_search_entities_fulltext_cross_repository() -> Result<()> {
     with_timeout(Duration::from_secs(30), async {
         let (postgres, db_name, client) = setup_postgres().await?;

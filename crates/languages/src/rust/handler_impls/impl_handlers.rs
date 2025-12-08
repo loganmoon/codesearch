@@ -8,11 +8,12 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::import_map::{parse_file_imports, resolve_reference, ImportMap};
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
     extract_function_calls, extract_function_modifiers, extract_function_parameters,
-    extract_generics_from_node, extract_preceding_doc_comments, find_capture_node, node_to_text,
-    require_capture_node,
+    extract_generics_from_node, extract_local_var_types, extract_preceding_doc_comments,
+    extract_type_references, find_capture_node, node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -42,9 +43,23 @@ pub fn handle_impl_impl(
     }
 
     // Extract the type this impl is for
-    let for_type = find_capture_node(query_match, query, capture_names::TYPE)
+    let for_type_raw = find_capture_node(query_match, query, capture_names::TYPE)
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
+
+    // Build ImportMap from file's imports for qualified name resolution
+    let import_map = get_file_import_map(impl_node, source);
+
+    // Resolve for_type through imports (strip generics first for resolution)
+    let for_type_base = for_type_raw
+        .split('<')
+        .next()
+        .unwrap_or(&for_type_raw)
+        .trim();
+    let for_type_resolved = resolve_reference(for_type_base, &import_map, None, "::");
+
+    // Keep original for display, but store resolved for relationships
+    let for_type = for_type_raw.clone();
 
     // Extract generics
     let generics = find_capture_node(query_match, query, capture_names::GENERICS)
@@ -101,6 +116,11 @@ pub fn handle_impl_impl(
         .attributes
         .insert("for_type".to_string(), for_type.clone());
 
+    // Store the resolved type name for relationship resolution
+    metadata
+        .attributes
+        .insert("implements".to_string(), for_type_resolved.clone());
+
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
@@ -139,14 +159,37 @@ pub fn handle_impl_trait_impl(
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL_TRAIT)?;
 
     // Extract the type this impl is for
-    let for_type = find_capture_node(query_match, query, capture_names::TYPE)
+    let for_type_raw = find_capture_node(query_match, query, capture_names::TYPE)
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
     // Extract the trait being implemented
-    let trait_name = find_capture_node(query_match, query, capture_names::TRAIT)
+    let trait_name_raw = find_capture_node(query_match, query, capture_names::TRAIT)
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
+
+    // Build ImportMap from file's imports for qualified name resolution
+    let import_map = get_file_import_map(impl_node, source);
+
+    // Resolve for_type through imports (strip generics first for resolution)
+    let for_type_base = for_type_raw
+        .split('<')
+        .next()
+        .unwrap_or(&for_type_raw)
+        .trim();
+    let for_type_resolved = resolve_reference(for_type_base, &import_map, None, "::");
+
+    // Resolve trait_name through imports (strip generics first for resolution)
+    let trait_name_base = trait_name_raw
+        .split('<')
+        .next()
+        .unwrap_or(&trait_name_raw)
+        .trim();
+    let trait_name_resolved = resolve_reference(trait_name_base, &import_map, None, "::");
+
+    // Keep original for display
+    let for_type = for_type_raw.clone();
+    let trait_name = trait_name_raw.clone();
 
     // Extract generics
     let generics = find_capture_node(query_match, query, capture_names::GENERICS)
@@ -206,6 +249,15 @@ pub fn handle_impl_trait_impl(
     metadata
         .attributes
         .insert("implements_trait".to_string(), trait_name.clone());
+
+    // Store the resolved names for relationship resolution
+    metadata
+        .attributes
+        .insert("implements".to_string(), for_type_resolved.clone());
+    metadata.attributes.insert(
+        "implements_trait_resolved".to_string(),
+        trait_name_resolved.clone(),
+    );
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -505,8 +557,28 @@ fn extract_method(
     // Extract return type
     let return_type = extract_method_return_type(method_node, source);
 
-    // Extract function calls from the method body
-    let calls = extract_function_calls(method_node, source);
+    // Build ImportMap from file's imports for qualified name resolution
+    let import_map = get_file_import_map(method_node, source);
+
+    // Extract local variable types for method call resolution
+    let local_vars = extract_local_var_types(method_node, source);
+
+    // Extract function calls from the method body with qualified name resolution
+    let calls = extract_function_calls(
+        method_node,
+        source,
+        &import_map,
+        Some(impl_ctx.qualified_name),
+        &local_vars,
+    );
+
+    // Extract type references for USES relationships
+    let type_refs = extract_type_references(
+        method_node,
+        source,
+        &import_map,
+        Some(impl_ctx.qualified_name),
+    );
 
     // Build metadata
     let mut metadata = EntityMetadata {
@@ -527,6 +599,13 @@ fn extract_method(
     if !calls.is_empty() {
         if let Ok(json) = serde_json::to_string(&calls) {
             metadata.attributes.insert("calls".to_string(), json);
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
         }
     }
 
@@ -611,4 +690,16 @@ fn extract_method_return_type(node: Node, source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Get the ImportMap for a file by walking up to the AST root
+fn get_file_import_map(node: Node, source: &str) -> ImportMap {
+    // Walk up to the root node
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        current = parent;
+    }
+
+    // Parse imports from the root
+    parse_file_imports(current, source, Language::Rust)
 }

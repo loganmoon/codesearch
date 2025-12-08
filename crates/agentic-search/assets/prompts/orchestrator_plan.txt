@@ -24,10 +24,11 @@ Graph traversal relationships:
 - dependencies/imports/uses: Find module dependencies
 
 Decision criteria:
-1. If the accumulated context satisfactorily answers the query, stop
-2. If no new information was found in the last iteration, stop
-3. If specific code entities are found, consider graph traversal to find callers/callees
-4. If the query is broad, use multiple search strategies
+1. If the query asks about relationships (calls, callers, callees, implements, uses, contains), USE graph_traversal
+2. If specific code entities are found in context, USE graph_traversal to explore their relationships
+3. If the accumulated context satisfactorily answers the query, stop
+4. If no new information was found in the last iteration, stop
+5. If the query is broad and no entities found yet, use search operations
 
 Output a JSON object with this exact structure:
 {
@@ -41,11 +42,14 @@ Output a JSON object with this exact structure:
     },
     {
       "operation_type": "graph_traversal",
-      "entity_id": "entity-uuid-from-context",
+      "entity_id": "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
       "relationship": "callers"
     }
   ]
 }
+
+IMPORTANT: For graph_traversal, the entity_id MUST be copied EXACTLY from the accumulated context above.
+Entity IDs are in the format [entity-{32 hex chars}] (39 characters total). Copy the full ID including the "entity-" prefix.
 
 If stopping, use:
 {
@@ -54,4 +58,4 @@ If stopping, use:
   "operations": []
 }
 
-Output ONLY the JSON object, no additional text.
+Output ONLY the JSON object, no additional text. Do NOT wrap in markdown code blocks.

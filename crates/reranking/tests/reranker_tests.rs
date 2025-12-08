@@ -43,7 +43,7 @@ async fn test_reranker_respects_top_k() {
     .await
     .expect("Failed to create reranker provider");
 
-    let document_contents = vec![
+    let document_contents = [
         ("doc1".to_string(), "function foo() {}".to_string()),
         ("doc2".to_string(), "function bar() {}".to_string()),
         ("doc3".to_string(), "function baz() {}".to_string()),

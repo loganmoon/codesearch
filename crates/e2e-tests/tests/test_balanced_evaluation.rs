@@ -205,6 +205,17 @@ where
     }
 }
 
+fn calculate_avg<F>(results: &[QueryResult], extractor: F) -> f64
+where
+    F: Fn(&QueryResult) -> f64,
+{
+    if results.is_empty() {
+        0.0
+    } else {
+        results.iter().map(extractor).sum::<f64>() / results.len() as f64
+    }
+}
+
 fn format_optional_metric(value: Option<f64>) -> String {
     value
         .map(|v| format!("{v:.3}"))
@@ -853,133 +864,61 @@ async fn test_balanced_evaluation() -> Result<()> {
     }
 
     // Calculate aggregate metrics - Latency
-    let semantic_avg_dense_latency = semantic_results
-        .iter()
-        .map(|r| r.dense_latency_ms as f64)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_dense_rerank_latency = semantic_results
-        .iter()
-        .map(|r| r.dense_rerank_latency_ms as f64)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_hybrid_latency = semantic_results
-        .iter()
-        .map(|r| r.hybrid_latency_ms as f64)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_hybrid_rerank_latency = semantic_results
-        .iter()
-        .map(|r| r.hybrid_rerank_latency_ms as f64)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
+    let semantic_avg_dense_latency =
+        calculate_avg(&semantic_results, |r| r.dense_latency_ms as f64);
+    let semantic_avg_dense_rerank_latency =
+        calculate_avg(&semantic_results, |r| r.dense_rerank_latency_ms as f64);
+    let semantic_avg_hybrid_latency =
+        calculate_avg(&semantic_results, |r| r.hybrid_latency_ms as f64);
+    let semantic_avg_hybrid_rerank_latency =
+        calculate_avg(&semantic_results, |r| r.hybrid_rerank_latency_ms as f64);
 
-    let keyword_avg_dense_latency = keyword_results
-        .iter()
-        .map(|r| r.dense_latency_ms as f64)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_dense_rerank_latency = keyword_results
-        .iter()
-        .map(|r| r.dense_rerank_latency_ms as f64)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_hybrid_latency = keyword_results
-        .iter()
-        .map(|r| r.hybrid_latency_ms as f64)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_hybrid_rerank_latency = keyword_results
-        .iter()
-        .map(|r| r.hybrid_rerank_latency_ms as f64)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
+    let keyword_avg_dense_latency =
+        calculate_avg(&keyword_results, |r| r.dense_latency_ms as f64);
+    let keyword_avg_dense_rerank_latency =
+        calculate_avg(&keyword_results, |r| r.dense_rerank_latency_ms as f64);
+    let keyword_avg_hybrid_latency =
+        calculate_avg(&keyword_results, |r| r.hybrid_latency_ms as f64);
+    let keyword_avg_hybrid_rerank_latency =
+        calculate_avg(&keyword_results, |r| r.hybrid_rerank_latency_ms as f64);
 
     // Calculate aggregate metrics - Entity Coverage
-    let semantic_avg_entity_coverage_dense = semantic_results
-        .iter()
-        .map(|r| r.entity_type_coverage_dense)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_entity_coverage_dense_rerank = semantic_results
-        .iter()
-        .map(|r| r.entity_type_coverage_dense_rerank)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_entity_coverage_hybrid = semantic_results
-        .iter()
-        .map(|r| r.entity_type_coverage_hybrid)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_entity_coverage_hybrid_rerank = semantic_results
-        .iter()
-        .map(|r| r.entity_type_coverage_hybrid_rerank)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
+    let semantic_avg_entity_coverage_dense =
+        calculate_avg(&semantic_results, |r| r.entity_type_coverage_dense);
+    let semantic_avg_entity_coverage_dense_rerank =
+        calculate_avg(&semantic_results, |r| r.entity_type_coverage_dense_rerank);
+    let semantic_avg_entity_coverage_hybrid =
+        calculate_avg(&semantic_results, |r| r.entity_type_coverage_hybrid);
+    let semantic_avg_entity_coverage_hybrid_rerank =
+        calculate_avg(&semantic_results, |r| r.entity_type_coverage_hybrid_rerank);
 
-    let keyword_avg_entity_coverage_dense = keyword_results
-        .iter()
-        .map(|r| r.entity_type_coverage_dense)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_entity_coverage_dense_rerank = keyword_results
-        .iter()
-        .map(|r| r.entity_type_coverage_dense_rerank)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_entity_coverage_hybrid = keyword_results
-        .iter()
-        .map(|r| r.entity_type_coverage_hybrid)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_entity_coverage_hybrid_rerank = keyword_results
-        .iter()
-        .map(|r| r.entity_type_coverage_hybrid_rerank)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
+    let keyword_avg_entity_coverage_dense =
+        calculate_avg(&keyword_results, |r| r.entity_type_coverage_dense);
+    let keyword_avg_entity_coverage_dense_rerank =
+        calculate_avg(&keyword_results, |r| r.entity_type_coverage_dense_rerank);
+    let keyword_avg_entity_coverage_hybrid =
+        calculate_avg(&keyword_results, |r| r.entity_type_coverage_hybrid);
+    let keyword_avg_entity_coverage_hybrid_rerank =
+        calculate_avg(&keyword_results, |r| r.entity_type_coverage_hybrid_rerank);
 
     // Calculate aggregate metrics - Concept Coverage
-    let semantic_avg_concept_coverage_dense = semantic_results
-        .iter()
-        .map(|r| r.concept_coverage_dense)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_concept_coverage_dense_rerank = semantic_results
-        .iter()
-        .map(|r| r.concept_coverage_dense_rerank)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_concept_coverage_hybrid = semantic_results
-        .iter()
-        .map(|r| r.concept_coverage_hybrid)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
-    let semantic_avg_concept_coverage_hybrid_rerank = semantic_results
-        .iter()
-        .map(|r| r.concept_coverage_hybrid_rerank)
-        .sum::<f64>()
-        / semantic_results.len() as f64;
+    let semantic_avg_concept_coverage_dense =
+        calculate_avg(&semantic_results, |r| r.concept_coverage_dense);
+    let semantic_avg_concept_coverage_dense_rerank =
+        calculate_avg(&semantic_results, |r| r.concept_coverage_dense_rerank);
+    let semantic_avg_concept_coverage_hybrid =
+        calculate_avg(&semantic_results, |r| r.concept_coverage_hybrid);
+    let semantic_avg_concept_coverage_hybrid_rerank =
+        calculate_avg(&semantic_results, |r| r.concept_coverage_hybrid_rerank);
 
-    let keyword_avg_concept_coverage_dense = keyword_results
-        .iter()
-        .map(|r| r.concept_coverage_dense)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_concept_coverage_dense_rerank = keyword_results
-        .iter()
-        .map(|r| r.concept_coverage_dense_rerank)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_concept_coverage_hybrid = keyword_results
-        .iter()
-        .map(|r| r.concept_coverage_hybrid)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
-    let keyword_avg_concept_coverage_hybrid_rerank = keyword_results
-        .iter()
-        .map(|r| r.concept_coverage_hybrid_rerank)
-        .sum::<f64>()
-        / keyword_results.len() as f64;
+    let keyword_avg_concept_coverage_dense =
+        calculate_avg(&keyword_results, |r| r.concept_coverage_dense);
+    let keyword_avg_concept_coverage_dense_rerank =
+        calculate_avg(&keyword_results, |r| r.concept_coverage_dense_rerank);
+    let keyword_avg_concept_coverage_hybrid =
+        calculate_avg(&keyword_results, |r| r.concept_coverage_hybrid);
+    let keyword_avg_concept_coverage_hybrid_rerank =
+        calculate_avg(&keyword_results, |r| r.concept_coverage_hybrid_rerank);
 
     // Calculate aggregate metrics - IR Metrics (NDCG@10)
     let semantic_avg_ndcg_dense = calculate_avg_optional(&semantic_results, |r| r.ndcg_dense);

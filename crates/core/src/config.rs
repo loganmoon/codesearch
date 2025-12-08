@@ -123,6 +123,10 @@ pub struct EmbeddingsConfig {
     /// Default instruction for BGE embedding models
     #[serde(default = "default_bge_instruction")]
     pub default_bge_instruction: String,
+
+    /// Number of retry attempts for failed embedding requests
+    #[serde(default = "default_embedding_retry_attempts")]
+    pub retry_attempts: usize,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -140,6 +144,7 @@ impl std::fmt::Debug for EmbeddingsConfig {
                 &self.max_concurrent_api_requests,
             )
             .field("default_bge_instruction", &self.default_bge_instruction)
+            .field("retry_attempts", &self.retry_attempts)
             .finish()
     }
 }
@@ -199,6 +204,10 @@ pub struct StorageConfig {
     #[serde(default = "default_postgres_password")]
     pub postgres_password: String,
 
+    /// Postgres connection pool size (max connections)
+    #[serde(default = "default_postgres_pool_size")]
+    pub postgres_pool_size: u32,
+
     /// Maximum entities allowed in a single Postgres batch operation (safety limit)
     #[serde(default = "default_max_entities_per_db_operation")]
     pub max_entities_per_db_operation: usize,
@@ -237,6 +246,7 @@ impl std::fmt::Debug for StorageConfig {
             .field("postgres_database", &self.postgres_database)
             .field("postgres_user", &self.postgres_user)
             .field("postgres_password", &"***REDACTED***")
+            .field("postgres_pool_size", &self.postgres_pool_size)
             .field(
                 "max_entities_per_db_operation",
                 &self.max_entities_per_db_operation,
@@ -265,7 +275,7 @@ pub struct ServerConfig {
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguagesConfig {
-    /// List of enabled languages (currently only "rust" is supported)
+    /// List of enabled languages (rust, javascript, typescript, python)
     #[serde(default = "default_enabled_languages")]
     pub enabled: Vec<String>,
 }
@@ -358,6 +368,10 @@ pub struct OutboxConfig {
     /// Maximum number of Qdrant client connections to cache
     #[serde(default = "default_outbox_max_cached_collections")]
     pub max_cached_collections: usize,
+
+    /// Drain timeout in seconds (how long to wait for outbox to drain after indexing)
+    #[serde(default = "default_outbox_drain_timeout_secs")]
+    pub drain_timeout_secs: u64,
 }
 
 // Default constants
@@ -383,7 +397,7 @@ fn default_enabled_languages() -> Vec<String> {
 }
 
 fn default_texts_per_api_request() -> usize {
-    128
+    64
 }
 
 fn default_device() -> String {
@@ -407,11 +421,15 @@ fn default_embedding_dimension() -> usize {
 }
 
 fn default_max_concurrent_api_requests() -> usize {
-    64
+    4 // Reduced from 64 to prevent vLLM OOM
 }
 
 fn default_bge_instruction() -> String {
     DEFAULT_BGE_INSTRUCTION.to_string()
+}
+
+fn default_embedding_retry_attempts() -> usize {
+    5
 }
 
 fn default_debounce_ms() -> u64 {
@@ -465,6 +483,10 @@ fn default_postgres_password() -> String {
     DEFAULT_POSTGRES_PASSWORD.to_string()
 }
 
+fn default_postgres_pool_size() -> u32 {
+    20 // Increased from SQLx default of 5 for better concurrency
+}
+
 fn default_neo4j_host() -> String {
     "localhost".to_string()
 }
@@ -486,7 +508,7 @@ fn default_neo4j_password() -> String {
 }
 
 fn default_entities_per_embedding_batch() -> usize {
-    2000
+    500 // Reduced from 2000 to prevent vLLM OOM
 }
 
 pub fn default_max_entities_per_db_operation() -> usize {
@@ -550,7 +572,7 @@ fn default_outbox_poll_interval_ms() -> u64 {
 }
 
 fn default_outbox_entries_per_poll() -> i64 {
-    100
+    500
 }
 
 fn default_outbox_max_retries() -> i32 {
@@ -565,6 +587,10 @@ fn default_outbox_max_cached_collections() -> usize {
     200
 }
 
+fn default_outbox_drain_timeout_secs() -> u64 {
+    600 // 10 minutes - sufficient for ~100k entries at 200 entries/sec
+}
+
 impl Default for EmbeddingsConfig {
     fn default() -> Self {
         Self {
@@ -577,6 +603,7 @@ impl Default for EmbeddingsConfig {
             embedding_dimension: default_embedding_dimension(),
             max_concurrent_api_requests: default_max_concurrent_api_requests(),
             default_bge_instruction: default_bge_instruction(),
+            retry_attempts: default_embedding_retry_attempts(),
         }
     }
 }
@@ -638,6 +665,7 @@ impl Default for OutboxConfig {
             max_retries: default_outbox_max_retries(),
             max_embedding_dim: default_outbox_max_embedding_dim(),
             max_cached_collections: default_outbox_max_cached_collections(),
+            drain_timeout_secs: default_outbox_drain_timeout_secs(),
         }
     }
 }
@@ -820,7 +848,32 @@ impl Config {
     /// for nested values. For example:
     /// - `CODESEARCH_EMBEDDINGS__PROVIDER=openai`
     pub fn from_file(path: &Path) -> Result<Self> {
-        let mut builder = ConfigLib::builder();
+        let mut builder = ConfigLib::builder()
+            // Set outbox defaults explicitly (config crate doesn't apply serde defaults for missing sections)
+            .set_default(
+                "outbox.poll_interval_ms",
+                default_outbox_poll_interval_ms() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            .set_default("outbox.entries_per_poll", default_outbox_entries_per_poll())
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            .set_default("outbox.max_retries", default_outbox_max_retries() as i64)
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            .set_default(
+                "outbox.max_embedding_dim",
+                default_outbox_max_embedding_dim() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            .set_default(
+                "outbox.max_cached_collections",
+                default_outbox_max_cached_collections() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            .set_default(
+                "outbox.drain_timeout_secs",
+                default_outbox_drain_timeout_secs() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?;
 
         // Add the config file if it exists
         if path.exists() {
@@ -1060,6 +1113,7 @@ impl Config {
                 postgres_user: default_postgres_user(),
                 postgres_password: default_postgres_password(),
                 max_entities_per_db_operation: default_max_entities_per_db_operation(),
+                postgres_pool_size: default_postgres_pool_size(),
                 neo4j_host: default_neo4j_host(),
                 neo4j_http_port: default_neo4j_http_port(),
                 neo4j_bolt_port: default_neo4j_bolt_port(),
@@ -2142,7 +2196,7 @@ mod tests {
         let result = config.validate();
         assert!(result.is_ok());
         assert_eq!(config.outbox.poll_interval_ms, 1000);
-        assert_eq!(config.outbox.entries_per_poll, 100);
+        assert_eq!(config.outbox.entries_per_poll, 500);
         assert_eq!(config.outbox.max_retries, 3);
         assert_eq!(config.outbox.max_embedding_dim, 100_000);
         assert_eq!(config.outbox.max_cached_collections, 200);

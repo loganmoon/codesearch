@@ -43,10 +43,12 @@ pub use codesearch_core::error::{Error, Result};
 /// * `config` - Application configuration
 /// * `valid_repos` - List of (repository_id, collection_name, path) tuples
 /// * `postgres_client` - PostgreSQL client for database operations
+/// * `enable_agentic` - Whether agentic search endpoint is enabled
 pub async fn run_rest_server(
     config: Config,
     valid_repos: Vec<(Uuid, String, PathBuf)>,
     postgres_client: Arc<dyn PostgresClientTrait>,
+    enable_agentic: bool,
 ) -> Result<()> {
     info!(
         "Starting multi-repository REST API server with {} valid repositories",
@@ -155,6 +157,7 @@ pub async fn run_rest_server(
             max_batch_size: config.storage.max_entities_per_db_operation,
         }),
         repositories: Arc::new(RwLock::new(repositories)),
+        enable_agentic,
     };
 
     // Build router

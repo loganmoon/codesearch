@@ -43,7 +43,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start REST API server with semantic code search
-    Serve,
+    Serve {
+        /// Enable agentic search endpoint (requires ANTHROPIC_API_KEY env var)
+        #[arg(long)]
+        enable_agentic: bool,
+    },
     /// Index the repository
     Index {
         /// Force re-indexing of all files
@@ -73,14 +77,25 @@ enum CacheCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tokio-console if feature is enabled
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
     let cli = Cli::parse();
 
-    // Initialize logging
+    // Initialize logging (skip if tokio-console is handling it)
+    #[cfg(not(feature = "tokio-console"))]
     init_logging(cli.verbose)?;
+    #[cfg(feature = "tokio-console")]
+    if cli.verbose {
+        eprintln!("Note: verbose flag ignored when tokio-console is enabled");
+    }
 
     // Execute commands
     match cli.command {
-        Some(Commands::Serve) => serve(cli.config.as_deref()).await,
+        Some(Commands::Serve { enable_agentic }) => {
+            serve(cli.config.as_deref(), enable_agentic).await
+        }
         Some(Commands::Index { force }) => {
             // Find repository root
             let repo_root = find_repository_root()?;
@@ -147,8 +162,18 @@ fn find_repository_root() -> Result<PathBuf> {
 }
 
 /// Start the REST API server (multi-repository mode)
-async fn serve(config_path: Option<&Path>) -> Result<()> {
+async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
     info!("Preparing to start multi-repository REST API server...");
+
+    // Validate ANTHROPIC_API_KEY if agentic search is enabled
+    if enable_agentic {
+        if env::var("ANTHROPIC_API_KEY").is_err() {
+            return Err(anyhow!(
+                "--enable-agentic requires ANTHROPIC_API_KEY environment variable to be set"
+            ));
+        }
+        info!("Agentic search enabled (ANTHROPIC_API_KEY found)");
+    }
 
     // Shared initialization
     let backends = initialize_backends(config_path).await?;
@@ -195,9 +220,10 @@ async fn serve(config_path: Option<&Path>) -> Result<()> {
     info!("Outbox processor started successfully");
 
     // Run REST API server
-    let server_result = codesearch_server::run_rest_server(config, valid_repos, postgres_client)
-        .await
-        .map_err(|e| anyhow!("REST server error: {e}"));
+    let server_result =
+        codesearch_server::run_rest_server(config, valid_repos, postgres_client, enable_agentic)
+            .await
+            .map_err(|e| anyhow!("REST server error: {e}"));
 
     // Always perform graceful shutdown of outbox processor, regardless of server result
     // This ensures proper cleanup even if the server failed
@@ -363,6 +389,36 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         "Repository ID retrieved for indexing"
     );
 
+    // Create Qdrant config for outbox processor
+    let qdrant_config = codesearch_storage::QdrantConfig {
+        host: config.storage.qdrant_host.clone(),
+        port: config.storage.qdrant_port,
+        rest_port: config.storage.qdrant_rest_port,
+    };
+
+    // Create outbox processor drain channel
+    let (outbox_drain_tx, outbox_drain_rx) = tokio::sync::oneshot::channel();
+
+    // Spawn outbox processor as background task with drain mode
+    let postgres_client_for_outbox = postgres_client.clone();
+    let storage_config = config.storage.clone();
+    let outbox_config = config.outbox.clone();
+    let outbox_handle = tokio::spawn(async move {
+        if let Err(e) = codesearch_outbox_processor::start_outbox_processor_with_drain(
+            postgres_client_for_outbox,
+            &qdrant_config,
+            storage_config,
+            &outbox_config,
+            outbox_drain_rx,
+        )
+        .await
+        {
+            error!("Outbox processor task failed: {e}");
+        }
+    });
+
+    info!("Outbox processor started (will drain after indexing completes)");
+
     // Create GitRepository if possible
     let git_repo = match codesearch_watcher::GitRepository::open(repo_root) {
         Ok(repo) => {
@@ -426,11 +482,27 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         }
     }
 
-    // Note: Relationship resolution now happens automatically in the outbox processor
-    // after entities are created in Neo4j. No manual resolution step required.
-    info!(
-        "Indexing completed. Relationships will be resolved automatically by the outbox processor."
-    );
+    // Signal the outbox processor to drain remaining entries
+    info!("Indexing complete. Signaling outbox processor to drain remaining entries...");
+    let _ = outbox_drain_tx.send(());
+
+    // Wait for outbox processor to finish draining
+    let drain_timeout_secs = config.outbox.drain_timeout_secs;
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(drain_timeout_secs),
+        outbox_handle,
+    )
+    .await
+    {
+        Ok(Ok(())) => info!("Outbox processor drained and stopped successfully"),
+        Ok(Err(e)) => warn!("Outbox processor task panicked: {e}"),
+        Err(_) => warn!(
+            "Outbox processor drain timed out after {drain_timeout_secs} seconds. \
+            Configure [outbox].drain_timeout_secs to increase."
+        ),
+    }
+
+    info!("Repository indexing and outbox processing completed.");
 
     Ok(())
 }
@@ -515,7 +587,8 @@ fn confirm_deletion() -> Result<bool> {
 ///
 /// Deletion is performed in this order:
 /// 1. Qdrant collection (if it exists - warns but continues if missing)
-/// 2. PostgreSQL repository data (cascades to all child tables)
+/// 2. Neo4j graph data (handles both Enterprise and Community editions)
+/// 3. PostgreSQL repository data (cascades to all child tables)
 async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to drop indexed data");
 
@@ -537,6 +610,9 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     let collection_manager = codesearch_storage::create_collection_manager(&config.storage)
         .await
         .context("Failed to create collection manager")?;
+    let neo4j_client = codesearch_storage::create_neo4j_client(&config.storage)
+        .await
+        .context("Failed to create Neo4j client")?;
 
     // List all repositories
     let all_repos = postgres_client
@@ -599,6 +675,16 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
                 "  Warning: Qdrant collection '{collection_name}' not found (may already be deleted)"
             );
         }
+
+        // Delete from Neo4j (handles both Enterprise and Community editions)
+        neo4j_client
+            .delete_repository_data(*repo_id)
+            .await
+            .context(format!(
+                "Failed to delete Neo4j graph data: {}",
+                repo_path.display()
+            ))?;
+        info!("Deleted Neo4j data for repository {repo_id}");
 
         // Delete from Postgres (cascades to all child tables)
         postgres_client

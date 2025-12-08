@@ -430,6 +430,9 @@ pub trait PostgresClientTrait: Send + Sync {
     /// Increment retry count and record error
     async fn record_outbox_failure(&self, outbox_id: Uuid, error: &str) -> Result<()>;
 
+    /// Count pending (unprocessed) outbox entries across all target stores
+    async fn count_pending_outbox_entries(&self) -> Result<i64>;
+
     /// Get the last indexed commit for a repository
     async fn get_last_indexed_commit(&self, repository_id: Uuid) -> Result<Option<String>>;
 
@@ -474,6 +477,23 @@ pub trait PostgresClientTrait: Send + Sync {
         embedding_id: i64,
     ) -> Result<Option<(Vec<f32>, Option<Vec<(u32, f32)>>)>>;
 
+    /// Batch fetch embeddings by IDs from entity_embeddings table
+    ///
+    /// Optimized batch version for fetching embeddings for many entities at once.
+    /// This reduces database round trips when processing outbox batches.
+    ///
+    /// # Parameters
+    ///
+    /// * `embedding_ids` - Slice of embedding IDs to fetch
+    ///
+    /// # Returns
+    ///
+    /// HashMap mapping embedding_id to (dense_embedding, sparse_embedding)
+    async fn get_embeddings_with_sparse_by_ids(
+        &self,
+        embedding_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, (Vec<f32>, Option<Vec<(u32, f32)>>)>>;
+
     /// Get entity embeddings statistics (total entries, size, etc.)
     async fn get_cache_stats(&self) -> Result<crate::CacheStats>;
 
@@ -516,4 +536,68 @@ pub trait PostgresClientTrait: Send + Sync {
         repository_id: Uuid,
         qualified_names: &[String],
     ) -> Result<std::collections::HashMap<String, CodeEntity>>;
+
+    // ========================================================================
+    // Pending Relationship Methods
+    // ========================================================================
+
+    /// Insert pending relationships for later resolution
+    ///
+    /// Stores relationships where the target entity doesn't exist yet.
+    /// These will be resolved later when the target entity is indexed.
+    /// Uses ON CONFLICT DO NOTHING to avoid duplicates.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `relationships` - Slice of (source_entity_id, relationship_type, target_qualified_name)
+    ///
+    /// # Returns
+    ///
+    /// Number of rows inserted (excludes duplicates)
+    async fn insert_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        relationships: &[(String, String, String)],
+    ) -> Result<u64>;
+
+    /// Resolve pending relationships using efficient JOIN
+    ///
+    /// Finds pending relationships where the target entity now exists by joining
+    /// against the entities table on qualified_name. Returns resolvable relationships
+    /// along with the target entity_id.
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    /// * `limit` - Maximum number of relationships to resolve in this batch
+    ///
+    /// # Returns
+    ///
+    /// Vec of (pending_id, source_entity_id, target_entity_id, relationship_type)
+    async fn resolve_pending_relationships(
+        &self,
+        repository_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<(i64, String, String, String)>>;
+
+    /// Delete resolved pending relationships by ID
+    ///
+    /// Call this after successfully creating the relationship edges in Neo4j.
+    ///
+    /// # Parameters
+    ///
+    /// * `pending_ids` - IDs of pending_relationships rows to delete
+    async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()>;
+
+    /// Count pending relationships for a repository
+    ///
+    /// # Parameters
+    ///
+    /// * `repository_id` - The repository UUID
+    ///
+    /// # Returns
+    ///
+    /// Total count of pending relationships
+    async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64>;
 }

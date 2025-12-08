@@ -631,7 +631,9 @@ impl OutboxProcessor {
         // Collect all embedding IDs and entity refs for batch queries
         let mut embedding_ids: Vec<i64> = Vec::with_capacity(entries.len());
         let mut entity_refs: Vec<(Uuid, String)> = Vec::with_capacity(entries.len());
-        let mut valid_entries: Vec<&OutboxEntry> = Vec::with_capacity(entries.len());
+        // Store parsed entities to avoid double parsing (parse once in first pass, reuse in second)
+        let mut valid_entries: Vec<(&OutboxEntry, codesearch_core::entities::CodeEntity)> =
+            Vec::with_capacity(entries.len());
 
         // First pass: collect IDs and validate entries
         for entry in entries {
@@ -670,7 +672,7 @@ impl OutboxProcessor {
 
             embedding_ids.push(embedding_id);
             entity_refs.push((entry.repository_id, entity.entity_id.clone()));
-            valid_entries.push(entry);
+            valid_entries.push((entry, entity));
         }
 
         // Batch fetch all embeddings in one query (instead of N queries)
@@ -707,7 +709,7 @@ impl OutboxProcessor {
         }
 
         // Second pass: build EmbeddedEntity from cached data
-        for (i, entry) in valid_entries.iter().enumerate() {
+        for (i, (entry, entity)) in valid_entries.into_iter().enumerate() {
             let embedding_id = embedding_ids[i];
             let entity_ref = &entity_refs[i];
 
@@ -787,11 +789,7 @@ impl OutboxProcessor {
                 }
             };
 
-            // Re-parse entity (we already validated it above)
-            let entity: codesearch_core::entities::CodeEntity =
-                serde_json::from_value(entry.payload.get("entity").cloned().unwrap_or_default())
-                    .map_err(|e| Error::storage(format!("Failed to deserialize entity: {e}")))?;
-
+            // Use entity from first pass (already parsed and validated)
             repo_token_counts.push((entry.repository_id, bm25_token_count));
             embedded_entities.push(EmbeddedEntity {
                 entity,

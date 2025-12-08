@@ -275,7 +275,7 @@ pub struct ServerConfig {
 /// Configuration for language support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguagesConfig {
-    /// List of enabled languages (currently only "rust" is supported)
+    /// List of enabled languages (rust, javascript, typescript, python)
     #[serde(default = "default_enabled_languages")]
     pub enabled: Vec<String>,
 }

@@ -309,17 +309,14 @@ impl Neo4jClient {
 
         let _db = self.get_current_database().await?;
 
-        // Group entities by type (needed for label assignment)
-        let mut entities_by_type: Vec<(EntityType, Vec<&CodeEntity>)> = Vec::new();
+        // Group entities by type (needed for label assignment) - O(n) with HashMap
+        let mut entities_by_type: std::collections::HashMap<EntityType, Vec<&CodeEntity>> =
+            std::collections::HashMap::new();
         for entity in entities {
-            if let Some((_, group)) = entities_by_type
-                .iter_mut()
-                .find(|(t, _)| *t == entity.entity_type)
-            {
-                group.push(entity);
-            } else {
-                entities_by_type.push((entity.entity_type, vec![entity]));
-            }
+            entities_by_type
+                .entry(entity.entity_type)
+                .or_default()
+                .push(entity);
         }
 
         let mut all_node_ids = Vec::new();
@@ -682,17 +679,14 @@ impl Neo4jClient {
             }
         }
 
-        // Group by relationship type
-        let mut rels_by_type: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+        // Group by relationship type - O(n) with HashMap
+        let mut rels_by_type: std::collections::HashMap<&str, Vec<(&str, &str)>> =
+            std::collections::HashMap::new();
         for (from_id, to_id, rel_type) in relationships {
-            if let Some((_, group)) = rels_by_type
-                .iter_mut()
-                .find(|(t, _)| *t == rel_type.as_str())
-            {
-                group.push((from_id.as_str(), to_id.as_str()));
-            } else {
-                rels_by_type.push((rel_type.as_str(), vec![(from_id.as_str(), to_id.as_str())]));
-            }
+            rels_by_type
+                .entry(rel_type.as_str())
+                .or_default()
+                .push((from_id.as_str(), to_id.as_str()));
         }
 
         // Process each relationship type group with a single UNWIND query

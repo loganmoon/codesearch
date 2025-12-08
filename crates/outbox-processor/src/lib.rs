@@ -187,9 +187,13 @@ pub async fn start_outbox_processor_with_drain(
                 Ok(0) => {
                     // Resolve all pending relationships now that all entities are indexed
                     info!("Outbox drained. Resolving pending relationships...");
-                    if let Err(e) = processor.resolve_pending_relationships().await {
-                        error!("Failed to resolve pending relationships: {e}");
-                    }
+                    processor
+                        .resolve_pending_relationships()
+                        .await
+                        .map_err(|e| {
+                            error!("Failed to resolve pending relationships: {e}");
+                            e
+                        })?;
                     info!("Outbox drained and relationships resolved, processor exiting");
                     return Ok(());
                 }

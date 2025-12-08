@@ -40,6 +40,29 @@ pub async fn query_graph(
 
     let (results, semantic_filter_applied) = if request.semantic_filter.is_some() {
         apply_semantic_filter(qualified_names, &request, postgres_client, reranker).await?
+    } else if request.return_entities && !qualified_names.is_empty() {
+        // Fetch full entities when requested (used by agentic search)
+        let entities = postgres_client
+            .get_entities_by_qualified_names(request.repository_id, &qualified_names)
+            .await
+            .unwrap_or_default();
+
+        let results: Vec<GraphResult> = qualified_names
+            .into_iter()
+            .take(request.limit)
+            .map(|qname| {
+                let entity = entities
+                    .get(&qname)
+                    .cloned()
+                    .and_then(|e| e.try_into().ok());
+                GraphResult {
+                    qualified_name: qname,
+                    relevance_score: None,
+                    entity,
+                }
+            })
+            .collect();
+        (results, false)
     } else {
         let results: Vec<GraphResult> = qualified_names
             .into_iter()

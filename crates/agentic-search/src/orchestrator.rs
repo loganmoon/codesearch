@@ -467,23 +467,40 @@ impl AgenticSearchOrchestrator {
                     let entity_id = op.entity_id.unwrap_or_default();
                     let relationship = op.relationship.unwrap_or_default();
 
+                    let valid_id = is_valid_entity_id(&entity_id);
+                    let valid_rel = is_valid_relationship(&relationship);
+
+                    debug!(
+                        "Graph traversal validation: entity_id='{}' (valid={}), relationship='{}' (valid={})",
+                        truncate_for_error(&entity_id),
+                        valid_id,
+                        relationship,
+                        valid_rel
+                    );
+
                     // Validate entity_id
-                    if !is_valid_entity_id(&entity_id) {
+                    if !valid_id {
                         warn!(
-                            "LLM returned invalid entity_id '{}', skipping graph traversal",
+                            "LLM returned invalid entity_id '{}', skipping graph traversal. Expected format: entity-{{32 hex chars}}",
                             truncate_for_error(&entity_id)
                         );
                         return None;
                     }
 
                     // Validate relationship against whitelist
-                    if !is_valid_relationship(&relationship) {
+                    if !valid_rel {
                         warn!(
-                            "LLM returned unknown relationship '{}', skipping graph traversal",
-                            relationship
+                            "LLM returned unknown relationship '{}', skipping graph traversal. Valid: {:?}",
+                            relationship,
+                            VALID_RELATIONSHIPS
                         );
                         return None;
                     }
+
+                    info!(
+                        "Graph traversal operation accepted: entity_id={}, relationship={}",
+                        entity_id, relationship
+                    );
 
                     Some(PlannedOperation::GraphTraversal {
                         entity_id,
@@ -601,10 +618,30 @@ impl AgenticSearchOrchestrator {
                     }
                 }
             }
+
+            // Log entities found from search for debugging graph traversal issues
+            info!(
+                "Search operations found {} entities this iteration",
+                all_entities.len()
+            );
+            for (i, e) in all_entities.iter().take(10).enumerate() {
+                debug!(
+                    "  [{}] {} -> {}",
+                    i + 1,
+                    e.entity.entity_id,
+                    e.entity.qualified_name
+                );
+            }
         }
 
         // Execute graph traversals (need entities from previous iterations + current)
         // Entity IDs from LLM come from accumulated_entities (previous iterations)
+        info!(
+            "Processing {} graph traversal operations with {} accumulated + {} new entities",
+            graph_ops.len(),
+            accumulated_entities.len(),
+            all_entities.len()
+        );
         for (entity_id, relationship) in graph_ops {
             stats.spawned += 1;
             // Combine accumulated entities with current iteration's entities
@@ -651,6 +688,32 @@ impl AgenticSearchOrchestrator {
         repository_ids: &[String],
         accumulated_entities: &[AgenticEntity],
     ) -> Result<Vec<AgenticEntity>> {
+        info!(
+            "Looking for entity_id='{}' in {} accumulated entities to execute {} traversal",
+            entity_id,
+            accumulated_entities.len(),
+            relationship
+        );
+
+        // Log available entity IDs for debugging
+        if accumulated_entities.len() <= 20 {
+            for e in accumulated_entities.iter() {
+                debug!(
+                    "  Available: {} -> {}",
+                    e.entity.entity_id, e.entity.qualified_name
+                );
+            }
+        } else {
+            debug!(
+                "  First 10 available: {:?}",
+                accumulated_entities
+                    .iter()
+                    .take(10)
+                    .map(|e| format!("{} -> {}", e.entity.entity_id, e.entity.qualified_name))
+                    .collect::<Vec<_>>()
+            );
+        }
+
         let query_type = relationship_to_query_type(relationship).ok_or_else(|| {
             AgenticSearchError::GraphTraversal(format!("Unknown relationship type: {relationship}"))
         })?;
@@ -660,6 +723,12 @@ impl AgenticSearchOrchestrator {
             .iter()
             .find(|e| e.entity.entity_id == entity_id)
             .ok_or_else(|| {
+                warn!(
+                    "Entity '{}' not found in {} accumulated entities. This indicates the LLM \
+                     referenced an entity_id that doesn't exist in the search results.",
+                    entity_id,
+                    accumulated_entities.len()
+                );
                 AgenticSearchError::GraphTraversal(format!(
                     "Entity not found in accumulated results: {entity_id}"
                 ))

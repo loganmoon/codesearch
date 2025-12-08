@@ -115,9 +115,31 @@ struct UnifiedSearchRequest {
 struct GraphQueryRequest {
     repository_id: String,
     query_type: String,
-    entity_name: Option<String>,
-    relationship_type: Option<String>,
+    parameters: GraphQueryParameters,
+    return_entities: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    semantic_filter: Option<String>,
     limit: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphQueryParameters {
+    qualified_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_depth: Option<usize>,
+}
+
+/// Map relationship_type from query JSON to GraphQueryType string
+fn relationship_to_graph_query_type(rel: &Option<String>) -> Option<&'static str> {
+    match rel.as_deref()? {
+        "CALLED_BY" => Some("FindFunctionCallers"),
+        "CALLS" => Some("FindFunctionCallees"),
+        "IMPLEMENTS" | "IMPLEMENTED_BY" => Some("FindTraitImplementations"),
+        "CONTAINS" => Some("FindModuleContents"),
+        "IMPORTS" | "USES" => Some("FindModuleDependencies"),
+        "EXTENDS" | "INHERITS_FROM" => Some("FindClassHierarchy"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -207,9 +229,17 @@ struct UnifiedSearchMetadata {
 
 #[derive(Debug, Deserialize)]
 struct GraphQueryResponse {
-    results: Vec<EntityResult>,
+    results: Vec<GraphResult>,
     #[allow(dead_code)]
     metadata: GraphMetadata,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphResult {
+    qualified_name: String,
+    #[allow(dead_code)]
+    relevance_score: Option<f32>,
+    entity: Option<EntityResult>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,6 +343,32 @@ struct CategorySearchTypeMetrics {
     avg_query_time_ms: f64,
 }
 
+/// Normalize a qualified_name for matching by stripping implementation details
+///
+/// Handles formats like:
+/// - "Fn::const_token (impl at line 566)" -> "fn::const_token"
+/// - "impl Fn at line 566" -> "fn"
+/// - "AssocItemList::l_curly_token" -> "associtemlist::l_curly_token"
+fn normalize_qualified_name(qn: &str) -> String {
+    let qn = qn.to_lowercase();
+
+    // Strip "(impl at line X)" suffix
+    if let Some(idx) = qn.find(" (impl at line") {
+        return qn[..idx].to_string();
+    }
+
+    // Handle "impl TypeName at line X" format - extract just the type name
+    if qn.starts_with("impl ") {
+        if let Some(at_idx) = qn.find(" at line") {
+            return qn[5..at_idx].to_string();
+        }
+        // "impl TypeName" without line number
+        return qn[5..].to_string();
+    }
+
+    qn
+}
+
 /// Calculate recall at k
 fn recall_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Option<f64> {
     if expected.is_empty() {
@@ -322,17 +378,20 @@ fn recall_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Optio
     let top_k: HashSet<_> = results
         .iter()
         .take(k)
-        .map(|r| r.qualified_name.to_lowercase())
+        .map(|r| normalize_qualified_name(&r.qualified_name))
         .collect();
 
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     let found = expected_set
         .iter()
         .filter(|e| {
             top_k
                 .iter()
-                .any(|r| r.contains(*e) || e.contains(r.as_str()))
+                .any(|r| r.contains(e.as_str()) || e.contains(r.as_str()))
         })
         .count();
 
@@ -346,15 +405,18 @@ fn precision_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Op
     }
 
     let top_k: Vec<_> = results.iter().take(k).collect();
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     let relevant = top_k
         .iter()
         .filter(|r| {
-            let qn = r.qualified_name.to_lowercase();
+            let qn = normalize_qualified_name(&r.qualified_name);
             expected_set
                 .iter()
-                .any(|e| qn.contains(e) || e.contains(&qn))
+                .any(|e| qn.contains(e.as_str()) || e.contains(qn.as_str()))
         })
         .count();
 
@@ -367,13 +429,16 @@ fn calculate_mrr(results: &[EntityResult], expected: &[String]) -> Option<f64> {
         return None;
     }
 
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     for (i, result) in results.iter().enumerate() {
-        let qn = result.qualified_name.to_lowercase();
+        let qn = normalize_qualified_name(&result.qualified_name);
         if expected_set
             .iter()
-            .any(|e| qn.contains(e) || e.contains(&qn))
+            .any(|e| qn.contains(e.as_str()) || e.contains(qn.as_str()))
         {
             return Some(1.0 / (i + 1) as f64);
         }
@@ -548,13 +613,24 @@ async fn execute_graph_search(
     repository_id: &str,
 ) -> Result<(Vec<EntityResult>, u64)> {
     // Extract entity name from query for graph traversal
-    let entity_name = extract_entity_name(&query.query);
+    let entity_name = extract_entity_name(&query.query).unwrap_or_default();
+
+    // Map relationship_type to proper GraphQueryType
+    let query_type = relationship_to_graph_query_type(&query.relationship_type)
+        .ok_or_else(|| anyhow::anyhow!(
+            "Unsupported relationship_type: {:?}",
+            query.relationship_type
+        ))?;
 
     let request = GraphQueryRequest {
         repository_id: repository_id.to_string(),
-        query_type: "find_related".to_string(),
-        entity_name,
-        relationship_type: query.relationship_type.clone(),
+        query_type: query_type.to_string(),
+        parameters: GraphQueryParameters {
+            qualified_name: entity_name,
+            max_depth: Some(3),
+        },
+        return_entities: true,
+        semantic_filter: None,
         limit: 20,
     };
 
@@ -575,7 +651,27 @@ async fn execute_graph_search(
     }
 
     let result: GraphQueryResponse = response.json().await?;
-    Ok((result.results, elapsed))
+
+    // Convert GraphResult to EntityResult (use entity if available, otherwise create minimal result)
+    let entities: Vec<EntityResult> = result
+        .results
+        .into_iter()
+        .filter_map(|gr| {
+            gr.entity.or_else(|| {
+                // Create a minimal EntityResult from qualified_name if entity not returned
+                Some(EntityResult {
+                    entity_id: String::new(),
+                    name: gr.qualified_name.split("::").last().unwrap_or(&gr.qualified_name).to_string(),
+                    qualified_name: gr.qualified_name,
+                    entity_type: "Unknown".to_string(),
+                    score: gr.relevance_score.unwrap_or(0.0),
+                    file_path: String::new(),
+                })
+            })
+        })
+        .collect();
+
+    Ok((entities, elapsed))
 }
 
 /// Execute agentic search

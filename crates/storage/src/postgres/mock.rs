@@ -1186,7 +1186,7 @@ mod tests {
             .mark_entities_deleted_with_outbox(
                 repo_id,
                 "test_collection",
-                &[entity.entity_id.clone()],
+                std::slice::from_ref(&entity.entity_id),
                 &[42], // token count
             )
             .await
@@ -1252,7 +1252,7 @@ mod tests {
             .mark_entities_deleted_with_outbox(
                 repo_id,
                 "test_collection",
-                &[entity.entity_id.clone()],
+                std::slice::from_ref(&entity.entity_id),
                 &[42], // token count
             )
             .await

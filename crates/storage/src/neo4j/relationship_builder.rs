@@ -480,7 +480,7 @@ mod tests {
         );
 
         // Build name_to_id map
-        let entities = vec![parent.clone(), child.clone()];
+        let entities = [parent.clone(), child.clone()];
         let name_to_id: HashMap<&str, &str> = entities
             .iter()
             .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
@@ -506,7 +506,7 @@ mod tests {
         );
 
         // Build name_to_id map (parent not in map, so relationship will be unresolved)
-        let entities = vec![child.clone()];
+        let entities = [child.clone()];
         let name_to_id: HashMap<&str, &str> = entities
             .iter()
             .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))

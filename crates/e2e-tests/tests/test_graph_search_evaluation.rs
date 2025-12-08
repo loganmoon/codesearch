@@ -14,6 +14,9 @@
 //!
 //!   # With agentic search included
 //!   ENABLE_AGENTIC=1 cargo test --manifest-path crates/e2e-tests/Cargo.toml --test test_graph_search_evaluation -- --ignored --nocapture
+//!
+//!   # Limit to first N samples (for quick testing)
+//!   SAMPLE_LIMIT=5 cargo test --manifest-path crates/e2e-tests/Cargo.toml --test test_graph_search_evaluation -- --ignored --nocapture
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
@@ -966,6 +969,13 @@ fn is_agentic_enabled() -> bool {
         .unwrap_or(false)
 }
 
+/// Get optional sample limit from SAMPLE_LIMIT environment variable
+fn get_sample_limit() -> Option<usize> {
+    std::env::var("SAMPLE_LIMIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+}
+
 /// Check if agentic search is enabled on the server
 async fn is_agentic_enabled_on_server(client: &Client) -> bool {
     match client.get(format!("{API_BASE_URL}/health")).send().await {
@@ -1053,14 +1063,33 @@ async fn test_graph_search_evaluation() -> Result<()> {
     }
     println!("Search types to evaluate: {:?}\n", search_types);
 
+    // Check for sample limit
+    let sample_limit = get_sample_limit();
+    let queries_to_run: Vec<_> = match sample_limit {
+        Some(limit) => {
+            println!(
+                "Sample limit: {} (set SAMPLE_LIMIT env var, running {} of {} queries)\n",
+                limit,
+                limit.min(dataset.queries.len()),
+                dataset.queries.len()
+            );
+            dataset.queries.iter().take(limit).collect()
+        }
+        None => {
+            println!("Sample limit: none (running all {} queries)\n", dataset.queries.len());
+            dataset.queries.iter().collect()
+        }
+    };
+
     // Evaluate each query against all search types
     let mut results = Vec::new();
+    let total_queries = queries_to_run.len();
 
-    for (i, query) in dataset.queries.iter().enumerate() {
+    for (i, query) in queries_to_run.iter().enumerate() {
         print!(
             "[{}/{}] Evaluating {} ({})... ",
             i + 1,
-            dataset.queries.len(),
+            total_queries,
             query.id,
             query.category
         );

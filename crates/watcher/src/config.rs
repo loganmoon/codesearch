@@ -304,30 +304,6 @@ impl Default for FilterConfig {
     }
 }
 
-/// Metrics configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MetricsConfig {
-    /// Enable event processing metrics
-    pub track_events: bool,
-    /// Enable memory usage tracking
-    pub track_memory: bool,
-    /// Enable Git operation metrics
-    pub track_git_ops: bool,
-    /// Metrics reporting interval in seconds
-    pub report_interval_secs: u64,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            track_events: true,
-            track_memory: true,
-            track_git_ops: true,
-            report_interval_secs: 60,
-        }
-    }
-}
-
 /// Recovery configuration for error handling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryConfig {

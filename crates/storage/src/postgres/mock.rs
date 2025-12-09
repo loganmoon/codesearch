@@ -593,6 +593,7 @@ impl PostgresClientTrait for MockPostgresClient {
         repository_id: Uuid,
         query: &str,
         limit: i64,
+        _fuzzy: bool,
     ) -> Result<Vec<CodeEntity>> {
         let data = self.data.lock().unwrap();
         let query_lower = query.to_lowercase();

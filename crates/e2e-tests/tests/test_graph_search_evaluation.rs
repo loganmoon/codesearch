@@ -5,8 +5,7 @@
 //! 1. Semantic - Vector embedding similarity search
 //! 2. Fulltext - PostgreSQL GIN-indexed keyword search
 //! 3. Unified - Hybrid semantic+fulltext with RRF fusion
-//! 4. Graph - Neo4j relationship traversal queries
-//! 5. Agentic - Claude-orchestrated multi-agent search (requires ENABLE_AGENTIC=1)
+//! 4. Agentic - Claude-orchestrated multi-agent search (requires ENABLE_AGENTIC=1)
 //!
 //! Run with:
 //!   # Without agentic (faster, no API costs)
@@ -36,7 +35,6 @@ pub enum SearchType {
     Semantic,
     Fulltext,
     Unified,
-    Graph,
     Agentic,
 }
 
@@ -46,7 +44,6 @@ impl std::fmt::Display for SearchType {
             SearchType::Semantic => write!(f, "semantic"),
             SearchType::Fulltext => write!(f, "fulltext"),
             SearchType::Unified => write!(f, "unified"),
-            SearchType::Graph => write!(f, "graph"),
             SearchType::Agentic => write!(f, "agentic"),
         }
     }
@@ -109,15 +106,6 @@ struct UnifiedSearchRequest {
     limit: usize,
     enable_fulltext: bool,
     enable_semantic: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct GraphQueryRequest {
-    repository_id: String,
-    query_type: String,
-    entity_name: Option<String>,
-    relationship_type: Option<String>,
-    limit: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -202,21 +190,6 @@ struct UnifiedSearchMetadata {
     #[serde(default)]
     reranked: bool,
     #[serde(default)]
-    query_time_ms: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct GraphQueryResponse {
-    results: Vec<EntityResult>,
-    #[allow(dead_code)]
-    metadata: GraphMetadata,
-}
-
-#[derive(Debug, Deserialize)]
-struct GraphMetadata {
-    #[allow(dead_code)]
-    total_results: usize,
-    #[allow(dead_code)]
     query_time_ms: u64,
 }
 
@@ -313,6 +286,32 @@ struct CategorySearchTypeMetrics {
     avg_query_time_ms: f64,
 }
 
+/// Normalize a qualified_name for matching by stripping implementation details
+///
+/// Handles formats like:
+/// - "Fn::const_token (impl at line 566)" -> "fn::const_token"
+/// - "impl Fn at line 566" -> "fn"
+/// - "AssocItemList::l_curly_token" -> "associtemlist::l_curly_token"
+fn normalize_qualified_name(qn: &str) -> String {
+    let qn = qn.to_lowercase();
+
+    // Strip "(impl at line X)" suffix
+    if let Some(idx) = qn.find(" (impl at line") {
+        return qn[..idx].to_string();
+    }
+
+    // Handle "impl TypeName at line X" format - extract just the type name
+    if qn.starts_with("impl ") {
+        if let Some(at_idx) = qn.find(" at line") {
+            return qn[5..at_idx].to_string();
+        }
+        // "impl TypeName" without line number
+        return qn[5..].to_string();
+    }
+
+    qn
+}
+
 /// Calculate recall at k
 fn recall_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Option<f64> {
     if expected.is_empty() {
@@ -322,17 +321,20 @@ fn recall_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Optio
     let top_k: HashSet<_> = results
         .iter()
         .take(k)
-        .map(|r| r.qualified_name.to_lowercase())
+        .map(|r| normalize_qualified_name(&r.qualified_name))
         .collect();
 
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     let found = expected_set
         .iter()
         .filter(|e| {
             top_k
                 .iter()
-                .any(|r| r.contains(*e) || e.contains(r.as_str()))
+                .any(|r| r.contains(e.as_str()) || e.contains(r.as_str()))
         })
         .count();
 
@@ -346,15 +348,18 @@ fn precision_at_k(results: &[EntityResult], expected: &[String], k: usize) -> Op
     }
 
     let top_k: Vec<_> = results.iter().take(k).collect();
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     let relevant = top_k
         .iter()
         .filter(|r| {
-            let qn = r.qualified_name.to_lowercase();
+            let qn = normalize_qualified_name(&r.qualified_name);
             expected_set
                 .iter()
-                .any(|e| qn.contains(e) || e.contains(&qn))
+                .any(|e| qn.contains(e.as_str()) || e.contains(qn.as_str()))
         })
         .count();
 
@@ -367,13 +372,16 @@ fn calculate_mrr(results: &[EntityResult], expected: &[String]) -> Option<f64> {
         return None;
     }
 
-    let expected_set: HashSet<_> = expected.iter().map(|e| e.to_lowercase()).collect();
+    let expected_set: HashSet<_> = expected
+        .iter()
+        .map(|e| normalize_qualified_name(e))
+        .collect();
 
     for (i, result) in results.iter().enumerate() {
-        let qn = result.qualified_name.to_lowercase();
+        let qn = normalize_qualified_name(&result.qualified_name);
         if expected_set
             .iter()
-            .any(|e| qn.contains(e) || e.contains(&qn))
+            .any(|e| qn.contains(e.as_str()) || e.contains(qn.as_str()))
         {
             return Some(1.0 / (i + 1) as f64);
         }
@@ -541,43 +549,6 @@ async fn execute_unified_search(
     Ok((result.results, elapsed.max(result.metadata.query_time_ms)))
 }
 
-/// Execute graph query
-async fn execute_graph_search(
-    client: &Client,
-    query: &EvalQuery,
-    repository_id: &str,
-) -> Result<(Vec<EntityResult>, u64)> {
-    // Extract entity name from query for graph traversal
-    let entity_name = extract_entity_name(&query.query);
-
-    let request = GraphQueryRequest {
-        repository_id: repository_id.to_string(),
-        query_type: "find_related".to_string(),
-        entity_name,
-        relationship_type: query.relationship_type.clone(),
-        limit: 20,
-    };
-
-    let start = Instant::now();
-    let response = client
-        .post(format!("{API_BASE_URL}/api/v1/graph/query"))
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to send graph query")?;
-
-    let elapsed = start.elapsed().as_millis() as u64;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Graph query returned error {}: {}", status, body);
-    }
-
-    let result: GraphQueryResponse = response.json().await?;
-    Ok((result.results, elapsed))
-}
-
 /// Execute agentic search
 async fn execute_agentic_search(
     client: &Client,
@@ -617,31 +588,6 @@ async fn execute_agentic_search(
         elapsed.max(result.metadata.query_time_ms),
         result.metadata.graph_traversal_used,
     ))
-}
-
-/// Extract entity name from query text
-fn extract_entity_name(query: &str) -> Option<String> {
-    // Look for patterns like "call X", "implement X", "use X"
-    let patterns = [
-        (r"call\s+(\w+::\w+)", 1),
-        (r"calls\s+(\w+::\w+)", 1),
-        (r"implement\s+(\w+)", 1),
-        (r"implements\s+(\w+)", 1),
-        (r"use\s+(\w+)", 1),
-        (r"uses\s+(\w+)", 1),
-        (r"`([^`]+)`", 1), // Backtick quoted names
-    ];
-
-    for (pattern, group) in patterns {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            if let Some(caps) = re.captures(query) {
-                if let Some(m) = caps.get(group) {
-                    return Some(m.as_str().to_string());
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Evaluate a single query against all search types
@@ -738,37 +684,6 @@ async fn evaluate_query_all_types(
                     graph_traversal_used: false,
                 },
             );
-        }
-    }
-
-    // 4. Graph search (only for queries with relationship type)
-    if query.relationship_type.is_some() {
-        match execute_graph_search(client, query, repository_id).await {
-            Ok((results, time_ms)) => {
-                let metrics =
-                    calculate_metrics(&results, &expected, time_ms, SearchType::Graph, true);
-                results_by_type.insert(SearchType::Graph.to_string(), metrics);
-            }
-            Err(e) => {
-                results_by_type.insert(
-                    SearchType::Graph.to_string(),
-                    SearchTypeResult {
-                        search_type: SearchType::Graph,
-                        query_time_ms: 0,
-                        num_results: 0,
-                        recall_at_5: None,
-                        recall_at_10: None,
-                        precision_at_5: None,
-                        precision_at_10: None,
-                        mrr: None,
-                        expected_found: 0,
-                        expected_total: expected.len(),
-                        top_results: vec![],
-                        error: Some(e.to_string()),
-                        graph_traversal_used: true,
-                    },
-                );
-            }
         }
     }
 
@@ -1056,8 +971,6 @@ async fn test_graph_search_evaluation() -> Result<()> {
 
     // Determine which search types to evaluate
     let mut search_types = vec!["semantic", "fulltext", "unified"];
-    // Graph search is included when query has relationship_type
-    search_types.push("graph");
     if include_agentic {
         search_types.push("agentic");
     }

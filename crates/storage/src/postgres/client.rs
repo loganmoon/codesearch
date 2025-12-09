@@ -1035,18 +1035,37 @@ impl PostgresClient {
 
     /// Full-text search entities using PostgreSQL's tsvector
     ///
-    /// Returns entities ranked by relevance using ts_rank.
+    /// Returns entities ranked by: (1) qualified_name ILIKE matches first,
+    /// then (2) ts_rank relevance score. Only searches entities with non-NULL content.
     ///
     /// # Arguments
     /// * `repository_id` - Repository to search in
     /// * `query` - Search query string (will be parsed using plainto_tsquery for plain text search)
     /// * `limit` - Maximum number of results to return
+    /// * `fuzzy` - If true, allows SQL wildcards (% and _) in qualified_name matching.
+    ///   If false, these characters are escaped for exact matching.
     pub async fn search_entities_fulltext(
         &self,
         repository_id: Uuid,
         query: &str,
         limit: i64,
+        fuzzy: bool,
     ) -> Result<Vec<CodeEntity>> {
+        // Escape SQL wildcard characters unless fuzzy mode is enabled
+        let processed_query = if fuzzy {
+            query.to_string()
+        } else {
+            query.replace('%', "\\%").replace('_', "\\_")
+        };
+        // Create a pattern for qualified_name matching (replace spaces/:: with wildcards)
+        let qname_pattern = format!(
+            "%{}%",
+            processed_query
+                .replace("::", "%")
+                .replace(' ', "%")
+                .replace("__", "%")
+        );
+
         let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
             "WITH query_tsv AS (
                  SELECT plainto_tsquery('english', $2) AS tsquery
@@ -1056,13 +1075,20 @@ impl PostgresClient {
              WHERE repository_id = $1
                AND deleted_at IS NULL
                AND content IS NOT NULL
-               AND content_tsv @@ query_tsv.tsquery
-             ORDER BY ts_rank(content_tsv, query_tsv.tsquery) DESC
+               AND (
+                   content_tsv @@ query_tsv.tsquery
+                   OR qualified_name ILIKE $4
+               )
+             ORDER BY
+               -- Boost exact qualified_name matches to the top
+               CASE WHEN qualified_name ILIKE $4 THEN 1 ELSE 0 END DESC,
+               ts_rank(content_tsv, query_tsv.tsquery) DESC
              LIMIT $3",
         )
         .bind(repository_id)
         .bind(query)
         .bind(limit)
+        .bind(&qname_pattern)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| Error::storage(format!("Failed to search entities: {e}")))?;
@@ -2565,8 +2591,9 @@ impl super::PostgresClientTrait for PostgresClient {
         repository_id: Uuid,
         query: &str,
         limit: i64,
+        fuzzy: bool,
     ) -> Result<Vec<CodeEntity>> {
-        self.search_entities_fulltext(repository_id, query, limit)
+        self.search_entities_fulltext(repository_id, query, limit, fuzzy)
             .await
     }
 

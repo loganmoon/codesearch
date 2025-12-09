@@ -26,7 +26,6 @@ const VALID_RELATIONSHIPS: &[&str] = &[
     "who_calls",
     "callees",
     "calls",
-    "what_calls",
     "implementations",
     "implements",
     "implementors",
@@ -112,7 +111,7 @@ fn is_valid_relationship(relationship: &str) -> bool {
 fn relationship_to_query_type(relationship: &str) -> Option<GraphQueryType> {
     match relationship.to_lowercase().as_str() {
         "callers" | "called_by" | "who_calls" => Some(GraphQueryType::FindFunctionCallers),
-        "callees" | "calls" | "what_calls" => Some(GraphQueryType::FindFunctionCallees),
+        "callees" | "calls" => Some(GraphQueryType::FindFunctionCallees),
         "implementations" | "implements" | "implementors" => {
             Some(GraphQueryType::FindTraitImplementations)
         }
@@ -138,17 +137,17 @@ fn format_entities_for_prompt(entities: &[AgenticEntity], limit: usize) -> Strin
                 _ => String::new(),
             };
             format!(
-                "Entity ID: {} (use this exact ID for graph_traversal)\n\
-                 Name: {}{}\n\
-                 Score: {:.2}\n\
-                 Justification: {}\n\
-                 Content: {}",
-                e.entity.entity_id,
-                e.entity.qualified_name,
-                source_info,
-                e.entity.score,
-                e.relevance_justification,
-                e.entity.content.as_ref().map_or("N/A".to_string(), |c| {
+                "[{entity_id}] {entity_type}: {qualified_name}{source_info}\n\
+                 Score: {score:.2}\n\
+                 Justification: {justification}\n\
+                 Content: {content}",
+                entity_id = e.entity.entity_id,
+                entity_type = e.entity.entity_type,
+                qualified_name = e.entity.qualified_name,
+                source_info = source_info,
+                score = e.entity.score,
+                justification = e.relevance_justification,
+                content = e.entity.content.as_ref().map_or("N/A".to_string(), |c| {
                     if c.len() > 200 {
                         format!("{}...", &c[..200])
                     } else {
@@ -248,9 +247,9 @@ impl AgenticSearchOrchestrator {
                 break;
             }
 
-            // Execute planned operations
+            // Execute planned operations (pass accumulated_entities for graph traversals)
             let (new_entities, worker_stats) = self
-                .execute_operations(&decision.operations, &request)
+                .execute_operations(&decision.operations, &request, &accumulated_entities)
                 .await?;
 
             workers_spawned += worker_stats.spawned;
@@ -341,29 +340,21 @@ impl AgenticSearchOrchestrator {
             accumulated_entities.len()
         );
 
-        // Format accumulated context
+        // Format accumulated context with entity IDs prominently displayed
+        // so the LLM can copy them for graph_traversal operations
         let context = if accumulated_entities.is_empty() {
             "No entities found yet.".to_string()
         } else {
-            accumulated_entities
-                .iter()
-                .take(20)
-                .map(|e| {
-                    format!(
-                        "- {} ({}): {}",
-                        e.entity.qualified_name,
-                        match &e.source {
-                            RetrievalSource::Semantic => "semantic",
-                            RetrievalSource::Fulltext => "fulltext",
-                            RetrievalSource::Unified => "unified",
-                            RetrievalSource::Graph { .. } => "graph",
-                        },
-                        e.relevance_justification
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+            format_entities_for_prompt(accumulated_entities, 20)
         };
+
+        // Debug: log first 3 entities in context
+        for (i, entity) in accumulated_entities.iter().take(3).enumerate() {
+            debug!(
+                "Context entity[{}]: {} ({}) - {}",
+                i, entity.entity.entity_type, entity.entity.entity_id, entity.entity.qualified_name
+            );
+        }
 
         let prompt = prompts::format_prompt(
             prompts::ORCHESTRATOR_PLAN,
@@ -414,10 +405,28 @@ impl AgenticSearchOrchestrator {
                 ))
             })?;
 
+        // Log raw LLM decision before validation
         debug!(
-            "Orchestrator decision: should_stop={}, operations={}",
+            "Orchestrator LLM raw decision: should_stop={}, reason='{}', operations={:?}",
             decision.should_stop,
-            decision.operations.len()
+            decision.reason,
+            decision
+                .operations
+                .iter()
+                .map(|op| format!(
+                    "{}({})",
+                    op.operation_type,
+                    if op.operation_type == "graph_traversal" {
+                        format!(
+                            "entity_id={}, rel={}",
+                            op.entity_id.as_deref().unwrap_or("none"),
+                            op.relationship.as_deref().unwrap_or("none")
+                        )
+                    } else {
+                        op.query.as_deref().unwrap_or("none").to_string()
+                    }
+                ))
+                .collect::<Vec<_>>()
         );
 
         // Parse and validate operations, filtering out invalid ones
@@ -457,23 +466,40 @@ impl AgenticSearchOrchestrator {
                     let entity_id = op.entity_id.unwrap_or_default();
                     let relationship = op.relationship.unwrap_or_default();
 
+                    let valid_id = is_valid_entity_id(&entity_id);
+                    let valid_rel = is_valid_relationship(&relationship);
+
+                    debug!(
+                        "Graph traversal validation: entity_id='{}' (valid={}), relationship='{}' (valid={})",
+                        truncate_for_error(&entity_id),
+                        valid_id,
+                        relationship,
+                        valid_rel
+                    );
+
                     // Validate entity_id
-                    if !is_valid_entity_id(&entity_id) {
+                    if !valid_id {
                         warn!(
-                            "LLM returned invalid entity_id '{}', skipping graph traversal",
+                            "LLM returned invalid entity_id '{}', skipping graph traversal. Expected format: entity-{{32 hex chars}}",
                             truncate_for_error(&entity_id)
                         );
                         return None;
                     }
 
                     // Validate relationship against whitelist
-                    if !is_valid_relationship(&relationship) {
+                    if !valid_rel {
                         warn!(
-                            "LLM returned unknown relationship '{}', skipping graph traversal",
-                            relationship
+                            "LLM returned unknown relationship '{}', skipping graph traversal. Valid: {:?}",
+                            relationship,
+                            VALID_RELATIONSHIPS
                         );
                         return None;
                     }
+
+                    debug!(
+                        "Graph traversal operation accepted: entity_id={}, relationship={}",
+                        entity_id, relationship
+                    );
 
                     Some(PlannedOperation::GraphTraversal {
                         entity_id,
@@ -510,6 +536,7 @@ impl AgenticSearchOrchestrator {
         &self,
         operations: &[PlannedOperation],
         request: &AgenticSearchRequest,
+        accumulated_entities: &[AgenticEntity],
     ) -> Result<(Vec<AgenticEntity>, WorkerStats)> {
         use futures::future::join_all;
 
@@ -590,10 +617,39 @@ impl AgenticSearchOrchestrator {
                     }
                 }
             }
+
+            // Log entities found from search for debugging graph traversal issues
+            info!(
+                "Search operations found {} entities this iteration",
+                all_entities.len()
+            );
+            for (i, e) in all_entities.iter().take(10).enumerate() {
+                debug!(
+                    "  [{}] {} -> {}",
+                    i + 1,
+                    e.entity.entity_id,
+                    e.entity.qualified_name
+                );
+            }
         }
 
-        // Execute graph traversals (need entities from searches to reference)
-        // These run after searches complete since they may reference newly found entities
+        // Execute graph traversals (need entities from previous iterations + current)
+        // Entity IDs from LLM come from accumulated_entities (previous iterations)
+        // Build combined entity list once before the loop to avoid O(G × (A + N)) cloning
+        let combined_entities: Vec<&AgenticEntity> = accumulated_entities
+            .iter()
+            .chain(all_entities.iter())
+            .collect();
+
+        info!(
+            "Processing {} graph traversal operations with {} accumulated + {} new entities",
+            graph_ops.len(),
+            accumulated_entities.len(),
+            all_entities.len()
+        );
+
+        // Collect graph results separately to avoid borrow conflicts
+        let mut graph_entities: Vec<AgenticEntity> = Vec::new();
         for (entity_id, relationship) in graph_ops {
             stats.spawned += 1;
             match self
@@ -601,20 +657,27 @@ impl AgenticSearchOrchestrator {
                     &entity_id,
                     &relationship,
                     &request.repository_ids,
-                    &all_entities,
+                    &combined_entities,
                 )
                 .await
             {
                 Ok(entities) => {
                     stats.succeeded += 1;
-                    all_entities.extend(entities);
+                    info!(
+                        "Graph traversal {} -> {} found {} entities",
+                        entity_id,
+                        relationship,
+                        entities.len()
+                    );
+                    graph_entities.extend(entities);
                 }
                 Err(e) => {
-                    debug!("Graph traversal failed (silent fallback): {}", e);
+                    warn!("Graph traversal failed: {}", e);
                     stats.failed += 1;
                 }
             }
         }
+        all_entities.extend(graph_entities);
 
         Ok((all_entities, stats))
     }
@@ -625,8 +688,34 @@ impl AgenticSearchOrchestrator {
         entity_id: &str,
         relationship: &str,
         repository_ids: &[String],
-        accumulated_entities: &[AgenticEntity],
+        accumulated_entities: &[&AgenticEntity],
     ) -> Result<Vec<AgenticEntity>> {
+        debug!(
+            "Looking for entity_id='{}' in {} accumulated entities to execute {} traversal",
+            entity_id,
+            accumulated_entities.len(),
+            relationship
+        );
+
+        // Log available entity IDs for debugging
+        if accumulated_entities.len() <= 20 {
+            for e in accumulated_entities.iter() {
+                debug!(
+                    "  Available: {} -> {}",
+                    e.entity.entity_id, e.entity.qualified_name
+                );
+            }
+        } else {
+            debug!(
+                "  First 10 available: {:?}",
+                accumulated_entities
+                    .iter()
+                    .take(10)
+                    .map(|e| format!("{} -> {}", e.entity.entity_id, e.entity.qualified_name))
+                    .collect::<Vec<_>>()
+            );
+        }
+
         let query_type = relationship_to_query_type(relationship).ok_or_else(|| {
             AgenticSearchError::GraphTraversal(format!("Unknown relationship type: {relationship}"))
         })?;
@@ -636,6 +725,12 @@ impl AgenticSearchOrchestrator {
             .iter()
             .find(|e| e.entity.entity_id == entity_id)
             .ok_or_else(|| {
+                warn!(
+                    "Entity '{}' not found in {} accumulated entities. This indicates the LLM \
+                     referenced an entity_id that doesn't exist in the search results.",
+                    entity_id,
+                    accumulated_entities.len()
+                );
                 AgenticSearchError::GraphTraversal(format!(
                     "Entity not found in accumulated results: {entity_id}"
                 ))
@@ -662,7 +757,7 @@ impl AgenticSearchOrchestrator {
         };
 
         debug!(
-            "Executing graph traversal: {} -> {} ({})",
+            "Executing graph traversal: qualified_name='{}' relationship='{}' entity_id='{}'",
             qualified_name, relationship, entity_id
         );
 
@@ -970,10 +1065,6 @@ mod tests {
         ));
         assert!(matches!(
             relationship_to_query_type("calls"),
-            Some(GraphQueryType::FindFunctionCallees)
-        ));
-        assert!(matches!(
-            relationship_to_query_type("what_calls"),
             Some(GraphQueryType::FindFunctionCallees)
         ));
     }
@@ -1317,5 +1408,103 @@ The graph context entities were less relevant for this particular query.
         let parsed: Vec<crate::types::QualityGateResult> = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].entity_id, "primary-1");
+    }
+
+    // ========================================================================
+    // Entity Lookup Tests (for graph traversal bug fix)
+    // ========================================================================
+
+    /// Helper to create a mock AgenticEntity for testing
+    fn create_test_agentic_entity(entity_id: &str, name: &str) -> AgenticEntity {
+        use codesearch_core::entities::{EntityType, Language, SourceLocation, Visibility};
+        use codesearch_core::search_models::EntityResult;
+
+        let entity = EntityResult {
+            entity_id: entity_id.to_string(),
+            repository_id: uuid::Uuid::new_v4(),
+            qualified_name: name.to_string(),
+            name: name.to_string(),
+            entity_type: EntityType::Function,
+            language: Language::Rust,
+            file_path: format!("src/{name}.rs"),
+            location: SourceLocation {
+                start_line: 1,
+                end_line: 10,
+                start_column: 0,
+                end_column: 0,
+            },
+            content: Some(format!("fn {name}() {{}}")),
+            signature: None,
+            documentation_summary: None,
+            visibility: Visibility::Public,
+            score: 0.9,
+            reranked: false,
+            reasoning: None,
+        };
+
+        AgenticEntity {
+            entity,
+            source: crate::types::RetrievalSource::Semantic,
+            relevance_justification: "Test entity".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_combined_entity_lookup_finds_accumulated_entities() {
+        // This test verifies the fix for the bug where graph traversals couldn't
+        // find entities from previous iterations. The fix combines accumulated_entities
+        // (from previous iterations) with all_entities (current iteration) before lookup.
+
+        // Create entities from "previous iteration" (accumulated)
+        let accumulated_entity = create_test_agentic_entity(
+            "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            "function_from_iteration_1",
+        );
+        let accumulated_entities = [accumulated_entity];
+
+        // Create entities from "current iteration"
+        let current_entity = create_test_agentic_entity(
+            "entity-ffffffffffffffffffffffffffffffff",
+            "function_from_iteration_2",
+        );
+        let all_entities = [current_entity];
+
+        // Combine them as done in execute_operations
+        let combined_entities: Vec<&AgenticEntity> = accumulated_entities
+            .iter()
+            .chain(all_entities.iter())
+            .collect();
+
+        // Verify we can find entity from accumulated (previous iteration)
+        let found_accumulated = combined_entities
+            .iter()
+            .find(|e| e.entity.entity_id == "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6");
+        assert!(
+            found_accumulated.is_some(),
+            "Should find entity from accumulated_entities (previous iteration)"
+        );
+        assert_eq!(
+            found_accumulated.unwrap().entity.qualified_name,
+            "function_from_iteration_1"
+        );
+
+        // Verify we can find entity from current iteration
+        let found_current = combined_entities
+            .iter()
+            .find(|e| e.entity.entity_id == "entity-ffffffffffffffffffffffffffffffff");
+        assert!(
+            found_current.is_some(),
+            "Should find entity from all_entities (current iteration)"
+        );
+        assert_eq!(
+            found_current.unwrap().entity.qualified_name,
+            "function_from_iteration_2"
+        );
+
+        // Verify non-existent entity is not found
+        let not_found = combined_entities
+            .iter()
+            .find(|e| e.entity.entity_id == "entity-00000000000000000000000000000000");
+        assert!(not_found.is_none(), "Should not find non-existent entity");
     }
 }

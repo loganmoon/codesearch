@@ -2067,7 +2067,7 @@ async fn test_search_entities_fulltext_basic() -> Result<()> {
 
         // Search for "authenticate" - should match entity1
         let results = client
-            .search_entities_fulltext(repository_id, "authenticate", 10)
+            .search_entities_fulltext(repository_id, "authenticate", 10, false)
             .await?;
 
         assert_eq!(results.len(), 1, "Should find one entity with 'authenticate'");
@@ -2075,7 +2075,7 @@ async fn test_search_entities_fulltext_basic() -> Result<()> {
 
         // Search for "token" - should match entity2
         let results = client
-            .search_entities_fulltext(repository_id, "token", 10)
+            .search_entities_fulltext(repository_id, "token", 10, false)
             .await?;
 
         assert_eq!(results.len(), 1, "Should find one entity with 'token'");
@@ -2083,7 +2083,7 @@ async fn test_search_entities_fulltext_basic() -> Result<()> {
 
         // Search for "user" - should match entity1 and entity3
         let results = client
-            .search_entities_fulltext(repository_id, "user", 10)
+            .search_entities_fulltext(repository_id, "user", 10, false)
             .await?;
 
         assert_eq!(results.len(), 2, "Should find two entities with 'user'");
@@ -2143,7 +2143,7 @@ async fn test_search_entities_fulltext_stemming() -> Result<()> {
 
         // Search for "run" - should match "running" due to stemming
         let results = client
-            .search_entities_fulltext(repository_id, "run", 10)
+            .search_entities_fulltext(repository_id, "run", 10, false)
             .await?;
 
         assert_eq!(
@@ -2207,7 +2207,7 @@ async fn test_search_entities_fulltext_stop_words() -> Result<()> {
 
         // Search for "important" - should match even though "do" is a stop word
         let results = client
-            .search_entities_fulltext(repository_id, "important", 10)
+            .search_entities_fulltext(repository_id, "important", 10, false)
             .await?;
 
         assert_eq!(results.len(), 1, "Should find entity with 'important'");
@@ -2277,7 +2277,7 @@ async fn test_search_entities_fulltext_null_content() -> Result<()> {
 
         // Search should only return entity with content
         let results = client
-            .search_entities_fulltext(repository_id, "searchable", 10)
+            .search_entities_fulltext(repository_id, "searchable", 10, false)
             .await?;
 
         assert_eq!(results.len(), 1, "Should only find entity with content");
@@ -2337,7 +2337,7 @@ async fn test_search_entities_fulltext_deleted_entities() -> Result<()> {
 
         // Verify entity is searchable
         let results = client
-            .search_entities_fulltext(repository_id, "deletable", 10)
+            .search_entities_fulltext(repository_id, "deletable", 10, false)
             .await?;
         assert_eq!(results.len(), 1, "Should find entity before deletion");
 
@@ -2353,7 +2353,7 @@ async fn test_search_entities_fulltext_deleted_entities() -> Result<()> {
 
         // Verify entity is no longer searchable
         let results = client
-            .search_entities_fulltext(repository_id, "deletable", 10)
+            .search_entities_fulltext(repository_id, "deletable", 10, false)
             .await?;
         assert_eq!(results.len(), 0, "Should not find deleted entity");
 
@@ -2414,14 +2414,14 @@ async fn test_search_entities_fulltext_limit() -> Result<()> {
 
         // Search with limit of 3
         let results = client
-            .search_entities_fulltext(repository_id, "search_term", 3)
+            .search_entities_fulltext(repository_id, "search_term", 3, false)
             .await?;
 
         assert_eq!(results.len(), 3, "Should respect limit parameter");
 
         // Search with limit of 10 (more than available)
         let results = client
-            .search_entities_fulltext(repository_id, "search_term", 10)
+            .search_entities_fulltext(repository_id, "search_term", 10, false)
             .await?;
 
         assert_eq!(
@@ -2504,7 +2504,7 @@ async fn test_search_entities_fulltext_cross_repository() -> Result<()> {
 
         // Search in repo1 - should only find entity1
         let results1 = client
-            .search_entities_fulltext(repository_id1, "unique_keyword_abc", 10)
+            .search_entities_fulltext(repository_id1, "unique_keyword_abc", 10, false)
             .await?;
 
         assert_eq!(results1.len(), 1, "Should find one entity in repo1");
@@ -2512,7 +2512,7 @@ async fn test_search_entities_fulltext_cross_repository() -> Result<()> {
 
         // Search in repo2 - should only find entity2
         let results2 = client
-            .search_entities_fulltext(repository_id2, "unique_keyword_abc", 10)
+            .search_entities_fulltext(repository_id2, "unique_keyword_abc", 10, false)
             .await?;
 
         assert_eq!(results2.len(), 1, "Should find one entity in repo2");

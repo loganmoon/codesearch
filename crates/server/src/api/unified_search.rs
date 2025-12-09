@@ -41,6 +41,7 @@ pub async fn search_unified(
                         request.repository_id,
                         &request.query.text,
                         request.fulltext_limit.unwrap_or(100) as i64,
+                        false,
                     )
                     .await
             } else {

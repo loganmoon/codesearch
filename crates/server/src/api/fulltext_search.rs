@@ -18,7 +18,12 @@ pub async fn search_fulltext(
     let start_time = Instant::now();
 
     let entities = postgres_client
-        .search_entities_fulltext(request.repository_id, &request.query, request.limit as i64)
+        .search_entities_fulltext(
+            request.repository_id,
+            &request.query,
+            request.limit as i64,
+            false,
+        )
         .await?;
 
     let results: Vec<EntityResult> = entities

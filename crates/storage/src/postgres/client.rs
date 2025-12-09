@@ -1035,22 +1035,32 @@ impl PostgresClient {
 
     /// Full-text search entities using PostgreSQL's tsvector
     ///
-    /// Returns entities ranked by relevance using ts_rank.
+    /// Returns entities ranked by: (1) qualified_name ILIKE matches first,
+    /// then (2) ts_rank relevance score. Only searches entities with non-NULL content.
     ///
     /// # Arguments
     /// * `repository_id` - Repository to search in
     /// * `query` - Search query string (will be parsed using plainto_tsquery for plain text search)
     /// * `limit` - Maximum number of results to return
+    /// * `fuzzy` - If true, allows SQL wildcards (% and _) in qualified_name matching.
+    ///   If false, these characters are escaped for exact matching.
     pub async fn search_entities_fulltext(
         &self,
         repository_id: Uuid,
         query: &str,
         limit: i64,
+        fuzzy: bool,
     ) -> Result<Vec<CodeEntity>> {
+        // Escape SQL wildcard characters unless fuzzy mode is enabled
+        let processed_query = if fuzzy {
+            query.to_string()
+        } else {
+            query.replace('%', "\\%").replace('_', "\\_")
+        };
         // Create a pattern for qualified_name matching (replace spaces/:: with wildcards)
         let qname_pattern = format!(
             "%{}%",
-            query
+            processed_query
                 .replace("::", "%")
                 .replace(' ', "%")
                 .replace("__", "%")
@@ -2581,8 +2591,9 @@ impl super::PostgresClientTrait for PostgresClient {
         repository_id: Uuid,
         query: &str,
         limit: i64,
+        fuzzy: bool,
     ) -> Result<Vec<CodeEntity>> {
-        self.search_entities_fulltext(repository_id, query, limit)
+        self.search_entities_fulltext(repository_id, query, limit, fuzzy)
             .await
     }
 

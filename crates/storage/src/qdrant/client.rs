@@ -124,13 +124,37 @@ impl QdrantStorageClient {
 
     /// Build Qdrant filter from SearchFilters
     fn build_filter(filters: &SearchFilters) -> Option<Filter> {
+        use qdrant_client::qdrant::condition::ConditionOneOf;
+
         let mut conditions = vec![];
 
-        if let Some(entity_type) = &filters.entity_type {
-            conditions.push(qdrant_client::qdrant::Condition::matches(
-                "entity_type",
-                entity_type.to_string(),
-            ));
+        // Handle multiple entity types with OR logic
+        if let Some(entity_types) = &filters.entity_types {
+            if !entity_types.is_empty() {
+                if entity_types.len() == 1 {
+                    // Single type - use simple match
+                    conditions.push(qdrant_client::qdrant::Condition::matches(
+                        "entity_type",
+                        entity_types[0].to_string(),
+                    ));
+                } else {
+                    // Multiple types - create OR filter using should
+                    let type_conditions: Vec<qdrant_client::qdrant::Condition> = entity_types
+                        .iter()
+                        .map(|et| {
+                            qdrant_client::qdrant::Condition::matches("entity_type", et.to_string())
+                        })
+                        .collect();
+
+                    // Nest the OR filter as a condition
+                    conditions.push(qdrant_client::qdrant::Condition {
+                        condition_one_of: Some(ConditionOneOf::Filter(Filter {
+                            should: type_conditions,
+                            ..Default::default()
+                        })),
+                    });
+                }
+            }
         }
 
         if let Some(language) = &filters.language {

@@ -989,7 +989,10 @@ async fn test_graph_search_evaluation() -> Result<()> {
             dataset.queries.iter().take(limit).collect()
         }
         None => {
-            println!("Sample limit: none (running all {} queries)\n", dataset.queries.len());
+            println!(
+                "Sample limit: none (running all {} queries)\n",
+                dataset.queries.len()
+            );
             dataset.queries.iter().collect()
         }
     };

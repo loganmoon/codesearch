@@ -84,6 +84,14 @@ pub struct Config {
     /// Outbox processor configuration
     #[serde(default)]
     pub outbox: OutboxConfig,
+
+    /// Query preprocessing configuration
+    #[serde(default)]
+    pub query_preprocessing: QueryPreprocessingConfig,
+
+    /// Specificity boost configuration
+    #[serde(default)]
+    pub specificity: SpecificityConfig,
 }
 
 /// Configuration for embeddings generation
@@ -367,6 +375,64 @@ pub struct HybridSearchConfig {
     pub prefetch_multiplier: usize,
 }
 
+/// Configuration for query preprocessing to improve search relevance
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryPreprocessingConfig {
+    /// Whether query preprocessing is enabled (default: true)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Extract code identifiers (snake_case, CamelCase, path::sep) from queries (default: true)
+    #[serde(default = "default_true")]
+    pub extract_identifiers: bool,
+
+    /// Infer entity types from query text (default: false)
+    /// Note: inference runs but results are not used in search filtering
+    #[serde(default)]
+    pub infer_entity_types: bool,
+
+    /// Detect query intent to adjust search strategy (default: true)
+    #[serde(default = "default_true")]
+    pub detect_query_intent: bool,
+}
+
+impl Default for QueryPreprocessingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            extract_identifiers: true,
+            infer_entity_types: false,
+            detect_query_intent: true,
+        }
+    }
+}
+
+/// Configuration for specificity-based score boosting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecificityConfig {
+    /// Whether specificity boost is enabled (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Weight factor for specificity boost, 0.0-1.0 (default: 0.1)
+    #[serde(default = "default_specificity_weight")]
+    pub weight: f32,
+
+    /// Maximum line count before no boost is applied (default: 500)
+    #[serde(default = "default_specificity_max_lines")]
+    pub max_lines: usize,
+}
+
+impl Default for SpecificityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            weight: default_specificity_weight(),
+            max_lines: default_specificity_max_lines(),
+        }
+    }
+}
+
 /// Configuration for outbox processor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboxConfig {
@@ -590,6 +656,18 @@ fn default_reranking_max_concurrent_requests() -> usize {
 
 fn default_prefetch_multiplier() -> usize {
     5
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_specificity_weight() -> f32 {
+    0.1
+}
+
+fn default_specificity_max_lines() -> usize {
+    500
 }
 
 fn default_outbox_poll_interval_ms() -> u64 {
@@ -1109,6 +1187,12 @@ impl Config {
 
         // Merge outbox config
         self.outbox = other.outbox;
+
+        // Merge query preprocessing config
+        self.query_preprocessing = other.query_preprocessing;
+
+        // Merge specificity config
+        self.specificity = other.specificity;
     }
 
     /// Load configuration with layered precedence (git-style)
@@ -1152,6 +1236,8 @@ impl Config {
             reranking: RerankingConfig::default(),
             hybrid_search: HybridSearchConfig::default(),
             outbox: OutboxConfig::default(),
+            query_preprocessing: QueryPreprocessingConfig::default(),
+            specificity: SpecificityConfig::default(),
         };
 
         // Try to load global config
@@ -1374,6 +1460,21 @@ impl Config {
                 "outbox.max_cached_collections too large (max 1000, got {})",
                 self.outbox.max_cached_collections
             )));
+        }
+
+        // Validate specificity configuration
+        if self.specificity.enabled {
+            if self.specificity.weight < 0.0 || self.specificity.weight > 1.0 {
+                return Err(Error::config(format!(
+                    "specificity.weight must be between 0.0 and 1.0 (got {})",
+                    self.specificity.weight
+                )));
+            }
+            if self.specificity.max_lines == 0 {
+                return Err(Error::config(
+                    "specificity.max_lines must be greater than 0".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -2465,6 +2566,8 @@ pub struct ConfigBuilder {
     reranking: RerankingConfig,
     hybrid_search: HybridSearchConfig,
     outbox: OutboxConfig,
+    query_preprocessing: QueryPreprocessingConfig,
+    specificity: SpecificityConfig,
 }
 
 impl ConfigBuilder {
@@ -2480,6 +2583,8 @@ impl ConfigBuilder {
             reranking: RerankingConfig::default(),
             hybrid_search: HybridSearchConfig::default(),
             outbox: OutboxConfig::default(),
+            query_preprocessing: QueryPreprocessingConfig::default(),
+            specificity: SpecificityConfig::default(),
         }
     }
 
@@ -2519,6 +2624,18 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the query preprocessing configuration
+    pub fn query_preprocessing(mut self, query_preprocessing: QueryPreprocessingConfig) -> Self {
+        self.query_preprocessing = query_preprocessing;
+        self
+    }
+
+    /// Set the specificity boost configuration
+    pub fn specificity(mut self, specificity: SpecificityConfig) -> Self {
+        self.specificity = specificity;
+        self
+    }
+
     /// Build the Config
     pub fn build(self) -> Config {
         Config {
@@ -2531,6 +2648,8 @@ impl ConfigBuilder {
             reranking: self.reranking,
             hybrid_search: self.hybrid_search,
             outbox: self.outbox,
+            query_preprocessing: self.query_preprocessing,
+            specificity: self.specificity,
         }
     }
 }

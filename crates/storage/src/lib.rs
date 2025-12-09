@@ -82,7 +82,8 @@ fn validate_database_name(name: &str) -> Result<()> {
 /// Search filters for querying entities
 #[derive(Debug, Default, Clone)]
 pub struct SearchFilters {
-    pub entity_type: Option<EntityType>,
+    /// Filter by one or more entity types (OR logic)
+    pub entity_types: Option<Vec<EntityType>>,
     pub language: Option<String>,
     pub file_path: Option<PathBuf>,
 }

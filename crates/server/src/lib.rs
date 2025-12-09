@@ -139,6 +139,8 @@ pub async fn run_rest_server(
         config: Arc::new(SearchConfig {
             hybrid_search: config.hybrid_search.clone(),
             reranking: config.reranking.clone(),
+            query_preprocessing: config.query_preprocessing.clone(),
+            specificity: config.specificity.clone(),
             default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
             max_batch_size: config.storage.max_entities_per_db_operation,
         }),

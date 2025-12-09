@@ -11,12 +11,10 @@ pub const WORKER_RERANK: &str = include_str!("../assets/prompts/worker_rerank.tx
 // Split prompts for caching - System prompts (static, cacheable)
 pub const ORCHESTRATOR_PLAN_SYSTEM: &str =
     include_str!("../assets/prompts/orchestrator_plan_system.txt");
-pub const QUALITY_GATE_SYSTEM: &str = include_str!("../assets/prompts/quality_gate_system.txt");
 
 // Split prompts for caching - User prompts (dynamic)
 pub const ORCHESTRATOR_PLAN_USER: &str =
     include_str!("../assets/prompts/orchestrator_plan_user.txt");
-pub const QUALITY_GATE_USER: &str = include_str!("../assets/prompts/quality_gate_user.txt");
 
 pub fn format_prompt(template: &str, vars: &[(&str, &str)]) -> String {
     let mut result = template.to_string();
@@ -47,7 +45,5 @@ mod tests {
         // Verify split prompts for caching
         assert!(ORCHESTRATOR_PLAN_SYSTEM.len() > 0);
         assert!(ORCHESTRATOR_PLAN_USER.len() > 0);
-        assert!(QUALITY_GATE_SYSTEM.len() > 0);
-        assert!(QUALITY_GATE_USER.len() > 0);
     }
 }

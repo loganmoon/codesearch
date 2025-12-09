@@ -1,0 +1,536 @@
+{
+  "repository": "rust-analyzer",
+  "total_queries": 5,
+  "search_types_evaluated": [
+    "semantic",
+    "fulltext",
+    "unified",
+    "agentic"
+  ],
+  "search_type_metrics": {
+    "semantic": {
+      "search_type": "semantic",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.425,
+      "avg_recall_at_10": 0.825,
+      "avg_precision_at_5": 0.25,
+      "avg_precision_at_10": 0.19999999999999998,
+      "avg_mrr": 0.3125,
+      "avg_query_time_ms": 416.0,
+      "graph_usage_rate": 0.0
+    },
+    "agentic": {
+      "search_type": "agentic",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.325,
+      "avg_recall_at_10": 0.325,
+      "avg_precision_at_5": 0.26666666666666666,
+      "avg_precision_at_10": 0.16666666666666666,
+      "avg_mrr": 0.25,
+      "avg_query_time_ms": 16499.4,
+      "graph_usage_rate": 0.4
+    },
+    "unified": {
+      "search_type": "unified",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.025,
+      "avg_recall_at_10": 0.55,
+      "avg_precision_at_5": 0.05,
+      "avg_precision_at_10": 0.1,
+      "avg_mrr": 0.3169642857142857,
+      "avg_query_time_ms": 56.6,
+      "graph_usage_rate": 0.0
+    },
+    "fulltext": {
+      "search_type": "fulltext",
+      "queries_evaluated": 5,
+      "queries_failed": 0,
+      "avg_recall_at_5": 0.0,
+      "avg_recall_at_10": 0.0,
+      "avg_precision_at_5": 0.0,
+      "avg_precision_at_10": 0.0,
+      "avg_mrr": 0.0,
+      "avg_query_time_ms": 94.8,
+      "graph_usage_rate": 0.0
+    }
+  },
+  "category_metrics": [
+    {
+      "category": "call_graph",
+      "query_count": 5,
+      "by_search_type": {
+        "fulltext": {
+          "avg_recall_at_5": 0.0,
+          "avg_recall_at_10": 0.0,
+          "avg_precision_at_5": 0.0,
+          "avg_mrr": 0.0,
+          "avg_query_time_ms": 94.8
+        },
+        "agentic": {
+          "avg_recall_at_5": 0.325,
+          "avg_recall_at_10": 0.325,
+          "avg_precision_at_5": 0.26666666666666666,
+          "avg_mrr": 0.25,
+          "avg_query_time_ms": 16499.4
+        },
+        "semantic": {
+          "avg_recall_at_5": 0.425,
+          "avg_recall_at_10": 0.825,
+          "avg_precision_at_5": 0.25,
+          "avg_mrr": 0.3125,
+          "avg_query_time_ms": 416.0
+        },
+        "unified": {
+          "avg_recall_at_5": 0.025,
+          "avg_recall_at_10": 0.55,
+          "avg_precision_at_5": 0.05,
+          "avg_mrr": 0.3169642857142857,
+          "avg_query_time_ms": 56.6
+        }
+      }
+    }
+  ],
+  "query_results": [
+    {
+      "query_id": "calls_001",
+      "category": "call_graph",
+      "results_by_type": {
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 880,
+          "num_results": 10,
+          "recall_at_5": 0.2,
+          "recall_at_10": 0.3,
+          "precision_at_5": 0.4,
+          "precision_at_10": 0.3,
+          "mrr": 0.5,
+          "expected_found": 1,
+          "expected_total": 10,
+          "top_results": [
+            "Fn::gen_token (impl at line 566)",
+            "impl Fn at line 566",
+            "Fn::fn_token (impl at line 566)",
+            "Fn::async_token (impl at line 566)",
+            "impl AsmOption at line 163"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 35,
+          "num_results": 20,
+          "recall_at_5": 0.1,
+          "recall_at_10": 0.2,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.2,
+          "mrr": 1.0,
+          "expected_found": 1,
+          "expected_total": 10,
+          "top_results": [
+            "impl ExternCrate at line 522",
+            "Const::semicolon_token (impl at line 410)",
+            "impl CastExpr at line 372",
+            "ClosureExpr::static_token (impl at line 384)",
+            "impl ConstParam at line 447"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 18802,
+          "num_results": 108,
+          "recall_at_5": 0.3,
+          "recall_at_10": 0.3,
+          "precision_at_5": 0.6,
+          "precision_at_10": 0.3,
+          "mrr": 0.5,
+          "expected_found": 10,
+          "expected_total": 10,
+          "top_results": [
+            "support::token",
+            "impl AsmOption at line 163",
+            "impl Fn at line 566",
+            "impl AsmExpr at line 104",
+            "impl Const at line 410"
+          ],
+          "error": null,
+          "graph_traversal_used": true
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 28,
+          "num_results": 6,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 10,
+          "top_results": [
+            "impl FindUsages<'a> at line 436",
+            "impl GlobalState at line 177",
+            "impl DefCollector<'db> at line 258",
+            "impl Config at line 1700",
+            "impl ExprCollector<'db> at line 519"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_002",
+      "category": "call_graph",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 119,
+          "num_results": 5,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl InferenceContext<'_, 'db> at line 60",
+            "tracing_infinite_repeat",
+            "impl GlobalState at line 177",
+            "impl Analysis at line 234",
+            "impl SourceToDefCtx<'_, '_> at line 176"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 75,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl Static at line 512",
+            "ContinueExpr::lifetime (impl at line 463)",
+            "impl ExternCrate at line 522",
+            "impl BecomeExpr at line 305",
+            "impl CastExpr at line 372"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 282,
+          "num_results": 10,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "name",
+            "impl CallExpr at line 364",
+            "visibility",
+            "impl AssocTypeArg at line 258",
+            "Fn::ret_type (impl at line 566)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 19988,
+          "num_results": 70,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": null,
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "support::child",
+            "support::children",
+            "impl AssocTypeArg at line 258",
+            "impl Fn at line 566",
+            "impl ClosureExpr at line 384"
+          ],
+          "error": null,
+          "graph_traversal_used": true
+        }
+      }
+    },
+    {
+      "query_id": "calls_003",
+      "category": "call_graph",
+      "results_by_type": {
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 3555,
+          "num_results": 0,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 2,
+          "top_results": [],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 68,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.14285714285714285,
+          "expected_found": 2,
+          "expected_total": 2,
+          "top_results": [
+            "enum_variants_with_paths",
+            "tests::generates_no_ref_on_calls",
+            "tests::join_lines_multiline_in_block",
+            "hir_to_ast_plain_path",
+            "hir_fmt_tys"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 102,
+          "num_results": 0,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": null,
+          "precision_at_10": null,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 2,
+          "top_results": [],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 376,
+          "num_results": 10,
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.4,
+          "precision_at_10": 0.3,
+          "mrr": 0.3333333333333333,
+          "expected_found": 2,
+          "expected_total": 2,
+          "top_results": [
+            "tests::not_applicable_on_function_calls",
+            "merge_nested_considers_first_segments",
+            "tests::check",
+            "tests::check",
+            "tests::replaces_method_calls"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_004",
+      "category": "call_graph",
+      "results_by_type": {
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 16382,
+          "num_results": 10,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.2,
+          "mrr": 0.5,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "Analysis::goto_definition (impl at line 234)",
+            "goto_definition",
+            "handle_goto_definition",
+            "goto_definition_response",
+            "Config::goto_definition (impl at line 1700)"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 322,
+          "num_results": 10,
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.2,
+          "precision_at_10": 0.1,
+          "mrr": 0.25,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "Analysis::goto_definition (impl at line 234)",
+            "call_hierarchy",
+            "Config::goto_definition (impl at line 1700)",
+            "goto_definition",
+            "handle_goto_definition"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 113,
+          "num_results": 10,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "tests",
+            "impl Analysis at line 234",
+            "tests",
+            "impl NameRefClass<'db> at line 741",
+            "call_hierarchy"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 73,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "goto_declaration",
+            "tests::TEST_CONFIG",
+            "tests::check",
+            "tests::goto_def_on_return_in_try",
+            "tests::goto_type_definition_record_pat_field"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    },
+    {
+      "query_id": "calls_005",
+      "category": "call_graph",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 112,
+          "num_results": 11,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "hover_ranged_macro_call",
+            "hover_call_parens",
+            "hover_offset",
+            "StaticIndex<'_>::add_file (impl at line 159)",
+            "impl StaticIndex<'_> at line 159"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "agentic": {
+          "search_type": "agentic",
+          "query_time_ms": 23770,
+          "num_results": 10,
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.0,
+          "mrr": 0.0,
+          "expected_found": 0,
+          "expected_total": 1,
+          "top_results": [
+            "hover_offset",
+            "handle_hover",
+            "check_hover_no_markdown",
+            "check_hover_fields_limit",
+            "check_hover_enum_variants_limit"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 220,
+          "num_results": 10,
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.16666666666666666,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "hover_call_parens",
+            "Request for HoverRequest at line 655",
+            "Analysis::hover (impl at line 234)",
+            "HoverRequest",
+            "HoverRequest::Result"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 32,
+          "num_results": 20,
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "precision_at_5": 0.0,
+          "precision_at_10": 0.1,
+          "mrr": 0.125,
+          "expected_found": 1,
+          "expected_total": 1,
+          "top_results": [
+            "PathSegments<'a>::strip_last (impl at line 226)",
+            "test_hover_variadic_function",
+            "Request for HoverRequest at line 655",
+            "prepare_hover_actions",
+            "check_hover_range_no_results"
+          ],
+          "error": null,
+          "graph_traversal_used": false
+        }
+      }
+    }
+  ]
+}

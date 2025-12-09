@@ -23,7 +23,7 @@ pub struct QuerySpec {
 }
 
 /// Search filters for entity matching
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]
 pub struct SearchFilters {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<Vec<EntityType>>))]

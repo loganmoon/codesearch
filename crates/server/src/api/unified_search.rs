@@ -4,9 +4,10 @@
 //! search and Qdrant semantic search for better recall and precision.
 
 use super::models::{
-    BackendClients, EntityResult, SearchConfig, UnifiedResponseMetadata, UnifiedSearchRequest,
-    UnifiedSearchResponse,
+    BackendClients, EntityResult, SearchConfig, SearchFilters, UnifiedResponseMetadata,
+    UnifiedSearchRequest, UnifiedSearchResponse,
 };
+use super::query_preprocessing::{preprocess_query, PreprocessedQuery};
 use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
@@ -31,15 +32,30 @@ pub async fn search_unified(
         *sem_limit = (*sem_limit).clamp(1, 1000);
     }
 
+    // Preprocess query to extract identifiers and infer entity types
+    let preprocessed = preprocess_query(&request.query.text, &config.query_preprocessing);
+
+    // Merge inferred entity types with explicit filters
+    let effective_filters = merge_inferred_filters(&request.filters, &preprocessed);
+
+    // Determine if fulltext should be skipped based on intent
+    let enable_fulltext = request.enable_fulltext && !preprocessed.skip_fulltext;
+
+    // Choose query for fulltext (extracted identifiers or original)
+    let fulltext_query = preprocessed
+        .fulltext_query
+        .as_ref()
+        .unwrap_or(&request.query.text);
+
     let (fulltext_results, semantic_results) = tokio::try_join!(
         // Full-text search via PostgreSQL
         async {
-            if request.enable_fulltext {
+            if enable_fulltext {
                 clients
                     .postgres
                     .search_entities_fulltext(
                         request.repository_id,
-                        &request.query.text,
+                        fulltext_query,
                         request.fulltext_limit.unwrap_or(100) as i64,
                         false,
                     )
@@ -51,7 +67,7 @@ pub async fn search_unified(
         // Semantic search via Qdrant
         async {
             if request.enable_semantic {
-                execute_semantic_search(&request, clients, config).await
+                execute_semantic_search(&request, clients, config, &effective_filters).await
             } else {
                 Ok(vec![])
             }
@@ -67,6 +83,9 @@ pub async fn search_unified(
         request.rrf_k.unwrap_or(60),
     );
 
+    // Apply specificity boost to favor smaller entities
+    let boosted_results = apply_specificity_boost(merged_results, &config.specificity);
+
     let (final_results, reranked) = if request
         .rerank
         .as_ref()
@@ -74,9 +93,9 @@ pub async fn search_unified(
         .unwrap_or(false)
         && clients.reranker.is_some()
     {
-        rerank_merged_results(merged_results, &request, clients, config).await?
+        rerank_merged_results(boosted_results, &request, clients, config).await?
     } else {
-        (merged_results, false)
+        (boosted_results, false)
     };
 
     let truncated: Vec<EntityResult> = final_results
@@ -108,10 +127,24 @@ pub async fn search_unified(
     })
 }
 
+/// Use explicit filters only - no automatic entity type inference
+///
+/// Entity type inference was removed because it filtered out valid results.
+/// For example, "What functions call X?" would filter to [Function, Method],
+/// which excludes other entity types that might call X.
+fn merge_inferred_filters(
+    filters: &Option<SearchFilters>,
+    _preprocessed: &PreprocessedQuery,
+) -> Option<SearchFilters> {
+    // Return explicit filters only - do not add inferred entity types
+    filters.clone()
+}
+
 async fn execute_semantic_search(
     request: &UnifiedSearchRequest,
     clients: &BackendClients,
     config: &SearchConfig,
+    effective_filters: &Option<SearchFilters>,
 ) -> Result<Vec<CodeEntity>> {
     let bge_instruction = request
         .query
@@ -147,7 +180,8 @@ async fn execute_semantic_search(
         .flatten()
         .ok_or_else(|| codesearch_core::error::Error::config("No sparse embedding".to_string()))?;
 
-    let filters = super::models::build_storage_filters(&request.filters);
+    // Use effective filters (with inferred entity types merged in)
+    let filters = super::models::build_storage_filters(effective_filters);
 
     let candidates = clients
         .qdrant
@@ -209,6 +243,45 @@ pub fn apply_rrf_fusion(
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     results
+}
+
+/// Apply specificity boost to favor smaller, more focused entities
+///
+/// Uses logarithmic decay based on entity line count:
+/// boost = 1.0 / (1.0 + ln(line_count))
+/// final_score = original_score + (boost * weight)
+pub fn apply_specificity_boost(
+    results: Vec<(CodeEntity, f32)>,
+    config: &codesearch_core::config::SpecificityConfig,
+) -> Vec<(CodeEntity, f32)> {
+    if !config.enabled {
+        return results;
+    }
+
+    let mut boosted: Vec<_> = results
+        .into_iter()
+        .map(|(entity, score)| {
+            let line_count = entity
+                .location
+                .end_line
+                .saturating_sub(entity.location.start_line)
+                + 1;
+
+            // Cap at max_lines to prevent negative boosts
+            let capped_lines = line_count.min(config.max_lines);
+
+            // Logarithmic decay: smaller entities get higher boost
+            let boost = 1.0 / (1.0 + (capped_lines as f32).ln());
+            let boosted_score = score + (boost * config.weight);
+
+            (entity, boosted_score)
+        })
+        .collect();
+
+    // Re-sort by boosted score
+    boosted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    boosted
 }
 
 async fn rerank_merged_results(
@@ -387,5 +460,58 @@ mod tests {
         let score_k100 = results_k100[0].1;
 
         assert!(score_k10 > score_k100);
+    }
+
+    #[test]
+    fn test_specificity_boost_disabled() {
+        let config = codesearch_core::config::SpecificityConfig {
+            enabled: false,
+            weight: 0.1,
+            max_lines: 500,
+        };
+
+        let results = vec![
+            (create_test_entity("1", "entity_1"), 0.5),
+            (create_test_entity("2", "entity_2"), 0.3),
+        ];
+
+        let boosted = apply_specificity_boost(results.clone(), &config);
+
+        // When disabled, scores should be unchanged
+        assert_eq!(boosted[0].1, results[0].1);
+        assert_eq!(boosted[1].1, results[1].1);
+    }
+
+    #[test]
+    fn test_specificity_boost_favors_smaller() {
+        let config = codesearch_core::config::SpecificityConfig {
+            enabled: true,
+            weight: 0.5,
+            max_lines: 500,
+        };
+
+        // Create entities with different sizes
+        let small_entity = {
+            let mut e = create_test_entity("small", "small_fn");
+            e.location.start_line = 1;
+            e.location.end_line = 5; // 5 lines
+            e
+        };
+        let large_entity = {
+            let mut e = create_test_entity("large", "large_fn");
+            e.location.start_line = 1;
+            e.location.end_line = 100; // 100 lines
+            e
+        };
+
+        // Start with same RRF score but large entity first
+        let results = vec![(large_entity, 0.5), (small_entity, 0.5)];
+
+        let boosted = apply_specificity_boost(results, &config);
+
+        // Small entity should now be first due to specificity boost
+        assert_eq!(boosted[0].0.entity_id, "small");
+        assert_eq!(boosted[1].0.entity_id, "large");
+        assert!(boosted[0].1 > boosted[1].1);
     }
 }

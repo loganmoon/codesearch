@@ -126,6 +126,8 @@ impl AgenticEntity {
 // ============================================================================
 
 /// Individual result from quality gate composition
+/// Currently only used in tests, kept for potential future use
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct QualityGateResult {
     pub entity_id: String,

@@ -140,7 +140,7 @@ async fn test_search_similar_with_entity_type_filter() -> Result<()> {
 
         let query_embedding = mock_embedding(1536);
         let filters = SearchFilters {
-            entity_type: Some(EntityType::Function),
+            entity_types: Some(vec![EntityType::Function]),
             ..Default::default()
         };
 
@@ -609,7 +609,7 @@ async fn test_hybrid_search_with_filters() -> Result<()> {
         let dense_query = mock_embedding(1536);
         let sparse_query = vec![(0, 0.5), (1, 0.3), (2, 0.2)];
         let filters = SearchFilters {
-            entity_type: Some(EntityType::Function),
+            entity_types: Some(vec![EntityType::Function]),
             ..Default::default()
         };
 

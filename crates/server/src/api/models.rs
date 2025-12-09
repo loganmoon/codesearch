@@ -3,7 +3,9 @@
 // Re-export search models from core
 pub use codesearch_core::search_models::*;
 
-use codesearch_core::config::{HybridSearchConfig, RerankingConfig};
+use codesearch_core::config::{
+    HybridSearchConfig, QueryPreprocessingConfig, RerankingConfig, SpecificityConfig,
+};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{
@@ -24,6 +26,8 @@ pub struct BackendClients {
 pub struct SearchConfig {
     pub hybrid_search: HybridSearchConfig,
     pub reranking: RerankingConfig,
+    pub query_preprocessing: QueryPreprocessingConfig,
+    pub specificity: SpecificityConfig,
     pub default_bge_instruction: String,
     pub max_batch_size: usize,
 }
@@ -31,10 +35,7 @@ pub struct SearchConfig {
 /// Convert API search filters to storage search filters
 pub fn build_storage_filters(filters: &Option<SearchFilters>) -> Option<StorageSearchFilters> {
     filters.as_ref().map(|f| StorageSearchFilters {
-        entity_type: f
-            .entity_type
-            .clone()
-            .and_then(|types| types.first().cloned()),
+        entity_types: f.entity_type.clone(),
         language: f.language.clone(),
         file_path: f.file_path.as_ref().map(std::path::PathBuf::from),
     })

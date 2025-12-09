@@ -6,14 +6,14 @@ use crate::{
     extract_json, prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
-        QualityGateResult, RerankingMethod, RetrievalSource,
+        RerankingMethod, RetrievalSource,
     },
     worker::{execute_workers, WorkerQuery, WorkerType},
 };
 use codesearch_core::search_models::{GraphQueryParameters, GraphQueryRequest, GraphQueryType};
 use codesearch_core::SearchApi;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -47,6 +47,7 @@ const VALID_RELATIONSHIPS: &[&str] = &[
 /// Extract JSON content from between <result_list> XML tags
 /// Handles chatty LLM responses that may have text before/after the tags,
 /// as well as markdown code blocks inside the tags
+#[cfg(test)]
 fn extract_result_list(response: &str) -> Result<String> {
     let start_tag = "<result_list>";
     let end_tag = "</result_list>";
@@ -763,7 +764,9 @@ impl AgenticSearchOrchestrator {
             },
             return_entities: true,
             semantic_filter: None,
-            limit: 10,
+            // Don't artificially limit graph traversals - let all relationships be returned
+            // The graph query itself has depth limits that naturally bound results
+            limit: 1000,
         };
 
         debug!(
@@ -778,11 +781,17 @@ impl AgenticSearchOrchestrator {
             .map_err(|e| AgenticSearchError::GraphTraversal(e.to_string()))?;
 
         // Convert GraphResult to AgenticEntity with Graph source
+        // Strip content to avoid context window blowup - graph results provide
+        // structural context, not code content
         let entities: Vec<AgenticEntity> = response
             .results
             .into_iter()
             .filter_map(|result| {
-                result.entity.map(|entity| {
+                result.entity.map(|mut entity| {
+                    // Clear content to reduce context size - graph traversal provides
+                    // structural relationships, not code for detailed inspection
+                    entity.content = None;
+
                     let source = RetrievalSource::Graph {
                         source_entity_id: entity_id.to_string(),
                         relationship: relationship.to_string(),
@@ -805,7 +814,10 @@ impl AgenticSearchOrchestrator {
         Ok(entities)
     }
 
-    /// Synthesize final top 10 results with dual-track quality gate
+    /// Synthesize final results
+    ///
+    /// Graph results are exhaustive and unranked (e.g., ALL callers of X), so they
+    /// should not be filtered. Direct candidates get quality-gated to pick the best.
     async fn synthesize_final_results(
         &self,
         entities: Vec<AgenticEntity>,
@@ -815,14 +827,23 @@ impl AgenticSearchOrchestrator {
         let (direct_candidates, graph_context): (Vec<_>, Vec<_>) =
             entities.into_iter().partition(|e| e.is_direct_match());
 
-        // If no graph context, use simple score-based ranking
+        // If no graph context, use simple score-based ranking for direct candidates
         if graph_context.is_empty() {
             return self.simple_top_n_by_score(direct_candidates, 10);
         }
 
-        // Use quality gate composition with Sonnet
-        self.synthesize_with_quality_gate(direct_candidates, graph_context, query)
-            .await
+        // Graph context exists: quality-gate direct candidates, include ALL graph results
+        // Graph results are exhaustive (all callers, all implementations, etc.) and
+        // already passed quality gate when orchestrator decided to traverse them
+        let quality_gated_direct = self
+            .quality_gate_direct_candidates(direct_candidates, &graph_context, query)
+            .await?;
+
+        // Combine: quality-gated direct + ALL graph results (unfiltered)
+        let mut final_results = quality_gated_direct;
+        final_results.extend(graph_context);
+
+        Ok(final_results)
     }
 
     /// Simple top N by score (fallback when no graph context)
@@ -841,128 +862,23 @@ impl AgenticSearchOrchestrator {
         Ok(sorted.into_iter().take(n).collect())
     }
 
-    /// Synthesize results using quality gate composition with dual-track support
-    async fn synthesize_with_quality_gate(
+    /// Quality gate for direct candidates only (when graph context exists)
+    ///
+    /// When we have graph results, we know the query is relationship-focused
+    /// (e.g., "What calls X?"). The direct candidates likely include the target
+    /// entity itself, which should be included. We use score-based ranking here
+    /// to avoid an extra LLM call - the orchestrator already validated these
+    /// entities are relevant.
+    async fn quality_gate_direct_candidates(
         &self,
         direct_candidates: Vec<AgenticEntity>,
-        graph_context: Vec<AgenticEntity>,
-        query: &str,
+        _graph_context: &[AgenticEntity],
+        _query: &str,
     ) -> Result<Vec<AgenticEntity>> {
-        // Format entities for prompt
-        let direct_text = format_entities_for_prompt(&direct_candidates, 20);
-        let graph_text = format_entities_for_prompt(&graph_context, 10);
-
-        // Create system prompt with cache control for cost reduction
-        let system_block = claudius::TextBlock::new(prompts::QUALITY_GATE_SYSTEM.to_string())
-            .with_cache_control(claudius::CacheControlEphemeral::new());
-
-        // Format user message with dynamic content
-        let user_prompt = prompts::format_prompt(
-            prompts::QUALITY_GATE_USER,
-            &[
-                ("direct_candidates", &direct_text),
-                ("graph_context", &graph_text),
-                ("query", query),
-            ],
-        );
-
-        // Call Sonnet for composition with cached system prompt
-        let params = claudius::MessageCreateParams::new(
-            4096,
-            vec![claudius::MessageParam::user(user_prompt)],
-            self.sonnet_model.clone(),
-        )
-        .with_system_blocks(vec![system_block])
-        .with_temperature(0.0)
-        .map_err(|e| AgenticSearchError::QualityGate(format!("Invalid temperature: {e}")))?;
-
-        let response =
-            self.sonnet_client.send(params).await.map_err(|e| {
-                AgenticSearchError::QualityGate(format!("Sonnet API call failed: {e}"))
-            })?;
-
-        // Extract text content
-        let response_text = response
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Parse the result_list XML block
-        let json_str = match extract_result_list(&response_text) {
-            Ok(json) => json,
-            Err(e) => {
-                warn!(
-                    "Quality gate response parsing failed, falling back to score-based: {}",
-                    e
-                );
-                // Fallback: combine direct and graph, sort by score
-                let mut combined = direct_candidates;
-                combined.extend(graph_context);
-                return self.simple_top_n_by_score(combined, 10);
-            }
-        };
-
-        let composition: Vec<QualityGateResult> = serde_json::from_str(&json_str).map_err(|e| {
-            AgenticSearchError::QualityGate(format!(
-                "Failed to parse quality gate JSON: {e}. Content: {json_str}"
-            ))
-        })?;
-
-        // Build entity lookup map
-        let all_entities: HashMap<&str, &AgenticEntity> = direct_candidates
-            .iter()
-            .chain(graph_context.iter())
-            .map(|e| (e.entity.entity_id.as_str(), e))
-            .collect();
-
-        // Build final results from composition
-        let mut final_results: Vec<AgenticEntity> = Vec::new();
-        for entry in composition.into_iter().take(10) {
-            if let Some(&entity) = all_entities.get(entry.entity_id.as_str()) {
-                let mut result = entity.clone();
-                result.relevance_justification = entry.relevance_justification;
-                if let Some(ref mut reasoning) = result.entity.reasoning {
-                    *reasoning = result.relevance_justification.clone();
-                } else {
-                    result.entity.reasoning = Some(result.relevance_justification.clone());
-                }
-                final_results.push(result);
-            } else {
-                warn!(
-                    "Quality gate referenced unknown entity: {}",
-                    entry.entity_id
-                );
-            }
-        }
-
-        // Fallback: if quality gate returned too few, fill from direct candidates
-        if final_results.len() < 5 {
-            warn!(
-                "Quality gate returned only {} results, filling from direct candidates",
-                final_results.len()
-            );
-            // Collect existing IDs as owned strings to avoid borrow conflict
-            let existing_ids: std::collections::HashSet<String> = final_results
-                .iter()
-                .map(|e| e.entity.entity_id.clone())
-                .collect();
-
-            for entity in &direct_candidates {
-                if final_results.len() >= 10 {
-                    break;
-                }
-                if !existing_ids.contains(&entity.entity.entity_id) {
-                    final_results.push(entity.clone());
-                }
-            }
-        }
-
-        Ok(final_results)
+        // For graph-focused queries, direct candidates usually include the target
+        // entity (e.g., the function X when asking "What calls X?"). Keep top
+        // candidates by score - they've already been validated by the orchestrator.
+        self.simple_top_n_by_score(direct_candidates, 5)
     }
 }
 

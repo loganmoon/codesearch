@@ -1,6 +1,7 @@
 //! Jina AI reranker provider
 
 use crate::error::RerankingError;
+use crate::sort_scores_descending;
 use crate::RerankerProvider;
 use async_trait::async_trait;
 use codesearch_core::error::Result;
@@ -157,17 +158,8 @@ impl RerankerProvider for JinaRerankerProvider {
             })
             .collect();
 
-        // Sort by relevance score descending with explicit NaN handling
-        scored_docs.sort_by(|a, b| {
-            let a_is_nan = a.1.is_nan();
-            let b_is_nan = b.1.is_nan();
-            match (a_is_nan, b_is_nan) {
-                (true, true) => std::cmp::Ordering::Equal,
-                (true, false) => std::cmp::Ordering::Greater, // NaN sorts to end
-                (false, true) => std::cmp::Ordering::Less,    // NaN sorts to end
-                (false, false) => b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal),
-            }
-        });
+        // Sort by relevance score descending with NaN handling
+        sort_scores_descending(&mut scored_docs);
 
         // Truncate to top_k (Jina should already limit, but ensure)
         scored_docs.truncate(top_k);

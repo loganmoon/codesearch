@@ -281,7 +281,7 @@ pub struct LanguagesConfig {
 }
 
 /// Configuration for reranking with cross-encoder models
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RerankingConfig {
     /// Whether reranking is enabled (default: false)
     #[serde(default = "default_enable_reranking")]
@@ -309,13 +309,29 @@ pub struct RerankingConfig {
     /// API key for reranker service (uses EMBEDDING_API_KEY env if not set)
     pub api_key: Option<String>,
 
-    /// Request timeout in seconds for reranking API calls (default: 30)
+    /// Request timeout in seconds for reranking API calls (default: 5)
     #[serde(default = "default_reranking_timeout_secs")]
     pub timeout_secs: u64,
 
     /// Maximum concurrent reranking API requests (default: 16)
     #[serde(default = "default_reranking_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+}
+
+impl std::fmt::Debug for RerankingConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RerankingConfig")
+            .field("enabled", &self.enabled)
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("candidates", &self.candidates)
+            .field("top_k", &self.top_k)
+            .field("api_base_url", &self.api_base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***REDACTED***"))
+            .field("timeout_secs", &self.timeout_secs)
+            .field("max_concurrent_requests", &self.max_concurrent_requests)
+            .finish()
+    }
 }
 
 /// Per-request reranking override configuration

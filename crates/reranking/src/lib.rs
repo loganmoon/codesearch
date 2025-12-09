@@ -20,6 +20,20 @@ mod vllm;
 pub use error::RerankingError;
 pub use jina::JinaRerankerProvider;
 
+/// Sort scored documents by relevance score descending, with NaN values sorted to the end.
+pub(crate) fn sort_scores_descending(scored_docs: &mut [(String, f32)]) {
+    scored_docs.sort_by(|a, b| {
+        let a_is_nan = a.1.is_nan();
+        let b_is_nan = b.1.is_nan();
+        match (a_is_nan, b_is_nan) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater, // NaN sorts to end
+            (false, true) => std::cmp::Ordering::Less,    // NaN sorts to end
+            (false, false) => b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal),
+        }
+    });
+}
+
 /// Trait for reranker providers
 ///
 /// This trait defines the interface for reranking providers that use cross-encoder
@@ -73,8 +87,7 @@ pub async fn create_reranker_provider(
 
             Ok(Arc::new(provider))
         }
-        _ => {
-            // Default to vLLM for backwards compatibility
+        "vllm" => {
             let api_base_url = config
                 .api_base_url
                 .clone()
@@ -93,5 +106,8 @@ pub async fn create_reranker_provider(
 
             Ok(Arc::new(provider))
         }
+        other => Err(Error::config(format!(
+            "Unknown reranking provider: '{other}'. Valid providers: jina, vllm"
+        ))),
     }
 }

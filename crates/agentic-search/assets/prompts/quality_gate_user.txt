@@ -1,0 +1,9 @@
+<direct_candidates>
+{direct_candidates}
+</direct_candidates>
+
+<graph_context>
+{graph_context}
+</graph_context>
+
+Query: {query}

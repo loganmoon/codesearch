@@ -55,6 +55,12 @@ pub struct AgenticSearchMetadata {
     pub reranking_method: RerankingMethod,
     pub graph_traversal_used: bool,
     pub estimated_cost_usd: f32,
+    /// Tokens read from Claude API prompt cache (90% cost reduction)
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    /// Tokens written to Claude API prompt cache
+    #[serde(default)]
+    pub cache_creation_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

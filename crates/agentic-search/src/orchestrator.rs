@@ -323,6 +323,9 @@ impl AgenticSearchOrchestrator {
                 reranking_method: RerankingMethod::HaikuOnly,
                 graph_traversal_used: graph_context > 0,
                 estimated_cost_usd: total_cost,
+                // Cache metrics are populated when usage tracking is available
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
             },
         })
     }
@@ -356,8 +359,13 @@ impl AgenticSearchOrchestrator {
             );
         }
 
-        let prompt = prompts::format_prompt(
-            prompts::ORCHESTRATOR_PLAN,
+        // Create system prompt with cache control for cost reduction
+        let system_block = claudius::TextBlock::new(prompts::ORCHESTRATOR_PLAN_SYSTEM.to_string())
+            .with_cache_control(claudius::CacheControlEphemeral::new());
+
+        // Format user message with dynamic content
+        let user_prompt = prompts::format_prompt(
+            prompts::ORCHESTRATOR_PLAN_USER,
             &[
                 ("query", query),
                 ("context", &context),
@@ -366,13 +374,15 @@ impl AgenticSearchOrchestrator {
             ],
         );
 
-        // Call Sonnet
-        let mut params = claudius::MessageCreateParams::simple(
-            claudius::MessageParam::user(prompt),
+        // Call Sonnet with cached system prompt
+        let params = claudius::MessageCreateParams::new(
+            4096,
+            vec![claudius::MessageParam::user(user_prompt)],
             self.sonnet_model.clone(),
-        );
-        params.max_tokens = 4096;
-        params.temperature = Some(0.0);
+        )
+        .with_system_blocks(vec![system_block])
+        .with_temperature(0.0)
+        .map_err(|e| AgenticSearchError::Orchestrator(format!("Invalid temperature: {e}")))?;
 
         let response = self.sonnet_client.send(params).await.map_err(|e| {
             AgenticSearchError::Orchestrator(format!("Sonnet API call failed: {e}"))
@@ -842,8 +852,13 @@ impl AgenticSearchOrchestrator {
         let direct_text = format_entities_for_prompt(&direct_candidates, 20);
         let graph_text = format_entities_for_prompt(&graph_context, 10);
 
-        let prompt = prompts::format_prompt(
-            prompts::QUALITY_GATE_COMPOSE,
+        // Create system prompt with cache control for cost reduction
+        let system_block = claudius::TextBlock::new(prompts::QUALITY_GATE_SYSTEM.to_string())
+            .with_cache_control(claudius::CacheControlEphemeral::new());
+
+        // Format user message with dynamic content
+        let user_prompt = prompts::format_prompt(
+            prompts::QUALITY_GATE_USER,
             &[
                 ("direct_candidates", &direct_text),
                 ("graph_context", &graph_text),
@@ -851,13 +866,15 @@ impl AgenticSearchOrchestrator {
             ],
         );
 
-        // Call Sonnet for composition
-        let mut params = claudius::MessageCreateParams::simple(
-            claudius::MessageParam::user(prompt),
+        // Call Sonnet for composition with cached system prompt
+        let params = claudius::MessageCreateParams::new(
+            4096,
+            vec![claudius::MessageParam::user(user_prompt)],
             self.sonnet_model.clone(),
-        );
-        params.max_tokens = 4096;
-        params.temperature = Some(0.0);
+        )
+        .with_system_blocks(vec![system_block])
+        .with_temperature(0.0)
+        .map_err(|e| AgenticSearchError::QualityGate(format!("Invalid temperature: {e}")))?;
 
         let response =
             self.sonnet_client.send(params).await.map_err(|e| {

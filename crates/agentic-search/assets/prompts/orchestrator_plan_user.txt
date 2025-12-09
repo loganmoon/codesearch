@@ -1,0 +1,6 @@
+Query: {query}
+
+Current iteration: {iteration} of {max_iterations}
+
+Accumulated context from previous iterations:
+{context}

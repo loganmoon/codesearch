@@ -287,6 +287,10 @@ pub struct RerankingConfig {
     #[serde(default = "default_enable_reranking")]
     pub enabled: bool,
 
+    /// Reranker provider type: "jina" or "vllm" (default: "jina")
+    #[serde(default = "default_reranking_provider")]
+    pub provider: String,
+
     /// Reranker model name
     #[serde(default = "default_reranking_model")]
     pub model: String,
@@ -327,6 +331,7 @@ impl RerankingRequestConfig {
     pub fn merge_with(&self, base: &RerankingConfig) -> RerankingConfig {
         RerankingConfig {
             enabled: self.enabled.unwrap_or(base.enabled),
+            provider: base.provider.clone(),
             candidates: self.candidates.unwrap_or(base.candidates).min(1000),
             top_k: self.top_k.unwrap_or(base.top_k),
             model: base.model.clone(),
@@ -543,12 +548,16 @@ fn default_enable_reranking() -> bool {
     false
 }
 
+fn default_reranking_provider() -> String {
+    "jina".to_string()
+}
+
 fn default_reranking_model() -> String {
-    "BAAI/bge-reranker-v2-m3".to_string()
+    "jina-reranker-v3".to_string()
 }
 
 fn default_reranking_candidates() -> usize {
-    350 // Increased from 100 for better reranking quality
+    100 // Reduced from 350 for Jina rate limits (vLLM can handle more)
 }
 
 fn default_reranking_top_k() -> usize {
@@ -638,6 +647,7 @@ impl Default for RerankingConfig {
     fn default() -> Self {
         Self {
             enabled: default_enable_reranking(),
+            provider: default_reranking_provider(),
             model: default_reranking_model(),
             candidates: default_reranking_candidates(),
             top_k: default_reranking_top_k(),
@@ -1071,6 +1081,7 @@ impl Config {
 
         // Merge reranking config
         self.reranking.enabled = other.reranking.enabled;
+        self.reranking.provider = other.reranking.provider;
         self.reranking.model = other.reranking.model;
         self.reranking.candidates = other.reranking.candidates;
         self.reranking.top_k = other.reranking.top_k;
@@ -1258,6 +1269,14 @@ impl Config {
         }
 
         // Validate reranking configuration
+        let valid_reranking_providers = ["jina", "vllm"];
+        if !valid_reranking_providers.contains(&self.reranking.provider.as_str()) {
+            return Err(Error::config(format!(
+                "Invalid reranking provider '{}'. Must be one of: {:?}",
+                self.reranking.provider, valid_reranking_providers
+            )));
+        }
+
         if self.reranking.enabled {
             if self.reranking.candidates == 0 {
                 return Err(Error::config(
@@ -1995,6 +2014,84 @@ mod tests {
     }
 
     #[test]
+    fn test_reranking_config_jina_provider() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+
+            [reranking]
+            enabled = true
+            provider = "jina"
+            model = "jina-reranker-v3"
+            api_key = "test_key"
+            candidates = 100
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML with Jina provider");
+
+        assert!(config.reranking.enabled);
+        assert_eq!(config.reranking.provider, "jina");
+        assert_eq!(config.reranking.model, "jina-reranker-v3");
+        assert_eq!(config.reranking.api_key, Some("test_key".to_string()));
+        assert_eq!(config.reranking.candidates, 100);
+    }
+
+    #[test]
+    fn test_reranking_config_vllm_provider() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+
+            [reranking]
+            enabled = true
+            provider = "vllm"
+            model = "BAAI/bge-reranker-v2-m3"
+            api_base_url = "http://localhost:8001/v1"
+            candidates = 350
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML with vLLM provider");
+
+        assert!(config.reranking.enabled);
+        assert_eq!(config.reranking.provider, "vllm");
+        assert_eq!(config.reranking.model, "BAAI/bge-reranker-v2-m3");
+        assert_eq!(config.reranking.candidates, 350);
+    }
+
+    #[test]
+    fn test_reranking_config_invalid_provider() {
+        let toml = r#"
+            [indexer]
+            [embeddings]
+            [watcher]
+            [storage]
+
+            [reranking]
+            provider = "invalid_provider"
+        "#;
+
+        let config = Config::from_toml_str(toml).expect("Failed to parse TOML");
+        let result = config.validate();
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Invalid reranking provider"));
+        assert!(error_msg.contains("invalid_provider"));
+    }
+
+    #[test]
+    fn test_reranking_defaults_to_jina() {
+        let config = RerankingConfig::default();
+        assert_eq!(config.provider, "jina");
+        assert_eq!(config.model, "jina-reranker-v3");
+        assert_eq!(config.candidates, 100);
+    }
+
+    #[test]
     fn test_outbox_validation_poll_interval_zero() {
         let toml = r#"
             [indexer]
@@ -2206,6 +2303,7 @@ mod tests {
     fn test_reranking_request_config_merge_override_all() {
         let base = RerankingConfig {
             enabled: false,
+            provider: "jina".to_string(),
             model: "base-model".to_string(),
             candidates: 100,
             top_k: 10,
@@ -2236,6 +2334,7 @@ mod tests {
     fn test_reranking_request_config_merge_partial_override() {
         let base = RerankingConfig {
             enabled: true,
+            provider: "jina".to_string(),
             model: "base-model".to_string(),
             candidates: 100,
             top_k: 10,
@@ -2263,6 +2362,7 @@ mod tests {
     fn test_reranking_request_config_merge_no_override() {
         let base = RerankingConfig {
             enabled: true,
+            provider: "jina".to_string(),
             model: "base-model".to_string(),
             candidates: 100,
             top_k: 10,
@@ -2290,6 +2390,7 @@ mod tests {
     fn test_reranking_request_config_merge_enforces_1000_limit() {
         let base = RerankingConfig {
             enabled: true,
+            provider: "jina".to_string(),
             model: "base-model".to_string(),
             candidates: 100,
             top_k: 10,
@@ -2314,6 +2415,7 @@ mod tests {
     fn test_reranking_request_config_merge_allows_1000() {
         let base = RerankingConfig {
             enabled: true,
+            provider: "jina".to_string(),
             model: "base-model".to_string(),
             candidates: 100,
             top_k: 10,

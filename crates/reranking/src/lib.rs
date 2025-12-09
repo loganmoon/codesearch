@@ -8,13 +8,17 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use async_trait::async_trait;
-use codesearch_core::error::Result;
+use codesearch_core::config::RerankingConfig;
+use codesearch_core::error::{Error, Result};
 use std::sync::Arc;
+use tracing::info;
 
 pub mod error;
+mod jina;
 mod vllm;
 
 pub use error::RerankingError;
+pub use jina::JinaRerankerProvider;
 
 /// Trait for reranker providers
 ///
@@ -39,28 +43,55 @@ pub trait RerankerProvider: Send + Sync {
     ) -> Result<Vec<(String, f32)>>;
 }
 
-/// Create a new reranker provider
+/// Create a new reranker provider based on configuration
 ///
 /// # Arguments
-/// * `model` - Model name (e.g., "BAAI/bge-reranker-v2-m3")
-/// * `api_base_url` - Base URL for the vLLM API (e.g., "http://localhost:8001")
-/// * `timeout_secs` - Request timeout in seconds
-/// * `max_concurrent_requests` - Maximum concurrent API requests
+/// * `config` - Reranking configuration including provider type
 pub async fn create_reranker_provider(
-    model: String,
-    api_base_url: String,
-    timeout_secs: u64,
-    max_concurrent_requests: usize,
+    config: &RerankingConfig,
 ) -> Result<Arc<dyn RerankerProvider>> {
-    let provider = vllm::VllmRerankerProvider::new(
-        model,
-        api_base_url,
-        timeout_secs,
-        max_concurrent_requests,
-    )?;
+    match config.provider.as_str() {
+        "jina" => {
+            let api_key = config
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("JINA_API_KEY").ok())
+                .ok_or_else(|| {
+                    Error::config(
+                        "Jina API key required. Set reranking.api_key or JINA_API_KEY env var"
+                            .to_string(),
+                    )
+                })?;
 
-    // Perform health check (non-blocking)
-    provider.check_health().await;
+            info!("Creating Jina reranker provider");
+            let provider = jina::JinaRerankerProvider::new(
+                api_key,
+                config.model.clone(),
+                config.timeout_secs,
+                config.max_concurrent_requests,
+            )?;
 
-    Ok(Arc::new(provider))
+            Ok(Arc::new(provider))
+        }
+        _ => {
+            // Default to vLLM for backwards compatibility
+            let api_base_url = config
+                .api_base_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:8001/v1".to_string());
+
+            info!("Creating vLLM reranker provider");
+            let provider = vllm::VllmRerankerProvider::new(
+                config.model.clone(),
+                api_base_url,
+                config.timeout_secs,
+                config.max_concurrent_requests,
+            )?;
+
+            // Perform health check (non-blocking)
+            provider.check_health().await;
+
+            Ok(Arc::new(provider))
+        }
+    }
 }

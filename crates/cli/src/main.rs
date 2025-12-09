@@ -261,21 +261,7 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
     // Initialize reranker if enabled
     let reranker: Option<std::sync::Arc<dyn codesearch_reranking::RerankerProvider>> =
         if config.reranking.enabled {
-            let api_base_url = config
-                .reranking
-                .api_base_url
-                .clone()
-                .or_else(|| config.embeddings.api_base_url.clone())
-                .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
-
-            match codesearch_reranking::create_reranker_provider(
-                config.reranking.model.clone(),
-                api_base_url,
-                config.reranking.timeout_secs,
-                config.reranking.max_concurrent_requests,
-            )
-            .await
-            {
+            match codesearch_reranking::create_reranker_provider(&config.reranking).await {
                 Ok(provider) => {
                     info!("Reranker initialized successfully");
                     Some(provider)
@@ -598,7 +584,8 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
 
     // Ensure dependencies are running
     if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+        let use_vllm_reranker = config.reranking.enabled && config.reranking.provider == "vllm";
+        infrastructure::ensure_shared_infrastructure(&config.storage, use_vllm_reranker).await?;
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
@@ -716,7 +703,8 @@ async fn handle_cache_command(command: CacheCommands, config_path: Option<&Path>
 
     // Ensure dependencies are running
     if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+        let use_vllm_reranker = config.reranking.enabled && config.reranking.provider == "vllm";
+        infrastructure::ensure_shared_infrastructure(&config.storage, use_vllm_reranker).await?;
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }

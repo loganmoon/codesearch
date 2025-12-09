@@ -64,21 +64,7 @@ pub async fn run_rest_server(
     // Initialize reranker if enabled
     let reranker: Option<Arc<dyn codesearch_reranking::RerankerProvider>> =
         if config.reranking.enabled {
-            let api_base_url = config
-                .reranking
-                .api_base_url
-                .clone()
-                .or_else(|| config.embeddings.api_base_url.clone())
-                .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
-
-            match codesearch_reranking::create_reranker_provider(
-                config.reranking.model.clone(),
-                api_base_url,
-                config.reranking.timeout_secs,
-                config.reranking.max_concurrent_requests,
-            )
-            .await
-            {
+            match codesearch_reranking::create_reranker_provider(&config.reranking).await {
                 Ok(provider) => {
                     info!("Reranker initialized successfully");
                     Some(provider)

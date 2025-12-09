@@ -184,6 +184,8 @@ mod tests {
             reranking_method: RerankingMethod::HaikuOnly,
             graph_traversal_used: true,
             estimated_cost_usd: 0.05,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
         }
     }
 

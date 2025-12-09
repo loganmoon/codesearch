@@ -97,7 +97,8 @@ pub async fn ensure_storage_initialized(
 
     // Ensure dependencies are running if auto-start is enabled
     if config.storage.auto_start_deps {
-        infrastructure::ensure_shared_infrastructure(&config.storage).await?;
+        let use_vllm_reranker = config.reranking.enabled && config.reranking.provider == "vllm";
+        infrastructure::ensure_shared_infrastructure(&config.storage, use_vllm_reranker).await?;
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }

@@ -1,10 +1,22 @@
 //! Prompt templates for agentic search
 //!
 //! PRIVATE MODULE - Not exported from crate
+//!
+//! Prompts are split into system (cacheable) and user (dynamic) parts
+//! to enable Claude API prompt caching for cost reduction.
 
-pub const ORCHESTRATOR_PLAN: &str = include_str!("../assets/prompts/orchestrator_plan.txt");
+// Worker reranking prompt (not split - too small to benefit from caching)
 pub const WORKER_RERANK: &str = include_str!("../assets/prompts/worker_rerank.txt");
-pub const QUALITY_GATE_COMPOSE: &str = include_str!("../assets/prompts/quality_gate_compose.txt");
+
+// Split prompts for caching - System prompts (static, cacheable)
+pub const ORCHESTRATOR_PLAN_SYSTEM: &str =
+    include_str!("../assets/prompts/orchestrator_plan_system.txt");
+pub const QUALITY_GATE_SYSTEM: &str = include_str!("../assets/prompts/quality_gate_system.txt");
+
+// Split prompts for caching - User prompts (dynamic)
+pub const ORCHESTRATOR_PLAN_USER: &str =
+    include_str!("../assets/prompts/orchestrator_plan_user.txt");
+pub const QUALITY_GATE_USER: &str = include_str!("../assets/prompts/quality_gate_user.txt");
 
 pub fn format_prompt(template: &str, vars: &[(&str, &str)]) -> String {
     let mut result = template.to_string();
@@ -29,9 +41,13 @@ mod tests {
     #[test]
     #[allow(clippy::len_zero)] // const_is_empty conflicts with len_zero for const strings
     fn test_prompts_load() {
-        // Verify prompts compile and are accessible
-        assert!(ORCHESTRATOR_PLAN.len() > 0);
+        // Verify worker rerank prompt loads
         assert!(WORKER_RERANK.len() > 0);
-        assert!(QUALITY_GATE_COMPOSE.len() > 0);
+
+        // Verify split prompts for caching
+        assert!(ORCHESTRATOR_PLAN_SYSTEM.len() > 0);
+        assert!(ORCHESTRATOR_PLAN_USER.len() > 0);
+        assert!(QUALITY_GATE_SYSTEM.len() > 0);
+        assert!(QUALITY_GATE_USER.len() > 0);
     }
 }

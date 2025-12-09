@@ -514,4 +514,69 @@ mod tests {
         assert_eq!(boosted[1].0.entity_id, "large");
         assert!(boosted[0].1 > boosted[1].1);
     }
+
+    #[test]
+    fn test_merge_inferred_filters_ignores_inferred_types() {
+        // Regression test: verify that inferred entity types are NOT applied to filters.
+        // Bug context: Previously, queries like "What functions call X?" would infer
+        // entity_types=[Function, Method] and filter results, excluding valid results
+        // like modules or structs that might call X.
+
+        use crate::api::query_preprocessing::{PreprocessedQuery, QueryIntent};
+
+        // Create preprocessed query with inferred entity types
+        let preprocessed = PreprocessedQuery {
+            original: "What functions call X?".to_string(),
+            identifiers: vec!["X".to_string()],
+            entity_types: vec![EntityType::Function, EntityType::Method],
+            intent: QueryIntent::CallGraph,
+            fulltext_query: Some("X".to_string()),
+            skip_fulltext: true,
+        };
+
+        // Case 1: No explicit filters - should remain None, NOT add inferred types
+        let no_filters: Option<SearchFilters> = None;
+        let result = merge_inferred_filters(&no_filters, &preprocessed);
+        assert!(
+            result.is_none(),
+            "Should not create filters from inferred entity types"
+        );
+
+        // Case 2: Explicit filters with different types - should keep explicit, NOT merge inferred
+        let explicit_filters = Some(SearchFilters {
+            entity_type: Some(vec![EntityType::Struct]),
+            ..Default::default()
+        });
+        let result = merge_inferred_filters(&explicit_filters, &preprocessed);
+        assert!(result.is_some());
+        let types = result.unwrap().entity_type.unwrap();
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0], EntityType::Struct);
+        // Should NOT contain Function or Method from inferred types
+    }
+
+    #[test]
+    fn test_specificity_boost_max_lines_capping() {
+        // Test that entities exceeding max_lines get capped boost (not negative boost)
+        let config = codesearch_core::config::SpecificityConfig {
+            enabled: true,
+            weight: 0.5,
+            max_lines: 100, // Low max_lines for testing
+        };
+
+        // Create entity that exceeds max_lines
+        let huge_entity = {
+            let mut e = create_test_entity("huge", "huge_fn");
+            e.location.start_line = 1;
+            e.location.end_line = 1000; // Way over max_lines
+            e
+        };
+
+        let results = vec![(huge_entity, 0.5)];
+        let boosted = apply_specificity_boost(results, &config);
+
+        // Boost should be positive (not negative) due to capping at max_lines
+        // The boost is 1.0 / (1.0 + ln(100)) = ~0.178, so boosted score should be > 0.5
+        assert!(boosted[0].1 > 0.5, "Capped boost should still be positive");
+    }
 }

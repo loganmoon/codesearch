@@ -386,8 +386,9 @@ pub struct QueryPreprocessingConfig {
     #[serde(default = "default_true")]
     pub extract_identifiers: bool,
 
-    /// Infer entity types from query text (default: true)
-    #[serde(default = "default_true")]
+    /// Infer entity types from query text (default: false)
+    /// Note: inference runs but results are not used in search filtering
+    #[serde(default)]
     pub infer_entity_types: bool,
 
     /// Detect query intent to adjust search strategy (default: true)
@@ -400,7 +401,7 @@ impl Default for QueryPreprocessingConfig {
         Self {
             enabled: true,
             extract_identifiers: true,
-            infer_entity_types: true,
+            infer_entity_types: false,
             detect_query_intent: true,
         }
     }

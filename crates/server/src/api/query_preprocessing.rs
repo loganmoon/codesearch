@@ -41,6 +41,9 @@ pub struct PreprocessedQuery {
     pub skip_fulltext: bool,
 }
 
+// Maximum query length to prevent resource abuse from regex processing
+const MAX_QUERY_LENGTH: usize = 10_000;
+
 // Compiled regex patterns for identifier extraction
 // These are compile-time constant patterns, so we use infallible initialization
 static PATH_PATTERN: LazyLock<Option<Regex>> =
@@ -52,7 +55,8 @@ static CAMEL_PATTERN: LazyLock<Option<Regex>> =
 
 /// Preprocess a query to extract identifiers and infer types
 pub fn preprocess_query(query: &str, config: &QueryPreprocessingConfig) -> PreprocessedQuery {
-    if !config.enabled {
+    // Guard against extremely long queries to prevent resource abuse
+    if !config.enabled || query.len() > MAX_QUERY_LENGTH {
         return PreprocessedQuery {
             original: query.to_string(),
             identifiers: vec![],
@@ -332,6 +336,48 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_query_intent_definition() {
+        // Test "definition of X"
+        let intent = detect_query_intent("Show me the definition of SearchFilters");
+        assert_eq!(intent, QueryIntent::Definition);
+
+        // Test "where is X"
+        let intent = detect_query_intent("Where is the Config struct?");
+        assert_eq!(intent, QueryIntent::Definition);
+
+        // Test "find the X"
+        let intent = detect_query_intent("Find the main function");
+        assert_eq!(intent, QueryIntent::Definition);
+
+        // Test "what is X" at start
+        let intent = detect_query_intent("What is CodeEntity?");
+        assert_eq!(intent, QueryIntent::Definition);
+    }
+
+    #[test]
+    fn test_detect_query_intent_file_search() {
+        // Test "file" keyword
+        let intent = detect_query_intent("In which file is this defined?");
+        assert_eq!(intent, QueryIntent::FileSearch);
+
+        // Test ".rs" extension
+        let intent = detect_query_intent("Look in config.rs");
+        assert_eq!(intent, QueryIntent::FileSearch);
+
+        // Test ".py" extension
+        let intent = detect_query_intent("Check main.py for errors");
+        assert_eq!(intent, QueryIntent::FileSearch);
+
+        // Test ".ts" extension
+        let intent = detect_query_intent("Something about utils.ts");
+        assert_eq!(intent, QueryIntent::FileSearch);
+
+        // Test ".js" extension
+        let intent = detect_query_intent("Show me app.js contents");
+        assert_eq!(intent, QueryIntent::FileSearch);
+    }
+
+    #[test]
     fn test_preprocess_query_full() {
         let config = test_config();
         let result = preprocess_query("What functions call support::token?", &config);
@@ -355,5 +401,26 @@ mod tests {
         assert!(result.entity_types.is_empty());
         assert_eq!(result.intent, QueryIntent::Semantic);
         assert!(!result.skip_fulltext);
+    }
+
+    #[test]
+    fn test_preprocess_query_length_limit() {
+        let config = test_config();
+
+        // Create a query that exceeds MAX_QUERY_LENGTH (10,000 chars)
+        let long_query = "a".repeat(10_001);
+        let result = preprocess_query(&long_query, &config);
+
+        // Should return default/empty result when query is too long
+        assert!(result.identifiers.is_empty());
+        assert!(result.entity_types.is_empty());
+        assert_eq!(result.intent, QueryIntent::Semantic);
+        assert!(!result.skip_fulltext);
+
+        // Query just under limit should be processed normally
+        let max_query = "function ".to_string() + &"a".repeat(9_990);
+        let result = preprocess_query(&max_query, &config);
+        // This should have run through the processing pipeline
+        assert!(result.entity_types.contains(&EntityType::Function));
     }
 }

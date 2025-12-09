@@ -119,17 +119,3 @@ impl AgenticEntity {
         matches!(self.source, RetrievalSource::Graph { .. })
     }
 }
-
-// ============================================================================
-// LLM Response Types (for parsing prompt outputs)
-// These are internal types used only for deserializing LLM responses.
-// ============================================================================
-
-/// Individual result from quality gate composition
-/// Currently only used in tests, kept for potential future use
-#[cfg(test)]
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct QualityGateResult {
-    pub entity_id: String,
-    pub relevance_justification: String,
-}

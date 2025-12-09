@@ -873,8 +873,7 @@ async fn test_balanced_evaluation() -> Result<()> {
     let semantic_avg_hybrid_rerank_latency =
         calculate_avg(&semantic_results, |r| r.hybrid_rerank_latency_ms as f64);
 
-    let keyword_avg_dense_latency =
-        calculate_avg(&keyword_results, |r| r.dense_latency_ms as f64);
+    let keyword_avg_dense_latency = calculate_avg(&keyword_results, |r| r.dense_latency_ms as f64);
     let keyword_avg_dense_rerank_latency =
         calculate_avg(&keyword_results, |r| r.dense_rerank_latency_ms as f64);
     let keyword_avg_hybrid_latency =

@@ -14190,7 +14190,7 @@
       "query": "How does type inference work in rust-analyzer?",
       "expected_entities": [
         "hir_ty::infer::InferenceContext",
-        "hir_ty::Ty",
+        "hir_ty::next_solver::ty::Ty",
         "hir_ty::infer::unify::InferenceTable",
         "hir::Type"
       ],
@@ -14204,7 +14204,7 @@
         "hir_def::resolver::Resolver",
         "hir_def::nameres::DefMap",
         "hir_def::item_scope::ItemScope",
-        "hir::PathResolution"
+        "hir::semantics::PathResolution"
       ],
       "notes": "Name resolution via DefMap and Resolver"
     },
@@ -14213,9 +14213,9 @@
       "category": "semantic",
       "query": "How does macro expansion work?",
       "expected_entities": [
-        "hir_expand::MacroExpander",
+        "hir_expand::db::TokenExpander",
         "hir_expand::ExpandResult",
-        "mbe::syntax_bridge",
+        "mbe::DeclarativeMacro",
         "tt::TokenTree"
       ],
       "notes": "Macro expansion via token trees"
@@ -14240,7 +14240,7 @@
         "base_db::SourceDatabase",
         "base_db::FileId",
         "ide_db::RootDatabase",
-        "base_db::Change"
+        "base_db::change::FileChange"
       ],
       "notes": "Salsa-based incremental computation"
     },
@@ -14275,7 +14275,7 @@
       "expected_entities": [
         "ide_diagnostics::Diagnostic",
         "ide_diagnostics::DiagnosticsContext",
-        "hir::diagnostics",
+        "hir::Diagnostic",
         "ide::Analysis::diagnostics"
       ],
       "notes": "Diagnostic generation from HIR analysis"
@@ -14285,10 +14285,10 @@
       "category": "semantic",
       "query": "How is HIR lowering performed?",
       "expected_entities": [
-        "hir_def::body::Body",
+        "hir_def::expr_store::body::Body",
         "hir_def::body::BodySourceMap",
-        "hir_def::expr::Expr",
-        "hir_def::data"
+        "hir_def::hir::Expr",
+        "hir_def::FunctionData"
       ],
       "notes": "Lowering from AST to HIR"
     },
@@ -14298,9 +14298,9 @@
       "query": "How does trait resolution work?",
       "expected_entities": [
         "hir_ty::TraitRef",
-        "hir_ty::method_resolution",
+        "hir_ty::method_resolution::TyFingerprint",
         "hir::Trait",
-        "hir_ty::chalk_db"
+        "hir_ty::db::HirDatabase"
       ],
       "notes": "Trait resolution using Chalk"
     },
@@ -14408,7 +14408,7 @@
         "cfg::CfgOptions",
         "cfg::CfgExpr",
         "cfg::CfgAtom",
-        "hir_def::attr::Attrs"
+        "hir_def::attrs::AttrFlags"
       ],
       "notes": "Conditional compilation handling"
     },
@@ -14420,7 +14420,7 @@
         "span::SyntaxContextId",
         "span::SpanAnchor",
         "span::HirFileId",
-        "hir_expand::hygiene"
+        "hir_expand::hygiene::SyntaxContextData"
       ],
       "notes": "Macro hygiene and span tracking"
     },
@@ -14431,7 +14431,7 @@
       "expected_entities": [
         "stdx::TupleExt",
         "ide::Cancelled",
-        "base_db::Cancelled",
+        "base_db::salsa::Cancelled",
         "hir_expand::ExpandError"
       ],
       "notes": "Error handling and cancellation patterns"
@@ -14465,10 +14465,10 @@
       "category": "discovery",
       "query": "Find token handling code",
       "expected_entities": [
-        "syntax::SyntaxToken",
+        "syntax::syntax_node::SyntaxToken",
         "syntax::ast::AstToken",
         "tt::TokenTree",
-        "syntax::TokenText"
+        "syntax::token_text::TokenText"
       ],
       "notes": "Token representation and handling"
     },
@@ -14477,7 +14477,7 @@
       "category": "discovery",
       "query": "Find module visibility handling",
       "expected_entities": [
-        "hir::Visibility",
+        "hir_def::visibility::Visibility",
         "hir_def::visibility::Visibility",
         "hir_def::item_scope::ItemScope",
         "hir::Module"
@@ -14501,7 +14501,7 @@
       "category": "discovery",
       "query": "Find lifetime handling code",
       "expected_entities": [
-        "hir::Lifetime",
+        "hir::LifetimeParam",
         "hir::LifetimeParam",
         "hir_ty::Region",
         "hir_def::generics::LifetimeParamData"
@@ -14513,10 +14513,10 @@
       "category": "discovery",
       "query": "Find pattern matching analysis",
       "expected_entities": [
-        "hir_ty::pattern_analysis",
-        "hir_def::body::Pat",
+        "hir_ty::diagnostics::match_check::DecisionTree",
+        "hir_def::hir::Pat",
         "syntax::ast::Pat",
-        "hir_ty::diagnostics::match_check"
+        "hir_ty::diagnostics::MissingMatchArms"
       ],
       "notes": "Pattern analysis and exhaustiveness"
     },
@@ -14525,10 +14525,10 @@
       "category": "discovery",
       "query": "Find expression analysis code",
       "expected_entities": [
-        "hir_def::expr::Expr",
-        "hir_ty::infer::expr",
+        "hir_def::hir::Expr",
+        "hir_ty::infer::InferenceContext",
         "syntax::ast::Expr",
-        "hir::Expr"
+        "hir_def::hir::Expr"
       ],
       "notes": "Expression typing and analysis"
     },
@@ -14537,9 +14537,9 @@
       "category": "discovery",
       "query": "Find statement handling code",
       "expected_entities": [
-        "hir_def::expr::Statement",
+        "hir_def::hir::Statement",
         "syntax::ast::Stmt",
-        "hir_def::body::Body",
+        "hir_def::expr_store::body::Body",
         "hir_ty::infer::InferenceContext"
       ],
       "notes": "Statement lowering and typing"
@@ -14549,7 +14549,7 @@
       "category": "discovery",
       "query": "Find import resolution code",
       "expected_entities": [
-        "hir_def::nameres::collector",
+        "hir_def::nameres::DefMap",
         "hir_def::import_map::ImportMap",
         "hir_def::per_ns::PerNs",
         "hir::Import"
@@ -14561,10 +14561,10 @@
       "category": "discovery",
       "query": "Find attribute processing code",
       "expected_entities": [
-        "hir_def::attr::Attrs",
-        "hir_expand::attrs",
+        "hir_def::attrs::AttrFlags",
+        "hir_expand::attrs::Attr",
         "syntax::ast::Attr",
-        "hir::Attr"
+        "hir_expand::attrs::Attr"
       ],
       "notes": "Attribute parsing and handling"
     },
@@ -14573,10 +14573,10 @@
       "category": "discovery",
       "query": "Find doc comment handling",
       "expected_entities": [
-        "hir::Documentation",
-        "hir_def::attr::Documentation",
-        "ide::doc_links",
-        "hir_ty::display"
+        "hir_def::attrs::Docs",
+        "hir_def::attrs::Docs",
+        "ide::doc_links::DocumentationLink",
+        "hir_ty::HirDisplay"
       ],
       "notes": "Documentation extraction and linking"
     },
@@ -14609,7 +14609,7 @@
       "category": "discovery",
       "query": "Find file change handling",
       "expected_entities": [
-        "base_db::Change",
+        "base_db::change::FileChange",
         "vfs::ChangeKind",
         "ide::AnalysisHost::apply_change",
         "vfs::Vfs"
@@ -14621,7 +14621,7 @@
       "category": "discovery",
       "query": "Find cancellation support code",
       "expected_entities": [
-        "base_db::Cancelled",
+        "base_db::salsa::Cancelled",
         "ide::Cancelled",
         "ide::Cancellable",
         "stdx::thread"
@@ -14646,9 +14646,9 @@
       "query": "Find interning implementations",
       "expected_entities": [
         "intern::Interned",
-        "intern::Symbol",
-        "hir_def::intern",
-        "base_db::input::FileText"
+        "intern::symbol::Symbol",
+        "hir_def::InternId",
+        "base_db::FileText"
       ],
       "notes": "String and value interning"
     },

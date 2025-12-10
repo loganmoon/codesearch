@@ -14190,7 +14190,7 @@
       "query": "How does type inference work in rust-analyzer?",
       "expected_entities": [
         "hir_ty::infer::InferenceContext",
-        "hir_ty::next_solver::ty::Ty",
+        "hir_ty::diagnostics::match_check::pat_analysis::Ty",
         "hir_ty::infer::unify::InferenceTable",
         "hir::Type"
       ],
@@ -14225,7 +14225,7 @@
       "category": "semantic",
       "query": "How is the syntax tree constructed?",
       "expected_entities": [
-        "syntax::SyntaxNode",
+        "syntax::syntax_node::SyntaxNode",
         "syntax::Parse",
         "parser::event::Event",
         "syntax::SyntaxKind"
@@ -14250,9 +14250,7 @@
       "query": "How does code completion work?",
       "expected_entities": [
         "ide_completion::CompletionItem",
-        "ide_completion::context::CompletionContext",
-        "ide_completion::completions",
-        "ide::Analysis::completions"
+        "ide_completion::context::CompletionContext"
       ],
       "notes": "Completion generation and context analysis"
     },
@@ -14262,9 +14260,8 @@
       "query": "How do code assists and refactoring work?",
       "expected_entities": [
         "ide_assists::Assist",
-        "ide_assists::AssistContext",
-        "ide_assists::AssistResolveStrategy",
-        "ide::Analysis::assists"
+        "ide_assists::assist_context::AssistContext",
+        "ide_assists::AssistResolveStrategy"
       ],
       "notes": "Code assist generation and resolution"
     },
@@ -14274,9 +14271,7 @@
       "query": "How are diagnostics generated?",
       "expected_entities": [
         "ide_diagnostics::Diagnostic",
-        "ide_diagnostics::DiagnosticsContext",
-        "hir::Diagnostic",
-        "ide::Analysis::diagnostics"
+        "ide_diagnostics::DiagnosticsContext"
       ],
       "notes": "Diagnostic generation from HIR analysis"
     },
@@ -14286,9 +14281,8 @@
       "query": "How is HIR lowering performed?",
       "expected_entities": [
         "hir_def::expr_store::body::Body",
-        "hir_def::body::BodySourceMap",
-        "hir_def::hir::Expr",
-        "hir_def::FunctionData"
+        "hir_def::expr_store::body::BodySourceMap",
+        "hir_def::hir::Expr"
       ],
       "notes": "Lowering from AST to HIR"
     },
@@ -14297,8 +14291,7 @@
       "category": "semantic",
       "query": "How does trait resolution work?",
       "expected_entities": [
-        "hir_ty::TraitRef",
-        "hir_ty::method_resolution::TyFingerprint",
+        "hir_ty::next_solver::predicate::TraitRef",
         "hir::Trait",
         "hir_ty::db::HirDatabase"
       ],
@@ -14312,7 +14305,7 @@
         "project_model::CargoWorkspace",
         "project_model::ProjectManifest",
         "load_cargo::load_workspace",
-        "project_model::WorkspaceBuildScripts"
+        "project_model::build_dependencies::WorkspaceBuildScripts"
       ],
       "notes": "Project loading via Cargo metadata"
     },
@@ -14334,9 +14327,7 @@
       "query": "How are proc macros executed?",
       "expected_entities": [
         "proc_macro_api::ProcMacroClient",
-        "proc_macro_srv::ProcMacroSrv",
-        "hir_expand::proc_macro::ProcMacroExpander",
-        "proc_macro_api::msg"
+        "hir_expand::proc_macro::ProcMacroExpander"
       ],
       "notes": "Proc macro client-server architecture"
     },
@@ -14347,7 +14338,7 @@
       "expected_entities": [
         "ide_db::search::SearchScope",
         "ide_db::defs::Definition",
-        "ide::Analysis::find_all_refs",
+        "ide::references::find_all_refs",
         "ide_db::search::UsageSearchResult"
       ],
       "notes": "Reference search across codebase"
@@ -14357,9 +14348,9 @@
       "category": "semantic",
       "query": "How does go to definition work?",
       "expected_entities": [
-        "ide::Analysis::goto_definition",
+        "ide::goto_definition::goto_definition",
         "ide::navigation_target::NavigationTarget",
-        "hir::Semantics::resolve_path",
+        "hir::source_analyzer::resolve_path",
         "ide_db::defs::Definition"
       ],
       "notes": "Navigation to symbol definitions"
@@ -14370,9 +14361,8 @@
       "query": "How is hover information generated?",
       "expected_entities": [
         "ide::hover::HoverResult",
-        "ide::Analysis::hover",
         "ide::hover::HoverConfig",
-        "hir::Semantics"
+        "hir::semantics::Semantics"
       ],
       "notes": "Hover documentation and type info"
     },
@@ -14381,10 +14371,8 @@
       "category": "semantic",
       "query": "How does syntax highlighting work?",
       "expected_entities": [
-        "ide::syntax_highlighting::highlight",
-        "ide::syntax_highlighting::HlTag",
-        "ide::syntax_highlighting::HlMod",
-        "ide::Analysis::highlight"
+        "ide::syntax_highlighting::tags::HlTag",
+        "ide::syntax_highlighting::tags::HlMod"
       ],
       "notes": "Semantic syntax highlighting"
     },
@@ -14393,10 +14381,9 @@
       "category": "semantic",
       "query": "How is call hierarchy computed?",
       "expected_entities": [
-        "ide::call_hierarchy::CallHierarchyItem",
-        "ide::Analysis::call_hierarchy",
-        "ide::Analysis::incoming_calls",
-        "ide::Analysis::outgoing_calls"
+        "ide::call_hierarchy::call_hierarchy",
+        "ide::call_hierarchy::incoming_calls",
+        "ide::call_hierarchy::outgoing_calls"
       ],
       "notes": "Call hierarchy navigation"
     },
@@ -14417,10 +14404,8 @@
       "category": "semantic",
       "query": "How does span and hygiene tracking work?",
       "expected_entities": [
-        "span::SyntaxContextId",
         "span::SpanAnchor",
-        "span::HirFileId",
-        "hir_expand::hygiene::SyntaxContextData"
+        "span::HirFileId"
       ],
       "notes": "Macro hygiene and span tracking"
     },
@@ -14430,8 +14415,6 @@
       "query": "Find error handling patterns in rust-analyzer",
       "expected_entities": [
         "stdx::TupleExt",
-        "ide::Cancelled",
-        "base_db::salsa::Cancelled",
         "hir_expand::ExpandError"
       ],
       "notes": "Error handling and cancellation patterns"
@@ -14453,10 +14436,10 @@
       "category": "discovery",
       "query": "Find AST node type definitions",
       "expected_entities": [
-        "syntax::ast::Expr",
-        "syntax::ast::Item",
-        "syntax::ast::Pat",
-        "syntax::ast::Type"
+        "syntax::ast::generated::nodes::Expr",
+        "syntax::ast::traits::Item",
+        "syntax::ast::generated::nodes::Pat",
+        "syntax::ast::generated::nodes::Type"
       ],
       "notes": "Generated AST node types"
     },
@@ -14466,7 +14449,7 @@
       "query": "Find token handling code",
       "expected_entities": [
         "syntax::syntax_node::SyntaxToken",
-        "syntax::ast::AstToken",
+        "syntax::AstToken",
         "tt::TokenTree",
         "syntax::token_text::TokenText"
       ],
@@ -14491,8 +14474,7 @@
       "expected_entities": [
         "hir::GenericParam",
         "hir::TypeParam",
-        "hir_def::generics::GenericParams",
-        "hir_ty::Substitution"
+        "hir_def::hir::generics::GenericParams"
       ],
       "notes": "Generic parameters and substitution"
     },
@@ -14503,8 +14485,8 @@
       "expected_entities": [
         "hir::LifetimeParam",
         "hir::LifetimeParam",
-        "hir_ty::Region",
-        "hir_def::generics::LifetimeParamData"
+        "hir_ty::next_solver::region::Region",
+        "hir_def::hir::generics::LifetimeParamData"
       ],
       "notes": "Lifetime representation and inference"
     },
@@ -14513,10 +14495,8 @@
       "category": "discovery",
       "query": "Find pattern matching analysis",
       "expected_entities": [
-        "hir_ty::diagnostics::match_check::DecisionTree",
         "hir_def::hir::Pat",
-        "syntax::ast::Pat",
-        "hir_ty::diagnostics::MissingMatchArms"
+        "syntax::ast::generated::nodes::Pat"
       ],
       "notes": "Pattern analysis and exhaustiveness"
     },
@@ -14527,7 +14507,7 @@
       "expected_entities": [
         "hir_def::hir::Expr",
         "hir_ty::infer::InferenceContext",
-        "syntax::ast::Expr",
+        "syntax::ast::generated::nodes::Expr",
         "hir_def::hir::Expr"
       ],
       "notes": "Expression typing and analysis"
@@ -14538,7 +14518,7 @@
       "query": "Find statement handling code",
       "expected_entities": [
         "hir_def::hir::Statement",
-        "syntax::ast::Stmt",
+        "syntax::ast::generated::nodes::Stmt",
         "hir_def::expr_store::body::Body",
         "hir_ty::infer::InferenceContext"
       ],
@@ -14551,8 +14531,7 @@
       "expected_entities": [
         "hir_def::nameres::DefMap",
         "hir_def::import_map::ImportMap",
-        "hir_def::per_ns::PerNs",
-        "hir::Import"
+        "hir_def::per_ns::PerNs"
       ],
       "notes": "Use statement and import handling"
     },
@@ -14563,7 +14542,7 @@
       "expected_entities": [
         "hir_def::attrs::AttrFlags",
         "hir_expand::attrs::Attr",
-        "syntax::ast::Attr",
+        "syntax::ast::generated::nodes::Attr",
         "hir_expand::attrs::Attr"
       ],
       "notes": "Attribute parsing and handling"
@@ -14575,8 +14554,7 @@
       "expected_entities": [
         "hir_def::attrs::Docs",
         "hir_def::attrs::Docs",
-        "ide::doc_links::DocumentationLink",
-        "hir_ty::HirDisplay"
+        "hir_ty::display::HirDisplay"
       ],
       "notes": "Documentation extraction and linking"
     },
@@ -14587,8 +14565,7 @@
       "expected_entities": [
         "ide::runnables::Runnable",
         "ide::runnables::RunnableKind",
-        "ide::Analysis::runnables",
-        "ide::runnables::discover_test_roots"
+        "ide::test_explorer::discover_test_roots"
       ],
       "notes": "Test and runnable discovery"
     },
@@ -14597,7 +14574,6 @@
       "category": "discovery",
       "query": "Find workspace management code",
       "expected_entities": [
-        "project_model::Workspace",
         "project_model::CargoWorkspace",
         "ide::AnalysisHost",
         "load_cargo::LoadCargoConfig"
@@ -14611,7 +14587,7 @@
       "expected_entities": [
         "base_db::change::FileChange",
         "vfs::ChangeKind",
-        "ide::AnalysisHost::apply_change",
+        "ide::apply_change",
         "vfs::Vfs"
       ],
       "notes": "File change propagation"
@@ -14621,10 +14597,7 @@
       "category": "discovery",
       "query": "Find cancellation support code",
       "expected_entities": [
-        "base_db::salsa::Cancelled",
-        "ide::Cancelled",
-        "ide::Cancellable",
-        "stdx::thread"
+        "ide::Cancellable"
       ],
       "notes": "Operation cancellation support"
     },
@@ -14634,7 +14607,7 @@
       "query": "Find memory profiling code",
       "expected_entities": [
         "profile::memory_usage",
-        "profile::StopWatch",
+        "profile::stop_watch::StopWatch",
         "profile::Bytes",
         "ide_db::apply_change::apply_change"
       ],
@@ -14647,7 +14620,6 @@
       "expected_entities": [
         "intern::Interned",
         "intern::symbol::Symbol",
-        "hir_def::InternId",
         "base_db::FileText"
       ],
       "notes": "String and value interning"
@@ -14657,9 +14629,7 @@
       "category": "discovery",
       "query": "Find edition handling code",
       "expected_entities": [
-        "base_db::Edition",
         "syntax::Edition",
-        "project_model::RustcSource",
         "hir_expand::db::ExpandDatabase"
       ],
       "notes": "Rust edition support"

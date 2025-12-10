@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-Extract ground truth for evaluation queries using rust-analyzer LSP.
+Extract and validate ground truth for evaluation queries using rust-analyzer LSP.
 
-This script uses rust-analyzer's LSP interface to extract semantically correct
-ground truth for structural queries (references, implementations, etc.).
+This script uses rust-analyzer's LSP interface to:
+1. Extract semantically correct ground truth for structural queries (references, implementations, etc.)
+2. Validate and correct FQNs in semantic/discovery query expected_entities
 
 Usage:
+    # Extract ground truth for structural queries
     python scripts/extract_ground_truth_lsp.py \
         --repo /path/to/rust-analyzer \
         --queries crates/e2e-tests/fixtures/graph_eval_queries.json \
         --output crates/e2e-tests/fixtures/graph_eval_queries_with_gt.json
 
+    # Validate semantic/discovery expected_entities FQNs
+    python scripts/extract_ground_truth_lsp.py validate \
+        --repo /path/to/rust-analyzer \
+        --queries crates/e2e-tests/fixtures/graph_eval_queries.json
+
 Requirements:
-    pip install python-lsp-jsonrpc
+    - rust-analyzer binary in PATH (or specify with --ra-binary)
 """
 
 import argparse
@@ -845,5 +852,174 @@ def main():
         print(f"Updated queries written to {output_path}")
 
 
+def validate_expected_entities(
+    lsp: RustAnalyzerLSP,
+    queries: list[dict],
+) -> dict[str, list[str]]:
+    """Validate expected_entities in semantic/discovery queries using workspace/symbol.
+    
+    Returns a dict mapping query_id -> list of validated/corrected FQNs.
+    """
+    results = {}
+    
+    for query in queries:
+        if query.get("category") not in ["semantic", "discovery"]:
+            continue
+            
+        expected = query.get("expected_entities", [])
+        if not expected:
+            continue
+            
+        query_id = query.get("id", "unknown")
+        print(f"\nValidating {query_id}: {query.get('query', '')[:50]}...")
+        
+        validated = []
+        for entity in expected:
+            # Extract symbol name (last component of FQN)
+            parts = entity.split("::")
+            symbol_name = parts[-1].split("<")[0].split("(")[0].strip()
+            
+            if not symbol_name:
+                print(f"  Skipping empty symbol from: {entity}")
+                continue
+                
+            try:
+                # Search for the symbol
+                search_results = lsp.workspace_symbol(symbol_name)
+                
+                if not search_results:
+                    print(f"  NOT FOUND: {entity} (searched for '{symbol_name}')")
+                    continue
+                    
+                # Find best match based on expected crate/module
+                expected_crate = parts[0] if len(parts) > 1 else None
+                expected_module = "::".join(parts[1:-1]) if len(parts) > 2 else None
+                
+                best_match = None
+                for sym in search_results:
+                    name = sym.get("name", "")
+                    if name != symbol_name:
+                        continue
+                        
+                    location = sym.get("location", {})
+                    uri = location.get("uri", "")
+                    
+                    if not uri.startswith("file://"):
+                        continue
+                        
+                    file_path = uri[7:]
+                    
+                    # Construct qualified name from file path
+                    qn = construct_qualified_name_from_file(lsp, file_path, name)
+                    if not qn:
+                        continue
+                        
+                    # Check if it matches expected crate
+                    qn_parts = qn.split("::")
+                    if expected_crate and qn_parts[0] != expected_crate.replace("-", "_"):
+                        continue
+                        
+                    # Found a match in the expected crate
+                    best_match = qn
+                    break
+                    
+                if best_match:
+                    if best_match != entity:
+                        print(f"  CORRECTED: {entity} -> {best_match}")
+                    else:
+                        print(f"  OK: {entity}")
+                    validated.append(best_match)
+                else:
+                    # No match in expected crate - this is a NOT FOUND, not "found elsewhere"
+                    # We don't want to substitute a different entity just because it has the same name
+                    print(f"  NOT FOUND: {entity} (no match in expected crate '{expected_crate}')")
+                        
+            except Exception as e:
+                print(f"  ERROR validating {entity}: {e}")
+                
+        results[query_id] = validated
+        
+    return results
+
+
+def validate_semantic_discovery_queries():
+    """CLI entry point for validating semantic/discovery queries."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Validate expected_entities in semantic/discovery queries using LSP"
+    )
+    parser.add_argument(
+        "--repo",
+        required=True,
+        help="Path to the rust-analyzer repository",
+    )
+    parser.add_argument(
+        "--queries",
+        required=True,
+        help="Path to the evaluation queries JSON file",
+    )
+    parser.add_argument(
+        "--output",
+        help="Output path for updated queries (default: overwrite input)",
+    )
+    parser.add_argument(
+        "--ra-binary",
+        default="rust-analyzer",
+        help="Path to rust-analyzer binary",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Don't write output, just print validation results",
+    )
+    
+    args = parser.parse_args()
+    
+    # Load queries
+    with open(args.queries, "r") as f:
+        data = json.load(f)
+        
+    queries = data.get("queries", [])
+    semantic_discovery = [q for q in queries if q.get("category") in ["semantic", "discovery"]]
+    print(f"Found {len(semantic_discovery)} semantic/discovery queries to validate")
+    
+    if not semantic_discovery:
+        print("No semantic/discovery queries found")
+        return
+        
+    # Start LSP
+    print(f"Starting rust-analyzer on {args.repo}...")
+    lsp = RustAnalyzerLSP(args.repo, args.ra_binary)
+    
+    try:
+        lsp.start()
+        print("LSP started, waiting 30s for indexing...")
+        time.sleep(30)
+        
+        # Validate
+        results = validate_expected_entities(lsp, queries)
+        
+        # Update queries
+        if not args.dry_run:
+            for query in queries:
+                query_id = query.get("id", "")
+                if query_id in results:
+                    query["expected_entities"] = results[query_id]
+                    
+            output_path = args.output or args.queries
+            with open(output_path, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"\nUpdated queries written to {output_path}")
+            
+    finally:
+        lsp.stop()
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "validate":
+        sys.argv.pop(1)  # Remove 'validate' from args
+        validate_semantic_discovery_queries()
+    else:
+        main()

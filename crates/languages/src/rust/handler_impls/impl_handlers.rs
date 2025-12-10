@@ -27,12 +27,15 @@ use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Process an inherent impl block query match and extract entities
+#[allow(unused_variables)]
 pub fn handle_impl_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL)?;
 
@@ -149,12 +152,15 @@ pub fn handle_impl_impl(
 }
 
 /// Process a trait impl block query match and extract entities
+#[allow(unused_variables)]
 pub fn handle_impl_trait_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL_TRAIT)?;
 

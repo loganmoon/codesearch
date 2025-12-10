@@ -5,6 +5,7 @@
 use crate::common::{get_current_commit, path_to_str};
 use crate::entity_processor;
 use crate::Result;
+use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::FileChange;
@@ -12,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Statistics for file change processing
@@ -63,6 +64,23 @@ pub async fn process_file_changes(
                 "Repository collection_name not found".to_string(),
             )
         })?;
+
+    // Detect project manifest for qualified name derivation
+    let package_map: Option<PackageMap> = match detect_manifest(repo_root) {
+        Ok(Some(manifest)) => {
+            debug!(
+                "Detected {:?} project with {} package(s) for incremental indexing",
+                manifest.project_type,
+                manifest.packages.len()
+            );
+            Some(manifest.packages)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            debug!("Failed to detect project manifest for incremental indexing: {e}");
+            None
+        }
+    };
 
     // Separate changes by type
     let mut files_to_index = Vec::new();
@@ -146,6 +164,7 @@ pub async fn process_file_changes(
             repo_root,
             embedding_manager,
             postgres_client,
+            package_map.as_ref(),
         )
         .await
         {
@@ -186,6 +205,7 @@ async fn process_file_batch(
     repo_root: &Path,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
+    package_map: Option<&PackageMap>,
 ) -> Result<ProcessingStats> {
     let mut stats = ProcessingStats::default();
     let mut batch_entities = Vec::new();
@@ -235,8 +255,20 @@ async fn process_file_batch(
             continue;
         }
 
-        match entity_processor::extract_entities_from_file(&canonical_path, &repo_id.to_string())
-            .await
+        // Look up package context for this file
+        let (package_name, source_root) = package_map
+            .as_ref()
+            .and_then(|pm| pm.find_package_for_file(&canonical_path))
+            .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
+            .unwrap_or((None, None));
+
+        match entity_processor::extract_entities_from_file(
+            &canonical_path,
+            &repo_id.to_string(),
+            package_name,
+            source_root,
+        )
+        .await
         {
             Ok(entities) => {
                 batch_entities.extend(entities);

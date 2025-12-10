@@ -28,6 +28,8 @@ pub fn handle_constant_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     // Get the constant node
     let constant_node = require_capture_node(query_match, query, "constant")?;
@@ -51,6 +53,8 @@ pub fn handle_constant_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Extract common components

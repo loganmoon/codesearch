@@ -8,13 +8,33 @@
 #![deny(clippy::expect_used)]
 
 use codesearch_core::{error::Result, CodeEntity};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Parser, Query, QueryCursor, QueryMatch};
 
 /// Handler function type for processing query matches into entities
-pub type EntityHandler =
-    Box<dyn Fn(&QueryMatch, &Query, &str, &Path, &str) -> Result<Vec<CodeEntity>> + Send + Sync>;
+///
+/// Arguments:
+/// - `query_match` - The tree-sitter query match
+/// - `query` - The tree-sitter query
+/// - `source` - The source code
+/// - `file_path` - Path to the source file
+/// - `repository_id` - Repository identifier
+/// - `package_name` - Optional package/crate name from manifest
+/// - `source_root` - Optional source root for module path derivation
+pub type EntityHandler = Box<
+    dyn Fn(
+            &QueryMatch,
+            &Query,
+            &str,
+            &Path,
+            &str,
+            Option<&str>,
+            Option<&Path>,
+        ) -> Result<Vec<CodeEntity>>
+        + Send
+        + Sync,
+>;
 
 /// Defines how to extract a specific type of entity
 struct EntityExtractor {
@@ -145,11 +165,22 @@ pub struct GenericExtractor<'a> {
 
     /// Repository ID for entity generation
     repository_id: String,
+
+    /// Package/crate name from manifest (e.g., "codesearch_core")
+    package_name: Option<String>,
+
+    /// Source root for module path derivation (e.g., "/project/src")
+    source_root: Option<PathBuf>,
 }
 
 impl<'a> GenericExtractor<'a> {
     /// Create a new generic extractor with the given configuration
-    pub fn new(config: &'a LanguageConfiguration, repository_id: String) -> Result<Self> {
+    pub fn new(
+        config: &'a LanguageConfiguration,
+        repository_id: String,
+        package_name: Option<&str>,
+        source_root: Option<&Path>,
+    ) -> Result<Self> {
         let mut parser = Parser::new();
         parser
             .set_language(&config.language)
@@ -159,6 +190,8 @@ impl<'a> GenericExtractor<'a> {
             config,
             parser,
             repository_id,
+            package_name: package_name.map(String::from),
+            source_root: source_root.map(PathBuf::from),
         })
     }
 
@@ -207,13 +240,15 @@ impl<'a> GenericExtractor<'a> {
                         .iter()
                         .find(|e| e.name == extractor_name)
                     {
-                        // Call the handler with repository_id
+                        // Call the handler with repository_id and package context
                         let entities = (extractor.handler)(
                             query_match,
                             query,
                             source,
                             file_path,
                             &self.repository_id,
+                            self.package_name.as_deref(),
+                            self.source_root.as_deref(),
                         )?;
                         all_entities.extend(entities);
                         processed = true;

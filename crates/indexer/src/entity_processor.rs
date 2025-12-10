@@ -68,14 +68,22 @@ fn chain_delim(out_str: &mut String, text: &str) {
 }
 
 /// Extract entities from a single file
+///
+/// # Arguments
+/// * `file_path` - Path to the file to extract entities from
+/// * `repo_id` - Repository identifier
+/// * `package_name` - Optional package name from manifest (e.g., "codesearch_core")
+/// * `source_root` - Optional source root for module path derivation
 pub async fn extract_entities_from_file(
     file_path: &Path,
     repo_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     debug!("Extracting from file: {}", file_path.display());
 
-    // Create extractor for this file
-    let extractor = match create_extractor(file_path, repo_id)? {
+    // Create extractor for this file with package context
+    let extractor = match create_extractor(file_path, repo_id, package_name, source_root)? {
         Some(ext) => ext,
         None => {
             debug!("No extractor available for file: {}", file_path.display());

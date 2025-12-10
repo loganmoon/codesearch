@@ -13,6 +13,8 @@ pub fn handle_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
     let mut entities = crate::javascript::handler_impls::handle_function_impl(
@@ -21,6 +23,8 @@ pub fn handle_function_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     )?;
 
     // Enhance with TypeScript type information and update language for all entities
@@ -39,6 +43,8 @@ pub fn handle_arrow_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
     let mut entities = crate::javascript::handler_impls::handle_arrow_function_impl(
@@ -47,6 +53,8 @@ pub fn handle_arrow_function_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     )?;
 
     // Enhance with TypeScript type information and update language for all entities

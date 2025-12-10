@@ -9,6 +9,7 @@ use crate::{IndexResult, IndexStats};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
+use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
@@ -68,6 +69,8 @@ pub struct RepositoryIndexer {
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
     config: IndexerConfig,
+    /// Package manifest for qualified name derivation
+    package_map: Option<Arc<PackageMap>>,
 }
 
 impl RepositoryIndexer {
@@ -89,6 +92,26 @@ impl RepositoryIndexer {
 
         debug!("RepositoryIndexer::new parsed UUID = {}", repository_id);
 
+        // Detect project manifest for qualified name derivation
+        let package_map = match detect_manifest(&repository_path) {
+            Ok(Some(manifest)) => {
+                info!(
+                    "Detected {:?} project with {} package(s)",
+                    manifest.project_type,
+                    manifest.packages.len()
+                );
+                Some(Arc::new(manifest.packages))
+            }
+            Ok(None) => {
+                debug!("No project manifest detected");
+                None
+            }
+            Err(e) => {
+                warn!("Failed to detect project manifest: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             repository_path,
             repository_id,
@@ -96,6 +119,7 @@ impl RepositoryIndexer {
             postgres_client,
             git_repo,
             config,
+            package_map,
         })
     }
 
@@ -260,6 +284,7 @@ async fn stage_file_discovery(
 }
 
 /// Stage 2: Extract entities from files in parallel
+#[allow(clippy::too_many_arguments)]
 async fn stage_extract_entities(
     mut file_rx: mpsc::Receiver<FileBatch>,
     entity_tx: mpsc::Sender<EntityBatch>,
@@ -268,6 +293,7 @@ async fn stage_extract_entities(
     collection_name: String,
     max_entity_batch_size: usize,
     file_extraction_concurrency: usize,
+    package_map: Option<Arc<PackageMap>>,
 ) -> Result<(usize, usize)> {
     let mut total_extracted = 0;
     let mut total_failed = 0;
@@ -282,13 +308,28 @@ async fn stage_extract_entities(
 
         // Convert repo_id once for the entire batch
         let repo_id_str = repo_id.to_string();
+        let package_map_ref = &package_map;
 
         // Process files in parallel (8 concurrent extractions), collect results
         let results = stream::iter(paths.into_iter())
             .map(|path| {
                 let repo_id_ref = &repo_id_str;
                 async move {
-                    match entity_processor::extract_entities_from_file(&path, repo_id_ref).await {
+                    // Look up package context for this file
+                    let (package_name, source_root) = package_map_ref
+                        .as_ref()
+                        .and_then(|pm| pm.find_package_for_file(&path))
+                        .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
+                        .unwrap_or((None, None));
+
+                    match entity_processor::extract_entities_from_file(
+                        &path,
+                        repo_id_ref,
+                        package_name,
+                        source_root,
+                    )
+                    .await
+                    {
                         Ok(entities) => Ok((path, entities)),
                         Err(e) => {
                             error!("Failed to extract from {}: {e}", path.display());
@@ -1056,6 +1097,7 @@ impl crate::Indexer for RepositoryIndexer {
             config.index_batch_size,
         ));
 
+        let package_map = self.package_map.clone();
         let stage2 = tokio::spawn(stage_extract_entities(
             file_rx,
             entity_tx,
@@ -1064,6 +1106,7 @@ impl crate::Indexer for RepositoryIndexer {
             collection_name.clone(),
             config.max_entity_batch_size,
             config.file_extraction_concurrency,
+            package_map,
         ));
 
         let postgres_client_3 = self.postgres_client.clone();

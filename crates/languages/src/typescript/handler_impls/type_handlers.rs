@@ -20,6 +20,8 @@ pub fn handle_class_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript class handler
     let mut entities = crate::javascript::handler_impls::handle_class_impl(
@@ -28,6 +30,8 @@ pub fn handle_class_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     )?;
 
     // Update language to TypeScript
@@ -45,6 +49,8 @@ pub fn handle_method_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript method handler
     let mut entities = crate::javascript::handler_impls::handle_method_impl(
@@ -53,6 +59,8 @@ pub fn handle_method_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     )?;
 
     // Update language to TypeScript
@@ -64,12 +72,15 @@ pub fn handle_method_impl(
 }
 
 /// Handle interface declarations
+#[allow(unused_variables)]
 pub fn handle_interface_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let interface_node = require_capture_node(query_match, query, "interface")?;
 
@@ -150,12 +161,15 @@ pub fn handle_interface_impl(
 }
 
 /// Handle type alias declarations
+#[allow(unused_variables)]
 pub fn handle_type_alias_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let type_alias_node = require_capture_node(query_match, query, "type_alias")?;
 
@@ -236,12 +250,15 @@ pub fn handle_type_alias_impl(
 }
 
 /// Handle enum declarations
+#[allow(unused_variables)]
 pub fn handle_enum_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let enum_node = require_capture_node(query_match, query, "enum")?;
 

@@ -1,6 +1,7 @@
 //! JavaScript language extractor module
 
 pub(crate) mod handler_impls;
+pub mod module_path;
 pub(crate) mod queries;
 
 use crate::qualified_name::{ScopeConfiguration, ScopePattern};

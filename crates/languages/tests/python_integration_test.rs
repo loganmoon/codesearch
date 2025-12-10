@@ -5,14 +5,14 @@ use std::path::Path;
 
 #[test]
 fn test_python_extractor_creation() {
-    let result = create_extractor(Path::new("test.py"), "test-repo");
+    let result = create_extractor(Path::new("test.py"), "test-repo", None, None);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
 
 #[test]
 fn test_pyi_extractor_creation() {
-    let result = create_extractor(Path::new("stubs.pyi"), "test-repo");
+    let result = create_extractor(Path::new("stubs.pyi"), "test-repo", None, None);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -24,7 +24,7 @@ def greet(name):
     return f"Hello, {name}!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -53,7 +53,7 @@ def add(a: int, b: int) -> int:
     return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -87,7 +87,7 @@ async def fetch_data(url: str) -> dict:
             return await response.json()
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -119,7 +119,7 @@ def calculate_sum(a: int, b: int) -> int:
     return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -146,7 +146,7 @@ def cached_computation(x: int) -> int:
     return x * 2
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -180,7 +180,7 @@ class Person:
         return f"Hello, I'm {self.name}"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -229,7 +229,7 @@ class Dog(Animal):
         return "Woof!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -261,7 +261,7 @@ class Point:
     y: float
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -291,7 +291,7 @@ class Calculator:
         return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -328,7 +328,7 @@ class Factory:
         return cls(name)
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -364,7 +364,7 @@ class Circle:
         return self._radius
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -395,7 +395,7 @@ def variadic_func(*args, **kwargs) -> None:
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -422,7 +422,7 @@ def greet(name: str, greeting: str = "Hello") -> str:
     return f"{greeting}, {name}!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -456,7 +456,7 @@ async def baz():
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -482,7 +482,7 @@ class Example:
         return x
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -513,7 +513,7 @@ class Outer:
             pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -538,7 +538,7 @@ def 计算(数值: int) -> int:
     return 数值 * 2
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -554,7 +554,7 @@ def 计算(数值: int) -> int:
 fn test_extract_empty_source() {
     let source = "";
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -569,7 +569,7 @@ fn test_extract_empty_source() {
 fn test_extract_whitespace_only_source() {
     let source = "   \n\n  \t  \n";
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -590,7 +590,7 @@ Module docstring
 """
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -610,7 +610,7 @@ def func(a, b, /, c, d):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -642,7 +642,7 @@ def func(a, *, b, c):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -673,7 +673,7 @@ def func(pos_only, /, standard, *, kw_only):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -705,7 +705,7 @@ class Client:
         pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 
@@ -732,7 +732,7 @@ class Child(Parent1, Parent2, Parent3):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo")
+    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .py");
 

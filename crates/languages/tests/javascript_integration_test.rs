@@ -5,14 +5,14 @@ use std::path::Path;
 
 #[test]
 fn test_javascript_extractor_creation() {
-    let result = create_extractor(Path::new("test.js"), "test-repo");
+    let result = create_extractor(Path::new("test.js"), "test-repo", None, None);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
 
 #[test]
 fn test_jsx_extractor_creation() {
-    let result = create_extractor(Path::new("Component.jsx"), "test-repo");
+    let result = create_extractor(Path::new("Component.jsx"), "test-repo", None, None);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -25,7 +25,7 @@ fn test_extract_simple_function() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 
@@ -56,7 +56,7 @@ fn test_extract_arrow_function() {
         const add = (a, b) => a + b;
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 
@@ -96,7 +96,7 @@ fn test_extract_async_function() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 
@@ -126,7 +126,7 @@ fn test_extract_class() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 
@@ -163,7 +163,7 @@ fn test_extract_function_with_jsdoc() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 
@@ -191,7 +191,7 @@ fn test_extract_multiple_entities() {
         class Baz {}
     "#;
 
-    let extractor = create_extractor(Path::new("test.js"), "test-repo")
+    let extractor = create_extractor(Path::new("test.js"), "test-repo", None, None)
         .expect("Failed to create extractor")
         .expect("No extractor for .js");
 

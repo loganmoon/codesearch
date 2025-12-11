@@ -11,12 +11,15 @@ mod handler_impls {
     use std::path::Path;
     use tree_sitter::{Query, QueryMatch};
 
+    #[allow(unused_variables)]
     pub fn handle_test_impl(
         _query_match: &QueryMatch,
         _query: &Query,
         _source: &str,
         _file_path: &Path,
         _repository_id: &str,
+        package_name: Option<&str>,
+        source_root: Option<&Path>,
     ) -> Result<Vec<CodeEntity>> {
         // Minimal implementation for testing
         Ok(Vec::new())
@@ -47,7 +50,7 @@ mod tests {
     #[test]
     fn test_macro_generates_extractor() {
         // Verify the extractor can be created
-        let result = TestLanguageExtractor::new("test-repo".to_string());
+        let result = TestLanguageExtractor::new("test-repo".to_string(), None, None);
         if let Err(e) = &result {
             eprintln!("Error creating extractor: {e:?}");
         }
@@ -58,7 +61,7 @@ mod tests {
     fn test_extractor_implements_trait() {
         use crate::Extractor;
 
-        let extractor = TestLanguageExtractor::new("test-repo".to_string()).unwrap();
+        let extractor = TestLanguageExtractor::new("test-repo".to_string(), None, None).unwrap();
 
         // Verify extract method exists (will return empty vec for test implementation)
         let result = extractor.extract("", std::path::Path::new("test.test"));

@@ -21,6 +21,8 @@ pub fn handle_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
@@ -30,6 +32,8 @@ pub fn handle_function_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Extract common components (name, qualified_name, entity_id, location)
@@ -76,12 +80,15 @@ pub fn handle_function_impl(
 }
 
 /// Handle arrow functions assigned to variables
+#[allow(unused_variables)]
 pub fn handle_arrow_function_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     use crate::common::entity_building::CommonEntityComponents;
     use codesearch_core::entities::SourceLocation;
@@ -89,7 +96,13 @@ pub fn handle_arrow_function_impl(
     let arrow_function_node = require_capture_node(query_match, query, "arrow_function")?;
 
     // Arrow functions need special name extraction from parent context
-    let name = extract_arrow_function_name(arrow_function_node, source)?;
+    // For anonymous arrow functions (callbacks, etc.), use a synthetic name with line number
+    let name = extract_arrow_function_name(arrow_function_node, source).unwrap_or_else(|_| {
+        format!(
+            "<anonymous@{}>",
+            arrow_function_node.start_position().row + 1
+        )
+    });
 
     // Build qualified name
     let scope_result = crate::qualified_name::build_qualified_name_from_ast(

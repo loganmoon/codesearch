@@ -51,6 +51,8 @@ pub fn handle_struct_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -58,6 +60,8 @@ pub fn handle_struct_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Build ImportMap from file's imports for type resolution
@@ -108,6 +112,8 @@ pub fn handle_enum_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -115,6 +121,8 @@ pub fn handle_enum_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Build ImportMap from file's imports for type resolution
@@ -158,6 +166,8 @@ pub fn handle_trait_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -165,6 +175,8 @@ pub fn handle_trait_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         let generics = extract_generics(ctx);

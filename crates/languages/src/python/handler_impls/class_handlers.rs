@@ -24,6 +24,8 @@ pub fn handle_class_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let class_node = require_capture_node(query_match, query, "class")?;
 
@@ -33,6 +35,8 @@ pub fn handle_class_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Extract common components
@@ -83,6 +87,8 @@ pub fn handle_method_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let method_node = require_capture_node(query_match, query, "method")?;
 
@@ -92,6 +98,8 @@ pub fn handle_method_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Extract common components (name, qualified_name, entity_id, location)

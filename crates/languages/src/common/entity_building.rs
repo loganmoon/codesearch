@@ -38,6 +38,10 @@ pub struct ExtractionContext<'a> {
     pub source: &'a str,
     pub file_path: &'a Path,
     pub repository_id: &'a str,
+    /// Package/crate name from manifest (e.g., "codesearch_core" from Cargo.toml)
+    pub package_name: Option<&'a str>,
+    /// Source root path for module path derivation (e.g., "/project/src")
+    pub source_root: Option<&'a Path>,
 }
 
 /// Entity-specific details for building a CodeEntity
@@ -58,6 +62,7 @@ pub struct EntityDetails {
 /// This function handles:
 /// - Name extraction from query captures
 /// - Qualified name building via AST traversal (using language-specific separator)
+/// - Module path derivation from file path (when source_root is provided)
 /// - Entity ID generation
 /// - Source location extraction
 ///
@@ -88,14 +93,31 @@ pub fn extract_common_components(
 
     // Build qualified name via parent traversal using language-specific separator
     let scope_result = build_qualified_name_from_ast(main_node, ctx.source, language);
-    let parent_scope = scope_result.parent_scope;
+    let ast_scope = scope_result.parent_scope;
     let separator = scope_result.separator;
 
-    let qualified_name = if parent_scope.is_empty() {
-        name.clone()
-    } else {
-        format!("{parent_scope}{separator}{name}")
-    };
+    // Derive module path from file path (if source_root is available)
+    let module_prefix = ctx
+        .source_root
+        .and_then(|root| derive_module_path_for_language(ctx.file_path, root, language));
+
+    // Compose fully qualified name: package::module::ast_scope::name
+    let qualified_name = compose_qualified_name(
+        ctx.package_name,
+        module_prefix.as_deref(),
+        &ast_scope,
+        &name,
+        separator,
+    );
+
+    // Calculate parent_scope (everything except the final name)
+    let parent_scope = compose_qualified_name(
+        ctx.package_name,
+        module_prefix.as_deref(),
+        &ast_scope,
+        "", // empty name to get just the parent scope
+        separator,
+    );
 
     // Generate entity_id from repository + file_path + qualified name
     let file_path_str = ctx
@@ -120,6 +142,65 @@ pub fn extract_common_components(
         file_path: ctx.file_path.to_path_buf(),
         location,
     })
+}
+
+/// Derive module path from file path for a specific language
+fn derive_module_path_for_language(
+    file_path: &Path,
+    source_root: &Path,
+    language: &str,
+) -> Option<String> {
+    match language {
+        "rust" => crate::rust::module_path::derive_module_path(file_path, source_root),
+        "python" => crate::python::module_path::derive_module_path(file_path, source_root),
+        "javascript" | "typescript" => {
+            crate::javascript::module_path::derive_module_path(file_path, source_root)
+        }
+        _ => None,
+    }
+}
+
+/// Compose a fully qualified name from components
+///
+/// Joins non-empty components with the separator. If name is empty, returns
+/// just the scope parts (useful for calculating parent_scope).
+///
+/// # Arguments
+/// * `package` - Optional package/crate name (e.g., "codesearch_core")
+/// * `module` - Optional module path from file location (e.g., "entities")
+/// * `scope` - AST-derived scope from parent traversal (e.g., "MyStruct")
+/// * `name` - The entity name (e.g., "my_method")
+/// * `separator` - Language-specific separator (e.g., "::" for Rust, "." for Python)
+fn compose_qualified_name(
+    package: Option<&str>,
+    module: Option<&str>,
+    scope: &str,
+    name: &str,
+    separator: &str,
+) -> String {
+    let mut parts: Vec<&str> = Vec::with_capacity(4);
+
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            parts.push(pkg);
+        }
+    }
+
+    if let Some(mod_path) = module {
+        if !mod_path.is_empty() {
+            parts.push(mod_path);
+        }
+    }
+
+    if !scope.is_empty() {
+        parts.push(scope);
+    }
+
+    if !name.is_empty() {
+        parts.push(name);
+    }
+
+    parts.join(separator)
 }
 
 /// Build a CodeEntity from common components and entity-specific data

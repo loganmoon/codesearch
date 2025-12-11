@@ -24,6 +24,8 @@ pub fn handle_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
@@ -33,6 +35,8 @@ pub fn handle_function_impl(
         source,
         file_path,
         repository_id,
+        package_name,
+        source_root,
     };
 
     // Extract common components

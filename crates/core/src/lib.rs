@@ -18,6 +18,7 @@ pub mod config;
 pub mod entities;
 pub mod entity_id;
 pub mod error;
+pub mod project_manifest;
 pub mod search_api;
 pub mod search_models;
 
@@ -32,6 +33,9 @@ pub use entities::{
 };
 pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};
+pub use project_manifest::{
+    detect_manifest, PackageInfo, PackageMap, ProjectManifest, ProjectType,
+};
 pub use search_api::SearchApi;
 pub use search_models::{
     BatchEntityRequest, BatchEntityResponse, EmbeddingRequest, EmbeddingResponse, EntityResult,

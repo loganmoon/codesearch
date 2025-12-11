@@ -12,7 +12,15 @@ use tree_sitter::{Parser, Query, QueryCursor};
 /// Helper to extract entities from source code using a handler
 pub fn extract_with_handler<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<CodeEntity>>
 where
-    F: Fn(&tree_sitter::QueryMatch, &Query, &str, &Path, &str) -> Result<Vec<CodeEntity>>,
+    F: Fn(
+        &tree_sitter::QueryMatch,
+        &Query,
+        &str,
+        &Path,
+        &str,
+        Option<&str>,
+        Option<&Path>,
+    ) -> Result<Vec<CodeEntity>>,
 {
     let mut parser = Parser::new();
     parser
@@ -30,7 +38,7 @@ where
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = matches_iter.next() {
-        let entities = handler(query_match, &query, source, path, repository_id)
+        let entities = handler(query_match, &query, source, path, repository_id, None, None)
             .expect("Handler should not fail during test extraction");
         all_entities.extend(entities);
     }

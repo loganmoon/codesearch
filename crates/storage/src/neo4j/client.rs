@@ -30,6 +30,10 @@ pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
     "CALLED_BY",
     "IMPORTS",
     "IMPORTED_BY",
+    // Resolution graph relationships
+    "RESOLVES_TO",  // Reference -> Import (same file resolution)
+    "IMPORTS_FROM", // Import -> Entity (cross-file resolution)
+    "REEXPORTS",    // Export -> Entity (re-export chain)
 ];
 
 /// Validates that a property key is safe to use in Cypher queries

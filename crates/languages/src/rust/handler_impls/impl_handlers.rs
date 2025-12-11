@@ -92,8 +92,8 @@ pub fn handle_impl_impl(
         let impl_ctx = ImplContext {
             qualified_name: &impl_qualified_name,
             for_type: &for_type,
-            trait_name: None,          // No trait for inherent impl
-            line: location.start_line, // Pass impl line number for unique method IDs
+            trait_name: None, // No trait for inherent impl
+            generics: &generics,
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
@@ -227,7 +227,7 @@ pub fn handle_impl_trait_impl(
             qualified_name: &impl_qualified_name,
             for_type: &for_type,
             trait_name: Some(&trait_name),
-            line: location.start_line, // Pass impl line number for unique method IDs
+            generics: &generics,
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
@@ -337,8 +337,9 @@ struct ImplContext<'a> {
     for_type: &'a str,
     /// Optional trait name for trait implementations
     trait_name: Option<&'a str>,
-    /// The line number where the impl block starts (for unique entity IDs)
-    line: usize,
+    /// Generic parameters with bounds (e.g., ["T: Clone", "U"])
+    /// Used to disambiguate impl blocks with different bounds
+    generics: &'a [String],
 }
 
 /// Components for building impl block member entities (methods, associated constants)
@@ -444,17 +445,24 @@ fn extract_associated_constant(
         .and_then(|n| node_to_text(n, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type, including impl line for uniqueness
-    let qualified_name = if let Some(trait_name) = impl_ctx.trait_name {
-        format!(
-            "<{} as {trait_name}>::{name} (impl at line {})",
-            impl_ctx.for_type, impl_ctx.line
-        )
-    } else {
-        format!(
-            "{}::{name} (impl at line {})",
-            impl_ctx.for_type, impl_ctx.line
-        )
+    // Build qualified name based on impl type
+    // Include generic bounds to disambiguate impl blocks with different constraints
+    let qualified_name = {
+        let has_bounds = impl_ctx.generics.iter().any(|g| g.contains(':'));
+        let bounds_suffix = if has_bounds {
+            format!(" where {}", impl_ctx.generics.join(", "))
+        } else {
+            String::new()
+        };
+
+        if let Some(trait_name) = impl_ctx.trait_name {
+            format!(
+                "<{} as {trait_name}{bounds_suffix}>::{name}",
+                impl_ctx.for_type
+            )
+        } else {
+            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type)
+        }
     };
 
     // Extract visibility
@@ -530,17 +538,27 @@ fn extract_method(
     let name = find_method_name(method_node, source)
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type, including impl line for uniqueness
-    let qualified_name = if let Some(trait_name) = impl_ctx.trait_name {
-        format!(
-            "<{} as {trait_name}>::{name} (impl at line {})",
-            impl_ctx.for_type, impl_ctx.line
-        )
-    } else {
-        format!(
-            "{}::{name} (impl at line {})",
-            impl_ctx.for_type, impl_ctx.line
-        )
+    // Build qualified name based on impl type
+    // Include generic bounds to disambiguate impl blocks with different constraints
+    // For trait impls: <Type as Trait>::method or <Type as Trait where T: Clone>::method
+    // For inherent impls: Type::method or Type where T: Clone>::method
+    let qualified_name = {
+        // Check if any generics have bounds (contain ':')
+        let has_bounds = impl_ctx.generics.iter().any(|g| g.contains(':'));
+        let bounds_suffix = if has_bounds {
+            format!(" where {}", impl_ctx.generics.join(", "))
+        } else {
+            String::new()
+        };
+
+        if let Some(trait_name) = impl_ctx.trait_name {
+            format!(
+                "<{} as {trait_name}{bounds_suffix}>::{name}",
+                impl_ctx.for_type
+            )
+        } else {
+            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type)
+        }
     };
 
     // Extract visibility

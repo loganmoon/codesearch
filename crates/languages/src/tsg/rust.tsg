@@ -1,0 +1,326 @@
+; Tree-sitter-graph rules for extracting resolution nodes from Rust source code
+;
+; This file extracts four node types:
+;   - Definition: struct, enum, fn, trait, const, type_alias, mod, impl
+;   - Export: pub use re-exports
+;   - Import: use declarations
+;   - Reference: identifier usages (calls, types, paths)
+
+; ============================================================
+; DEFINITIONS - Items that introduce new names
+; ============================================================
+
+; Function definitions
+(function_item
+  (visibility_modifier)? @vis
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Struct definitions
+(struct_item
+  (visibility_modifier)? @vis
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "struct"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Enum definitions
+(enum_item
+  (visibility_modifier)? @vis
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "enum"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Enum variant definitions - extracts each variant as a definition
+; The parent_enum attribute links it to its containing enum
+(enum_item
+  name: (type_identifier) @enum_name
+  body: (enum_variant_list
+    (enum_variant
+      name: (identifier) @variant_name) @variant)) @_enum
+{
+  node @variant.node
+  attr (@variant.node) type = "Definition"
+  attr (@variant.node) kind = "enum_variant"
+  attr (@variant.node) name = (source-text @variant_name)
+  attr (@variant.node) parent_enum = (source-text @enum_name)
+  attr (@variant.node) start_row = (start-row @variant)
+  attr (@variant.node) end_row = (end-row @variant)
+}
+
+; Trait definitions
+(trait_item
+  (visibility_modifier)? @vis
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "trait"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Constant definitions
+(const_item
+  (visibility_modifier)? @vis
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "constant"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Static definitions
+(static_item
+  (visibility_modifier)? @vis
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "static"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Type alias definitions
+(type_item
+  (visibility_modifier)? @vis
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Module definitions (both inline and file modules)
+; Using a single rule to avoid duplicate variable errors
+(mod_item
+  (visibility_modifier)? @vis
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "module"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Macro definitions (macro_rules!)
+(macro_definition
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "macro"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; ============================================================
+; EXPORTS - Public re-exports via `pub use`
+; ============================================================
+; NOTE: Exports are currently disabled to avoid duplicate variable errors
+; with the Import rule. Both rules would match `pub use` declarations.
+; Exports will be handled via the is_public attribute on Import nodes instead.
+
+; ============================================================
+; IMPORTS - Use declarations (both public and private)
+; ============================================================
+
+; Simple use: `use foo::Bar;` (may include pub use, filtered in post-processing)
+; We store the full path and extract the name in post-processing
+(use_declaration
+  (visibility_modifier)? @_vis
+  argument: (scoped_identifier) @path) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @path)
+  attr (@import.node) path = (source-text @path)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+  if none @_vis {
+    ; Only mark as non-public if no visibility modifier
+    attr (@import.node) is_public = "false"
+  }
+  if some @_vis {
+    attr (@import.node) is_public = "true"
+  }
+}
+
+; Aliased import: `use foo::Bar as Baz;`
+; The alias name is what gets used in the code
+(use_declaration
+  (visibility_modifier)? @_vis
+  argument: (use_as_clause
+    path: (scoped_identifier) @path
+    alias: (identifier) @alias)) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @alias)
+  attr (@import.node) path = (source-text @path)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+  if none @_vis {
+    attr (@import.node) is_public = "false"
+  }
+  if some @_vis {
+    attr (@import.node) is_public = "true"
+  }
+}
+
+; Glob import: `use foo::*;`
+(use_declaration
+  (visibility_modifier)? @_vis
+  argument: (use_wildcard) @wildcard) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = "*"
+  attr (@import.node) path = (source-text @wildcard)
+  attr (@import.node) is_glob = "true"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+  if none @_vis {
+    attr (@import.node) is_public = "false"
+  }
+  if some @_vis {
+    attr (@import.node) is_public = "true"
+  }
+}
+
+; Grouped import item: `use foo::{Bar, Baz};` - extract each identifier in the list
+; This matches individual identifiers within a use_list
+; Note: We can only capture the identifier name, the full path reconstruction
+; happens in post-processing by combining the parent path
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @base_path
+    list: (use_list
+      (identifier) @item))) @_import
+{
+  node @item.node
+  attr (@item.node) type = "Import"
+  attr (@item.node) name = (source-text @item)
+  attr (@item.node) base_path = (source-text @base_path)
+  attr (@item.node) is_glob = "false"
+  attr (@item.node) start_row = (start-row @item)
+  attr (@item.node) end_row = (end-row @item)
+}
+
+; Grouped import with scoped identifiers: `use foo::{bar::Baz, qux::Quux};`
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @base_path
+    list: (use_list
+      (scoped_identifier) @item))) @_import
+{
+  node @item.node
+  attr (@item.node) type = "Import"
+  attr (@item.node) name = (source-text @item)
+  attr (@item.node) base_path = (source-text @base_path)
+  attr (@item.node) is_glob = "false"
+  attr (@item.node) start_row = (start-row @item)
+  attr (@item.node) end_row = (end-row @item)
+}
+
+; Grouped import with alias: `use foo::{Bar as B, Baz};`
+(use_declaration
+  argument: (scoped_use_list
+    path: (_) @base_path
+    list: (use_list
+      (use_as_clause
+        path: (_) @item_path
+        alias: (identifier) @alias)))) @_import
+{
+  node @alias.node
+  attr (@alias.node) type = "Import"
+  attr (@alias.node) name = (source-text @alias)
+  attr (@alias.node) base_path = (source-text @base_path)
+  attr (@alias.node) original_name = (source-text @item_path)
+  attr (@alias.node) is_glob = "false"
+  attr (@alias.node) start_row = (start-row @alias)
+  attr (@alias.node) end_row = (end-row @alias)
+}
+
+; ============================================================
+; REFERENCES - Identifier usages
+; ============================================================
+
+; Function call with bare identifier: `foo()`
+(call_expression
+  function: (identifier) @ref) @_call
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "call"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Type references (in type positions)
+(type_identifier) @ref
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "type"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}

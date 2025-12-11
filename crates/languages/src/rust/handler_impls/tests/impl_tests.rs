@@ -112,6 +112,19 @@ impl<T: Clone> Container<T> {
         .iter()
         .any(|e| e.metadata.is_generic && !e.metadata.generic_params.is_empty());
     assert!(has_generic_impl, "Should capture generic parameters");
+
+    // Verify method qualified names don't have "impl at line"
+    let methods: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Method)
+        .collect();
+    for m in &methods {
+        assert!(
+            !m.qualified_name.contains("impl at line"),
+            "Method qualified name should not contain 'impl at line': {}",
+            m.qualified_name
+        );
+    }
 }
 
 #[test]
@@ -487,12 +500,21 @@ impl<T: Clone> Container<T> {
         new_methods[1].location.start_line
     );
 
-    // Qualified names should include impl line number
+    // Qualified names should be different due to generic bounds
+    // One should be "Container<T>::new" and the other "Container<T> where T: Clone::new"
+    assert_ne!(
+        new_methods[0].qualified_name, new_methods[1].qualified_name,
+        "Qualified names should be different due to generic bounds. Got: {} and {}",
+        new_methods[0].qualified_name, new_methods[1].qualified_name
+    );
+
+    // Verify one has bounds and one doesn't
+    let has_where = new_methods
+        .iter()
+        .any(|m| m.qualified_name.contains("where"));
     assert!(
-        new_methods[0].qualified_name.contains("impl at line")
-            || new_methods[1].qualified_name.contains("impl at line"),
-        "Qualified names should include impl block line number for uniqueness. Got: {} and {}",
-        new_methods[0].qualified_name,
-        new_methods[1].qualified_name
+        has_where,
+        "One qualified name should include 'where' for bounded impl. Got: {} and {}",
+        new_methods[0].qualified_name, new_methods[1].qualified_name
     );
 }

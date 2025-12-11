@@ -63,6 +63,15 @@ impl CrossFileEvalStats {
         self.imports_resolved_cross_file as f64 / self.total_imports as f64
     }
 
+    /// Calculate percentage, returning 0.0 if denominator is zero
+    fn percent_of(numerator: usize, denominator: usize) -> f64 {
+        if denominator == 0 {
+            0.0
+        } else {
+            numerator as f64 / denominator as f64 * 100.0
+        }
+    }
+
     /// Print summary statistics
     pub fn print_summary(&self) {
         println!("\n=== Cross-File Resolution Evaluation ===\n");
@@ -78,17 +87,17 @@ impl CrossFileEvalStats {
         println!(
             "  Via local definition: {} ({:.1}%)",
             self.resolved_via_local_definition,
-            self.resolved_via_local_definition as f64 / self.total_references as f64 * 100.0
+            Self::percent_of(self.resolved_via_local_definition, self.total_references)
         );
         println!(
             "  Via import: {} ({:.1}%)",
             self.resolved_via_import,
-            self.resolved_via_import as f64 / self.total_references as f64 * 100.0
+            Self::percent_of(self.resolved_via_import, self.total_references)
         );
         println!(
             "  Unresolved: {} ({:.1}%)",
             self.references_unresolved,
-            self.references_unresolved as f64 / self.total_references as f64 * 100.0
+            Self::percent_of(self.references_unresolved, self.total_references)
         );
         println!();
         println!("Import resolution:");
@@ -100,7 +109,7 @@ impl CrossFileEvalStats {
         println!(
             "  Unresolved: {} ({:.1}%)",
             self.imports_unresolved,
-            self.imports_unresolved as f64 / self.total_imports as f64 * 100.0
+            Self::percent_of(self.imports_unresolved, self.total_imports)
         );
         println!();
         println!(

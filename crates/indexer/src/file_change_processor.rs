@@ -210,6 +210,20 @@ async fn process_file_batch(
     let mut stats = ProcessingStats::default();
     let mut batch_entities = Vec::new();
 
+    // Canonicalize repo root once before the loop
+    let canonical_repo = match repo_root.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(
+                repo_root = %repo_root.display(),
+                error = %e,
+                "Failed to canonicalize repository root"
+            );
+            stats.files_failed = file_paths.len();
+            return Ok(stats);
+        }
+    };
+
     // Extract entities from all files
     for file_path in file_paths {
         // Make path absolute relative to repo root
@@ -227,19 +241,6 @@ async fn process_file_batch(
                     file_path = %file_path.display(),
                     error = %e,
                     "Failed to canonicalize path"
-                );
-                stats.files_failed += 1;
-                continue;
-            }
-        };
-
-        let canonical_repo = match repo_root.canonicalize() {
-            Ok(p) => p,
-            Err(e) => {
-                warn!(
-                    repo_root = %repo_root.display(),
-                    error = %e,
-                    "Failed to canonicalize repository root"
                 );
                 stats.files_failed += 1;
                 continue;

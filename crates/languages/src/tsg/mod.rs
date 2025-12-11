@@ -7,7 +7,8 @@
 //! - Reference nodes (identifier usages)
 //!
 //! These nodes form a resolution graph where cross-file FQN resolution
-//! follows edges: Reference → Import → Export* → Definition
+//! follows edges: Reference → Import → Definition
+//! (Note: Export nodes are handled via `is_public` attribute on Import nodes)
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]

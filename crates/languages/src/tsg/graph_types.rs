@@ -46,9 +46,9 @@ pub struct ResolutionNode {
     pub qualified_name: String,
     /// Path to the source file
     pub file_path: PathBuf,
-    /// Start line (1-indexed)
+    /// Start line (0-indexed, from tree-sitter)
     pub start_line: u32,
-    /// End line (1-indexed)
+    /// End line (0-indexed, from tree-sitter)
     pub end_line: u32,
     /// Visibility modifier (e.g., "pub", "pub(crate)", None for private)
     pub visibility: Option<String>,

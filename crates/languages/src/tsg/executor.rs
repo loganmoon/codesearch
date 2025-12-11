@@ -10,11 +10,50 @@
 use super::graph_types::{ResolutionNode, ResolutionNodeKind};
 use anyhow::{anyhow, Result};
 use std::path::Path;
+use std::sync::OnceLock;
 use tree_sitter::Parser;
 use tree_sitter_graph::ast::File as TsgFile;
 use tree_sitter_graph::functions::Functions;
 use tree_sitter_graph::graph::Value;
 use tree_sitter_graph::{ExecutionConfig, Identifier, NoCancellation, Variables};
+
+/// Cached identifiers for common TSG attribute names
+struct AttrIds {
+    type_: Identifier,
+    name: Identifier,
+    visibility: Identifier,
+    start_row: Identifier,
+    end_row: Identifier,
+    kind: Identifier,
+    path: Identifier,
+    base_path: Identifier,
+    context: Identifier,
+    is_glob: Identifier,
+}
+
+impl AttrIds {
+    fn new() -> Self {
+        Self {
+            type_: Identifier::from("type"),
+            name: Identifier::from("name"),
+            visibility: Identifier::from("visibility"),
+            start_row: Identifier::from("start_row"),
+            end_row: Identifier::from("end_row"),
+            kind: Identifier::from("kind"),
+            path: Identifier::from("path"),
+            base_path: Identifier::from("base_path"),
+            context: Identifier::from("context"),
+            is_glob: Identifier::from("is_glob"),
+        }
+    }
+}
+
+/// Global cached attribute identifiers
+static ATTR_IDS: OnceLock<AttrIds> = OnceLock::new();
+
+fn attr_ids() -> &'static AttrIds {
+    ATTR_IDS.get_or_init(AttrIds::new)
+}
 
 /// The TSG rules for Rust source extraction
 pub const RUST_TSG_RULES: &str = include_str!("rust.tsg");
@@ -29,6 +68,7 @@ fn extract_simple_name(path: &str) -> String {
 pub struct TsgExecutor {
     tsg_file: TsgFile,
     parser: Parser,
+    functions: Functions,
 }
 
 impl TsgExecutor {
@@ -43,7 +83,13 @@ impl TsgExecutor {
             .set_language(&language)
             .map_err(|e| anyhow!("Failed to set parser language: {e}"))?;
 
-        Ok(Self { tsg_file, parser })
+        let functions = Functions::stdlib();
+
+        Ok(Self {
+            tsg_file,
+            parser,
+            functions,
+        })
     }
 
     /// Extract resolution nodes from source code
@@ -53,9 +99,8 @@ impl TsgExecutor {
             .parse(source, None)
             .ok_or_else(|| anyhow!("Failed to parse source"))?;
 
-        let functions = Functions::stdlib();
         let globals = Variables::new();
-        let config = ExecutionConfig::new(&functions, &globals);
+        let config = ExecutionConfig::new(&self.functions, &globals);
 
         let graph = self
             .tsg_file
@@ -72,13 +117,13 @@ impl TsgExecutor {
         file_path: &Path,
     ) -> Result<Vec<ResolutionNode>> {
         let mut nodes = Vec::new();
+        let ids = attr_ids();
 
         for node_ref in graph.iter_nodes() {
             let graph_node = &graph[node_ref];
 
             // Get the "type" attribute to determine node kind
-            let type_id = Identifier::from("type");
-            let node_type = match graph_node.attributes.get(&type_id) {
+            let node_type = match graph_node.attributes.get(&ids.type_) {
                 Some(Value::String(s)) => s.clone(),
                 _ => continue, // Skip nodes without a type
             };
@@ -91,18 +136,18 @@ impl TsgExecutor {
                 _ => continue, // Unknown type
             };
 
-            // Extract common attributes
-            let raw_name = self.get_string_attr(&graph_node.attributes, "name");
-            let visibility = self.get_optional_string_attr(&graph_node.attributes, "visibility");
-            let start_row = self.get_int_attr(&graph_node.attributes, "start_row");
-            let end_row = self.get_int_attr(&graph_node.attributes, "end_row");
+            // Extract common attributes using cached identifiers
+            let raw_name = get_string_attr(&graph_node.attributes, &ids.name);
+            let visibility = get_optional_string_attr(&graph_node.attributes, &ids.visibility);
+            let start_row = get_int_attr(&graph_node.attributes, &ids.start_row);
+            let end_row = get_int_attr(&graph_node.attributes, &ids.end_row);
 
             // Extract kind-specific attributes
-            let definition_kind = self.get_optional_string_attr(&graph_node.attributes, "kind");
-            let path = self.get_optional_string_attr(&graph_node.attributes, "path");
-            let base_path = self.get_optional_string_attr(&graph_node.attributes, "base_path");
-            let context = self.get_optional_string_attr(&graph_node.attributes, "context");
-            let is_glob_str = self.get_optional_string_attr(&graph_node.attributes, "is_glob");
+            let definition_kind = get_optional_string_attr(&graph_node.attributes, &ids.kind);
+            let path = get_optional_string_attr(&graph_node.attributes, &ids.path);
+            let base_path = get_optional_string_attr(&graph_node.attributes, &ids.base_path);
+            let context = get_optional_string_attr(&graph_node.attributes, &ids.context);
+            let is_glob_str = get_optional_string_attr(&graph_node.attributes, &ids.is_glob);
             let is_glob = is_glob_str.as_deref() == Some("true");
 
             // For imports/exports, extract simple name from full path (e.g., "std::io::Read" -> "Read")
@@ -176,36 +221,32 @@ impl TsgExecutor {
 
         Ok(nodes)
     }
+}
 
-    /// Get a required string attribute
-    fn get_string_attr(&self, attrs: &tree_sitter_graph::graph::Attributes, name: &str) -> String {
-        let id = Identifier::from(name);
-        match attrs.get(&id) {
-            Some(Value::String(s)) => s.clone(),
-            _ => String::new(),
-        }
+/// Get a required string attribute using a pre-cached identifier
+fn get_string_attr(attrs: &tree_sitter_graph::graph::Attributes, id: &Identifier) -> String {
+    match attrs.get(id) {
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
     }
+}
 
-    /// Get an optional string attribute
-    fn get_optional_string_attr(
-        &self,
-        attrs: &tree_sitter_graph::graph::Attributes,
-        name: &str,
-    ) -> Option<String> {
-        let id = Identifier::from(name);
-        match attrs.get(&id) {
-            Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-            _ => None,
-        }
+/// Get an optional string attribute using a pre-cached identifier
+fn get_optional_string_attr(
+    attrs: &tree_sitter_graph::graph::Attributes,
+    id: &Identifier,
+) -> Option<String> {
+    match attrs.get(id) {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
     }
+}
 
-    /// Get an integer attribute (as u32), defaulting to 0
-    fn get_int_attr(&self, attrs: &tree_sitter_graph::graph::Attributes, name: &str) -> u32 {
-        let id = Identifier::from(name);
-        match attrs.get(&id) {
-            Some(Value::Integer(i)) => *i,
-            _ => 0,
-        }
+/// Get an integer attribute (as u32), defaulting to 0, using a pre-cached identifier
+fn get_int_attr(attrs: &tree_sitter_graph::graph::Attributes, id: &Identifier) -> u32 {
+    match attrs.get(id) {
+        Some(Value::Integer(i)) => *i,
+        _ => 0,
     }
 }
 

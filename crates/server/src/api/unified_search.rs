@@ -83,8 +83,8 @@ pub async fn search_unified(
         request.rrf_k.unwrap_or(60),
     );
 
-    // Apply specificity boost to favor smaller entities
-    let boosted_results = apply_specificity_boost(merged_results, &config.specificity);
+    // Skip specificity boost - it was having negative effects on search quality
+    let boosted_results = merged_results;
 
     let (final_results, reranked) = if request
         .rerank
@@ -243,45 +243,6 @@ pub fn apply_rrf_fusion(
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     results
-}
-
-/// Apply specificity boost to favor smaller, more focused entities
-///
-/// Uses logarithmic decay based on entity line count:
-/// boost = 1.0 / (1.0 + ln(line_count))
-/// final_score = original_score + (boost * weight)
-pub fn apply_specificity_boost(
-    results: Vec<(CodeEntity, f32)>,
-    config: &codesearch_core::config::SpecificityConfig,
-) -> Vec<(CodeEntity, f32)> {
-    if !config.enabled {
-        return results;
-    }
-
-    let mut boosted: Vec<_> = results
-        .into_iter()
-        .map(|(entity, score)| {
-            let line_count = entity
-                .location
-                .end_line
-                .saturating_sub(entity.location.start_line)
-                + 1;
-
-            // Cap at max_lines to prevent negative boosts
-            let capped_lines = line_count.min(config.max_lines);
-
-            // Logarithmic decay: smaller entities get higher boost
-            let boost = 1.0 / (1.0 + (capped_lines as f32).ln());
-            let boosted_score = score + (boost * config.weight);
-
-            (entity, boosted_score)
-        })
-        .collect();
-
-    // Re-sort by boosted score
-    boosted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    boosted
 }
 
 async fn rerank_merged_results(
@@ -463,59 +424,6 @@ mod tests {
     }
 
     #[test]
-    fn test_specificity_boost_disabled() {
-        let config = codesearch_core::config::SpecificityConfig {
-            enabled: false,
-            weight: 0.1,
-            max_lines: 500,
-        };
-
-        let results = vec![
-            (create_test_entity("1", "entity_1"), 0.5),
-            (create_test_entity("2", "entity_2"), 0.3),
-        ];
-
-        let boosted = apply_specificity_boost(results.clone(), &config);
-
-        // When disabled, scores should be unchanged
-        assert_eq!(boosted[0].1, results[0].1);
-        assert_eq!(boosted[1].1, results[1].1);
-    }
-
-    #[test]
-    fn test_specificity_boost_favors_smaller() {
-        let config = codesearch_core::config::SpecificityConfig {
-            enabled: true,
-            weight: 0.5,
-            max_lines: 500,
-        };
-
-        // Create entities with different sizes
-        let small_entity = {
-            let mut e = create_test_entity("small", "small_fn");
-            e.location.start_line = 1;
-            e.location.end_line = 5; // 5 lines
-            e
-        };
-        let large_entity = {
-            let mut e = create_test_entity("large", "large_fn");
-            e.location.start_line = 1;
-            e.location.end_line = 100; // 100 lines
-            e
-        };
-
-        // Start with same RRF score but large entity first
-        let results = vec![(large_entity, 0.5), (small_entity, 0.5)];
-
-        let boosted = apply_specificity_boost(results, &config);
-
-        // Small entity should now be first due to specificity boost
-        assert_eq!(boosted[0].0.entity_id, "small");
-        assert_eq!(boosted[1].0.entity_id, "large");
-        assert!(boosted[0].1 > boosted[1].1);
-    }
-
-    #[test]
     fn test_merge_inferred_filters_ignores_inferred_types() {
         // Regression test: verify that inferred entity types are NOT applied to filters.
         // Bug context: Previously, queries like "What functions call X?" would infer
@@ -553,30 +461,5 @@ mod tests {
         assert_eq!(types.len(), 1);
         assert_eq!(types[0], EntityType::Struct);
         // Should NOT contain Function or Method from inferred types
-    }
-
-    #[test]
-    fn test_specificity_boost_max_lines_capping() {
-        // Test that entities exceeding max_lines get capped boost (not negative boost)
-        let config = codesearch_core::config::SpecificityConfig {
-            enabled: true,
-            weight: 0.5,
-            max_lines: 100, // Low max_lines for testing
-        };
-
-        // Create entity that exceeds max_lines
-        let huge_entity = {
-            let mut e = create_test_entity("huge", "huge_fn");
-            e.location.start_line = 1;
-            e.location.end_line = 1000; // Way over max_lines
-            e
-        };
-
-        let results = vec![(huge_entity, 0.5)];
-        let boosted = apply_specificity_boost(results, &config);
-
-        // Boost should be positive (not negative) due to capping at max_lines
-        // The boost is 1.0 / (1.0 + ln(100)) = ~0.178, so boosted score should be > 0.5
-        assert!(boosted[0].1 > 0.5, "Capped boost should still be positive");
     }
 }

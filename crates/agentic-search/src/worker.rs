@@ -17,9 +17,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerType {
+    /// Semantic search combining dense embeddings + BM25 sparse retrieval
     Semantic,
-    Fulltext,
-    Unified,
 }
 
 #[derive(Debug, Clone)]
@@ -54,94 +53,29 @@ pub async fn execute_worker(
         .filter_map(|s| Uuid::parse_str(s).ok())
         .collect();
 
-    // Execute search based on worker type
-    let search_results = match query.worker_type {
-        WorkerType::Semantic => {
-            let request = SemanticSearchRequest {
-                query: QuerySpec {
-                    text: query.query.clone(),
-                    instruction: None,
-                    embedding: None,
-                },
-                filters: None,
-                limit: 15,
-                prefetch_multiplier: None,
-                repository_ids: if repository_ids.is_empty() {
-                    None
-                } else {
-                    Some(repository_ids.clone())
-                },
-                rerank: None,
-            };
-
-            search_api
-                .search_semantic(request)
-                .await
-                .map_err(|e| AgenticSearchError::SearchApi(e.to_string()))?
-                .results
-        }
-        WorkerType::Fulltext => {
-            // Fulltext only supports single repository - use first or return empty
-            let repository_id = if repository_ids.is_empty() {
-                warn!("Fulltext search requires a repository ID, skipping");
-                return Ok(WorkerResult {
-                    worker_type: query.worker_type,
-                    entities: vec![],
-                    reranking_cost_usd: 0.0,
-                });
-            } else {
-                repository_ids[0]
-            };
-
-            let request = FulltextSearchRequest {
-                repository_id,
-                query: query.query.clone(),
-                limit: 15,
-            };
-
-            search_api
-                .search_fulltext(request)
-                .await
-                .map_err(|e| AgenticSearchError::SearchApi(e.to_string()))?
-                .results
-        }
-        WorkerType::Unified => {
-            // Unified only supports single repository - use first or return empty
-            let repository_id = if repository_ids.is_empty() {
-                warn!("Unified search requires a repository ID, skipping");
-                return Ok(WorkerResult {
-                    worker_type: query.worker_type,
-                    entities: vec![],
-                    reranking_cost_usd: 0.0,
-                });
-            } else {
-                repository_ids[0]
-            };
-
-            let request = UnifiedSearchRequest {
-                repository_id,
-                query: QuerySpec {
-                    text: query.query.clone(),
-                    instruction: None,
-                    embedding: None,
-                },
-                filters: None,
-                limit: 15,
-                enable_fulltext: true,
-                enable_semantic: true,
-                fulltext_limit: None,
-                semantic_limit: None,
-                rrf_k: None,
-                rerank: None,
-            };
-
-            search_api
-                .search_unified(request)
-                .await
-                .map_err(|e| AgenticSearchError::SearchApi(e.to_string()))?
-                .results
-        }
+    // Execute semantic search (combines dense embeddings + BM25 sparse retrieval)
+    let request = SemanticSearchRequest {
+        query: QuerySpec {
+            text: query.query.clone(),
+            instruction: None,
+            embedding: None,
+        },
+        filters: None,
+        limit: 15,
+        prefetch_multiplier: None,
+        repository_ids: if repository_ids.is_empty() {
+            None
+        } else {
+            Some(repository_ids.clone())
+        },
+        rerank: None,
     };
+
+    let search_results = search_api
+        .search_semantic(request)
+        .await
+        .map_err(|e| AgenticSearchError::SearchApi(e.to_string()))?
+        .results;
 
     if search_results.is_empty() {
         debug!("Worker {:?} found no results", query.worker_type);
@@ -247,11 +181,9 @@ async fn rerank_worker_results(
 
     // Map back to AgenticEntity with updated scores and reasoning
     let mut reranked_entities = Vec::new();
-    let retrieval_source = match worker_type {
-        WorkerType::Semantic => RetrievalSource::Semantic,
-        WorkerType::Fulltext => RetrievalSource::Fulltext,
-        WorkerType::Unified => RetrievalSource::Unified,
-    };
+    // All workers now use semantic search
+    let _ = worker_type; // Acknowledge the parameter even though all workers use semantic
+    let retrieval_source = RetrievalSource::Semantic;
 
     for reranked in reranked_list.iter().take(10) {
         if let Some(&entity_ref) = results_map.get(reranked.entity_id.as_str()) {
@@ -358,12 +290,12 @@ mod tests {
     #[test]
     fn test_worker_result_construction() {
         let result = WorkerResult {
-            worker_type: WorkerType::Unified,
+            worker_type: WorkerType::Semantic,
             entities: vec![],
             reranking_cost_usd: 0.0025,
         };
 
-        assert_eq!(result.worker_type, WorkerType::Unified);
+        assert_eq!(result.worker_type, WorkerType::Semantic);
         assert_eq!(result.entities.len(), 0);
         assert_eq!(result.reranking_cost_usd, 0.0025);
     }

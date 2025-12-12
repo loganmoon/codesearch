@@ -15,8 +15,6 @@ use uuid::Uuid;
 /// Mock SearchApi for testing
 struct MockSearchApi {
     semantic_results: Vec<EntityResult>,
-    fulltext_results: Vec<EntityResult>,
-    unified_results: Vec<EntityResult>,
     graph_results: Vec<GraphResult>,
 }
 
@@ -24,20 +22,12 @@ impl MockSearchApi {
     fn new() -> Self {
         Self {
             semantic_results: vec![],
-            fulltext_results: vec![],
-            unified_results: vec![],
             graph_results: vec![],
         }
     }
 
-    #[allow(dead_code)]
     fn with_semantic_results(mut self, results: Vec<EntityResult>) -> Self {
         self.semantic_results = results;
-        self
-    }
-
-    fn with_unified_results(mut self, results: Vec<EntityResult>) -> Self {
-        self.unified_results = results;
         self
     }
 
@@ -69,10 +59,11 @@ impl SearchApi for MockSearchApi {
         &self,
         _request: FulltextSearchRequest,
     ) -> CoreResult<FulltextSearchResponse> {
+        // Fulltext search is no longer used by agentic search
         Ok(FulltextSearchResponse {
-            results: self.fulltext_results.clone(),
+            results: vec![],
             metadata: ResponseMetadata {
-                total_results: self.fulltext_results.len(),
+                total_results: 0,
                 repositories_searched: 1,
                 reranked: false,
                 query_time_ms: 100,
@@ -84,12 +75,13 @@ impl SearchApi for MockSearchApi {
         &self,
         _request: UnifiedSearchRequest,
     ) -> CoreResult<UnifiedSearchResponse> {
+        // Unified search is no longer used by agentic search
         Ok(UnifiedSearchResponse {
-            results: self.unified_results.clone(),
+            results: vec![],
             metadata: UnifiedResponseMetadata {
-                total_results: self.unified_results.len(),
+                total_results: 0,
                 fulltext_count: 0,
-                semantic_count: self.unified_results.len(),
+                semantic_count: 0,
                 merged_via_rrf: false,
                 reranked: false,
                 query_time_ms: 100,
@@ -197,7 +189,7 @@ async fn test_end_to_end_search() {
     ];
 
     let mock_api =
-        Arc::new(MockSearchApi::new().with_unified_results(mock_results)) as Arc<dyn SearchApi>;
+        Arc::new(MockSearchApi::new().with_semantic_results(mock_results)) as Arc<dyn SearchApi>;
 
     let config = AgenticSearchConfig {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
@@ -290,8 +282,8 @@ async fn test_mock_search_api_with_graph() {
 #[tokio::test]
 #[ignore = "Requires ANTHROPIC_API_KEY and makes real API calls"]
 async fn test_dual_track_metadata_population() {
-    // Setup: unified results + graph results with low semantic score
-    let unified_results = vec![
+    // Setup: semantic results + graph results with low semantic score
+    let semantic_results = vec![
         create_mock_entity("u1", "validate_jwt", 0.95),
         create_mock_entity("u2", "parse_token", 0.85),
     ];
@@ -303,7 +295,7 @@ async fn test_dual_track_metadata_population() {
 
     let mock_api = Arc::new(
         MockSearchApi::new()
-            .with_unified_results(unified_results)
+            .with_semantic_results(semantic_results)
             .with_graph_results(graph_results),
     ) as Arc<dyn SearchApi>;
 

@@ -419,19 +419,11 @@ impl AgenticSearchOrchestrator {
                     let truncated_query: String =
                         search_query.chars().take(MAX_LLM_QUERY_LENGTH).collect();
 
+                    // All search operations now use semantic search only
+                    // (which combines dense embeddings + BM25 sparse retrieval)
                     Some(PlannedOperation::Search {
                         query: truncated_query,
-                        search_types: op
-                            .search_types
-                            .unwrap_or_else(|| vec!["unified".to_string()])
-                            .into_iter()
-                            .filter_map(|s| match s.as_str() {
-                                "semantic" => Some(WorkerType::Semantic),
-                                "fulltext" => Some(WorkerType::Fulltext),
-                                "unified" => Some(WorkerType::Unified),
-                                _ => None,
-                            })
-                            .collect(),
+                        search_types: vec![WorkerType::Semantic],
                     })
                 }
                 "graph_traversal" => {
@@ -485,7 +477,7 @@ impl AgenticSearchOrchestrator {
                     );
                     Some(PlannedOperation::Search {
                         query: query.to_string(),
-                        search_types: vec![WorkerType::Unified],
+                        search_types: vec![WorkerType::Semantic],
                     })
                 }
             })
@@ -864,6 +856,8 @@ struct OrchestratorDecisionResponse {
 struct PlannedOperationResponse {
     operation_type: String,
     query: Option<String>,
+    // Note: search_types is ignored - all searches now use semantic only
+    #[allow(dead_code)]
     search_types: Option<Vec<String>>,
     entity_id: Option<String>,
     relationship: Option<String>,
@@ -901,8 +895,7 @@ mod tests {
             "operations": [
                 {
                     "operation_type": "search",
-                    "query": "JWT validation implementation",
-                    "search_types": ["semantic", "fulltext"]
+                    "query": "JWT validation implementation"
                 }
             ]
         }"#;

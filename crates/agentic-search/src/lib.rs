@@ -16,7 +16,7 @@
 //! - [`AgenticSearchResponse`] - Output response model with results and metadata
 //! - [`AgenticSearchMetadata`] - Execution metadata (iterations, cost, etc.)
 //! - [`AgenticEntity`] - Entity result enriched with retrieval source
-//! - [`RetrievalSource`] - How an entity was retrieved (semantic, fulltext, graph)
+//! - [`RetrievalSource`] - How an entity was retrieved (semantic or graph)
 //! - [`RerankingMethod`] - Which reranking method was used
 //!
 //! ## Configuration

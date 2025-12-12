@@ -74,9 +74,9 @@ pub enum RerankingMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalSource {
+    /// Semantic search (combines dense embeddings + BM25 sparse retrieval)
     Semantic,
-    Fulltext,
-    Unified,
+    /// Graph traversal from a source entity
     Graph {
         source_entity_id: String,
         relationship: String,
@@ -95,9 +95,7 @@ pub struct AgenticEntity {
 impl AgenticEntity {
     pub fn from_search_result(entity: EntityResult, source: RetrievalSource) -> Self {
         let justification = match &source {
-            RetrievalSource::Semantic => format!("Semantic similarity: {:.2}", entity.score),
-            RetrievalSource::Fulltext => format!("Full-text match: {:.2}", entity.score),
-            RetrievalSource::Unified => format!("Hybrid match: {:.2}", entity.score),
+            RetrievalSource::Semantic => format!("Semantic match: {:.2}", entity.score),
             RetrievalSource::Graph { .. } => "Graph context".to_string(),
         };
 
@@ -109,10 +107,7 @@ impl AgenticEntity {
     }
 
     pub fn is_direct_match(&self) -> bool {
-        matches!(
-            self.source,
-            RetrievalSource::Semantic | RetrievalSource::Fulltext | RetrievalSource::Unified
-        )
+        matches!(self.source, RetrievalSource::Semantic)
     }
 
     pub fn is_graph_context(&self) -> bool {

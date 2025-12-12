@@ -1,0 +1,559 @@
+{
+  "repository": "nushell",
+  "total_queries": 5,
+  "search_types_evaluated": [
+    "semantic",
+    "fulltext",
+    "unified"
+  ],
+  "search_type_metrics": {
+    "semantic": {
+      "query_count": 5,
+      "avg_recall_at_5": null,
+      "avg_recall_at_10": null,
+      "avg_precision_at_5": null,
+      "avg_mrr": null,
+      "avg_query_time_ms": 32.6,
+      "avg_set_coverage": 0.0,
+      "avg_set_precision": 0.0,
+      "avg_f1_score": null,
+      "avg_contains_coverage": 0.0
+    },
+    "fulltext": {
+      "query_count": 5,
+      "avg_recall_at_5": null,
+      "avg_recall_at_10": null,
+      "avg_precision_at_5": null,
+      "avg_mrr": null,
+      "avg_query_time_ms": 40.8,
+      "avg_set_coverage": 0.14285714285714285,
+      "avg_set_precision": 0.0625,
+      "avg_f1_score": 0.08695652173913043,
+      "avg_contains_coverage": 0.14285714285714285
+    },
+    "unified": {
+      "query_count": 5,
+      "avg_recall_at_5": null,
+      "avg_recall_at_10": null,
+      "avg_precision_at_5": null,
+      "avg_mrr": null,
+      "avg_query_time_ms": 43.2,
+      "avg_set_coverage": 0.0,
+      "avg_set_precision": 0.0,
+      "avg_f1_score": null,
+      "avg_contains_coverage": 0.0
+    }
+  },
+  "query_type_metrics": {
+    "semantic": {
+      "structural": {
+        "query_count": 5,
+        "avg_recall_at_5": null,
+        "avg_recall_at_10": null,
+        "avg_precision_at_5": null,
+        "avg_mrr": null,
+        "avg_set_coverage": 0.0,
+        "avg_set_precision": 0.0,
+        "avg_f1_score": null,
+        "avg_contains_coverage": 0.0,
+        "avg_query_time_ms": 32.6
+      }
+    },
+    "unified": {
+      "structural": {
+        "query_count": 5,
+        "avg_recall_at_5": null,
+        "avg_recall_at_10": null,
+        "avg_precision_at_5": null,
+        "avg_mrr": null,
+        "avg_set_coverage": 0.0,
+        "avg_set_precision": 0.0,
+        "avg_f1_score": null,
+        "avg_contains_coverage": 0.0,
+        "avg_query_time_ms": 43.2
+      }
+    },
+    "fulltext": {
+      "structural": {
+        "query_count": 5,
+        "avg_recall_at_5": null,
+        "avg_recall_at_10": null,
+        "avg_precision_at_5": null,
+        "avg_mrr": null,
+        "avg_set_coverage": 0.14285714285714285,
+        "avg_set_precision": 0.0625,
+        "avg_f1_score": 0.08695652173913043,
+        "avg_contains_coverage": 0.14285714285714285,
+        "avg_query_time_ms": 40.8
+      }
+    }
+  },
+  "category_metrics": [
+    {
+      "category": "trait_impl",
+      "query_count": 5,
+      "by_search_type": {
+        "unified": {
+          "query_count": 5,
+          "avg_recall_at_5": null,
+          "avg_recall_at_10": null,
+          "avg_precision_at_5": null,
+          "avg_mrr": null,
+          "avg_query_time_ms": 43.2,
+          "avg_set_coverage": 0.0,
+          "avg_set_precision": 0.0,
+          "avg_f1_score": null,
+          "avg_contains_coverage": 0.0
+        },
+        "semantic": {
+          "query_count": 5,
+          "avg_recall_at_5": null,
+          "avg_recall_at_10": null,
+          "avg_precision_at_5": null,
+          "avg_mrr": null,
+          "avg_query_time_ms": 32.6,
+          "avg_set_coverage": 0.0,
+          "avg_set_precision": 0.0,
+          "avg_f1_score": null,
+          "avg_contains_coverage": 0.0
+        },
+        "fulltext": {
+          "query_count": 5,
+          "avg_recall_at_5": null,
+          "avg_recall_at_10": null,
+          "avg_precision_at_5": null,
+          "avg_mrr": null,
+          "avg_query_time_ms": 40.8,
+          "avg_set_coverage": 0.14285714285714285,
+          "avg_set_precision": 0.0625,
+          "avg_f1_score": 0.08695652173913043,
+          "avg_contains_coverage": 0.14285714285714285
+        }
+      }
+    }
+  ],
+  "query_results": [
+    {
+      "query_id": "trait_impl_001",
+      "category": "trait_impl",
+      "query_type": "structural",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 29,
+          "num_results": 16,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": 0.14285714285714285,
+            "set_precision": 0.0625,
+            "f1_score": 0.08695652173913043,
+            "contains_coverage": 0.14285714285714285,
+            "returned_count": 16
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl Signature at line 346",
+            "nu_plugin::plugin::command::SimplePluginCommand",
+            "nu_plugin::plugin::command::PluginCommand",
+            "nu_protocol::engine::command::Command",
+            "Command for Help at line 7"
+          ],
+          "error": null
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 31,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": 0.0,
+            "set_precision": 0.0,
+            "f1_score": null,
+            "contains_coverage": 0.0,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "impl Command at line 37",
+            "nu_command::platform::input::reedline_prompt::ReedlinePrompt",
+            "nu_protocol::value::into_value::TryIntoValue",
+            "<Source as Command>::command_type",
+            "nu_protocol::deprecation::DeprecationEntry"
+          ],
+          "error": null
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 47,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": 0.0,
+            "set_precision": 0.0,
+            "f1_score": null,
+            "contains_coverage": 0.0,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "<ExportAlias as Command>::command_type",
+            "Command for ConfigEnv at line 7",
+            "nu_protocol::value::filesize::FormattedFilesize",
+            "CmdArgument for Arguments at line 14",
+            "impl Command at line 16"
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "query_id": "trait_impl_002",
+      "category": "trait_impl",
+      "query_type": "structural",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 68,
+          "num_results": 2,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 2
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_protocol::value::custom_value::CustomValue",
+            "impl PluginTest at line 27"
+          ],
+          "error": null
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 51,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "CustomValue for CoolCustomValue at line 52",
+            "<NuExpression as CustomValueSupport>::custom_value",
+            "nu_command::formats::to::toml::helper",
+            "Value::is_subtype_of",
+            "<NuExpression as CustomValueSupport>::can_downcast"
+          ],
+          "error": null
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 50,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "CustomValue for DropCustomVal at line 1339",
+            "nu_protocol::value::into_value::TryIntoValue",
+            "nu_protocol::deprecation::DeprecationEntry",
+            "impl CustomValuePlugin at line 38",
+            "<CustomValuePlugin as Plugin>::custom_value_dropped"
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "query_id": "trait_impl_003",
+      "category": "trait_impl",
+      "query_type": "structural",
+      "results_by_type": {
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 31,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_protocol::value::filesize::FormattedFilesize",
+            "process_call",
+            "<Value as FromValue>::expected_type",
+            "nu_derive_value::from::struct_from_value",
+            "nu_protocol::value::test_derive::IntoTestValue"
+          ],
+          "error": null
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 26,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_protocol::value::into_value::TryIntoValue",
+            "FromValue for Value at line 654",
+            "nu_derive_value::from::FromValue",
+            "nu_protocol::errors::shell_error::bridge::ShellErrorBridge",
+            "nu_protocol::value::from_value::FromValue"
+          ],
+          "error": null
+        },
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 32,
+          "num_results": 1,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 1
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_protocol::value::from_value::FromValue"
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "query_id": "trait_impl_004",
+      "category": "trait_impl",
+      "query_type": "structural",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 34,
+          "num_results": 1,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 1
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "IntoValue for HashMap<K, V> at line 223"
+          ],
+          "error": null
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 38,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "<Record as IntoValue>::into_value",
+            "IntoValue for BannerKind at line 43",
+            "IntoValue for Range at line 256",
+            "IntoValue for TrimStrategy at line 198",
+            "IntoValue for Filesize at line 256"
+          ],
+          "error": null
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 23,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_protocol::value::into_value::TryIntoValue",
+            "nu_command::conversions::into::value::IntoValue",
+            "<HashMap<K, V> as IntoValue>::into_value",
+            "nu_derive_value::into::IntoValue",
+            "IntoValue for HashMap<K, V> at line 223"
+          ],
+          "error": null
+        }
+      }
+    },
+    {
+      "query_id": "trait_impl_005",
+      "category": "trait_impl",
+      "query_type": "structural",
+      "results_by_type": {
+        "fulltext": {
+          "search_type": "fulltext",
+          "query_time_ms": 41,
+          "num_results": 11,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 11
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_plugin::plugin::command::SimplePluginCommand",
+            "nu_plugin::plugin::command::PluginCommand",
+            "nu_protocol::engine::command::Command",
+            "nu_protocol::value::custom_value::CustomValue",
+            "PluginCommand for ExprMath at line 67"
+          ],
+          "error": null
+        },
+        "unified": {
+          "search_type": "unified",
+          "query_time_ms": 49,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_plugin_example::commands::echo::Echo::Plugin",
+            "nu_protocol::value::filesize::FormattedFilesize",
+            "process_call",
+            "nu_plugin_protocol::evaluated_call",
+            "nu_plugin_polars::dataframe::command::boolean::is_null::IsNull::Plugin"
+          ],
+          "error": null
+        },
+        "semantic": {
+          "search_type": "semantic",
+          "query_time_ms": 33,
+          "num_results": 20,
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "precision_at_5": null,
+          "mrr": null,
+          "structural_metrics": {
+            "set_coverage": null,
+            "set_precision": null,
+            "f1_score": null,
+            "contains_coverage": null,
+            "returned_count": 20
+          },
+          "expected_found": 0,
+          "expected_total": 0,
+          "top_results": [
+            "nu_plugin_query::query_web::QueryWeb::Plugin",
+            "nu_protocol::value::into_value::TryIntoValue",
+            "nu_plugin_formats::from::ics::FromIcs::Plugin",
+            "nu_command::platform::input::reedline_prompt::ReedlinePrompt",
+            "nu_plugin_query::query_json::QueryJson::Plugin"
+          ],
+          "error": null
+        }
+      }
+    }
+  ],
+  "success_criteria": {
+    "semantic_precision_at_5_target": 0.8,
+    "semantic_precision_at_5_actual": null,
+    "semantic_precision_at_5_pass": false,
+    "graph_accuracy_target": 0.9,
+    "graph_accuracy_actual": 0.0,
+    "graph_accuracy_pass": false
+  }
+}

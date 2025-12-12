@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::EmbeddingManager;
+use codesearch_embeddings::{EmbeddingContext, EmbeddingManager};
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
@@ -562,16 +562,23 @@ async fn stage_generate_embeddings(
                 cache_miss_count
             );
 
-            let new_embeddings = embedding_manager
-                .embed(cache_miss_texts.clone())
-                .await
-                .map_err(|e| {
-                    error!(
-                        "Stage 3: Embedding failed for {} texts, error: {}",
-                        cache_miss_count, e
-                    );
-                    e
+            // Build EmbeddingContext for each cache miss entity
+            let contexts: Vec<EmbeddingContext> = cache_miss_indices
+                .iter()
+                .map(|entity_idx| {
+                    let entity = &batch.entities[*entity_idx];
+                    EmbeddingContext {
+                        qualified_name: entity.qualified_name.clone(),
+                        file_path: entity.file_path.clone(),
+                        line_number: entity.location.start_line as u32,
+                        entity_type: format!("{:?}", entity.entity_type),
+                    }
                 })
+                .collect();
+
+            let new_embeddings = embedding_manager
+                .embed_with_context(cache_miss_texts.clone(), Some(contexts))
+                .await
                 .storage_err("Failed to generate embeddings")?;
 
             // Fill in newly generated dense embeddings

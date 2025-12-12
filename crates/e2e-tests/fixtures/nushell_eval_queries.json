@@ -1,0 +1,992 @@
+{
+  "repository": "nushell",
+  "repository_path": "/tmp/nushell-eval",
+  "repository_commit": "11d71fe3c78670a8922143dd7e8b8f20b71a97d0",
+  "description": "Evaluation queries for Nushell codebase. Ground truth extracted using rust-analyzer LSP at the pinned commit.",
+  "queries": [
+    {
+      "id": "trait_impl_001",
+      "category": "trait_impl",
+      "query": "What types implement Command?",
+      "expected_count_gte": 200,
+      "expected_contains": [
+        "Select",
+        "Where",
+        "Filter",
+        "First",
+        "Last",
+        "Get",
+        "Each"
+      ],
+      "relationship_type": "IMPLEMENTS",
+      "lsp_query": {
+        "method": "textDocument/implementation",
+        "target": "crates/nu-protocol/src/engine/command.rs:52:11"
+      },
+      "notes": "207+ commands implement the Command trait"
+    },
+    {
+      "id": "trait_impl_002",
+      "category": "trait_impl",
+      "query": "What types implement CustomValue?",
+      "expected_count_gte": 5,
+      "relationship_type": "IMPLEMENTS",
+      "lsp_query": {
+        "method": "textDocument/implementation",
+        "target": "crates/nu-protocol/src/value/custom_value.rs:7:11"
+      },
+      "notes": "CustomValue for plugin and polars values"
+    },
+    {
+      "id": "trait_impl_003",
+      "category": "trait_impl",
+      "query": "What types implement FromValue?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "FromValue trait for converting from Value enum"
+    },
+    {
+      "id": "trait_impl_004",
+      "category": "trait_impl",
+      "query": "What types implement IntoValue?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "IntoValue trait for converting to Value enum"
+    },
+    {
+      "id": "trait_impl_005",
+      "category": "trait_impl",
+      "query": "What types implement Plugin?",
+      "expected_count_gte": 5,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Plugin trait for plugin implementations"
+    },
+    {
+      "id": "trait_impl_006",
+      "category": "trait_impl",
+      "query": "What types implement PluginCommand?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "PluginCommand trait for plugin commands"
+    },
+    {
+      "id": "trait_impl_007",
+      "category": "trait_impl",
+      "query": "What types implement Display in nu-protocol?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Display implementations for protocol types"
+    },
+    {
+      "id": "trait_impl_008",
+      "category": "trait_impl",
+      "query": "What types implement Default in nu-protocol?",
+      "expected_count_gte": 15,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Default implementations for protocol types"
+    },
+    {
+      "id": "trait_impl_009",
+      "category": "trait_impl",
+      "query": "What types implement Clone in nu-protocol?",
+      "expected_count_gte": 30,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Clone implementations for protocol types"
+    },
+    {
+      "id": "trait_impl_010",
+      "category": "trait_impl",
+      "query": "What types implement Completer?",
+      "expected_count_gte": 3,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Completer trait for tab completion"
+    },
+    {
+      "id": "trait_impl_011",
+      "category": "trait_impl",
+      "query": "What types implement ByteStream?",
+      "expected_count_gte": 1,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "ByteStream for streaming data"
+    },
+    {
+      "id": "trait_impl_012",
+      "category": "trait_impl",
+      "query": "What types implement Iterator in nu-protocol?",
+      "expected_count_gte": 5,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Iterator implementations in protocol"
+    },
+    {
+      "id": "trait_impl_013",
+      "category": "trait_impl",
+      "query": "What types implement From<Value>?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "From<Value> conversions"
+    },
+    {
+      "id": "trait_impl_014",
+      "category": "trait_impl",
+      "query": "What types implement Into<Value>?",
+      "expected_count_gte": 10,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Into<Value> conversions"
+    },
+    {
+      "id": "trait_impl_015",
+      "category": "trait_impl",
+      "query": "What types implement Serialize in nu-protocol?",
+      "expected_count_gte": 20,
+      "relationship_type": "IMPLEMENTS",
+      "notes": "Serde Serialize implementations"
+    },
+    {
+      "id": "call_graph_001",
+      "category": "call_graph",
+      "query": "What functions call eval_block?",
+      "expected_count_gte": 20,
+      "relationship_type": "CALLED_BY",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-engine/src/eval.rs:291:8"
+      },
+      "notes": "Core evaluation function called throughout engine"
+    },
+    {
+      "id": "call_graph_002",
+      "category": "call_graph",
+      "query": "What functions call eval_expression?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-engine/src/eval.rs:219:8"
+      },
+      "notes": "Expression evaluation"
+    },
+    {
+      "id": "call_graph_003",
+      "category": "call_graph",
+      "query": "What functions call eval_block_with_early_return?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-engine/src/eval.rs:304:8"
+      },
+      "notes": "Block evaluation with early return handling"
+    },
+    {
+      "id": "call_graph_004",
+      "category": "call_graph",
+      "query": "What functions call Command::run?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Command execution entry point"
+    },
+    {
+      "id": "call_graph_005",
+      "category": "call_graph",
+      "query": "What functions call parse_block?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Block parsing in parser"
+    },
+    {
+      "id": "call_graph_006",
+      "category": "call_graph",
+      "query": "What functions call parse_expression?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Expression parsing in parser"
+    },
+    {
+      "id": "call_graph_007",
+      "category": "call_graph",
+      "query": "What functions call parse_value?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Value parsing in parser"
+    },
+    {
+      "id": "call_graph_008",
+      "category": "call_graph",
+      "query": "What functions call EngineState::new?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Engine state construction"
+    },
+    {
+      "id": "call_graph_009",
+      "category": "call_graph",
+      "query": "What functions call Stack::new?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Stack construction"
+    },
+    {
+      "id": "call_graph_010",
+      "category": "call_graph",
+      "query": "What functions call Value::into_string?",
+      "expected_count_gte": 20,
+      "relationship_type": "CALLED_BY",
+      "notes": "Value to string conversion"
+    },
+    {
+      "id": "call_graph_011",
+      "category": "call_graph",
+      "query": "What functions call Value::as_record?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Value as record access"
+    },
+    {
+      "id": "call_graph_012",
+      "category": "call_graph",
+      "query": "What functions call Value::as_list?",
+      "expected_count_gte": 10,
+      "relationship_type": "CALLED_BY",
+      "notes": "Value as list access"
+    },
+    {
+      "id": "call_graph_013",
+      "category": "call_graph",
+      "query": "What functions call PipelineData::into_value?",
+      "expected_count_gte": 30,
+      "relationship_type": "CALLED_BY",
+      "notes": "Pipeline data to value conversion"
+    },
+    {
+      "id": "call_graph_014",
+      "category": "call_graph",
+      "query": "What functions call ShellError::GenericError?",
+      "expected_count_gte": 50,
+      "relationship_type": "CALLED_BY",
+      "notes": "Generic error construction"
+    },
+    {
+      "id": "call_graph_015",
+      "category": "call_graph",
+      "query": "What functions call Signature::build?",
+      "expected_count_gte": 200,
+      "relationship_type": "CALLED_BY",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/signature.rs:314:8"
+      },
+      "notes": "Signature builder used by all commands"
+    },
+    {
+      "id": "call_graph_016",
+      "category": "call_graph",
+      "query": "What functions call working_set.parse_errors?",
+      "expected_count_gte": 5,
+      "relationship_type": "CALLED_BY",
+      "notes": "Parse error handling"
+    },
+    {
+      "id": "call_graph_017",
+      "category": "call_graph",
+      "query": "What functions call from_value?",
+      "expected_count_gte": 50,
+      "relationship_type": "CALLED_BY",
+      "notes": "FromValue trait usage"
+    },
+    {
+      "id": "call_graph_018",
+      "category": "call_graph",
+      "query": "What functions call into_value?",
+      "expected_count_gte": 50,
+      "relationship_type": "CALLED_BY",
+      "notes": "IntoValue trait usage"
+    },
+    {
+      "id": "call_graph_019",
+      "category": "call_graph",
+      "query": "What functions call Span::unknown?",
+      "expected_count_gte": 20,
+      "relationship_type": "CALLED_BY",
+      "notes": "Unknown span construction"
+    },
+    {
+      "id": "call_graph_020",
+      "category": "call_graph",
+      "query": "What functions call Record::new?",
+      "expected_count_gte": 30,
+      "relationship_type": "CALLED_BY",
+      "notes": "Record construction"
+    },
+    {
+      "id": "type_usage_001",
+      "category": "type_usage",
+      "query": "What types use ShellError?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/errors/shell_error/mod.rs:24:10"
+      },
+      "notes": "ShellError is used throughout for error handling"
+    },
+    {
+      "id": "type_usage_002",
+      "category": "type_usage",
+      "query": "What types use PipelineData?",
+      "expected_count_gte": 100,
+      "relationship_type": "USES",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/pipeline/pipeline_data.rs:50:10"
+      },
+      "notes": "PipelineData is used by all commands"
+    },
+    {
+      "id": "type_usage_003",
+      "category": "type_usage",
+      "query": "What types use Value?",
+      "expected_count_gte": 100,
+      "relationship_type": "USES",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/value/mod.rs:52:10"
+      },
+      "notes": "Value is the core data type"
+    },
+    {
+      "id": "type_usage_004",
+      "category": "type_usage",
+      "query": "What types use Span?",
+      "expected_count_gte": 100,
+      "relationship_type": "USES",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/span.rs:140:12"
+      },
+      "notes": "Span for source location tracking"
+    },
+    {
+      "id": "type_usage_005",
+      "category": "type_usage",
+      "query": "What types use Signature?",
+      "expected_count_gte": 200,
+      "relationship_type": "USES",
+      "lsp_query": {
+        "method": "textDocument/references",
+        "target": "crates/nu-protocol/src/signature.rs:314:12"
+      },
+      "notes": "Signature for command definitions"
+    },
+    {
+      "id": "type_usage_006",
+      "category": "type_usage",
+      "query": "What types use EngineState?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "notes": "EngineState for evaluation context"
+    },
+    {
+      "id": "type_usage_007",
+      "category": "type_usage",
+      "query": "What types use Stack?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "notes": "Stack for variable bindings"
+    },
+    {
+      "id": "type_usage_008",
+      "category": "type_usage",
+      "query": "What types use Record?",
+      "expected_count_gte": 30,
+      "relationship_type": "USES",
+      "notes": "Record for key-value data"
+    },
+    {
+      "id": "type_usage_009",
+      "category": "type_usage",
+      "query": "What types use Call?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "notes": "Call for command invocation"
+    },
+    {
+      "id": "type_usage_010",
+      "category": "type_usage",
+      "query": "What types use Expression?",
+      "expected_count_gte": 30,
+      "relationship_type": "USES",
+      "notes": "Expression AST node"
+    },
+    {
+      "id": "type_usage_011",
+      "category": "type_usage",
+      "query": "What types use Block?",
+      "expected_count_gte": 20,
+      "relationship_type": "USES",
+      "notes": "Block AST node"
+    },
+    {
+      "id": "type_usage_012",
+      "category": "type_usage",
+      "query": "What types use Type?",
+      "expected_count_gte": 30,
+      "relationship_type": "USES",
+      "notes": "Type for Nushell type system"
+    },
+    {
+      "id": "type_usage_013",
+      "category": "type_usage",
+      "query": "What types use SyntaxShape?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "notes": "SyntaxShape for argument parsing"
+    },
+    {
+      "id": "type_usage_014",
+      "category": "type_usage",
+      "query": "What types use Spanned?",
+      "expected_count_gte": 50,
+      "relationship_type": "USES",
+      "notes": "Spanned wrapper for source tracking"
+    },
+    {
+      "id": "type_usage_015",
+      "category": "type_usage",
+      "query": "What types use Example?",
+      "expected_count_gte": 200,
+      "relationship_type": "USES",
+      "notes": "Example for command documentation"
+    },
+    {
+      "id": "module_structure_001",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::filters?",
+      "expected_count_gte": 50,
+      "expected_contains": [
+        "Select",
+        "Where",
+        "Filter",
+        "First",
+        "Last",
+        "Each",
+        "Get",
+        "All",
+        "Any"
+      ],
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/filters"
+      },
+      "notes": "Filter commands module"
+    },
+    {
+      "id": "module_structure_002",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::strings?",
+      "expected_count_gte": 20,
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/strings"
+      },
+      "notes": "String manipulation commands"
+    },
+    {
+      "id": "module_structure_003",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::date?",
+      "expected_count_gte": 5,
+      "expected_contains": [
+        "DateNow",
+        "DateHumanize"
+      ],
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/date"
+      },
+      "notes": "Date commands"
+    },
+    {
+      "id": "module_structure_004",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::math?",
+      "expected_count_gte": 10,
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/math"
+      },
+      "notes": "Math commands"
+    },
+    {
+      "id": "module_structure_005",
+      "category": "module_structure",
+      "query": "What's defined in nu_protocol::value?",
+      "expected_count_gte": 10,
+      "expected_contains": [
+        "Value",
+        "Record"
+      ],
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-protocol/src/value"
+      },
+      "notes": "Value types module"
+    },
+    {
+      "id": "module_structure_006",
+      "category": "module_structure",
+      "query": "What's defined in nu_protocol::engine?",
+      "expected_count_gte": 10,
+      "expected_contains": [
+        "EngineState",
+        "Stack",
+        "Command"
+      ],
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-protocol/src/engine"
+      },
+      "notes": "Engine types module"
+    },
+    {
+      "id": "module_structure_007",
+      "category": "module_structure",
+      "query": "What's defined in nu_parser?",
+      "expected_count_gte": 20,
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-parser/src"
+      },
+      "notes": "Parser crate"
+    },
+    {
+      "id": "module_structure_008",
+      "category": "module_structure",
+      "query": "What's defined in nu_engine?",
+      "expected_count_gte": 10,
+      "expected_contains": [
+        "eval_block",
+        "eval_expression"
+      ],
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-engine/src"
+      },
+      "notes": "Engine crate"
+    },
+    {
+      "id": "module_structure_009",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::formats?",
+      "expected_count_gte": 10,
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/formats"
+      },
+      "notes": "Format conversion commands"
+    },
+    {
+      "id": "module_structure_010",
+      "category": "module_structure",
+      "query": "What's defined in nu_command::system?",
+      "expected_count_gte": 5,
+      "relationship_type": "CONTAINS",
+      "lsp_query": {
+        "type": "workspace_symbol",
+        "directory": "crates/nu-command/src/system"
+      },
+      "notes": "System commands"
+    },
+    {
+      "id": "semantic_001",
+      "category": "semantic",
+      "query": "How does Nushell handle command arguments?",
+      "expected_entities": [
+        "nu_protocol::signature::Signature",
+        "nu_protocol::syntax_shape::SyntaxShape",
+        "nu_engine::call_ext::CallExt"
+      ],
+      "notes": "Command argument handling via Signature and SyntaxShape"
+    },
+    {
+      "id": "semantic_002",
+      "category": "semantic",
+      "query": "How does pipeline data flow work in Nushell?",
+      "expected_entities": [
+        "nu_protocol::pipeline::PipelineData",
+        "nu_protocol::value::Value",
+        "nu_protocol::pipeline::ByteStream"
+      ],
+      "notes": "Pipeline data flow via PipelineData enum"
+    },
+    {
+      "id": "semantic_003",
+      "category": "semantic",
+      "query": "How does Nushell parse commands?",
+      "expected_entities": [
+        "nu_parser::parse",
+        "nu_protocol::ast::Block",
+        "nu_protocol::ast::Expression"
+      ],
+      "notes": "Command parsing via nu-parser"
+    },
+    {
+      "id": "semantic_004",
+      "category": "semantic",
+      "query": "How does Nushell evaluate expressions?",
+      "expected_entities": [
+        "nu_engine::eval::eval_expression",
+        "nu_engine::eval::eval_block",
+        "nu_protocol::value::Value"
+      ],
+      "notes": "Expression evaluation in nu-engine"
+    },
+    {
+      "id": "semantic_005",
+      "category": "semantic",
+      "query": "How does Nushell handle errors?",
+      "expected_entities": [
+        "nu_protocol::errors::ShellError",
+        "nu_protocol::errors::ParseError"
+      ],
+      "notes": "Error handling via ShellError and ParseError"
+    },
+    {
+      "id": "semantic_006",
+      "category": "semantic",
+      "query": "How does Nushell manage engine state?",
+      "expected_entities": [
+        "nu_protocol::engine::EngineState",
+        "nu_protocol::engine::StateWorkingSet",
+        "nu_protocol::engine::Stack"
+      ],
+      "notes": "Engine state management"
+    },
+    {
+      "id": "semantic_007",
+      "category": "semantic",
+      "query": "How does Nushell implement table output?",
+      "expected_entities": [
+        "nu_table::Table",
+        "nu_protocol::value::Record"
+      ],
+      "notes": "Table output via nu-table"
+    },
+    {
+      "id": "semantic_008",
+      "category": "semantic",
+      "query": "How does Nushell handle closures?",
+      "expected_entities": [
+        "nu_protocol::ast::Block",
+        "nu_engine::closure_eval::ClosureEval"
+      ],
+      "notes": "Closure handling"
+    },
+    {
+      "id": "semantic_009",
+      "category": "semantic",
+      "query": "How does Nushell implement the plugin system?",
+      "expected_entities": [
+        "nu_plugin::Plugin",
+        "nu_plugin::PluginCommand",
+        "nu_plugin_protocol::PluginProtocol"
+      ],
+      "notes": "Plugin system implementation"
+    },
+    {
+      "id": "semantic_010",
+      "category": "semantic",
+      "query": "How does Nushell implement tab completion?",
+      "expected_entities": [
+        "nu_cli::completions::Completer",
+        "nu_cli::completions::completion_menu"
+      ],
+      "notes": "Tab completion system"
+    },
+    {
+      "id": "semantic_011",
+      "category": "semantic",
+      "query": "How does Nushell handle external commands?",
+      "expected_entities": [
+        "nu_command::system::run_external::ExternalCommand"
+      ],
+      "notes": "External command execution"
+    },
+    {
+      "id": "semantic_012",
+      "category": "semantic",
+      "query": "How does Nushell implement the type system?",
+      "expected_entities": [
+        "nu_protocol::type::Type",
+        "nu_protocol::syntax_shape::SyntaxShape"
+      ],
+      "notes": "Type system implementation"
+    },
+    {
+      "id": "semantic_013",
+      "category": "semantic",
+      "query": "How does Nushell handle environment variables?",
+      "expected_entities": [
+        "nu_protocol::engine::Stack",
+        "nu_command::env"
+      ],
+      "notes": "Environment variable handling"
+    },
+    {
+      "id": "semantic_014",
+      "category": "semantic",
+      "query": "How does Nushell implement the explore command?",
+      "expected_entities": [
+        "nu_explore::Explore",
+        "nu_explore::views"
+      ],
+      "notes": "Interactive explore command"
+    },
+    {
+      "id": "semantic_015",
+      "category": "semantic",
+      "query": "How does Nushell handle configuration?",
+      "expected_entities": [
+        "nu_protocol::config::Config"
+      ],
+      "notes": "Configuration handling"
+    },
+    {
+      "id": "discovery_001",
+      "category": "discovery",
+      "query": "Find date manipulation commands in Nushell",
+      "expected_entities": [
+        "nu_command::date::DateNow",
+        "nu_command::date::DateHumanize",
+        "nu_command::date::DateToTimezone"
+      ],
+      "notes": "Date commands in nu-command"
+    },
+    {
+      "id": "discovery_002",
+      "category": "discovery",
+      "query": "Find file system commands in Nushell",
+      "expected_entities": [
+        "nu_command::filesystem::Ls",
+        "nu_command::filesystem::Cd",
+        "nu_command::filesystem::Cp",
+        "nu_command::filesystem::Mv",
+        "nu_command::filesystem::Rm"
+      ],
+      "notes": "Filesystem commands"
+    },
+    {
+      "id": "discovery_003",
+      "category": "discovery",
+      "query": "Find string manipulation commands in Nushell",
+      "expected_entities": [
+        "nu_command::strings::Split",
+        "nu_command::strings::Join",
+        "nu_command::strings::Replace"
+      ],
+      "notes": "String commands"
+    },
+    {
+      "id": "discovery_004",
+      "category": "discovery",
+      "query": "Find math commands in Nushell",
+      "expected_entities": [
+        "nu_command::math::MathSum",
+        "nu_command::math::MathAvg",
+        "nu_command::math::MathMax",
+        "nu_command::math::MathMin"
+      ],
+      "notes": "Math commands"
+    },
+    {
+      "id": "discovery_005",
+      "category": "discovery",
+      "query": "Find format conversion commands in Nushell",
+      "expected_entities": [
+        "nu_command::formats::FromJson",
+        "nu_command::formats::ToJson",
+        "nu_command::formats::FromYaml",
+        "nu_command::formats::FromCsv"
+      ],
+      "notes": "Format conversion commands"
+    },
+    {
+      "id": "discovery_006",
+      "category": "discovery",
+      "query": "Find network commands in Nushell",
+      "expected_entities": [
+        "nu_command::network::Http",
+        "nu_command::network::Port"
+      ],
+      "notes": "Network commands"
+    },
+    {
+      "id": "discovery_007",
+      "category": "discovery",
+      "query": "Find random generation commands in Nushell",
+      "expected_entities": [
+        "nu_command::random::RandomInt",
+        "nu_command::random::RandomFloat",
+        "nu_command::random::RandomChars"
+      ],
+      "notes": "Random commands"
+    },
+    {
+      "id": "discovery_008",
+      "category": "discovery",
+      "query": "Find hash commands in Nushell",
+      "expected_entities": [
+        "nu_command::hash::HashMd5",
+        "nu_command::hash::HashSha256"
+      ],
+      "notes": "Hash commands"
+    },
+    {
+      "id": "discovery_009",
+      "category": "discovery",
+      "query": "Find help and documentation commands in Nushell",
+      "expected_entities": [
+        "nu_command::help::Help",
+        "nu_command::help::HelpCommands"
+      ],
+      "notes": "Help commands"
+    },
+    {
+      "id": "discovery_010",
+      "category": "discovery",
+      "query": "Find database and storage commands in Nushell",
+      "expected_entities": [
+        "nu_command::stor::Stor"
+      ],
+      "notes": "Storage commands"
+    },
+    {
+      "id": "complex_001",
+      "category": "complex",
+      "query": "What commands call PipelineData::into_value and return ShellError?",
+      "expected_count_gte": 20,
+      "relationship_chain": ["CALLS", "RETURNS"],
+      "notes": "Commands that convert pipeline data with error handling"
+    },
+    {
+      "id": "complex_002",
+      "category": "complex",
+      "query": "What types implement Command and use Signature?",
+      "expected_count_gte": 200,
+      "relationship_chain": ["IMPLEMENTS", "USES"],
+      "notes": "All commands that use Signature"
+    },
+    {
+      "id": "complex_003",
+      "category": "complex",
+      "query": "What functions in nu_engine call functions in nu_protocol?",
+      "expected_count_gte": 20,
+      "relationship_chain": ["CALLS"],
+      "notes": "Cross-crate dependencies engine->protocol"
+    },
+    {
+      "id": "complex_004",
+      "category": "complex",
+      "query": "What functions call eval_block and are called by Command::run?",
+      "expected_count_gte": 5,
+      "relationship_chain": ["CALLED_BY", "CALLS"],
+      "notes": "Commands that evaluate blocks"
+    },
+    {
+      "id": "complex_005",
+      "category": "complex",
+      "query": "What types contain Value and implement IntoValue?",
+      "expected_count_gte": 5,
+      "relationship_chain": ["CONTAINS", "IMPLEMENTS"],
+      "notes": "Value wrapper types"
+    },
+    {
+      "id": "complex_006",
+      "category": "complex",
+      "query": "What commands in filters use Record?",
+      "expected_count_gte": 10,
+      "relationship_chain": ["CONTAINS", "USES"],
+      "notes": "Filter commands using Record"
+    },
+    {
+      "id": "complex_007",
+      "category": "complex",
+      "query": "What functions parse expressions and evaluate them?",
+      "expected_count_gte": 3,
+      "relationship_chain": ["CALLS", "CALLS"],
+      "notes": "Parse-eval chain"
+    },
+    {
+      "id": "complex_008",
+      "category": "complex",
+      "query": "What types in nu_command implement Command and call eval_expression?",
+      "expected_count_gte": 10,
+      "relationship_chain": ["IMPLEMENTS", "CALLS"],
+      "notes": "Commands that evaluate expressions"
+    },
+    {
+      "id": "complex_009",
+      "category": "complex",
+      "query": "What plugin commands call methods on CustomValue?",
+      "expected_count_gte": 3,
+      "relationship_chain": ["IMPLEMENTS", "CALLS"],
+      "notes": "Plugin commands using custom values"
+    },
+    {
+      "id": "complex_010",
+      "category": "complex",
+      "query": "What commands read files and parse formats?",
+      "expected_count_gte": 5,
+      "relationship_chain": ["CALLS", "CALLS"],
+      "notes": "File reading with format parsing"
+    },
+    {
+      "id": "complex_011",
+      "category": "complex",
+      "query": "What types extend ShellError and are used by commands?",
+      "expected_count_gte": 5,
+      "relationship_chain": ["EXTENDS", "USES"],
+      "notes": "Error types used by commands"
+    },
+    {
+      "id": "complex_012",
+      "category": "complex",
+      "query": "What commands create Span and attach it to Value?",
+      "expected_count_gte": 20,
+      "relationship_chain": ["CALLS", "USES"],
+      "notes": "Span tracking in commands"
+    },
+    {
+      "id": "complex_013",
+      "category": "complex",
+      "query": "What commands implement Command and have examples?",
+      "expected_count_gte": 100,
+      "relationship_chain": ["IMPLEMENTS", "CALLS"],
+      "notes": "Commands with examples"
+    },
+    {
+      "id": "complex_014",
+      "category": "complex",
+      "query": "What parser functions call working_set methods and create AST nodes?",
+      "expected_count_gte": 10,
+      "relationship_chain": ["CALLS", "CREATES"],
+      "notes": "Parser AST creation"
+    },
+    {
+      "id": "complex_015",
+      "category": "complex",
+      "query": "What commands use SyntaxShape and call from_value?",
+      "expected_count_gte": 50,
+      "relationship_chain": ["USES", "CALLS"],
+      "notes": "Commands with typed argument extraction"
+    }
+  ]
+}

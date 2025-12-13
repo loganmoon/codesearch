@@ -150,7 +150,10 @@ impl EvaluationResults {
     /// Print a summary of metrics to stdout.
     pub fn print_metrics(&self) {
         let m = self.compute_metrics();
-        println!("Semantic Search Evaluation Results (n={}):", m.total_queries);
+        println!(
+            "Semantic Search Evaluation Results (n={}):",
+            m.total_queries
+        );
         println!(
             "  Found: {} ({:.1}%)",
             m.found_count,

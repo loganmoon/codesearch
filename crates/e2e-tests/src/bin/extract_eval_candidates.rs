@@ -55,9 +55,7 @@ fn parse_args() -> Result<Args> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--repository" | "-r" => {
-                args.repository = iter
-                    .next()
-                    .context("--repository requires a value")?;
+                args.repository = iter.next().context("--repository requires a value")?;
             }
             "--min-tokens" | "-t" => {
                 args.min_tokens = iter
@@ -74,9 +72,7 @@ fn parse_args() -> Result<Args> {
                     .context("--limit must be a number")?;
             }
             "--format" | "-f" => {
-                args.format = iter
-                    .next()
-                    .context("--format requires a value")?;
+                args.format = iter.next().context("--format requires a value")?;
             }
             "--randomize" | "-R" => {
                 args.randomize = true;
@@ -263,12 +259,11 @@ async fn main() -> Result<()> {
         FROM entity_metadata
         WHERE repository_id = $1 AND deleted_at IS NULL
     "#;
-    let (null_count, non_null_count, avg_tokens): (i64, i64, f64) =
-        sqlx::query_as(token_query)
-            .bind(repository_id)
-            .fetch_one(&pool)
-            .await
-            .context("Failed to query token stats")?;
+    let (null_count, non_null_count, avg_tokens): (i64, i64, f64) = sqlx::query_as(token_query)
+        .bind(repository_id)
+        .fetch_one(&pool)
+        .await
+        .context("Failed to query token stats")?;
 
     eprintln!("\nToken count stats:");
     eprintln!("  Entities with token count: {}", non_null_count);
@@ -281,8 +276,10 @@ async fn main() -> Result<()> {
     eprintln!("\nQuerying for candidate entities...");
 
     if args.randomize {
-        eprintln!("  Mode: Random sampling{}",
-            args.seed.map_or(String::new(), |s| format!(" (seed: {s})")));
+        eprintln!(
+            "  Mode: Random sampling{}",
+            args.seed.map_or(String::new(), |s| format!(" (seed: {s})"))
+        );
 
         // Set random seed if specified
         if let Some(seed) = args.seed {

@@ -201,7 +201,11 @@ async fn find_repository(client: &Client, name_pattern: &str) -> Result<Uuid> {
     let repo = body
         .repositories
         .iter()
-        .find(|r| r.repository_name.to_lowercase().contains(&name_pattern.to_lowercase()))
+        .find(|r| {
+            r.repository_name
+                .to_lowercase()
+                .contains(&name_pattern.to_lowercase())
+        })
         .with_context(|| format!("No repository found matching '{name_pattern}'"))?;
 
     println!(
@@ -249,7 +253,10 @@ async fn execute_search(
 }
 
 /// Find the rank of the ground truth entity in search results
-fn find_ground_truth_rank(response: &SemanticSearchResponse, ground_truth: &GroundTruth) -> Option<usize> {
+fn find_ground_truth_rank(
+    response: &SemanticSearchResponse,
+    ground_truth: &GroundTruth,
+) -> Option<usize> {
     for (i, result) in response.results.iter().enumerate() {
         // Match by entity_id (primary) or qualified_name (fallback)
         if result.entity_id == ground_truth.entity_id
@@ -285,7 +292,12 @@ async fn execute_agentic_search(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Agentic search failed for '{}': {} - {}", query.id, status, body);
+        anyhow::bail!(
+            "Agentic search failed for '{}': {} - {}",
+            query.id,
+            status,
+            body
+        );
     }
 
     response
@@ -295,7 +307,10 @@ async fn execute_agentic_search(
 }
 
 /// Find the rank of the ground truth entity in agentic search results
-fn find_ground_truth_rank_agentic(response: &AgenticSearchResponse, ground_truth: &GroundTruth) -> Option<usize> {
+fn find_ground_truth_rank_agentic(
+    response: &AgenticSearchResponse,
+    ground_truth: &GroundTruth,
+) -> Option<usize> {
     for (i, result) in response.results.iter().enumerate() {
         // Match by entity_id (primary) or qualified_name (fallback)
         if result.entity_id == ground_truth.entity_id
@@ -328,7 +343,10 @@ async fn test_semantic_search_evaluation() -> Result<()> {
         }
     };
 
-    println!("Loaded {} evaluation queries", dataset.metadata.total_queries);
+    println!(
+        "Loaded {} evaluation queries",
+        dataset.metadata.total_queries
+    );
     println!("Source repository: {}", dataset.metadata.source_repository);
     println!("Expected commit:   {}", dataset.metadata.source_commit);
     println!();
@@ -395,7 +413,10 @@ async fn test_semantic_search_evaluation() -> Result<()> {
     semantic_results.print_metrics();
 
     let semantic_metrics = semantic_results.compute_metrics();
-    println!("\n  Avg query time:    {:.0} ms", semantic_time_ms as f64 / semantic_metrics.total_queries as f64);
+    println!(
+        "\n  Avg query time:    {:.0} ms",
+        semantic_time_ms as f64 / semantic_metrics.total_queries as f64
+    );
     println!("  Search limit:      {search_limit}");
 
     // Run agentic search evaluation if enabled
@@ -407,13 +428,13 @@ async fn test_semantic_search_evaluation() -> Result<()> {
         for query in &dataset.queries {
             match execute_agentic_search(&client, query, repository_id).await {
                 Ok(search_response) => {
-                    let rank = find_ground_truth_rank_agentic(&search_response, &query.ground_truth);
+                    let rank =
+                        find_ground_truth_rank_agentic(&search_response, &query.ground_truth);
                     agentic_time_ms += search_response.metadata.query_time_ms;
 
                     // Record result with score if found
-                    let score = rank.and_then(|r| {
-                        search_response.results.get(r - 1).map(|e| e.score)
-                    });
+                    let score =
+                        rank.and_then(|r| search_response.results.get(r - 1).map(|e| e.score));
                     agentic_results.record(&query.id, rank, score);
 
                     let status = format_rank_status(rank);
@@ -445,19 +466,41 @@ async fn test_semantic_search_evaluation() -> Result<()> {
 
         let agentic_metrics = agentic_results.compute_metrics();
         if agentic_metrics.total_queries > 0 {
-            println!("\n  Avg query time:    {:.0} ms", agentic_time_ms as f64 / agentic_metrics.total_queries as f64);
+            println!(
+                "\n  Avg query time:    {:.0} ms",
+                agentic_time_ms as f64 / agentic_metrics.total_queries as f64
+            );
         }
 
         // Print comparison
         println!("\n{:=<70}", "");
         println!("COMPARISON: SEMANTIC vs AGENTIC");
         println!("{:=<70}", "");
-        println!("{:<20} {:>15} {:>15} {:>12}", "Metric", "Semantic", "Agentic", "Delta");
+        println!(
+            "{:<20} {:>15} {:>15} {:>12}",
+            "Metric", "Semantic", "Agentic", "Delta"
+        );
         println!("{:-<70}", "");
-        print_comparison_row("Recall@1", semantic_metrics.recall_at_1, agentic_metrics.recall_at_1);
-        print_comparison_row("Recall@5", semantic_metrics.recall_at_5, agentic_metrics.recall_at_5);
-        print_comparison_row("Recall@10", semantic_metrics.recall_at_10, agentic_metrics.recall_at_10);
-        print_comparison_row("Recall@20", semantic_metrics.recall_at_20, agentic_metrics.recall_at_20);
+        print_comparison_row(
+            "Recall@1",
+            semantic_metrics.recall_at_1,
+            agentic_metrics.recall_at_1,
+        );
+        print_comparison_row(
+            "Recall@5",
+            semantic_metrics.recall_at_5,
+            agentic_metrics.recall_at_5,
+        );
+        print_comparison_row(
+            "Recall@10",
+            semantic_metrics.recall_at_10,
+            agentic_metrics.recall_at_10,
+        );
+        print_comparison_row(
+            "Recall@20",
+            semantic_metrics.recall_at_20,
+            agentic_metrics.recall_at_20,
+        );
         print_comparison_row("MRR", semantic_metrics.mrr, agentic_metrics.mrr);
         println!("{:-<70}", "");
         println!(

@@ -215,4 +215,12 @@ If stopping, use:
   "operations": []
 }
 
-Output ONLY the JSON object, no additional text. Do NOT wrap in markdown code blocks.
+RESPONSE FORMAT (CRITICAL):
+- Output ONLY the raw JSON object
+- Do NOT include any text before or after the JSON
+- Do NOT wrap in markdown code blocks
+- Do NOT explain your reasoning outside the JSON
+- The "reason" field inside the JSON is for your explanation
+
+WRONG: "Looking at [entity-abc123], I can see that..." (prose before JSON)
+CORRECT: {"should_stop": false, "reason": "Found target entity", "operations": [...]}

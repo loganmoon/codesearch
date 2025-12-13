@@ -53,28 +53,23 @@ pub use types::{
 };
 
 // ============================================================================
-// Internal Utilities
+// Internal Utilities (test-only since we use structured output)
 // ============================================================================
 
-/// Extract JSON from LLM response, stripping markdown and extraneous text.
-///
-/// Handles:
-/// - Markdown code blocks: ```json\n{...}\n```
-/// - Chatty prefixes: "Here's the result:\n{...}"
-/// - Trailing explanations: "{...}\n\nLet me know if you need..."
-/// - Nested JSON (finds outermost balanced structure)
-pub(crate) fn extract_json(response: &str) -> Option<&str> {
+/// Strip markdown code fences from LLM response.
+#[cfg(test)]
+fn strip_markdown_fences(response: &str) -> &str {
     let trimmed = response.trim();
 
-    // First, try to strip markdown code blocks
-    let content = if trimmed.starts_with("```") {
+    if trimmed.starts_with("```") {
         // Find the end of the opening fence (```json or ```)
         let after_fence = if let Some(newline_pos) = trimmed.find('\n') {
             &trimmed[newline_pos + 1..]
         } else {
             trimmed
                 .strip_prefix("```json")
-                .or_else(|| trimmed.strip_prefix("```"))?
+                .or_else(|| trimmed.strip_prefix("```"))
+                .unwrap_or(trimmed)
         };
 
         // Find closing fence
@@ -85,15 +80,21 @@ pub(crate) fn extract_json(response: &str) -> Option<&str> {
         }
     } else {
         trimmed
+    }
+}
+
+/// Extract balanced JSON structure starting at a given position.
+/// Returns the balanced structure if found, None otherwise.
+#[cfg(test)]
+fn extract_balanced_at(content: &str, start_pos: usize) -> Option<&str> {
+    let start_char = content.chars().nth(start_pos)?;
+    let end_char = match start_char {
+        '{' => '}',
+        '[' => ']',
+        _ => return None,
     };
 
-    // Find the start of JSON (first '{' or '[')
-    let json_start = content.find(['{', '['])?;
-    let start_char = content.chars().nth(json_start)?;
-    let end_char = if start_char == '{' { '}' } else { ']' };
-
-    // Find matching end bracket (handling nesting)
-    let json_content = &content[json_start..];
+    let json_content = &content[start_pos..];
     let mut depth = 0;
     let mut in_string = false;
     let mut escape_next = false;
@@ -119,7 +120,41 @@ pub(crate) fn extract_json(response: &str) -> Option<&str> {
         }
     }
 
-    // No balanced match found
+    None
+}
+
+/// Check if a string is valid JSON.
+#[cfg(test)]
+fn is_valid_json(s: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(s).is_ok()
+}
+
+/// Extract JSON from LLM response, stripping markdown and extraneous text.
+///
+/// Handles:
+/// - Markdown code blocks: ```json\n{...}\n```
+/// - Chatty prefixes: "Here's the result:\n{...}"
+/// - Trailing explanations: "{...}\n\nLet me know if you need..."
+/// - Nested JSON (finds outermost balanced structure)
+/// - False positives like `[entity-abc123]` (validates with serde_json)
+#[cfg(test)]
+fn extract_json(response: &str) -> Option<&str> {
+    let content = strip_markdown_fences(response);
+
+    // Collect all candidate start positions and sort by position
+    // This ensures we find the outermost structure first (e.g., array before inner objects)
+    let mut candidates: Vec<usize> = content.match_indices(['{', '[']).map(|(i, _)| i).collect();
+    candidates.sort_unstable();
+
+    // Try each candidate in positional order, validate with serde_json
+    for pos in candidates {
+        if let Some(json) = extract_balanced_at(content, pos) {
+            if is_valid_json(json) {
+                return Some(json);
+            }
+        }
+    }
+
     None
 }
 
@@ -211,5 +246,47 @@ mod tests {
             extract_json(input),
             Some(r#"[{"a": 1}, {"b": 2}, {"c": 3}]"#)
         );
+    }
+
+    #[test]
+    fn test_extract_json_rejects_entity_id_brackets() {
+        // Should find the actual JSON, not the entity ID reference
+        let input = r#"Looking at [entity-2b53cad79507ddba4f9b6031c1a82f05]:
+{"should_stop": true, "reason": "done", "operations": []}"#;
+        assert_eq!(
+            extract_json(input),
+            Some(r#"{"should_stop": true, "reason": "done", "operations": []}"#)
+        );
+    }
+
+    #[test]
+    fn test_extract_json_handles_only_prose() {
+        // When LLM completely ignores JSON instruction
+        let input = "I found [entity-abc123] and {various helpers} in the code.";
+        assert_eq!(extract_json(input), None);
+    }
+
+    #[test]
+    fn test_extract_json_multiple_invalid_before_valid() {
+        let input = r#"Found [entity-a1b2c3d4] and [entity-e5f6g7h8] in results:
+{"should_stop": false, "reason": "continue", "operations": []}"#;
+        assert_eq!(
+            extract_json(input),
+            Some(r#"{"should_stop": false, "reason": "continue", "operations": []}"#)
+        );
+    }
+
+    #[test]
+    fn test_extract_json_prefers_brace_over_bracket() {
+        // When both exist, prefer { since objects are more common
+        let input = r#"[not json] but {"valid": "json"}"#;
+        assert_eq!(extract_json(input), Some(r#"{"valid": "json"}"#));
+    }
+
+    #[test]
+    fn test_extract_json_valid_array_after_invalid_bracket() {
+        // Should skip the entity ID and find the valid JSON array
+        let input = r#"Looking at [entity-abc123]: [{"id": 1}, {"id": 2}]"#;
+        assert_eq!(extract_json(input), Some(r#"[{"id": 1}, {"id": 2}]"#));
     }
 }

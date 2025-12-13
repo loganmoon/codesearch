@@ -3,7 +3,7 @@
 use crate::{
     content_selection::{select_content_for_reranking, RerankStage},
     error::{truncate_for_error, AgenticSearchError, Result},
-    extract_json, prompts,
+    prompts,
     types::{AgenticEntity, RetrievalSource},
 };
 use codesearch_core::search_models::*;
@@ -110,6 +110,11 @@ pub async fn execute_worker(
 }
 
 #[derive(Debug, Deserialize)]
+struct RerankingWrapper {
+    rankings: Vec<RerankingResponse>,
+}
+
+#[derive(Debug, Deserialize)]
 struct RerankingResponse {
     entity_id: String,
     score: f32,
@@ -138,42 +143,86 @@ async fn rerank_worker_results(
         &[("query", query), ("results", &results_text)],
     );
 
-    // Call Haiku for reranking
-    let mut params =
-        claudius::MessageCreateParams::simple(claudius::MessageParam::user(prompt), haiku_model);
-    params.max_tokens = 4096;
-    params.temperature = Some(0.0);
+    // Define tool schema for structured output
+    let tool_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "rankings": {
+                "type": "array",
+                "description": "Ranked results, top 10 most relevant only. Exclude obviously irrelevant results.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Entity ID copied exactly from input"
+                        },
+                        "score": {
+                            "type": "number",
+                            "description": "Relevance score 0.0-1.0"
+                        },
+                        "reasoning": {
+                            "type": "string",
+                            "description": "Brief explanation of ranking"
+                        }
+                    },
+                    "required": ["entity_id", "score", "reasoning"]
+                }
+            }
+        },
+        "required": ["rankings"]
+    });
+
+    let tool = claudius::ToolUnionParam::new_custom_tool("rerank_results".to_string(), tool_schema);
+
+    // Call Haiku for reranking with forced tool use
+    let params = claudius::MessageCreateParams::new(
+        4096,
+        vec![claudius::MessageParam::user(prompt)],
+        haiku_model,
+    )
+    .with_temperature(0.0)
+    .map_err(|e| AgenticSearchError::Reranking(format!("Invalid temperature: {e}")))?
+    .with_tools(vec![tool])
+    .with_tool_choice(claudius::ToolChoice::tool("rerank_results"));
 
     let response = haiku_client
         .send(params)
         .await
         .map_err(|e| AgenticSearchError::Claudius(format!("Haiku API call failed: {e}")))?;
 
-    // Extract text content
-    let response_text = response
+    // Extract structured decision from tool use block
+    let tool_use_block = response
         .content
         .iter()
-        .filter_map(|block| match block {
-            claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .find_map(|block| block.as_tool_use())
+        .ok_or_else(|| {
+            // Fallback: extract text for error message
+            let response_text = response
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            AgenticSearchError::Reranking(format!(
+                "No tool use block in Haiku response: {}",
+                truncate_for_error(&response_text)
+            ))
+        })?;
 
-    // Parse JSON array response - extract JSON from potentially chatty LLM response
-    let json_str = extract_json(&response_text).ok_or_else(|| {
+    // Parse the rankings wrapper object
+    let rankings_wrapper: RerankingWrapper = serde_json::from_value(tool_use_block.input.clone())
+        .map_err(|e| {
         AgenticSearchError::Reranking(format!(
-            "No valid JSON found in Haiku response: {}",
-            truncate_for_error(&response_text)
+            "Failed to parse tool input: {e}. Input: {}",
+            truncate_for_error(&tool_use_block.input.to_string())
         ))
     })?;
 
-    let reranked_list: Vec<RerankingResponse> = serde_json::from_str(json_str).map_err(|e| {
-        AgenticSearchError::Reranking(format!(
-            "Failed to parse Haiku reranking response: {e}. Response: {}",
-            truncate_for_error(&response_text)
-        ))
-    })?;
+    let reranked_list = rankings_wrapper.rankings;
 
     // Build HashMap index for O(1) lookup instead of O(n) per entity
     let results_map: std::collections::HashMap<&str, &EntityResult> =

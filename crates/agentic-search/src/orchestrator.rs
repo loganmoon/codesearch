@@ -3,7 +3,7 @@
 use crate::{
     config::AgenticSearchConfig,
     error::{truncate_for_error, AgenticSearchError, Result},
-    extract_json, prompts,
+    prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
         RerankingMethod, RetrievalSource,
@@ -336,7 +336,53 @@ impl AgenticSearchOrchestrator {
             ],
         );
 
-        // Call Sonnet with cached system prompt
+        // Define tool schema for structured output
+        let tool_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "should_stop": {
+                    "type": "boolean",
+                    "description": "Whether to stop the search loop"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of the decision"
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "operation_type": {
+                                "type": "string",
+                                "enum": ["search", "graph_traversal"]
+                            },
+                            "query": {
+                                "type": "string",
+                                "description": "Search query (for search operations)"
+                            },
+                            "entity_id": {
+                                "type": "string",
+                                "description": "Entity ID to traverse from (for graph_traversal)"
+                            },
+                            "relationship": {
+                                "type": "string",
+                                "description": "Relationship type (for graph_traversal)"
+                            }
+                        },
+                        "required": ["operation_type"]
+                    }
+                }
+            },
+            "required": ["should_stop", "reason", "operations"]
+        });
+
+        let tool = claudius::ToolUnionParam::new_custom_tool(
+            "orchestrator_decision".to_string(),
+            tool_schema,
+        );
+
+        // Call Sonnet with cached system prompt and forced tool use
         let params = claudius::MessageCreateParams::new(
             4096,
             vec![claudius::MessageParam::user(user_prompt)],
@@ -344,36 +390,41 @@ impl AgenticSearchOrchestrator {
         )
         .with_system_blocks(vec![system_block])
         .with_temperature(0.0)
-        .map_err(|e| AgenticSearchError::Orchestrator(format!("Invalid temperature: {e}")))?;
+        .map_err(|e| AgenticSearchError::Orchestrator(format!("Invalid temperature: {e}")))?
+        .with_tools(vec![tool])
+        .with_tool_choice(claudius::ToolChoice::tool("orchestrator_decision"));
 
         let response = self.sonnet_client.send(params).await.map_err(|e| {
             AgenticSearchError::Orchestrator(format!("Sonnet API call failed: {e}"))
         })?;
 
-        // Extract text content
-        let response_text = response
+        // Extract structured decision from tool use block
+        let tool_use_block = response
             .content
             .iter()
-            .filter_map(|block| match block {
-                claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Parse JSON decision - extract JSON from potentially chatty LLM response
-        let json_str = extract_json(&response_text).ok_or_else(|| {
-            AgenticSearchError::Orchestrator(format!(
-                "No valid JSON found in Sonnet response: {}",
-                truncate_for_error(&response_text)
-            ))
-        })?;
+            .find_map(|block| block.as_tool_use())
+            .ok_or_else(|| {
+                // Fallback: extract text for error message
+                let response_text = response
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                AgenticSearchError::Orchestrator(format!(
+                    "No tool use block in Sonnet response: {}",
+                    truncate_for_error(&response_text)
+                ))
+            })?;
 
         let decision: OrchestratorDecisionResponse =
-            serde_json::from_str(json_str).map_err(|e| {
+            serde_json::from_value(tool_use_block.input.clone()).map_err(|e| {
                 AgenticSearchError::Orchestrator(format!(
-                    "Failed to parse Sonnet decision: {e}. Response: {}",
-                    truncate_for_error(&response_text)
+                    "Failed to parse tool input: {e}. Input: {}",
+                    truncate_for_error(&tool_use_block.input.to_string())
                 ))
             })?;
 

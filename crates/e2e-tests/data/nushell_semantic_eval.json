@@ -1,0 +1,312 @@
+{
+  "metadata": {
+    "created": "2024-12-12",
+    "purpose": "Semantic search evaluation with single-answer ground truth",
+    "total_queries": 30,
+    "source_repository": "nushell/nushell",
+    "source_commit": "11d71fe3c78670a8922143dd7e8b8f20b71a97d0",
+    "generation_method": "Manual curation with keyword exclusion"
+  },
+  "queries": [
+    {
+      "id": "sem_001",
+      "query": "Find the implementation that handles data transmission between commands in a shell sequence",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-15bc2f97e3bc67cfac2d837b0dc221a2",
+        "qualified_name": "impl external::PipelineData",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_002",
+      "query": "Find the implementation that manages runtime variable scope and environment during execution",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-ea50f9199c531590a1778abffdd1157d",
+        "qualified_name": "impl super::Stack",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_003",
+      "query": "Find the function that determines the output type when two values are combined with arithmetic operators",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-8924f9d06642c579ea7df7f6e6018c5d",
+        "qualified_name": "nu_parser::type_check::math_result_type",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_004",
+      "query": "Find the enumeration containing all possible error conditions during syntax analysis",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-0c755be64471cb0a2179d7b82d57500c",
+        "qualified_name": "nu_protocol::errors::parse_error::ParseError",
+        "entity_type": "Enum"
+      }
+    },
+    {
+      "id": "sem_005",
+      "query": "Find the implementation that handles raw binary data flowing through the shell as a continuous sequence",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-7b3a638071e51eaf4a84afd9bf6d4f98",
+        "qualified_name": "impl external::ByteStream",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_006",
+      "query": "Find the function that converts named color codes into terminal formatting instructions",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-893dd7d5f566aa0e49407647a040f92d",
+        "qualified_name": "nu_color_config::nu_style::lookup_style",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_007",
+      "query": "Find the function that executes a single intermediate representation opcode during runtime",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-d909b5ddbb031c582b4d2e31ae4f9f65",
+        "qualified_name": "nu_engine::eval_ir::eval_instruction",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_008",
+      "query": "Find the implementation that suggests possible completions when the user presses the autocomplete key",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-dee2fe34d869d2093057d1875629ecad",
+        "qualified_name": "impl external::NuCompleter",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_009",
+      "query": "Find the implementation that allows external addons to communicate with the shell's core",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-d82bcb6cd32e0ca82038ae8a88a82ae1",
+        "qualified_name": "impl external::EngineInterface",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_010",
+      "query": "Find the implementation that constructs sequences of compiled opcodes during the compilation phase",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-5dbaeec13f2f05bb491ed322ece7ea7f",
+        "qualified_name": "impl external::BlockBuilder",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_011",
+      "query": "Find the function that performs a single read-evaluate-print cycle in interactive mode",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-a8ff62066b5e826ef1e349d4a974b623",
+        "qualified_name": "nu_cli::repl::loop_iteration",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_012",
+      "query": "Find the implementation that defines expected arguments, flags, and input/output types for a command",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-00b32aac2a46023a6263f7dc25f5d54b",
+        "qualified_name": "impl external::Signature",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_013",
+      "query": "Find the function that converts a hierarchical syntax tree into a flat list of spans with their syntactic roles",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-7908f5325f3ba2846bf7fc875e01bee2",
+        "qualified_name": "nu_parser::flatten::flatten_expression_into",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_014",
+      "query": "Find the function that translates parsed syntax nodes into executable intermediate representation",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-693e3984cef18a7cb746baa4e70bfbda",
+        "qualified_name": "nu_engine::compile::expression::compile_expression",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_015",
+      "query": "Find the trait that provides a common interface for both runtime and compile-time interpretation",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-2b53cad79507ddba4f9b6031c1a82f05",
+        "qualified_name": "nu_protocol::eval_base::Eval",
+        "entity_type": "Trait"
+      }
+    },
+    {
+      "id": "sem_016",
+      "query": "Find the implementation that determines the ordering relationship between two shell values for sorting",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-9eabdb8669d43fd2c007feeb2b94f9ac",
+        "qualified_name": "<super::Value as external::PartialOrd>",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_017",
+      "query": "Find the implementation providing IDE features like go-to-definition through the standard protocol",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-3bcc6be2760ac332dd7b3a25e8a8da6a",
+        "qualified_name": "impl external::LanguageServer",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_018",
+      "query": "Find the function that processes arguments and flags when invoking a built-in command",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-fe29fc83f594f25d8d1833ea89f942d2",
+        "qualified_name": "nu_parser::parser::parse_internal_call",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_019",
+      "query": "Find the implementation that wraps tabular data structures for use with the data analysis addon",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-e72d8bca4a716938f5713c78583aa0f7",
+        "qualified_name": "impl external::NuDataFrame",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_020",
+      "query": "Find the enumeration defining all possible operations in the shell's compiled bytecode",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-be38e9789959bbf55288896f79a4d4b6",
+        "qualified_name": "nu_protocol::ir::Instruction",
+        "entity_type": "Enum"
+      }
+    },
+    {
+      "id": "sem_021",
+      "query": "Find the function that transforms the shell's native object notation into runtime values",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-419905afa6b35d13f1903b1932f9a6e0",
+        "qualified_name": "nuon::from::convert_to_value",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_022",
+      "query": "Find the implementation that collects information about visible variables, commands, and modules at a given point",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-017c6325109585541504d43074764b0d",
+        "qualified_name": "impl external::ScopeData",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_023",
+      "query": "Find the implementation providing methods for manipulating and querying nodes in the abstract syntax tree",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-075f5b96dfe3f61351fbd8aca2c80adf",
+        "qualified_name": "impl external::Expression",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_024",
+      "query": "Find the function that transforms filesystem metadata into structured records for directory listing",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-8f375ac38a19d5d42ce6b37995c869ac",
+        "qualified_name": "nu_command::filesystem::ls::dir_entry_dict",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_025",
+      "query": "Find the function that extracts a single lexical unit from source code characters",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-f53439518eb2870d2196b06608443ecb",
+        "qualified_name": "nu_parser::lex::lex_item",
+        "entity_type": "Function"
+      }
+    },
+    {
+      "id": "sem_026",
+      "query": "Find the implementation that organizes exported commands, constants, and submodules into a namespace",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-ed9e21dc83f1db0fa0f9400021f1b68c",
+        "qualified_name": "impl external::Module",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_027",
+      "query": "Find the implementation that spawns and manages operating system processes for non-builtin commands",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-10c882ef00103a90e828abbb6037c34e",
+        "qualified_name": "<external::External as external::Command>",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_028",
+      "query": "Find the command implementation that searches through collections and highlights or filters matching elements",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-e73f9db5f839e60779e117a8c8b85f73",
+        "qualified_name": "<external::Find as external::Command>",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_029",
+      "query": "Find the command implementation that outputs terminal control sequences for colors and text formatting",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-23ccd83b20a1b389e3ba63e55911952f",
+        "qualified_name": "<crate::strings::ansi::ansi_::Ansi as external::Command>",
+        "entity_type": "Impl"
+      }
+    },
+    {
+      "id": "sem_030",
+      "query": "Find the command implementation that generates month and year calendar displays in text format",
+      "bge_instruction": "Represent this query for retrieving the specific code entity that handles this functionality",
+      "ground_truth": {
+        "entity_id": "entity-1f51de161b7bdbb76f3c79ad4db2dd0d",
+        "qualified_name": "<external::Cal as external::Command>",
+        "entity_type": "Impl"
+      }
+    }
+  ]
+}

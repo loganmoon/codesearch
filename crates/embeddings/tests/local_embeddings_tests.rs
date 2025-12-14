@@ -1,6 +1,6 @@
 //! Unit tests for embedding providers that don't require external services
 
-use codesearch_embeddings::{EmbeddingError, EmbeddingProvider};
+use codesearch_embeddings::{EmbeddingContext, EmbeddingError, EmbeddingProvider};
 
 #[tokio::test]
 async fn test_batch_size_validation() {
@@ -13,9 +13,10 @@ async fn test_batch_size_validation() {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for TestProvider {
-        async fn embed(
+        async fn embed_with_context(
             &self,
             texts: Vec<String>,
+            _contexts: Option<Vec<EmbeddingContext>>,
         ) -> codesearch_core::error::Result<Vec<Option<Vec<f32>>>> {
             if texts.len() > self.max_batch {
                 return Err(EmbeddingError::BatchSizeExceeded {
@@ -54,7 +55,7 @@ async fn test_batch_size_validation() {
 #[tokio::test]
 async fn test_embedding_size_limits() {
     use codesearch_core::error::Result;
-    use codesearch_embeddings::{EmbeddingManager, EmbeddingProvider};
+    use codesearch_embeddings::EmbeddingManager;
 
     struct SizeLimitProvider {
         max_context: usize,
@@ -62,7 +63,11 @@ async fn test_embedding_size_limits() {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for SizeLimitProvider {
-        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
+        async fn embed_with_context(
+            &self,
+            texts: Vec<String>,
+            _contexts: Option<Vec<EmbeddingContext>>,
+        ) -> Result<Vec<Option<Vec<f32>>>> {
             Ok(texts
                 .iter()
                 .map(|text| {

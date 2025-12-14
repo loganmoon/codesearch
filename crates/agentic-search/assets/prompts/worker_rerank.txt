@@ -11,22 +11,21 @@ Instructions:
 3. Prioritize results that directly answer the query
 4. Assign a relevance score (0.0 to 1.0) based on how well each result matches the query
 5. Provide brief reasoning for each ranking decision
+6. EXCLUDE obviously irrelevant results (score below 0.40) - do NOT include them in output
 
 Scoring guide:
 - 0.90-1.00: Direct answer to the query, highly specific match
 - 0.75-0.89: Strong relevance, clear connection to query
 - 0.60-0.74: Moderate relevance, tangentially related
 - 0.40-0.59: Weak relevance, might be useful
-- Below 0.40: Likely irrelevant
+- Below 0.40: EXCLUDE - do not include in output
+
+FILTERING RULES:
+- Only return results with score >= 0.40
+- Return at most {max_results} results
+- If fewer than {max_results} results are relevant, return only the relevant ones
+- If no results are relevant, return an empty rankings array
 
 CRITICAL: The entity_id values MUST be copied EXACTLY as shown in brackets [entity-xxx] in each result above.
 Entity IDs are 39-character strings starting with "entity-" followed by 32 hex characters.
 DO NOT invent, modify, or truncate entity_ids - copy them character-for-character from the input.
-
-Output format (JSON array of objects, top 10 results):
-[
-  {"entity_id": "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "score": 0.95, "reasoning": "Direct implementation of the queried functionality"},
-  {"entity_id": "entity-1234567890abcdef1234567890abcdef", "score": 0.82, "reasoning": "Helper function used by the main implementation"}
-]
-
-Output ONLY the JSON array, no additional text. Do NOT wrap in markdown code blocks.

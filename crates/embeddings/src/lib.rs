@@ -25,7 +25,7 @@ pub use code_tokenizer::CodeTokenizer;
 pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType};
 pub use error::EmbeddingError;
 pub use mock_provider::MockEmbeddingProvider;
-pub use provider::EmbeddingProvider;
+pub use provider::{EmbeddingContext, EmbeddingProvider};
 pub use sparse_provider::SparseEmbeddingProvider;
 
 // Re-export Tokenizer trait for use in indexer
@@ -129,6 +129,15 @@ impl EmbeddingManager {
     /// Generate embeddings for texts
     pub async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
         self.provider.embed(texts).await
+    }
+
+    /// Generate embeddings for texts with optional context for error logging
+    pub async fn embed_with_context(
+        &self,
+        texts: Vec<String>,
+        contexts: Option<Vec<EmbeddingContext>>,
+    ) -> Result<Vec<Option<Vec<f32>>>> {
+        self.provider.embed_with_context(texts, contexts).await
     }
 }
 

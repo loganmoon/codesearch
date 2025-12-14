@@ -6,7 +6,7 @@
 use crate::common::{path_to_str, ResultExt};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::EmbeddingManager;
+use codesearch_embeddings::{EmbeddingContext, EmbeddingManager};
 use codesearch_languages::create_extractor;
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use std::collections::{HashMap, HashSet};
@@ -382,8 +382,22 @@ async fn process_entity_chunk(
             cache_miss_texts.len()
         );
 
+        // Build EmbeddingContext for each cache miss entity
+        let contexts: Vec<EmbeddingContext> = cache_misses
+            .iter()
+            .map(|(entity_idx, _)| {
+                let entity = &entities[*entity_idx];
+                EmbeddingContext {
+                    qualified_name: entity.qualified_name.clone(),
+                    file_path: entity.file_path.clone(),
+                    line_number: entity.location.start_line as u32,
+                    entity_type: format!("{:?}", entity.entity_type),
+                }
+            })
+            .collect();
+
         let new_embeddings = embedding_manager
-            .embed(cache_miss_texts)
+            .embed_with_context(cache_miss_texts.clone(), Some(contexts))
             .await
             .storage_err("Failed to generate embeddings")?;
 

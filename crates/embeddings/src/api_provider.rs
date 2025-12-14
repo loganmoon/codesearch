@@ -1,6 +1,10 @@
 //! OpenAI-compatible API provider for embeddings (vLLM, OpenAI, etc.)
 
-use crate::{config::EmbeddingConfig, error::EmbeddingError, provider::EmbeddingProvider};
+use crate::{
+    config::EmbeddingConfig,
+    error::EmbeddingError,
+    provider::{EmbeddingContext, EmbeddingProvider},
+};
 use async_openai::types::{CreateEmbeddingRequest, EmbeddingInput};
 use async_openai::{config::OpenAIConfig, Client};
 use async_trait::async_trait;
@@ -9,7 +13,12 @@ use futures::stream::{self, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
+
+/// Maximum characters per API batch request.
+/// Treating 1 char = 1 token to be safe against context overflow.
+/// BGE models have 32768 token context limit.
+const MAX_BATCH_CHARS: usize = 32768;
 
 /// OpenAI-compatible API provider
 pub struct OpenAiApiProvider {
@@ -63,9 +72,8 @@ impl OpenAiApiProvider {
         // Perform health check (warn on failure, don't block)
         Self::check_health(&client).await;
 
-        // Use a reasonable max_context default
-        // Simple heuristic: ~4 chars per token with safety margin
-        let max_context = (32768.0f64 * 4.0f64 * 0.8f64).floor() as usize;
+        // Max characters per individual text (texts exceeding this are skipped).
+        let max_context = MAX_BATCH_CHARS;
 
         Ok(Self {
             client,
@@ -102,58 +110,100 @@ impl OpenAiApiProvider {
 
 #[async_trait]
 impl EmbeddingProvider for OpenAiApiProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
+    async fn embed_with_context(
+        &self,
+        texts: Vec<String>,
+        contexts: Option<Vec<EmbeddingContext>>,
+    ) -> Result<Vec<Option<Vec<f32>>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
 
-        let mut all_embeddings = Vec::with_capacity(texts.len());
+        // Initialize results array - None for texts that are skipped
+        let mut all_embeddings = vec![None; texts.len()];
 
-        // Process in batches with concurrency control
-        let chunks: Vec<_> = texts
-            .chunks(self.batch_size)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+        // Step 1: Filter texts by individual size and build batches
+        // Each batch entry is (original_index, text, char_count)
+        let mut filtered_texts: Vec<(usize, String, usize)> = Vec::new();
+        let mut skipped_count = 0;
 
-        let results = stream::iter(chunks)
-            .map(|chunk| {
+        for (i, text) in texts.iter().enumerate() {
+            let char_count = text.chars().count();
+            if char_count <= self.max_context {
+                filtered_texts.push((i, text.clone(), char_count));
+            } else {
+                skipped_count += 1;
+                debug!(
+                    "Text at index {i} exceeds max_context ({char_count} > {} chars), skipping",
+                    self.max_context
+                );
+            }
+        }
+
+        if skipped_count > 0 {
+            warn!(
+                "Skipped {skipped_count}/{} texts exceeding max length of {} chars",
+                texts.len(),
+                self.max_context
+            );
+        }
+
+        if filtered_texts.is_empty() {
+            return Ok(all_embeddings);
+        }
+
+        // Step 2: Build dynamic batches based on character count
+        // Each batch is Vec<(original_index, text)>
+        let mut batches: Vec<Vec<(usize, String)>> = Vec::new();
+        let mut current_batch: Vec<(usize, String)> = Vec::new();
+        let mut current_batch_chars: usize = 0;
+
+        for (orig_idx, text, char_count) in filtered_texts {
+            // If adding this text would exceed the batch char limit, start a new batch
+            // (unless current batch is empty - a single text that's too large will be sent alone)
+            if current_batch_chars + char_count > MAX_BATCH_CHARS && !current_batch.is_empty() {
+                batches.push(std::mem::take(&mut current_batch));
+                current_batch_chars = 0;
+            }
+
+            current_batch.push((orig_idx, text));
+            current_batch_chars += char_count;
+
+            // Also respect the configured batch_size as an upper bound
+            if current_batch.len() >= self.batch_size {
+                batches.push(std::mem::take(&mut current_batch));
+                current_batch_chars = 0;
+            }
+        }
+
+        // Don't forget the last batch
+        if !current_batch.is_empty() {
+            batches.push(current_batch);
+        }
+
+        debug!(
+            "Created {} batches for {} texts (max_batch_chars={}, batch_size={})",
+            batches.len(),
+            texts.len() - skipped_count,
+            MAX_BATCH_CHARS,
+            self.batch_size
+        );
+
+        // Step 3: Process batches concurrently
+        let contexts = contexts.map(Arc::new);
+        let results = stream::iter(batches)
+            .map(|batch| {
                 let limiter = self.concurrency_limiter.clone();
                 let client = self.client.clone();
                 let model = self.model.clone();
-                let max_context = self.max_context;
                 let dimensions = self.dimensions;
                 let retry_attempts = self.retry_attempts;
+                let contexts = contexts.clone();
 
                 async move {
-                    // Pre-filter texts by length (simple char-based heuristic)
-                    let mut texts_to_embed = Vec::new();
-                    let mut indices_to_embed = Vec::new();
-                    let mut chunk_results = vec![None; chunk.len()];
-
-                    let mut skipped_count = 0;
-                    for (i, text) in chunk.iter().enumerate() {
-                        let char_count = text.chars().count();
-                        if char_count <= max_context {
-                            texts_to_embed.push(text.clone());
-                            indices_to_embed.push(i);
-                        } else {
-                            skipped_count += 1;
-                            debug!(
-                                "Text at index {i} exceeds max_context ({char_count} > {max_context} chars), skipping"
-                            );
-                        }
-                        // Texts exceeding limit remain as None
-                    }
-                    if skipped_count > 0 {
-                        warn!(
-                            "Skipped {skipped_count}/{} texts exceeding max length of {max_context} chars",
-                            chunk.len()
-                        );
-                    }
-
-                    if texts_to_embed.is_empty() {
-                        return Ok::<_, EmbeddingError>(chunk_results);
-                    }
+                    // Extract indices and texts
+                    let (indices, texts_to_embed): (Vec<usize>, Vec<String>) =
+                        batch.into_iter().unzip();
 
                     // Acquire semaphore permit for concurrency control
                     let _permit = limiter.acquire_owned().await.map_err(|e| {
@@ -177,7 +227,7 @@ impl EmbeddingProvider for OpenAiApiProvider {
 
                         match client.embeddings().create(request).await {
                             Ok(response) => {
-                                // Extract embeddings and sort by index
+                                // Extract embeddings and sort by index (API response index)
                                 let mut sorted_embeddings: Vec<(usize, Vec<f32>)> = response
                                     .data
                                     .into_iter()
@@ -189,33 +239,47 @@ impl EmbeddingProvider for OpenAiApiProvider {
                                 for (_, embedding) in &sorted_embeddings {
                                     if embedding.len() != dimensions {
                                         return Err(EmbeddingError::InferenceError(format!(
-                                            "Dimension mismatch: expected {}, got {}",
-                                            dimensions,
+                                            "Dimension mismatch: expected {dimensions}, got {}",
                                             embedding.len()
                                         )));
                                     }
                                 }
 
-                                // Place embeddings at their original indices
-                                for (result_idx, orig_idx) in
-                                    indices_to_embed.into_iter().enumerate()
-                                {
-                                    chunk_results[orig_idx] =
-                                        Some(sorted_embeddings[result_idx].1.clone());
-                                }
+                                // Return pairs of (original_index, embedding)
+                                let results: Vec<(usize, Vec<f32>)> = indices
+                                    .into_iter()
+                                    .zip(sorted_embeddings.into_iter().map(|(_, emb)| emb))
+                                    .collect();
 
-                                return Ok(chunk_results);
+                                return Ok::<_, EmbeddingError>(results);
                             }
                             Err(e) if attempt < retry_attempts => {
                                 attempt += 1;
+
+                                // Log error with entity context if available
+                                error!("Embedding generation failed: {e}");
+                                for (batch_idx, orig_idx) in indices.iter().enumerate() {
+                                    let char_count = texts_to_embed
+                                        .get(batch_idx)
+                                        .map(|t| t.chars().count())
+                                        .unwrap_or(0);
+                                    if let Some(ref ctxs) = contexts {
+                                        if let Some(ctx) = ctxs.get(*orig_idx) {
+                                            error!("  {} | Chars: {}", ctx, char_count);
+                                        } else {
+                                            error!("  Text {}: {} chars", orig_idx, char_count);
+                                        }
+                                    } else {
+                                        error!("  Text {}: {} chars", orig_idx, char_count);
+                                    }
+                                }
 
                                 // Exponential backoff: 10s, 20s, 40s, 60s (capped)
                                 // vLLM can take 30-60s to restart after a crash
                                 let backoff_secs = (10 * 2u64.pow(attempt as u32 - 1)).min(60);
                                 let backoff = Duration::from_secs(backoff_secs);
                                 warn!(
-                                    "Embedding batch failed (attempt {}/{}), retrying in {:?}: {}",
-                                    attempt, retry_attempts, backoff, e
+                                    "Retrying in {backoff:?} (attempt {attempt}/{retry_attempts})"
                                 );
                                 tokio::time::sleep(backoff).await;
                             }
@@ -232,12 +296,13 @@ impl EmbeddingProvider for OpenAiApiProvider {
             .collect::<Vec<_>>()
             .await;
 
-        // Flatten results
+        // Step 4: Place results back into the original positions
         for result in results {
-            all_embeddings.extend(
-                result
-                    .map_err(|e: EmbeddingError| -> codesearch_core::error::Error { e.into() })?,
-            );
+            let batch_results = result
+                .map_err(|e: EmbeddingError| -> codesearch_core::error::Error { e.into() })?;
+            for (orig_idx, embedding) in batch_results {
+                all_embeddings[orig_idx] = Some(embedding);
+            }
         }
 
         Ok(all_embeddings)
@@ -248,8 +313,7 @@ impl EmbeddingProvider for OpenAiApiProvider {
     }
 
     fn max_sequence_length(&self) -> usize {
-        // Return as tokens (char count / 4 as rough estimate)
-        self.max_context / 4
+        self.max_context
     }
 }
 

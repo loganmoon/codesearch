@@ -70,18 +70,22 @@ pub fn handle_impl_impl(
         .unwrap_or_default();
 
     // Build qualified name for the impl block
-    // Use "impl <Type> at line <N>" to distinguish from the struct/type itself
-    // and to handle multiple impl blocks for the same type
-    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
+    // Use "impl <TypeFQN>" with optional generic bounds to distinguish impl blocks
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
-    let impl_qualified_name = if parent_scope.is_empty() {
-        format!("impl {for_type} at line {}", location.start_line)
+
+    // Build generic bounds suffix for disambiguation
+    let has_bounds = generics.iter().any(|g| g.contains(':'));
+    let bounds_suffix = if has_bounds {
+        format!(" where {}", generics.join(", "))
     } else {
-        format!(
-            "{parent_scope}::impl {for_type} at line {}",
-            location.start_line
-        )
+        String::new()
+    };
+
+    let impl_qualified_name = if parent_scope.is_empty() {
+        format!("impl {for_type_resolved}{bounds_suffix}")
+    } else {
+        format!("{parent_scope}::impl {for_type_resolved}{bounds_suffix}")
     };
 
     // Extract all methods from impl body
@@ -91,8 +95,8 @@ pub fn handle_impl_impl(
     if let Some(body_node) = impl_body {
         let impl_ctx = ImplContext {
             qualified_name: &impl_qualified_name,
-            for_type: &for_type,
-            trait_name: None, // No trait for inherent impl
+            for_type_resolved: &for_type_resolved,
+            trait_name_resolved: None, // No trait for inherent impl
             generics: &generics,
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
@@ -202,20 +206,22 @@ pub fn handle_impl_trait_impl(
         .map(|node| extract_generics_from_node(node, source))
         .unwrap_or_default();
 
-    // Build qualified name: "Trait for Type at line N" to handle multiple trait impls
-    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(impl_node);
+    // Build qualified name: "<TypeFQN as TraitFQN>" with optional generic bounds
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
-    let impl_qualified_name = if parent_scope.is_empty() {
-        format!(
-            "{trait_name} for {for_type} at line {}",
-            location.start_line
-        )
+
+    // Build generic bounds suffix for disambiguation
+    let has_bounds = generics.iter().any(|g| g.contains(':'));
+    let bounds_suffix = if has_bounds {
+        format!(" where {}", generics.join(", "))
     } else {
-        format!(
-            "{parent_scope}::{trait_name} for {for_type} at line {}",
-            location.start_line
-        )
+        String::new()
+    };
+
+    let impl_qualified_name = if parent_scope.is_empty() {
+        format!("<{for_type_resolved} as {trait_name_resolved}{bounds_suffix}>")
+    } else {
+        format!("{parent_scope}::<{for_type_resolved} as {trait_name_resolved}{bounds_suffix}>")
     };
 
     // Extract all methods from impl body
@@ -225,8 +231,8 @@ pub fn handle_impl_trait_impl(
     if let Some(body_node) = impl_body {
         let impl_ctx = ImplContext {
             qualified_name: &impl_qualified_name,
-            for_type: &for_type,
-            trait_name: Some(&trait_name),
+            for_type_resolved: &for_type_resolved,
+            trait_name_resolved: Some(&trait_name_resolved),
             generics: &generics,
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
@@ -333,10 +339,10 @@ fn extract_impl_methods(
 struct ImplContext<'a> {
     /// The qualified name of the impl block itself
     qualified_name: &'a str,
-    /// The type being implemented for (e.g., "Container<T>")
-    for_type: &'a str,
-    /// Optional trait name for trait implementations
-    trait_name: Option<&'a str>,
+    /// The type being implemented for, resolved to FQN (e.g., "crate::module::Container")
+    for_type_resolved: &'a str,
+    /// Optional trait name for trait implementations, resolved to FQN
+    trait_name_resolved: Option<&'a str>,
     /// Generic parameters with bounds (e.g., ["T: Clone", "U"])
     /// Used to disambiguate impl blocks with different bounds
     generics: &'a [String],
@@ -445,7 +451,7 @@ fn extract_associated_constant(
         .and_then(|n| node_to_text(n, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type
+    // Build qualified name based on impl type using resolved FQNs
     // Include generic bounds to disambiguate impl blocks with different constraints
     let qualified_name = {
         let has_bounds = impl_ctx.generics.iter().any(|g| g.contains(':'));
@@ -455,13 +461,13 @@ fn extract_associated_constant(
             String::new()
         };
 
-        if let Some(trait_name) = impl_ctx.trait_name {
+        if let Some(trait_name) = impl_ctx.trait_name_resolved {
             format!(
                 "<{} as {trait_name}{bounds_suffix}>::{name}",
-                impl_ctx.for_type
+                impl_ctx.for_type_resolved
             )
         } else {
-            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type)
+            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
         }
     };
 
@@ -538,10 +544,10 @@ fn extract_method(
     let name = find_method_name(method_node, source)
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name based on impl type
+    // Build qualified name based on impl type using resolved FQNs
     // Include generic bounds to disambiguate impl blocks with different constraints
-    // For trait impls: <Type as Trait>::method or <Type as Trait where T: Clone>::method
-    // For inherent impls: Type::method or Type where T: Clone>::method
+    // For trait impls: <TypeFQN as TraitFQN>::method or <TypeFQN as TraitFQN where T: Clone>::method
+    // For inherent impls: TypeFQN::method or TypeFQN where T: Clone::method
     let qualified_name = {
         // Check if any generics have bounds (contain ':')
         let has_bounds = impl_ctx.generics.iter().any(|g| g.contains(':'));
@@ -551,13 +557,13 @@ fn extract_method(
             String::new()
         };
 
-        if let Some(trait_name) = impl_ctx.trait_name {
+        if let Some(trait_name) = impl_ctx.trait_name_resolved {
             format!(
                 "<{} as {trait_name}{bounds_suffix}>::{name}",
-                impl_ctx.for_type
+                impl_ctx.for_type_resolved
             )
         } else {
-            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type)
+            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
         }
     };
 

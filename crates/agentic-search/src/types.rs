@@ -74,9 +74,9 @@ pub enum RerankingMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalSource {
+    /// Semantic search (combines dense embeddings + BM25 sparse retrieval)
     Semantic,
-    Fulltext,
-    Unified,
+    /// Graph traversal from a source entity
     Graph {
         source_entity_id: String,
         relationship: String,
@@ -95,9 +95,7 @@ pub struct AgenticEntity {
 impl AgenticEntity {
     pub fn from_search_result(entity: EntityResult, source: RetrievalSource) -> Self {
         let justification = match &source {
-            RetrievalSource::Semantic => format!("Semantic similarity: {:.2}", entity.score),
-            RetrievalSource::Fulltext => format!("Full-text match: {:.2}", entity.score),
-            RetrievalSource::Unified => format!("Hybrid match: {:.2}", entity.score),
+            RetrievalSource::Semantic => format!("Semantic match: {:.2}", entity.score),
             RetrievalSource::Graph { .. } => "Graph context".to_string(),
         };
 
@@ -109,13 +107,93 @@ impl AgenticEntity {
     }
 
     pub fn is_direct_match(&self) -> bool {
-        matches!(
-            self.source,
-            RetrievalSource::Semantic | RetrievalSource::Fulltext | RetrievalSource::Unified
-        )
+        matches!(self.source, RetrievalSource::Semantic)
     }
 
     pub fn is_graph_context(&self) -> bool {
         matches!(self.source, RetrievalSource::Graph { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_empty_query_rejected() {
+        let request = AgenticSearchRequest {
+            query: "".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Query cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_whitespace_only_query_accepted() {
+        // Whitespace-only is not empty string, so it passes the empty check
+        // (semantically invalid but syntactically passes current validation)
+        let request = AgenticSearchRequest {
+            query: "   ".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_exceeds_max_length() {
+        let long_query = "a".repeat(MAX_QUERY_LENGTH + 1);
+        let request = AgenticSearchRequest {
+            query: long_query,
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn test_validate_query_at_max_length() {
+        let max_query = "a".repeat(MAX_QUERY_LENGTH);
+        let request = AgenticSearchRequest {
+            query: max_query,
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_normal_query() {
+        let request = AgenticSearchRequest {
+            query: "What functions handle authentication?".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_with_repository_ids() {
+        let request = AgenticSearchRequest {
+            query: "Find the main function".to_string(),
+            force_sonnet: true,
+            repository_ids: vec!["repo-1".to_string(), "repo-2".to_string()],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
     }
 }

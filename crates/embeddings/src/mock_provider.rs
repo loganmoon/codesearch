@@ -1,6 +1,6 @@
 //! Mock embedding provider for testing
 
-use crate::provider::EmbeddingProvider;
+use crate::provider::{EmbeddingContext, EmbeddingProvider};
 use async_trait::async_trait;
 use codesearch_core::error::Result;
 
@@ -18,7 +18,11 @@ impl MockEmbeddingProvider {
 
 #[async_trait]
 impl EmbeddingProvider for MockEmbeddingProvider {
-    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Option<Vec<f32>>>> {
+    async fn embed_with_context(
+        &self,
+        texts: Vec<String>,
+        _contexts: Option<Vec<EmbeddingContext>>,
+    ) -> Result<Vec<Option<Vec<f32>>>> {
         // Return mock embeddings - just zeros for simplicity
         Ok(texts
             .into_iter()

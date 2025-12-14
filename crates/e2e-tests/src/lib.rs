@@ -7,3 +7,4 @@
 #![allow(clippy::expect_used)]
 
 pub mod common;
+pub mod eval_metrics;

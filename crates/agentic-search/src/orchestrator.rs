@@ -3,7 +3,7 @@
 use crate::{
     config::AgenticSearchConfig,
     error::{truncate_for_error, AgenticSearchError, Result},
-    extract_json, prompts,
+    prompts,
     types::{
         AgenticEntity, AgenticSearchMetadata, AgenticSearchRequest, AgenticSearchResponse,
         RerankingMethod, RetrievalSource,
@@ -20,6 +20,7 @@ use tracing::{debug, info, warn};
 
 const MAX_ITERATIONS: usize = 5;
 const MAX_LLM_QUERY_LENGTH: usize = 1000;
+
 const VALID_RELATIONSHIPS: &[&str] = &[
     "callers",
     "called_by",
@@ -181,7 +182,6 @@ impl AgenticSearchOrchestrator {
         let mut iteration = 0;
         let mut accumulated_entities: Vec<AgenticEntity> = Vec::new();
         let mut seen_entity_ids: HashSet<String> = HashSet::new();
-        let mut total_cost = 0.0;
         let mut workers_spawned = 0;
         let mut workers_succeeded = 0;
         let mut partial_outage = false;
@@ -206,6 +206,14 @@ impl AgenticSearchOrchestrator {
 
             if iteration >= MAX_ITERATIONS {
                 info!("Reached max iterations");
+                break;
+            }
+
+            // Prevent infinite loop when LLM returns should_stop=false but all operations are invalid
+            if decision.operations.is_empty() {
+                warn!(
+                    "Orchestrator returned no valid operations despite should_stop=false, forcing stop"
+                );
                 break;
             }
 
@@ -245,8 +253,6 @@ impl AgenticSearchOrchestrator {
                 info!("No new entities found, stopping");
                 break;
             }
-
-            total_cost += decision.iteration_cost;
         }
 
         // Calculate metadata before synthesis (need counts from accumulated_entities)
@@ -284,8 +290,7 @@ impl AgenticSearchOrchestrator {
                 graph_entities_in_results: graph_in_results,
                 reranking_method: RerankingMethod::HaikuOnly,
                 graph_traversal_used: graph_context > 0,
-                estimated_cost_usd: total_cost,
-                // Cache metrics are populated when usage tracking is available
+                estimated_cost_usd: 0.0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             },
@@ -336,7 +341,53 @@ impl AgenticSearchOrchestrator {
             ],
         );
 
-        // Call Sonnet with cached system prompt
+        // Define tool schema for structured output
+        let tool_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "should_stop": {
+                    "type": "boolean",
+                    "description": "Whether to stop the search loop"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of the decision"
+                },
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "operation_type": {
+                                "type": "string",
+                                "enum": ["search", "graph_traversal"]
+                            },
+                            "query": {
+                                "type": "string",
+                                "description": "Search query (for search operations)"
+                            },
+                            "entity_id": {
+                                "type": "string",
+                                "description": "Entity ID to traverse from (for graph_traversal)"
+                            },
+                            "relationship": {
+                                "type": "string",
+                                "description": "Relationship type (for graph_traversal)"
+                            }
+                        },
+                        "required": ["operation_type"]
+                    }
+                }
+            },
+            "required": ["should_stop", "reason", "operations"]
+        });
+
+        let tool = claudius::ToolUnionParam::new_custom_tool(
+            "orchestrator_decision".to_string(),
+            tool_schema,
+        );
+
+        // Call Sonnet with cached system prompt and forced tool use
         let params = claudius::MessageCreateParams::new(
             4096,
             vec![claudius::MessageParam::user(user_prompt)],
@@ -344,36 +395,41 @@ impl AgenticSearchOrchestrator {
         )
         .with_system_blocks(vec![system_block])
         .with_temperature(0.0)
-        .map_err(|e| AgenticSearchError::Orchestrator(format!("Invalid temperature: {e}")))?;
+        .map_err(|e| AgenticSearchError::Orchestrator(format!("Invalid temperature: {e}")))?
+        .with_tools(vec![tool])
+        .with_tool_choice(claudius::ToolChoice::tool("orchestrator_decision"));
 
         let response = self.sonnet_client.send(params).await.map_err(|e| {
             AgenticSearchError::Orchestrator(format!("Sonnet API call failed: {e}"))
         })?;
 
-        // Extract text content
-        let response_text = response
+        // Extract structured decision from tool use block
+        let tool_use_block = response
             .content
             .iter()
-            .filter_map(|block| match block {
-                claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Parse JSON decision - extract JSON from potentially chatty LLM response
-        let json_str = extract_json(&response_text).ok_or_else(|| {
-            AgenticSearchError::Orchestrator(format!(
-                "No valid JSON found in Sonnet response: {}",
-                truncate_for_error(&response_text)
-            ))
-        })?;
+            .find_map(|block| block.as_tool_use())
+            .ok_or_else(|| {
+                // Fallback: extract text for error message
+                let response_text = response
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                AgenticSearchError::Orchestrator(format!(
+                    "No tool use block in Sonnet response: {}",
+                    truncate_for_error(&response_text)
+                ))
+            })?;
 
         let decision: OrchestratorDecisionResponse =
-            serde_json::from_str(json_str).map_err(|e| {
+            serde_json::from_value(tool_use_block.input.clone()).map_err(|e| {
                 AgenticSearchError::Orchestrator(format!(
-                    "Failed to parse Sonnet decision: {e}. Response: {}",
-                    truncate_for_error(&response_text)
+                    "Failed to parse tool input: {e}. Input: {}",
+                    truncate_for_error(&tool_use_block.input.to_string())
                 ))
             })?;
 
@@ -419,19 +475,11 @@ impl AgenticSearchOrchestrator {
                     let truncated_query: String =
                         search_query.chars().take(MAX_LLM_QUERY_LENGTH).collect();
 
+                    // All search operations now use semantic search only
+                    // (which combines dense embeddings + BM25 sparse retrieval)
                     Some(PlannedOperation::Search {
                         query: truncated_query,
-                        search_types: op
-                            .search_types
-                            .unwrap_or_else(|| vec!["unified".to_string()])
-                            .into_iter()
-                            .filter_map(|s| match s.as_str() {
-                                "semantic" => Some(WorkerType::Semantic),
-                                "fulltext" => Some(WorkerType::Fulltext),
-                                "unified" => Some(WorkerType::Unified),
-                                _ => None,
-                            })
-                            .collect(),
+                        search_types: vec![WorkerType::Semantic],
                     })
                 }
                 "graph_traversal" => {
@@ -485,7 +533,7 @@ impl AgenticSearchOrchestrator {
                     );
                     Some(PlannedOperation::Search {
                         query: query.to_string(),
-                        search_types: vec![WorkerType::Unified],
+                        search_types: vec![WorkerType::Semantic],
                     })
                 }
             })
@@ -495,7 +543,6 @@ impl AgenticSearchOrchestrator {
             should_stop: decision.should_stop,
             reason: decision.reason,
             operations,
-            iteration_cost: 0.01,
         })
     }
 
@@ -849,7 +896,6 @@ struct OrchestratorDecision {
     should_stop: bool,
     reason: String,
     operations: Vec<PlannedOperation>,
-    iteration_cost: f32,
 }
 
 /// Response from Sonnet for orchestrator decision
@@ -864,7 +910,6 @@ struct OrchestratorDecisionResponse {
 struct PlannedOperationResponse {
     operation_type: String,
     query: Option<String>,
-    search_types: Option<Vec<String>>,
     entity_id: Option<String>,
     relationship: Option<String>,
 }
@@ -901,8 +946,7 @@ mod tests {
             "operations": [
                 {
                     "operation_type": "search",
-                    "query": "JWT validation implementation",
-                    "search_types": ["semantic", "fulltext"]
+                    "query": "JWT validation implementation"
                 }
             ]
         }"#;

@@ -1,7 +1,7 @@
 //! Shared infrastructure management for multi-repository support
 
 use anyhow::{anyhow, Context, Result};
-use codesearch_core::config::StorageConfig;
+use codesearch_core::config::{Config, StorageConfig};
 use fs2::FileExt;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -10,6 +10,25 @@ use std::time::{Duration, Instant};
 use tracing::info;
 
 use crate::docker;
+
+/// Specifies which vLLM containers are required based on configuration
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VllmRequirements {
+    /// Whether vLLM embeddings container is needed (embeddings.provider == "localapi")
+    pub embeddings: bool,
+    /// Whether vLLM reranker container is needed (reranking.enabled && reranking.provider == "vllm")
+    pub reranker: bool,
+}
+
+impl VllmRequirements {
+    /// Determine vLLM requirements from configuration
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            embeddings: config.embeddings.provider == "localapi",
+            reranker: config.reranking.enabled && config.reranking.provider == "vllm",
+        }
+    }
+}
 
 /// RAII guard for file locking
 ///
@@ -65,19 +84,27 @@ fn get_lock_file_path() -> Result<PathBuf> {
 /// Check if shared infrastructure is running
 ///
 /// # Arguments
-/// * `use_vllm_reranker` - Whether vLLM reranker container is required
-pub fn is_shared_infrastructure_running(use_vllm_reranker: bool) -> Result<bool> {
+/// * `vllm_reqs` - Which vLLM containers are required
+pub fn is_shared_infrastructure_running(vllm_reqs: VllmRequirements) -> Result<bool> {
     let postgres_running = docker::is_postgres_running()?;
     let qdrant_running = docker::is_qdrant_running()?;
     let neo4j_running = docker::is_neo4j_running()?;
-    let vllm_running = docker::is_vllm_running()?;
-    let reranker_ok = if use_vllm_reranker {
+
+    // Check vLLM embeddings only if required
+    let embeddings_ok = if vllm_reqs.embeddings {
+        docker::is_vllm_running()?
+    } else {
+        true
+    };
+
+    // Check vLLM reranker only if required
+    let reranker_ok = if vllm_reqs.reranker {
         docker::is_vllm_reranker_running()?
     } else {
         true
     };
 
-    Ok(postgres_running && qdrant_running && neo4j_running && vllm_running && reranker_ok)
+    Ok(postgres_running && qdrant_running && neo4j_running && embeddings_ok && reranker_ok)
 }
 
 /// Ensure shared infrastructure directory and compose file exist
@@ -119,8 +146,8 @@ async fn ensure_infrastructure_files() -> Result<PathBuf> {
 ///
 /// # Arguments
 /// * `infra_dir` - Path to infrastructure directory containing docker-compose.yml
-/// * `use_vllm_reranker` - Whether to start the vLLM reranker container
-fn start_infrastructure(infra_dir: &Path, use_vllm_reranker: bool) -> Result<()> {
+/// * `vllm_reqs` - Which vLLM containers to start
+fn start_infrastructure(infra_dir: &Path, vllm_reqs: VllmRequirements) -> Result<()> {
     let compose_file = infra_dir.join("docker-compose.yml");
 
     if !compose_file.exists() {
@@ -153,9 +180,13 @@ fn start_infrastructure(infra_dir: &Path, use_vllm_reranker: bool) -> Result<()>
 
     args.extend(["-f", compose_file_str]);
 
-    // Build service list - conditionally include reranker
-    let mut services = vec!["up", "-d", "postgres", "qdrant", "vllm-embeddings", "neo4j"];
-    if use_vllm_reranker {
+    // Build service list - always include postgres, qdrant, neo4j
+    // Conditionally include vLLM containers based on config
+    let mut services = vec!["up", "-d", "postgres", "qdrant", "neo4j"];
+    if vllm_reqs.embeddings {
+        services.push("vllm-embeddings");
+    }
+    if vllm_reqs.reranker {
         services.push("vllm-reranker");
     }
     args.extend(services);
@@ -197,8 +228,8 @@ fn start_infrastructure(infra_dir: &Path, use_vllm_reranker: bool) -> Result<()>
 ///
 /// # Arguments
 /// * `config` - Storage configuration
-/// * `use_vllm_reranker` - Whether to wait for vLLM reranker container
-async fn wait_for_all_services(config: &StorageConfig, use_vllm_reranker: bool) -> Result<()> {
+/// * `vllm_reqs` - Which vLLM containers to wait for
+async fn wait_for_all_services(config: &StorageConfig, vllm_reqs: VllmRequirements) -> Result<()> {
     info!("Waiting for infrastructure services to become healthy...");
 
     // Wait for Postgres
@@ -210,12 +241,14 @@ async fn wait_for_all_services(config: &StorageConfig, use_vllm_reranker: bool) 
     // Wait for Neo4j
     docker::wait_for_neo4j(config, Duration::from_secs(60)).await?;
 
-    // Wait for vLLM embeddings
-    let api_url = "http://localhost:8000/v1";
-    docker::wait_for_vllm(api_url, Duration::from_secs(60)).await?;
+    // Wait for vLLM embeddings (only if using localapi provider)
+    if vllm_reqs.embeddings {
+        let api_url = "http://localhost:8000/v1";
+        docker::wait_for_vllm(api_url, Duration::from_secs(60)).await?;
+    }
 
     // Wait for vLLM reranker (only if using vLLM provider)
-    if use_vllm_reranker {
+    if vllm_reqs.reranker {
         let reranker_api_url = "http://localhost:8001";
         docker::wait_for_vllm(reranker_api_url, Duration::from_secs(60)).await?;
     }
@@ -231,13 +264,13 @@ async fn wait_for_all_services(config: &StorageConfig, use_vllm_reranker: bool) 
 ///
 /// # Arguments
 /// * `config` - Storage configuration
-/// * `use_vllm_reranker` - Whether to start and wait for vLLM reranker container
+/// * `vllm_reqs` - Which vLLM containers are required
 pub async fn ensure_shared_infrastructure(
     config: &StorageConfig,
-    use_vllm_reranker: bool,
+    vllm_reqs: VllmRequirements,
 ) -> Result<()> {
     // Check if already running
-    if is_shared_infrastructure_running(use_vllm_reranker)? {
+    if is_shared_infrastructure_running(vllm_reqs)? {
         info!("Shared infrastructure is already running");
         return Ok(());
     }
@@ -278,7 +311,7 @@ pub async fn ensure_shared_infrastructure(
     info!("Lock acquired, proceeding with initialization");
 
     // Double-check if infrastructure was started by another process
-    if is_shared_infrastructure_running(use_vllm_reranker)? {
+    if is_shared_infrastructure_running(vllm_reqs)? {
         info!("Infrastructure was started by another process");
         // Lock will be automatically released when _lock_guard drops
         return Ok(());
@@ -288,10 +321,10 @@ pub async fn ensure_shared_infrastructure(
     let infra_dir = ensure_infrastructure_files().await?;
 
     // Start infrastructure
-    start_infrastructure(&infra_dir, use_vllm_reranker)?;
+    start_infrastructure(&infra_dir, vllm_reqs)?;
 
     // Wait for services to be healthy
-    wait_for_all_services(config, use_vllm_reranker).await?;
+    wait_for_all_services(config, vllm_reqs).await?;
 
     // Lock will be automatically released when _lock_guard drops
     info!("Shared infrastructure initialization complete");

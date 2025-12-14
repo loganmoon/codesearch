@@ -586,8 +586,8 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
 
     // Ensure dependencies are running
     if config.storage.auto_start_deps {
-        let use_vllm_reranker = config.reranking.enabled && config.reranking.provider == "vllm";
-        infrastructure::ensure_shared_infrastructure(&config.storage, use_vllm_reranker).await?;
+        let vllm_reqs = infrastructure::VllmRequirements::from_config(&config);
+        infrastructure::ensure_shared_infrastructure(&config.storage, vllm_reqs).await?;
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }
@@ -705,8 +705,8 @@ async fn handle_cache_command(command: CacheCommands, config_path: Option<&Path>
 
     // Ensure dependencies are running
     if config.storage.auto_start_deps {
-        let use_vllm_reranker = config.reranking.enabled && config.reranking.provider == "vllm";
-        infrastructure::ensure_shared_infrastructure(&config.storage, use_vllm_reranker).await?;
+        let vllm_reqs = infrastructure::VllmRequirements::from_config(&config);
+        infrastructure::ensure_shared_infrastructure(&config.storage, vllm_reqs).await?;
         let api_base_url = get_api_base_url_if_local_api(&config);
         docker::ensure_dependencies_running(&config.storage, api_base_url).await?;
     }

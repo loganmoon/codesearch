@@ -1,0 +1,258 @@
+{
+  "metadata": {
+    "judge_model": "gemini-2.5-pro",
+    "timestamp": "2025-12-14T12:53:33.542184",
+    "limit": 10,
+    "repository": "nushell"
+  },
+  "semantic": {
+    "endpoint": "semantic",
+    "aggregate_metrics": {
+      "num_queries": 1,
+      "mean_ndcg_5": 0.8584912361856167,
+      "mean_ndcg_10": 0.8163978071115595,
+      "mean_ndcg_20": 0.7850371826126036,
+      "std_ndcg_5": 0.0,
+      "std_ndcg_10": 0.0,
+      "std_ndcg_20": 0.0,
+      "min_ndcg_10": 0.8163978071115595,
+      "max_ndcg_10": 0.8163978071115595
+    },
+    "per_query_results": [
+      {
+        "query_id": "sem_001",
+        "query": "Find the implementation that handles data transmission between commands in a shell sequence",
+        "ndcg_5": 0.8584912361856167,
+        "ndcg_10": 0.8163978071115595,
+        "ndcg_20": 0.7850371826126036,
+        "scored_results": [
+          {
+            "entity_id": "entity-a428b0f0117105001e9d9c0890a7bf69",
+            "qualified_name": "nu_protocol::pipeline::pipeline_data::PipelineData",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the user's request. Excellent work in providing a direct and focused answer!",
+            "original_rank": 1,
+            "original_score": 0.37989092
+          },
+          {
+            "entity_id": "entity-dd8e086150aef10ed2fd3868509fade3",
+            "qualified_name": "<external::PluginInterface as nu_plugin_core::Interface>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-engine/src/interface/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the user's request. Excellent work in providing a direct and focused answer!",
+            "original_rank": 2,
+            "original_score": 0.20776442
+          },
+          {
+            "entity_id": "entity-17a7f89b89f6e33d3abc2b0214cec4f6",
+            "qualified_name": "<external::Seq as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/seq.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely fails to address the user's query. Instead of explaining the mechanism for data transmission *between* commands, it incorrectly focuses entirely on the implementation details of a single, unrelated data-generating command (`seq`).",
+            "original_rank": 3,
+            "original_score": 0.19601497
+          },
+          {
+            "entity_id": "entity-ce504c53496e83e2fcb498ff1e781ef6",
+            "qualified_name": "<external::Help as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/help/help_.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output is completely irrelevant to the user's request. The input asks about data transmission between shell commands, but the output exclusively describes the implementation of a `help` command, failing to address the query in any capacity.",
+            "original_rank": 4,
+            "original_score": 0.15341888
+          },
+          {
+            "entity_id": "entity-03bf0993de9548373956aa513aab0da8",
+            "qualified_name": "nu_plugin_engine::interface::PluginInterfaceState",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-engine/src/interface/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 0.78 because the answer is largely relevant to the user's query about data transmission. It is not higher because it includes irrelevant information about generating unique identifiers for plugin calls and data streams, which is not the core mechanism of data transmission between commands.",
+            "original_rank": 5,
+            "original_score": 0.07148242
+          },
+          {
+            "entity_id": "entity-946d75441f44f2cb0da11d09ce938dbe",
+            "qualified_name": "nu_command::generators::seq_char",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/mod.rs",
+            "score": 0,
+            "reasoning": "The score is 0 because the output is completely irrelevant to the user's request. Instead of addressing data transmission between commands, it provided information about a module that generates a single, specific command, which does not answer the user's question at all.",
+            "original_rank": 6,
+            "original_score": 0.04377585
+          },
+          {
+            "entity_id": "entity-2b77362543af2d9e01fb930cfd909c91",
+            "qualified_name": "nu_command::formats::to::command::To",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/formats/to/command.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely misunderstands the user's request. It provides information about data formatting commands, which is entirely irrelevant to the user's query about the mechanism for data transmission between commands in a shell pipeline.",
+            "original_rank": 7,
+            "original_score": 0.03785843
+          },
+          {
+            "entity_id": "entity-95849631327c95cacfe6fd6f04dc4207",
+            "qualified_name": "nu_plugin_example::commands::seq",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_example/src/commands/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.0 because the output is perfectly on-topic and directly addresses the user's request. Excellent work!",
+            "original_rank": 8,
+            "original_score": -0.02736609
+          },
+          {
+            "entity_id": "entity-d759c5ba5f0a9a653cea25cc3211e467",
+            "qualified_name": "nu_plugin_example::commands::seq::Seq",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_example/src/commands/seq.rs",
+            "score": 2,
+            "reasoning": "The score is 1.0 because the output is perfectly on-topic and directly addresses the user's request. Excellent work!",
+            "original_rank": 9,
+            "original_score": -0.04085627
+          },
+          {
+            "entity_id": "entity-76a24535cd90290b2917c2630453c536",
+            "qualified_name": "Pattern",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-glob/src/lib.rs",
+            "score": 0,
+            "reasoning": "The score is 0.0 because the output is entirely irrelevant to the user's request. The user asked for information on data transmission between commands, but the output provided code for file path globbing, which is a completely different functionality.",
+            "original_rank": 10,
+            "original_score": -0.05528932
+          }
+        ]
+      }
+    ]
+  },
+  "agentic": {
+    "endpoint": "agentic",
+    "aggregate_metrics": {
+      "num_queries": 1,
+      "mean_ndcg_5": 0.6223260412204333,
+      "mean_ndcg_10": 0.6264860323190806,
+      "mean_ndcg_20": 0.5899257315016727,
+      "std_ndcg_5": 0.0,
+      "std_ndcg_10": 0.0,
+      "std_ndcg_20": 0.0,
+      "min_ndcg_10": 0.6264860323190806,
+      "max_ndcg_10": 0.6264860323190806
+    },
+    "per_query_results": [
+      {
+        "query_id": "sem_001",
+        "query": "Find the implementation that handles data transmission between commands in a shell sequence",
+        "ndcg_5": 0.6223260412204333,
+        "ndcg_10": 0.6264860323190806,
+        "ndcg_20": 0.5899257315016727,
+        "scored_results": [
+          {
+            "entity_id": "entity-8d1c92ad6851a7c5b94db36ac5c13b7e",
+            "qualified_name": "joins_sequence_with_pipe",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/tests/commands/seq_char.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely fails to address the user's request. Instead of providing the core implementation for data transmission, it identifies irrelevant test functions, test files, and specific examples, which do not answer the user's question about the underlying mechanism.",
+            "original_rank": 1,
+            "original_score": 0.92
+          },
+          {
+            "entity_id": "entity-a8e21d9cc8bf4b34b27063e22efc721c",
+            "qualified_name": "<external::SeqChar as external::Command>::examples",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/seq_char.rs",
+            "score": 1,
+            "reasoning": "The score is 0.5 because the output fails to address the core of the user's query regarding data transmission between commands. Instead, it provides irrelevant information about generating examples for single, isolated commands, which does not answer the question.",
+            "original_rank": 2,
+            "original_score": 0.88
+          },
+          {
+            "entity_id": "entity-2fbe7bb152fe733db64540ee9c214c20",
+            "qualified_name": "<super::HelpPipeAndRedirect as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/help/help_pipe_and_redirect.rs",
+            "score": 1,
+            "reasoning": "The score is very low because the output completely misses the user's intent. Instead of discussing the implementation of data transmission between commands (pipelines), it provides irrelevant details about help documentation, examples, and file redirection.",
+            "original_rank": 3,
+            "original_score": 0.85
+          },
+          {
+            "entity_id": "entity-147a2c3950c746b27887a61c659ccb9d",
+            "qualified_name": "<super::HelpPipeAndRedirect as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/help/help_pipe_and_redirect.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely fails to answer the user's request. Instead of providing the implementation code for data transmission, it only describes the function of shell operators and points to irrelevant help commands.",
+            "original_rank": 4,
+            "original_score": 0.82
+          },
+          {
+            "entity_id": "entity-de9e206d1130e2d88247edb6ca8e7e14",
+            "qualified_name": "<external::Complete as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/system/complete.rs",
+            "score": 2,
+            "reasoning": "The score is 0.90 because the output correctly identifies the implementation for data transmission but also includes some irrelevant metadata, such as the file path and command name, which do not describe the implementation itself.",
+            "original_rank": 5,
+            "original_score": 0.75
+          },
+          {
+            "entity_id": "entity-365333840a664198db0f8e8dc82e8bb9",
+            "qualified_name": "<external::SeqChar as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/seq_char.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely fails to address the user's question. Instead of explaining the implementation of data transmission between commands, it provides a detailed description of a single, irrelevant command, `seq_char`.",
+            "original_rank": 6,
+            "original_score": 0.72
+          },
+          {
+            "entity_id": "entity-80b162c436b99b15449aab0d86699d69",
+            "qualified_name": "<external::Seq as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/seq.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output is completely irrelevant to the user's request. Instead of explaining how data is transmitted between commands in a shell sequence (i.e., pipes), the output repeatedly described the `seq` command, which is an entirely different topic.",
+            "original_rank": 7,
+            "original_score": 0.68
+          },
+          {
+            "entity_id": "entity-bf0097cf115cc9cea9bf37a6dd4e9921",
+            "qualified_name": "nu_plugin_core::interface::tests::read_pipeline_data_list_stream",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-core/src/interface/tests.rs",
+            "score": 2,
+            "reasoning": "The score is 0.79 because while the output correctly identifies the core logic for data transmission, it also includes several irrelevant details about the testing implementation, such as creating mock data and specific test assertions, which were not part of the user's request.",
+            "original_rank": 8,
+            "original_score": 0.68
+          },
+          {
+            "entity_id": "entity-a948bbe6af017a23e9b6791fb6f625c1",
+            "qualified_name": "<external::Save as external::Command>::pipe_redirection",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filesystem/save.rs",
+            "score": 2,
+            "reasoning": "The score is 1.0 because the output is perfectly on-topic and directly answers the user's query about shell command data transmission without any irrelevant information. Excellent work!",
+            "original_rank": 9,
+            "original_score": 0.65
+          },
+          {
+            "entity_id": "entity-026ab74a316f2dfa84c74148ebc14213",
+            "qualified_name": "<external::Tee as external::Command>::pipe_redirection",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/tee.rs",
+            "score": 2,
+            "reasoning": "The score is 1.0 because the output is perfectly on-topic and directly answers the user's query about shell command data transmission without any irrelevant information. Excellent work!",
+            "original_rank": 10,
+            "original_score": 0.65
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 const JINA_API_URL: &str = "https://api.jina.ai/v1/rerank";
 
@@ -103,7 +103,7 @@ impl RerankerProvider for JinaRerankerProvider {
             return_documents: false,
         };
 
-        debug!(
+        info!(
             "Sending Jina rerank request for {} documents",
             documents.len()
         );
@@ -160,7 +160,7 @@ impl RerankerProvider for JinaRerankerProvider {
         // Sort by relevance score descending with NaN handling
         sort_scores_descending(&mut scored_docs);
 
-        debug!(
+        info!(
             "Jina reranking complete: returned {} results",
             scored_docs.len()
         );

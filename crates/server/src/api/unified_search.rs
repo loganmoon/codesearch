@@ -101,10 +101,17 @@ pub async fn search_unified(
     );
 
     let (final_results, reranked) = if rerank_config.enabled && clients.reranker.is_some() {
+        let rerank_start = Instant::now();
         tracing::info!(candidates = boosted_results.len(), "Starting reranking");
-        rerank_merged_results(boosted_results, &request, clients, &rerank_config).await?
+        let result =
+            rerank_merged_results(boosted_results, &request, clients, &rerank_config).await?;
+        tracing::info!(
+            rerank_time_ms = rerank_start.elapsed().as_millis() as u64,
+            "Reranking completed"
+        );
+        result
     } else {
-        tracing::debug!(
+        tracing::info!(
             rerank_enabled = rerank_config.enabled,
             reranker_available = clients.reranker.is_some(),
             "Skipping reranking"

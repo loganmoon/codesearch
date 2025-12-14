@@ -25,6 +25,11 @@ from deepeval.metrics import AnswerRelevancyMetric
 from deepeval.test_case import LLMTestCase
 
 
+class RateLimitError(Exception):
+    """Raised when API rate limit is exceeded."""
+    pass
+
+
 @dataclass
 class ScoredResult:
     """A search result with LLM-assigned relevance score."""
@@ -120,6 +125,10 @@ class CodeSearchJudge:
                 score = max(0, min(2, score))
                 reason = metric.reason if metric.reason else "No reasoning provided"
             except Exception as e:
+                error_str = str(e).lower()
+                # Check for rate limit errors - must exit immediately
+                if "429" in str(e) or "resource_exhausted" in error_str or "rate" in error_str and "limit" in error_str:
+                    raise RateLimitError(f"API rate limit exceeded: {e}") from e
                 print(f"    Warning: Failed to score result {index+1}: {e}", file=sys.stderr)
                 score, reason = 0, f"Scoring failed: {e}"
 
@@ -696,16 +705,27 @@ def main():
     print(f"Parallelism: {args.max_query_concurrency} queries, {args.max_concurrent} LLM calls/query")
     print("=" * 70)
 
-    comparison = asyncio.run(run_evaluation(
-        queries_path=args.queries,
-        api_url=args.api_url,
-        output_path=args.output,
-        limit=args.limit,
-        repo_name=args.repo,
-        max_queries=args.max_queries,
-        max_concurrent=args.max_concurrent,
-        max_query_concurrency=args.max_query_concurrency,
-    ))
+    try:
+        comparison = asyncio.run(run_evaluation(
+            queries_path=args.queries,
+            api_url=args.api_url,
+            output_path=args.output,
+            limit=args.limit,
+            repo_name=args.repo,
+            max_queries=args.max_queries,
+            max_concurrent=args.max_concurrent,
+            max_query_concurrency=args.max_query_concurrency,
+        ))
+    except RateLimitError as e:
+        print(f"\n{'='*70}", file=sys.stderr)
+        print("FATAL: Rate limit exceeded - stopping evaluation", file=sys.stderr)
+        print(f"{'='*70}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
+        print("\nSuggestions:", file=sys.stderr)
+        print("  - Wait a few minutes before retrying", file=sys.stderr)
+        print("  - Reduce --max-query-concurrency (current: {})".format(args.max_query_concurrency), file=sys.stderr)
+        print("  - Reduce --max-concurrent (current: {})".format(args.max_concurrent), file=sys.stderr)
+        sys.exit(1)
 
     # Print comparison tables
     print_comparison_table(comparison.semantic, comparison.agentic, args.limit)

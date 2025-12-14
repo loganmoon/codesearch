@@ -42,19 +42,17 @@ pub(crate) fn sort_scores_descending(scored_docs: &mut [(String, f32)]) {
 pub trait RerankerProvider: Send + Sync {
     /// Rerank documents by relevance to the query
     ///
+    /// Scores all provided documents and returns them sorted by relevance.
+    /// The caller is responsible for truncating to desired number of results.
+    ///
     /// # Arguments
     /// * `query` - The search query text
     /// * `documents` - List of (document_id, document_content) tuples to rerank
-    /// * `top_k` - Number of top results to return
     ///
     /// # Returns
-    /// A vector of (document_id, relevance_score) tuples, sorted by descending relevance
-    async fn rerank(
-        &self,
-        query: &str,
-        documents: &[(String, &str)],
-        top_k: usize,
-    ) -> Result<Vec<(String, f32)>>;
+    /// A vector of (document_id, relevance_score) tuples for all documents, sorted by descending relevance
+    async fn rerank(&self, query: &str, documents: &[(String, &str)])
+        -> Result<Vec<(String, f32)>>;
 }
 
 /// Create a new reranker provider based on configuration

@@ -85,7 +85,6 @@ impl RerankerProvider for JinaRerankerProvider {
         &self,
         query: &str,
         documents: &[(String, &str)],
-        top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
         if documents.is_empty() {
             return Ok(Vec::new());
@@ -100,7 +99,7 @@ impl RerankerProvider for JinaRerankerProvider {
             model: self.model.clone(),
             query: query.to_string(),
             documents: doc_texts,
-            top_n: top_k,
+            top_n: documents.len(),
             return_documents: false,
         };
 
@@ -160,9 +159,6 @@ impl RerankerProvider for JinaRerankerProvider {
 
         // Sort by relevance score descending with NaN handling
         sort_scores_descending(&mut scored_docs);
-
-        // Truncate to top_k (Jina should already limit, but ensure)
-        scored_docs.truncate(top_k);
 
         debug!(
             "Jina reranking complete: returned {} results",

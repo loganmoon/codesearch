@@ -125,7 +125,6 @@ impl RerankerProvider for VllmRerankerProvider {
         &self,
         query: &str,
         documents: &[(String, &str)],
-        top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
         if documents.is_empty() {
             return Ok(Vec::new());
@@ -207,9 +206,6 @@ impl RerankerProvider for VllmRerankerProvider {
 
         // Sort by relevance score descending with NaN handling
         sort_scores_descending(&mut scored_docs);
-
-        // Truncate to top_k
-        scored_docs.truncate(top_k);
 
         debug!("Reranking complete: returned {} results", scored_docs.len());
 

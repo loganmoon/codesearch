@@ -212,13 +212,12 @@ async fn apply_semantic_filter(
 
             let documents = prepare_documents_for_reranking(&entity_contents);
 
-            match reranker_provider
-                .rerank(semantic_filter, &documents, request.limit)
-                .await
-            {
+            match reranker_provider.rerank(semantic_filter, &documents).await {
                 Ok(reranked) => {
+                    // Reranker returns all documents sorted; truncate to requested limit
                     let results: Vec<GraphResult> = reranked
                         .into_iter()
+                        .take(request.limit)
                         .map(|(qname, score)| {
                             let entity = if request.return_entities {
                                 entities

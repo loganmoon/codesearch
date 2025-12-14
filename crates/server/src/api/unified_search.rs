@@ -86,14 +86,15 @@ pub async fn search_unified(
     // Skip specificity boost - it was having negative effects on search quality
     let boosted_results = merged_results;
 
-    let (final_results, reranked) = if request
+    // Merge rerank config: request overrides take precedence, fall back to server config
+    let rerank_config = request
         .rerank
         .as_ref()
-        .and_then(|r| r.enabled)
-        .unwrap_or(false)
-        && clients.reranker.is_some()
-    {
-        rerank_merged_results(boosted_results, &request, clients, config).await?
+        .map(|r| r.merge_with(&config.reranking))
+        .unwrap_or_else(|| config.reranking.clone());
+
+    let (final_results, reranked) = if rerank_config.enabled && clients.reranker.is_some() {
+        rerank_merged_results(boosted_results, &request, clients, &rerank_config).await?
     } else {
         (boosted_results, false)
     };
@@ -249,22 +250,14 @@ async fn rerank_merged_results(
     merged_results: Vec<(CodeEntity, f32)>,
     request: &UnifiedSearchRequest,
     clients: &BackendClients,
-    config: &SearchConfig,
+    rerank_config: &codesearch_core::config::RerankingConfig,
 ) -> Result<(Vec<(CodeEntity, f32)>, bool)> {
     let reranker = match &clients.reranker {
         Some(r) => r,
         None => return Ok((merged_results, false)),
     };
 
-    let rerank_config = request
-        .rerank
-        .as_ref()
-        .map(|r| r.merge_with(&config.reranking))
-        .unwrap_or_else(|| config.reranking.clone());
-
     let candidates_limit = rerank_config.candidates.min(merged_results.len());
-    let final_limit = rerank_config.top_k.min(request.limit);
-
     let candidates: Vec<_> = merged_results.into_iter().take(candidates_limit).collect();
 
     let entity_contents: Vec<(String, String)> = candidates
@@ -274,16 +267,14 @@ async fn rerank_merged_results(
 
     let documents = prepare_documents_for_reranking(&entity_contents);
 
-    match reranker
-        .rerank(&request.query.text, &documents, final_limit)
-        .await
-    {
+    match reranker.rerank(&request.query.text, &documents).await {
         Ok(reranked) => {
             let entities_map: HashMap<String, CodeEntity> = candidates
                 .into_iter()
                 .map(|(entity, _)| (entity.entity_id.clone(), entity))
                 .collect();
 
+            // Reranker returns all documents sorted by relevance; caller truncates via request.limit
             let results = reranked
                 .into_iter()
                 .filter_map(|(entity_id, score)| {

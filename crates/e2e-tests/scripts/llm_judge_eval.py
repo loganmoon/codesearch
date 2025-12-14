@@ -25,6 +25,11 @@ from deepeval.metrics import AnswerRelevancyMetric
 from deepeval.test_case import LLMTestCase
 
 
+class RateLimitError(Exception):
+    """Raised when API rate limit is exceeded."""
+    pass
+
+
 @dataclass
 class ScoredResult:
     """A search result with LLM-assigned relevance score."""
@@ -44,9 +49,7 @@ class QueryEvaluation:
     query_id: str
     query_text: str
     scored_results: list[ScoredResult]
-    ndcg_5: float
-    ndcg_10: float
-    ndcg_20: float
+    ndcg_scores: dict[int, float]  # k -> NDCG@k, only for valid k values
 
 
 @dataclass
@@ -122,6 +125,10 @@ class CodeSearchJudge:
                 score = max(0, min(2, score))
                 reason = metric.reason if metric.reason else "No reasoning provided"
             except Exception as e:
+                error_str = str(e).lower()
+                # Check for rate limit errors - must exit immediately
+                if "429" in str(e) or "resource_exhausted" in error_str or "rate" in error_str and "limit" in error_str:
+                    raise RateLimitError(f"API rate limit exceeded: {e}") from e
                 print(f"    Warning: Failed to score result {index+1}: {e}", file=sys.stderr)
                 score, reason = 0, f"Scoring failed: {e}"
 
@@ -140,7 +147,8 @@ class CodeSearchJudge:
         self,
         query_id: str,
         query_text: str,
-        results: list[dict]
+        results: list[dict],
+        limit: int,
     ) -> QueryEvaluation:
         """Score all results for a query concurrently and compute NDCG.
 
@@ -148,6 +156,7 @@ class CodeSearchJudge:
             query_id: Unique identifier for the query
             query_text: The search query text
             results: List of search results with entity details
+            limit: The result limit - NDCG is only calculated for valid k <= limit
 
         Returns:
             QueryEvaluation with scores and NDCG metrics
@@ -162,19 +171,18 @@ class CodeSearchJudge:
         ]
         scored_results = await asyncio.gather(*tasks)
 
-        # Calculate NDCG at different cutoffs
+        # Calculate NDCG only at valid cutoffs (k <= limit)
         relevance_scores = [r.score for r in scored_results]
-        ndcg_5 = calculate_ndcg(relevance_scores, k=5)
-        ndcg_10 = calculate_ndcg(relevance_scores, k=10)
-        ndcg_20 = calculate_ndcg(relevance_scores, k=20)
+        ndcg_scores = {}
+        for k in [5, 10, 20]:
+            if k <= limit:
+                ndcg_scores[k] = calculate_ndcg(relevance_scores, k=k)
 
         return QueryEvaluation(
             query_id=query_id,
             query_text=query_text,
             scored_results=list(scored_results),
-            ndcg_5=ndcg_5,
-            ndcg_10=ndcg_10,
-            ndcg_20=ndcg_20,
+            ndcg_scores=ndcg_scores,
         )
 
 
@@ -212,26 +220,31 @@ def calculate_ndcg(relevance_scores: list[int], k: int) -> float:
     return float(ndcg_score(y_true, y_score, k=k))
 
 
-def calculate_aggregate_metrics(query_results: list[QueryEvaluation]) -> dict:
-    """Calculate aggregate metrics from query results."""
+def calculate_aggregate_metrics(query_results: list[QueryEvaluation], limit: int) -> dict:
+    """Calculate aggregate metrics from query results.
+
+    Args:
+        query_results: List of query evaluations
+        limit: The result limit - determines which NDCG@k values are available
+    """
     if not query_results:
         return {}
 
-    ndcg_5_values = [q.ndcg_5 for q in query_results]
-    ndcg_10_values = [q.ndcg_10 for q in query_results]
-    ndcg_20_values = [q.ndcg_20 for q in query_results]
+    # Determine which k values we have based on limit
+    k_values = [k for k in [5, 10, 20] if k <= limit]
+    if not k_values:
+        return {"num_queries": len(query_results)}
 
-    return {
-        "num_queries": len(query_results),
-        "mean_ndcg_5": float(np.mean(ndcg_5_values)),
-        "mean_ndcg_10": float(np.mean(ndcg_10_values)),
-        "mean_ndcg_20": float(np.mean(ndcg_20_values)),
-        "std_ndcg_5": float(np.std(ndcg_5_values)),
-        "std_ndcg_10": float(np.std(ndcg_10_values)),
-        "std_ndcg_20": float(np.std(ndcg_20_values)),
-        "min_ndcg_10": float(np.min(ndcg_10_values)),
-        "max_ndcg_10": float(np.max(ndcg_10_values)),
-    }
+    metrics = {"num_queries": len(query_results), "k_values": k_values}
+
+    for k in k_values:
+        values = [q.ndcg_scores.get(k, 0.0) for q in query_results]
+        metrics[f"mean_ndcg_{k}"] = float(np.mean(values))
+        metrics[f"std_ndcg_{k}"] = float(np.std(values))
+        metrics[f"min_ndcg_{k}"] = float(np.min(values))
+        metrics[f"max_ndcg_{k}"] = float(np.max(values))
+
+    return metrics
 
 
 async def fetch_search_results(
@@ -341,9 +354,7 @@ def save_results(evaluation: ComparisonEvaluation, output_path: str) -> None:
                 {
                     "query_id": q.query_id,
                     "query": q.query_text,
-                    "ndcg_5": q.ndcg_5,
-                    "ndcg_10": q.ndcg_10,
-                    "ndcg_20": q.ndcg_20,
+                    "ndcg_scores": q.ndcg_scores,
                     "scored_results": [
                         {
                             "entity_id": r.entity_id,
@@ -372,7 +383,7 @@ def save_results(evaluation: ComparisonEvaluation, output_path: str) -> None:
         json.dump(output, f, indent=2)
 
 
-def print_comparison_table(semantic: EndpointEvaluation, agentic: EndpointEvaluation) -> None:
+def print_comparison_table(semantic: EndpointEvaluation, agentic: EndpointEvaluation, limit: int) -> None:
     """Print a side-by-side comparison table of metrics."""
     sem = semantic.aggregate_metrics
     agt = agentic.aggregate_metrics
@@ -381,6 +392,9 @@ def print_comparison_table(semantic: EndpointEvaluation, agentic: EndpointEvalua
         print("Insufficient data for comparison")
         return
 
+    k_values = sem.get('k_values', [k for k in [5, 10, 20] if k <= limit])
+    primary_k = max(k_values) if k_values else 10
+
     print("\n" + "=" * 70)
     print("SIDE-BY-SIDE COMPARISON")
     print("=" * 70)
@@ -388,31 +402,46 @@ def print_comparison_table(semantic: EndpointEvaluation, agentic: EndpointEvalua
     print("-" * 70)
     print(f"{'Queries evaluated':<25} {sem['num_queries']:>20} {agt['num_queries']:>20}")
     print("-" * 70)
-    print(f"{'Mean NDCG@5':<25} {sem['mean_ndcg_5']:>20.4f} {agt['mean_ndcg_5']:>20.4f}")
-    print(f"{'Mean NDCG@10':<25} {sem['mean_ndcg_10']:>20.4f} {agt['mean_ndcg_10']:>20.4f}")
-    print(f"{'Mean NDCG@20':<25} {sem['mean_ndcg_20']:>20.4f} {agt['mean_ndcg_20']:>20.4f}")
+
+    for k in k_values:
+        sem_val = sem.get(f'mean_ndcg_{k}', 0.0)
+        agt_val = agt.get(f'mean_ndcg_{k}', 0.0)
+        print(f"{f'Mean NDCG@{k}':<25} {sem_val:>20.4f} {agt_val:>20.4f}")
+
     print("-" * 70)
-    print(f"{'Std NDCG@10':<25} {sem['std_ndcg_10']:>20.4f} {agt['std_ndcg_10']:>20.4f}")
-    print(f"{'Min NDCG@10':<25} {sem['min_ndcg_10']:>20.4f} {agt['min_ndcg_10']:>20.4f}")
-    print(f"{'Max NDCG@10':<25} {sem['max_ndcg_10']:>20.4f} {agt['max_ndcg_10']:>20.4f}")
+    sem_std = sem.get(f'std_ndcg_{primary_k}', 0.0)
+    agt_std = agt.get(f'std_ndcg_{primary_k}', 0.0)
+    sem_min = sem.get(f'min_ndcg_{primary_k}', 0.0)
+    agt_min = agt.get(f'min_ndcg_{primary_k}', 0.0)
+    sem_max = sem.get(f'max_ndcg_{primary_k}', 0.0)
+    agt_max = agt.get(f'max_ndcg_{primary_k}', 0.0)
+
+    print(f"{f'Std NDCG@{primary_k}':<25} {sem_std:>20.4f} {agt_std:>20.4f}")
+    print(f"{f'Min NDCG@{primary_k}':<25} {sem_min:>20.4f} {agt_min:>20.4f}")
+    print(f"{f'Max NDCG@{primary_k}':<25} {sem_max:>20.4f} {agt_max:>20.4f}")
     print("=" * 70)
 
-    # Highlight winner
-    sem_ndcg10 = sem['mean_ndcg_10']
-    agt_ndcg10 = agt['mean_ndcg_10']
-    diff = agt_ndcg10 - sem_ndcg10
+    # Highlight winner using the primary k value
+    sem_ndcg = sem.get(f'mean_ndcg_{primary_k}', 0.0)
+    agt_ndcg = agt.get(f'mean_ndcg_{primary_k}', 0.0)
+    diff = agt_ndcg - sem_ndcg
     if abs(diff) < 0.01:
         print("Result: Roughly equivalent performance")
     elif diff > 0:
-        print(f"Result: Agentic search is better by {diff:.4f} NDCG@10 ({diff/sem_ndcg10*100:.1f}% improvement)")
+        pct = (diff / sem_ndcg * 100) if sem_ndcg > 0 else 0
+        print(f"Result: Agentic search is better by {diff:.4f} NDCG@{primary_k} ({pct:.1f}% improvement)")
     else:
-        print(f"Result: Semantic search is better by {-diff:.4f} NDCG@10 ({-diff/agt_ndcg10*100:.1f}% improvement)")
+        pct = (-diff / agt_ndcg * 100) if agt_ndcg > 0 else 0
+        print(f"Result: Semantic search is better by {-diff:.4f} NDCG@{primary_k} ({pct:.1f}% improvement)")
 
 
-def print_per_query_comparison(semantic: EndpointEvaluation, agentic: EndpointEvaluation) -> None:
+def print_per_query_comparison(semantic: EndpointEvaluation, agentic: EndpointEvaluation, limit: int) -> None:
     """Print per-query NDCG comparison."""
+    # Use the highest valid k value
+    primary_k = max(k for k in [5, 10, 20] if k <= limit)
+
     print("\n" + "=" * 90)
-    print("PER-QUERY NDCG@10 COMPARISON")
+    print(f"PER-QUERY NDCG@{primary_k} COMPARISON")
     print("=" * 90)
     print(f"{'Query ID':<12} {'Semantic':>12} {'Agentic':>12} {'Delta':>12} {'Winner':<15}")
     print("-" * 90)
@@ -430,8 +459,8 @@ def print_per_query_comparison(semantic: EndpointEvaluation, agentic: EndpointEv
         sem_q = sem_by_id.get(qid)
         agt_q = agt_by_id.get(qid)
 
-        sem_ndcg = sem_q.ndcg_10 if sem_q else 0.0
-        agt_ndcg = agt_q.ndcg_10 if agt_q else 0.0
+        sem_ndcg = sem_q.ndcg_scores.get(primary_k, 0.0) if sem_q else 0.0
+        agt_ndcg = agt_q.ndcg_scores.get(primary_k, 0.0) if agt_q else 0.0
         delta = agt_ndcg - sem_ndcg
 
         if abs(delta) < 0.01:
@@ -451,6 +480,65 @@ def print_per_query_comparison(semantic: EndpointEvaluation, agentic: EndpointEv
     print("=" * 90)
 
 
+async def evaluate_single_query(
+    query_idx: int,
+    query: dict,
+    total_queries: int,
+    session: aiohttp.ClientSession,
+    api_url: str,
+    repository_ids: list[str],
+    limit: int,
+    judge: CodeSearchJudge,
+    query_semaphore: asyncio.Semaphore,
+) -> tuple[Optional[QueryEvaluation], Optional[QueryEvaluation]]:
+    """Evaluate a single query against both endpoints.
+
+    Returns:
+        Tuple of (semantic_result, agentic_result), either may be None on error
+    """
+    async with query_semaphore:
+        query_id = query.get("id", f"query_{query_idx}")
+        query_text = query.get("query", "")
+
+        print(f"\n[{query_idx+1}/{total_queries}] Query: {query_id}")
+        print(f"  {query_text[:70]}...")
+
+        semantic_eval = None
+        agentic_eval = None
+
+        # Determine primary k for logging
+        primary_k = max(k for k in [5, 10, 20] if k <= limit)
+
+        for endpoint in ["semantic", "agentic"]:
+            print(f"  {endpoint.capitalize()}:", end=" ", flush=True)
+
+            try:
+                results = await fetch_search_results(
+                    session, api_url, query_text, repository_ids, endpoint, limit
+                )
+                print(f"{len(results)} results", end="", flush=True)
+            except Exception as e:
+                print(f"ERROR: {e}", file=sys.stderr)
+                continue
+
+            if not results:
+                print(" (empty)")
+                continue
+
+            # Score results with LLM (async concurrent scoring)
+            evaluation = await judge.evaluate_query(query_id, query_text, results, limit)
+
+            if endpoint == "semantic":
+                semantic_eval = evaluation
+            else:
+                agentic_eval = evaluation
+
+            ndcg_val = evaluation.ndcg_scores.get(primary_k, 0.0)
+            print(f" -> NDCG@{primary_k}={ndcg_val:.3f}")
+
+        return (semantic_eval, agentic_eval)
+
+
 async def run_evaluation(
     queries_path: str,
     api_url: str,
@@ -459,6 +547,7 @@ async def run_evaluation(
     repo_name: str,
     max_queries: Optional[int] = None,
     max_concurrent: int = 10,
+    max_query_concurrency: int = 4,
 ) -> ComparisonEvaluation:
     """Run the full evaluation pipeline for both endpoints.
 
@@ -469,7 +558,8 @@ async def run_evaluation(
         limit: Number of results to retrieve per query
         repo_name: Repository name to search
         max_queries: Optional limit on number of queries to evaluate
-        max_concurrent: Maximum concurrent LLM API calls
+        max_concurrent: Maximum concurrent LLM API calls per query
+        max_query_concurrency: Maximum queries to process in parallel (default 4)
 
     Returns:
         ComparisonEvaluation with results from both endpoints
@@ -483,7 +573,8 @@ async def run_evaluation(
 
     # Initialize the judge with concurrency control
     judge = CodeSearchJudge(max_concurrent=max_concurrent)
-    print(f"Initialized LLM judge with {judge._model_name} (max {max_concurrent} concurrent)")
+    print(f"Initialized LLM judge with {judge._model_name}")
+    print(f"Concurrency: {max_query_concurrency} queries, {max_concurrent} LLM calls per query")
 
     async with aiohttp.ClientSession() as session:
         # Get repository ID
@@ -494,54 +585,35 @@ async def run_evaluation(
 
         repository_ids = [repo_id]
 
-        semantic_results = []
-        agentic_results = []
+        # Semaphore to limit concurrent query processing
+        query_semaphore = asyncio.Semaphore(max_query_concurrency)
 
-        for i, query in enumerate(queries):
-            query_id = query.get("id", f"query_{i}")
-            query_text = query.get("query", "")
+        # Process all queries in parallel (bounded by semaphore)
+        tasks = [
+            evaluate_single_query(
+                i, query, len(queries), session, api_url, repository_ids,
+                limit, judge, query_semaphore
+            )
+            for i, query in enumerate(queries)
+        ]
 
-            print(f"\n[{i+1}/{len(queries)}] Query: {query_id}")
-            print(f"  {query_text[:70]}...")
+        results = await asyncio.gather(*tasks)
 
-            # Fetch results from both endpoints
-            for endpoint in ["semantic", "agentic"]:
-                print(f"  {endpoint.capitalize()}:", end=" ", flush=True)
-
-                try:
-                    results = await fetch_search_results(
-                        session, api_url, query_text, repository_ids, endpoint, limit
-                    )
-                    print(f"{len(results)} results", end="", flush=True)
-                except Exception as e:
-                    print(f"ERROR: {e}", file=sys.stderr)
-                    continue
-
-                if not results:
-                    print(" (empty)")
-                    continue
-
-                # Score results with LLM (async concurrent scoring)
-                evaluation = await judge.evaluate_query(query_id, query_text, results)
-
-                if endpoint == "semantic":
-                    semantic_results.append(evaluation)
-                else:
-                    agentic_results.append(evaluation)
-
-                print(f" -> NDCG@10={evaluation.ndcg_10:.3f}")
+        # Collect results
+        semantic_results = [r[0] for r in results if r[0] is not None]
+        agentic_results = [r[1] for r in results if r[1] is not None]
 
     # Calculate aggregate metrics
     semantic_eval = EndpointEvaluation(
         endpoint="semantic",
         query_results=semantic_results,
-        aggregate_metrics=calculate_aggregate_metrics(semantic_results),
+        aggregate_metrics=calculate_aggregate_metrics(semantic_results, limit),
     )
 
     agentic_eval = EndpointEvaluation(
         endpoint="agentic",
         query_results=agentic_results,
-        aggregate_metrics=calculate_aggregate_metrics(agentic_results),
+        aggregate_metrics=calculate_aggregate_metrics(agentic_results, limit),
     )
 
     # Build comparison evaluation
@@ -607,10 +679,19 @@ def main():
         "--max-concurrent",
         type=int,
         default=10,
-        help="Maximum concurrent LLM API calls (default: 10)",
+        help="Maximum concurrent LLM API calls per query (default: 10)",
+    )
+    parser.add_argument(
+        "--max-query-concurrency",
+        type=int,
+        default=4,
+        help="Maximum queries to process in parallel (default: 4, max recommended due to API rate limits)",
     )
 
     args = parser.parse_args()
+
+    # Determine which NDCG@k values will be computed
+    k_values = [k for k in [5, 10, 20] if k <= args.limit]
 
     print("=" * 70)
     print("LLM-as-a-Judge Code Search Evaluation")
@@ -620,21 +701,35 @@ def main():
     print(f"API URL:    {args.api_url}")
     print(f"Repository: {args.repo}")
     print(f"Limit:      {args.limit} results per query")
+    print(f"NDCG@k:     {', '.join(f'@{k}' for k in k_values)}")
+    print(f"Parallelism: {args.max_query_concurrency} queries, {args.max_concurrent} LLM calls/query")
     print("=" * 70)
 
-    comparison = asyncio.run(run_evaluation(
-        queries_path=args.queries,
-        api_url=args.api_url,
-        output_path=args.output,
-        limit=args.limit,
-        repo_name=args.repo,
-        max_queries=args.max_queries,
-        max_concurrent=args.max_concurrent,
-    ))
+    try:
+        comparison = asyncio.run(run_evaluation(
+            queries_path=args.queries,
+            api_url=args.api_url,
+            output_path=args.output,
+            limit=args.limit,
+            repo_name=args.repo,
+            max_queries=args.max_queries,
+            max_concurrent=args.max_concurrent,
+            max_query_concurrency=args.max_query_concurrency,
+        ))
+    except RateLimitError as e:
+        print(f"\n{'='*70}", file=sys.stderr)
+        print("FATAL: Rate limit exceeded - stopping evaluation", file=sys.stderr)
+        print(f"{'='*70}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
+        print("\nSuggestions:", file=sys.stderr)
+        print("  - Wait a few minutes before retrying", file=sys.stderr)
+        print("  - Reduce --max-query-concurrency (current: {})".format(args.max_query_concurrency), file=sys.stderr)
+        print("  - Reduce --max-concurrent (current: {})".format(args.max_concurrent), file=sys.stderr)
+        sys.exit(1)
 
     # Print comparison tables
-    print_comparison_table(comparison.semantic, comparison.agentic)
-    print_per_query_comparison(comparison.semantic, comparison.agentic)
+    print_comparison_table(comparison.semantic, comparison.agentic, args.limit)
+    print_per_query_comparison(comparison.semantic, comparison.agentic, args.limit)
 
 
 if __name__ == "__main__":

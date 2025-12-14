@@ -62,6 +62,12 @@ pub async fn run_rest_server(
             .context("Failed to create embedding manager")?;
 
     // Initialize reranker if enabled
+    info!(
+        reranking_enabled = config.reranking.enabled,
+        provider = %config.reranking.provider,
+        model = %config.reranking.model,
+        "Reranking configuration"
+    );
     let reranker: Option<Arc<dyn codesearch_reranking::RerankerProvider>> =
         if config.reranking.enabled {
             match codesearch_reranking::create_reranker_provider(&config.reranking).await {
@@ -76,6 +82,7 @@ pub async fn run_rest_server(
                 }
             }
         } else {
+            info!("Reranking disabled in configuration");
             None
         };
 

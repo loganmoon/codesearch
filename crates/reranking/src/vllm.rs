@@ -125,7 +125,6 @@ impl RerankerProvider for VllmRerankerProvider {
         &self,
         query: &str,
         documents: &[(String, &str)],
-        top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
         if documents.is_empty() {
             return Ok(Vec::new());
@@ -156,7 +155,7 @@ impl RerankerProvider for VllmRerankerProvider {
         // Send request to vLLM rerank endpoint
         let rerank_url = format!("{}/rerank", self.api_base_url);
 
-        debug!("Sending rerank request for {} documents", documents.len());
+        info!("Sending rerank request for {} documents", documents.len());
 
         // Acquire semaphore permit for concurrency control
         let _permit = self.concurrency_limiter.acquire().await.map_err(|e| {
@@ -208,10 +207,7 @@ impl RerankerProvider for VllmRerankerProvider {
         // Sort by relevance score descending with NaN handling
         sort_scores_descending(&mut scored_docs);
 
-        // Truncate to top_k
-        scored_docs.truncate(top_k);
-
-        debug!("Reranking complete: returned {} results", scored_docs.len());
+        info!("Reranking complete: returned {} results", scored_docs.len());
 
         Ok(scored_docs)
     }

@@ -581,7 +581,7 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
     info!("Preparing to drop indexed data");
 
     // Load configuration
-    let (config, _sources) = Config::load_layered(config_path)?;
+    let config = Config::load(config_path)?;
     config.validate()?;
 
     // Ensure dependencies are running
@@ -700,7 +700,7 @@ async fn drop_data(config_path: Option<&Path>) -> Result<()> {
 /// Handle cache subcommands
 async fn handle_cache_command(command: CacheCommands, config_path: Option<&Path>) -> Result<()> {
     // Load configuration
-    let (config, _sources) = Config::load_layered(config_path)?;
+    let config = Config::load(config_path)?;
     config.validate()?;
 
     // Ensure dependencies are running

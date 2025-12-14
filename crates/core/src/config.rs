@@ -13,19 +13,6 @@ pub fn global_config_path() -> Result<PathBuf> {
     Ok(home_dir.join(".codesearch").join("config.toml"))
 }
 
-/// Tracks which configuration sources were loaded
-#[derive(Debug, Clone, Default)]
-pub struct ConfigSources {
-    /// Whether global config was loaded
-    pub global_loaded: bool,
-    /// Whether repo-local config was loaded
-    pub local_loaded: bool,
-    /// Path to global config (if loaded)
-    pub global_path: Option<PathBuf>,
-    /// Path to local config (if loaded)
-    pub local_path: Option<PathBuf>,
-}
-
 /// Indexer configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexerConfig {
@@ -977,7 +964,31 @@ impl Config {
                 "outbox.drain_timeout_secs",
                 default_outbox_drain_timeout_secs() as i64,
             )
-            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?;
+            .map_err(|e| Error::config(format!("Failed to set outbox default: {e}")))?
+            // Reranking defaults
+            .set_default("reranking.enabled", default_enable_reranking())
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default("reranking.provider", default_reranking_provider())
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default("reranking.model", default_reranking_model())
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default(
+                "reranking.candidates",
+                default_reranking_candidates() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default("reranking.top_k", default_reranking_top_k() as i64)
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default(
+                "reranking.timeout_secs",
+                default_reranking_timeout_secs() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?
+            .set_default(
+                "reranking.max_concurrent_requests",
+                default_reranking_max_concurrent_requests() as i64,
+            )
+            .map_err(|e| Error::config(format!("Failed to set reranking default: {e}")))?;
 
         // Add the config file if it exists
         if path.exists() {
@@ -1134,139 +1145,18 @@ impl Config {
         toml::from_str(content).map_err(|e| Error::config(format!("Failed to parse TOML: {e}")))
     }
 
-    /// Merge another config into this one, preferring values from the other config
+    /// Load configuration from a single file
     ///
-    /// This is used for layered configuration where repo-local settings override global settings.
-    /// Only non-default values from `other` will override values in `self`.
-    pub fn merge_from(&mut self, other: Self) {
-        // Always take other storage settings if they differ from defaults
-        self.storage.qdrant_host = other.storage.qdrant_host;
-        self.storage.qdrant_port = other.storage.qdrant_port;
-        self.storage.qdrant_rest_port = other.storage.qdrant_rest_port;
-        self.storage.auto_start_deps = other.storage.auto_start_deps;
-        self.storage.docker_compose_file = other.storage.docker_compose_file;
-        self.storage.postgres_host = other.storage.postgres_host;
-        self.storage.postgres_port = other.storage.postgres_port;
-        self.storage.postgres_database = other.storage.postgres_database;
-        self.storage.postgres_user = other.storage.postgres_user;
-        self.storage.postgres_password = other.storage.postgres_password;
-        self.storage.max_entities_per_db_operation = other.storage.max_entities_per_db_operation;
-
-        // Merge embeddings config
-        self.embeddings.provider = other.embeddings.provider;
-        self.embeddings.model = other.embeddings.model;
-        self.embeddings.texts_per_api_request = other.embeddings.texts_per_api_request;
-        self.embeddings.device = other.embeddings.device;
-        self.embeddings.api_base_url = other.embeddings.api_base_url;
-        self.embeddings.api_key = other.embeddings.api_key.or(self.embeddings.api_key.clone());
-        self.embeddings.embedding_dimension = other.embeddings.embedding_dimension;
-        self.embeddings.max_concurrent_api_requests = other.embeddings.max_concurrent_api_requests;
-        self.embeddings.default_bge_instruction = other.embeddings.default_bge_instruction;
-
-        // Merge watcher config
-        self.watcher.debounce_ms = other.watcher.debounce_ms;
-        self.watcher.ignore_patterns = other.watcher.ignore_patterns;
-
-        // Merge server config
-        self.server.port = other.server.port;
-
-        // Merge languages config
-        self.languages = other.languages;
-
-        // Merge reranking config
-        self.reranking.enabled = other.reranking.enabled;
-        self.reranking.provider = other.reranking.provider;
-        self.reranking.model = other.reranking.model;
-        self.reranking.candidates = other.reranking.candidates;
-        self.reranking.top_k = other.reranking.top_k;
-        self.reranking.api_base_url = other
-            .reranking
-            .api_base_url
-            .or(self.reranking.api_base_url.clone());
-        self.reranking.api_key = other.reranking.api_key.or(self.reranking.api_key.clone());
-
-        // Merge outbox config
-        self.outbox = other.outbox;
-
-        // Merge query preprocessing config
-        self.query_preprocessing = other.query_preprocessing;
-
-        // Merge specificity config
-        self.specificity = other.specificity;
-    }
-
-    /// Load configuration with layered precedence (git-style)
-    ///
-    /// Precedence order (lowest to highest):
+    /// Precedence (lowest to highest):
     /// 1. Hardcoded defaults
-    /// 2. Global config (~/.codesearch/config.toml) - if exists
-    /// 3. Repo-local config (./codesearch.toml or specified path) - if exists
-    /// 4. Environment variables (CODESEARCH_*)
-    ///
-    /// Returns the merged config and metadata about which sources were loaded.
-    pub fn load_layered(repo_local_path: Option<&Path>) -> Result<(Self, ConfigSources)> {
-        let mut sources = ConfigSources::default();
-
-        // Start with defaults
-        let mut config = Config {
-            indexer: IndexerConfig::default(),
-            embeddings: EmbeddingsConfig::default(),
-            watcher: WatcherConfig::default(),
-            storage: StorageConfig {
-                qdrant_host: default_qdrant_host(),
-                qdrant_port: default_qdrant_port(),
-                qdrant_rest_port: default_qdrant_rest_port(),
-                auto_start_deps: default_auto_start_deps(),
-                docker_compose_file: None,
-                postgres_host: default_postgres_host(),
-                postgres_port: default_postgres_port(),
-                postgres_database: default_postgres_database(),
-                postgres_user: default_postgres_user(),
-                postgres_password: default_postgres_password(),
-                max_entities_per_db_operation: default_max_entities_per_db_operation(),
-                postgres_pool_size: default_postgres_pool_size(),
-                neo4j_host: default_neo4j_host(),
-                neo4j_http_port: default_neo4j_http_port(),
-                neo4j_bolt_port: default_neo4j_bolt_port(),
-                neo4j_user: default_neo4j_user(),
-                neo4j_password: default_neo4j_password(),
-            },
-            server: ServerConfig::default(),
-            languages: LanguagesConfig::default(),
-            reranking: RerankingConfig::default(),
-            hybrid_search: HybridSearchConfig::default(),
-            outbox: OutboxConfig::default(),
-            query_preprocessing: QueryPreprocessingConfig::default(),
-            specificity: SpecificityConfig::default(),
+    /// 2. Config file (~/.codesearch/config.toml or custom --config path)
+    /// 3. Environment variables (CODESEARCH_*)
+    pub fn load(config_path: Option<&Path>) -> Result<Self> {
+        let path = match config_path {
+            Some(p) => p.to_path_buf(),
+            None => global_config_path()?,
         };
-
-        // Try to load global config
-        if let Ok(global_path) = global_config_path() {
-            if global_path.exists() {
-                if let Ok(global_config) = Self::from_file(&global_path) {
-                    config.merge_from(global_config);
-                    sources.global_loaded = true;
-                    sources.global_path = Some(global_path);
-                }
-            }
-        }
-
-        // Try to load repo-local config
-        let local_path = repo_local_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join("codesearch.toml")
-        });
-
-        if local_path.exists() {
-            if let Ok(local_config) = Self::from_file(&local_path) {
-                config.merge_from(local_config);
-                sources.local_loaded = true;
-                sources.local_path = Some(local_path);
-            }
-        }
-
-        Ok((config, sources))
+        Self::from_file(&path)
     }
 
     /// Validates the configuration

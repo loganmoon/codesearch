@@ -415,10 +415,10 @@ async fn rerank_results(
         .map(|r| r.merge_with(&config.reranking))
         .unwrap_or_else(|| config.reranking.clone());
 
-    let (candidates_limit, final_limit) = if rerank_config.enabled && clients.reranker.is_some() {
-        (rerank_config.candidates, rerank_config.top_k.min(limit))
+    let candidates_limit = if rerank_config.enabled && clients.reranker.is_some() {
+        rerank_config.candidates
     } else {
-        (limit, limit)
+        limit
     };
 
     let truncated_candidates: Vec<_> = candidates.iter().take(candidates_limit).collect();
@@ -441,13 +441,12 @@ async fn rerank_results(
 
             let documents = prepare_documents_for_reranking(&entity_contents);
 
-            match reranker
-                .rerank(&request.query.text, &documents, final_limit)
-                .await
-            {
+            match reranker.rerank(&request.query.text, &documents).await {
                 Ok(reranked) => {
+                    // Reranker returns all documents sorted; truncate to requested limit
                     let results: Vec<EntityResult> = reranked
                         .into_iter()
+                        .take(limit)
                         .filter_map(|(entity_id, score)| {
                             entities_map.get(&entity_id).map(|entity| {
                                 let result: Result<EntityResult> = entity.clone().try_into();
@@ -470,7 +469,7 @@ async fn rerank_results(
 
     let results: Vec<EntityResult> = truncated_candidates
         .iter()
-        .take(final_limit)
+        .take(limit)
         .filter_map(|(repo_id, entity_id, score)| {
             entities_map.get(entity_id).map(|entity| {
                 let result: Result<EntityResult> = entity.clone().try_into();

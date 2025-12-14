@@ -9,7 +9,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 const JINA_API_URL: &str = "https://api.jina.ai/v1/rerank";
 
@@ -85,7 +85,6 @@ impl RerankerProvider for JinaRerankerProvider {
         &self,
         query: &str,
         documents: &[(String, &str)],
-        top_k: usize,
     ) -> Result<Vec<(String, f32)>> {
         if documents.is_empty() {
             return Ok(Vec::new());
@@ -100,11 +99,11 @@ impl RerankerProvider for JinaRerankerProvider {
             model: self.model.clone(),
             query: query.to_string(),
             documents: doc_texts,
-            top_n: top_k,
+            top_n: documents.len(),
             return_documents: false,
         };
 
-        debug!(
+        info!(
             "Sending Jina rerank request for {} documents",
             documents.len()
         );
@@ -161,10 +160,7 @@ impl RerankerProvider for JinaRerankerProvider {
         // Sort by relevance score descending with NaN handling
         sort_scores_descending(&mut scored_docs);
 
-        // Truncate to top_k (Jina should already limit, but ensure)
-        scored_docs.truncate(top_k);
-
-        debug!(
+        info!(
             "Jina reranking complete: returned {} results",
             scored_docs.len()
         );

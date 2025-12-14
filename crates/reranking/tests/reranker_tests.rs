@@ -32,20 +32,20 @@ async fn test_reranker_handles_empty_documents() {
         .await
         .expect("Failed to create reranker provider");
 
-    let result = provider.rerank("test query", &[], 10).await;
+    let result = provider.rerank("test query", &[]).await;
 
     assert!(result.is_ok());
     let scores = result.unwrap();
     assert!(scores.is_empty());
 }
 
-/// Test reranker respects top_k parameter
+/// Test reranker returns all documents sorted
 ///
 /// This test requires a running vLLM reranker instance and is ignored by default.
-/// Run with: cargo test --package codesearch-reranking -- --ignored test_reranker_respects_top_k
+/// Run with: cargo test --package codesearch-reranking -- --ignored test_reranker_returns_all_documents
 #[tokio::test]
 #[ignore]
-async fn test_reranker_respects_top_k() {
+async fn test_reranker_returns_all_documents() {
     let config = vllm_config();
     let provider = create_reranker_provider(&config)
         .await
@@ -64,13 +64,11 @@ async fn test_reranker_respects_top_k() {
         .map(|(id, content)| (id.clone(), content.as_str()))
         .collect();
 
-    let result = provider
-        .rerank("function implementation", &documents, 2)
-        .await;
+    let result = provider.rerank("function implementation", &documents).await;
 
     assert!(result.is_ok());
     let scores = result.unwrap();
-    assert_eq!(scores.len(), 2, "Should return exactly 2 results");
+    assert_eq!(scores.len(), documents.len(), "Should return all documents");
 }
 
 /// Test reranker basic functionality
@@ -106,12 +104,12 @@ async fn test_reranker_basic_functionality() {
         .collect();
 
     let result = provider
-        .rerank("arithmetic addition function", &documents, 3)
+        .rerank("arithmetic addition function", &documents)
         .await;
 
     assert!(result.is_ok());
     let scores = result.unwrap();
-    assert_eq!(scores.len(), 3, "Should return 3 results");
+    assert_eq!(scores.len(), 3, "Should return all 3 results");
 
     // Verify results are sorted by score descending
     for i in 0..scores.len() - 1 {
@@ -244,7 +242,7 @@ async fn test_reranker_connection_failure() {
         ("doc2".to_string(), "test content 2"),
     ];
 
-    let result = provider.rerank("test query", &documents, 2).await;
+    let result = provider.rerank("test query", &documents).await;
 
     // Should return an error due to connection failure
     assert!(result.is_err(), "Should return error when connection fails");
@@ -279,7 +277,7 @@ async fn test_reranker_http_error() {
 
     let documents = vec![("doc1".to_string(), "test content")];
 
-    let result = provider.rerank("test query", &documents, 1).await;
+    let result = provider.rerank("test query", &documents).await;
 
     // Should return an error due to invalid model
     assert!(result.is_err(), "Should return error for invalid model");
@@ -295,21 +293,21 @@ async fn test_reranker_empty_query() {
 
     // Empty query should still work (though results may not be meaningful)
     let documents = vec![("doc1".to_string(), "test content")];
-    let result = provider.rerank("", &documents, 1).await;
+    let result = provider.rerank("", &documents).await;
 
     // This might succeed or fail depending on the backend - we just verify it doesn't panic
     // If it succeeds, verify the result structure
     if let Ok(scores) = result {
         assert!(
-            scores.len() <= 1,
-            "Should return at most the requested top_k"
+            scores.len() <= documents.len(),
+            "Should return at most the number of documents"
         );
     }
 }
 
-/// Test reranker with very large top_k
+/// Test reranker returns all documents
 #[tokio::test]
-async fn test_reranker_large_top_k() {
+async fn test_reranker_returns_all() {
     let config = vllm_config();
     let provider = create_reranker_provider(&config)
         .await
@@ -320,14 +318,14 @@ async fn test_reranker_large_top_k() {
         ("doc2".to_string(), "test 2"),
     ];
 
-    // Request more results than available documents
-    let result = provider.rerank("test", &documents, 100).await;
+    let result = provider.rerank("test", &documents).await;
 
-    // Should either succeed with ≤ num_docs results, or fail gracefully
+    // Should return all documents
     if let Ok(scores) = result {
-        assert!(
-            scores.len() <= documents.len(),
-            "Should not return more results than input documents"
+        assert_eq!(
+            scores.len(),
+            documents.len(),
+            "Should return all input documents"
         );
     }
 }
@@ -352,14 +350,14 @@ async fn test_reranker_handles_large_documents() {
     ];
 
     // This should succeed because documents are truncated internally
-    let result = provider.rerank("test query", &documents, 2).await;
+    let result = provider.rerank("test query", &documents).await;
 
     assert!(
         result.is_ok(),
         "Reranker should handle large documents with truncation"
     );
     let scores = result.unwrap();
-    assert_eq!(scores.len(), 2, "Should return top 2 results");
+    assert_eq!(scores.len(), 3, "Should return all 3 results");
 }
 
 // =============================================================================
@@ -405,7 +403,7 @@ async fn test_jina_provider_handles_empty_documents() {
         .await
         .expect("Failed to create Jina provider");
 
-    let result = provider.rerank("test query", &[], 10).await;
+    let result = provider.rerank("test query", &[]).await;
 
     assert!(result.is_ok());
     let scores = result.unwrap();
@@ -455,12 +453,12 @@ async fn test_jina_provider_basic_functionality() {
         .collect();
 
     let result = provider
-        .rerank("arithmetic addition function", &documents, 3)
+        .rerank("arithmetic addition function", &documents)
         .await;
 
     assert!(result.is_ok(), "Jina rerank should succeed");
     let scores = result.unwrap();
-    assert_eq!(scores.len(), 3, "Should return 3 results");
+    assert_eq!(scores.len(), 3, "Should return all 3 results");
 
     // Verify results are sorted by score descending
     for i in 0..scores.len() - 1 {

@@ -42,7 +42,7 @@ pub struct InitializedBackends {
 /// - Repository loading and path validation
 pub async fn initialize_backends(config_path: Option<&Path>) -> Result<InitializedBackends> {
     // Load configuration
-    let (config, _sources) = Config::load_layered(config_path)?;
+    let config = Config::load(config_path)?;
     config.validate()?;
 
     // Ensure infrastructure is running

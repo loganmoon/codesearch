@@ -78,20 +78,9 @@ pub async fn ensure_storage_initialized(
         info!("Created local configuration at {:?}", config_file);
     }
 
-    // Load configuration using layered approach
-    let (config, sources) = Config::load_layered(Some(&config_file))?;
-
-    // Log which configs were loaded
-    if sources.global_loaded {
-        if let Some(ref path) = sources.global_path {
-            info!("Loaded global config: {}", path.display());
-        }
-    }
-    if sources.local_loaded {
-        if let Some(ref path) = sources.local_path {
-            info!("Loaded local config: {}", path.display());
-        }
-    }
+    // Load configuration
+    let config = Config::load(Some(&config_file))?;
+    info!("Loaded config from: {}", config_file.display());
 
     config.validate()?;
 

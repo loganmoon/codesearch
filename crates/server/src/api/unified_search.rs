@@ -93,9 +93,22 @@ pub async fn search_unified(
         .map(|r| r.merge_with(&config.reranking))
         .unwrap_or_else(|| config.reranking.clone());
 
+    tracing::debug!(
+        rerank_enabled = rerank_config.enabled,
+        reranker_available = clients.reranker.is_some(),
+        candidates = rerank_config.candidates,
+        "Reranking config check"
+    );
+
     let (final_results, reranked) = if rerank_config.enabled && clients.reranker.is_some() {
+        tracing::info!(candidates = boosted_results.len(), "Starting reranking");
         rerank_merged_results(boosted_results, &request, clients, &rerank_config).await?
     } else {
+        tracing::debug!(
+            rerank_enabled = rerank_config.enabled,
+            reranker_available = clients.reranker.is_some(),
+            "Skipping reranking"
+        );
         (boosted_results, false)
     };
 

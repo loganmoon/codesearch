@@ -14,6 +14,9 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Maximum number of results to return from worker reranking
+const WORKER_RERANK_LIMIT: usize = 10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerType {
@@ -33,8 +36,6 @@ pub struct WorkerResult {
     #[allow(dead_code)]
     pub worker_type: WorkerType,
     pub entities: Vec<AgenticEntity>,
-    #[allow(dead_code)]
-    pub reranking_cost_usd: f32,
 }
 
 /// Execute a single worker: search + Stage 1 reranking
@@ -82,7 +83,6 @@ pub async fn execute_worker(
         return Ok(WorkerResult {
             worker_type: query.worker_type,
             entities: vec![],
-            reranking_cost_usd: 0.0,
         });
     }
 
@@ -105,7 +105,6 @@ pub async fn execute_worker(
     Ok(WorkerResult {
         worker_type: query.worker_type,
         entities: reranked,
-        reranking_cost_usd: 0.0025,
     })
 }
 
@@ -138,9 +137,14 @@ async fn rerank_worker_results(
         .collect::<Vec<_>>()
         .join("\n\n---\n\n");
 
+    let max_results_str = WORKER_RERANK_LIMIT.to_string();
     let prompt = prompts::format_prompt(
         prompts::WORKER_RERANK,
-        &[("query", query), ("results", &results_text)],
+        &[
+            ("query", query),
+            ("results", &results_text),
+            ("max_results", &max_results_str),
+        ],
     );
 
     // Define tool schema for structured output
@@ -149,7 +153,7 @@ async fn rerank_worker_results(
         "properties": {
             "rankings": {
                 "type": "array",
-                "description": "Ranked results, top 10 most relevant only. Exclude obviously irrelevant results.",
+                "description": format!("Ranked results, top {WORKER_RERANK_LIMIT} most relevant only. Exclude obviously irrelevant results."),
                 "items": {
                     "type": "object",
                     "properties": {
@@ -341,12 +345,10 @@ mod tests {
         let result = WorkerResult {
             worker_type: WorkerType::Semantic,
             entities: vec![],
-            reranking_cost_usd: 0.0025,
         };
 
         assert_eq!(result.worker_type, WorkerType::Semantic);
         assert_eq!(result.entities.len(), 0);
-        assert_eq!(result.reranking_cost_usd, 0.0025);
     }
 
     #[test]
@@ -409,5 +411,90 @@ mod tests {
             total: 3,
         };
         assert!(err.to_string().contains("2/3"));
+    }
+
+    // RerankingWrapper deserialization tests (structured output format)
+
+    #[test]
+    fn test_reranking_wrapper_valid() {
+        let json = r#"{
+            "rankings": [
+                {"entity_id": "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "score": 0.95, "reasoning": "Direct match"},
+                {"entity_id": "entity-f6e5d4c3b2a1a8b9c0d1e2f3a4b5c6d7", "score": 0.82, "reasoning": "Related"}
+            ]
+        }"#;
+        let parsed: RerankingWrapper = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.rankings.len(), 2);
+        assert_eq!(
+            parsed.rankings[0].entity_id,
+            "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+        );
+        assert_eq!(parsed.rankings[0].score, 0.95);
+    }
+
+    #[test]
+    fn test_reranking_wrapper_empty_rankings() {
+        let json = r#"{"rankings": []}"#;
+        let parsed: RerankingWrapper = serde_json::from_str(json).unwrap();
+        assert!(parsed.rankings.is_empty());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_missing_rankings_field() {
+        let json = r#"{}"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_malformed_item_missing_entity_id() {
+        let json = r#"{
+            "rankings": [
+                {"score": 0.95, "reasoning": "Missing entity_id"}
+            ]
+        }"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_malformed_item_missing_score() {
+        let json = r#"{
+            "rankings": [
+                {"entity_id": "entity-abc", "reasoning": "Missing score"}
+            ]
+        }"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_malformed_item_missing_reasoning() {
+        let json = r#"{
+            "rankings": [
+                {"entity_id": "entity-abc", "score": 0.95}
+            ]
+        }"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_wrong_rankings_type() {
+        // rankings should be an array, not an object
+        let json = r#"{"rankings": {"entity_id": "e1", "score": 0.9}}"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reranking_wrapper_invalid_score_type() {
+        let json = r#"{
+            "rankings": [
+                {"entity_id": "entity-abc", "score": "high", "reasoning": "Wrong score type"}
+            ]
+        }"#;
+        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 }

@@ -114,3 +114,86 @@ impl AgenticEntity {
         matches!(self.source, RetrievalSource::Graph { .. })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_empty_query_rejected() {
+        let request = AgenticSearchRequest {
+            query: "".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Query cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_whitespace_only_query_accepted() {
+        // Whitespace-only is not empty string, so it passes the empty check
+        // (semantically invalid but syntactically passes current validation)
+        let request = AgenticSearchRequest {
+            query: "   ".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_exceeds_max_length() {
+        let long_query = "a".repeat(MAX_QUERY_LENGTH + 1);
+        let request = AgenticSearchRequest {
+            query: long_query,
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn test_validate_query_at_max_length() {
+        let max_query = "a".repeat(MAX_QUERY_LENGTH);
+        let request = AgenticSearchRequest {
+            query: max_query,
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_normal_query() {
+        let request = AgenticSearchRequest {
+            query: "What functions handle authentication?".to_string(),
+            force_sonnet: false,
+            repository_ids: vec![],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_query_with_repository_ids() {
+        let request = AgenticSearchRequest {
+            query: "Find the main function".to_string(),
+            force_sonnet: true,
+            repository_ids: vec!["repo-1".to_string(), "repo-2".to_string()],
+        };
+        let result = request.validate();
+        assert!(result.is_ok());
+    }
+}

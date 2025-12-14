@@ -20,6 +20,7 @@ use tracing::{debug, info, warn};
 
 const MAX_ITERATIONS: usize = 5;
 const MAX_LLM_QUERY_LENGTH: usize = 1000;
+
 const VALID_RELATIONSHIPS: &[&str] = &[
     "callers",
     "called_by",
@@ -181,7 +182,6 @@ impl AgenticSearchOrchestrator {
         let mut iteration = 0;
         let mut accumulated_entities: Vec<AgenticEntity> = Vec::new();
         let mut seen_entity_ids: HashSet<String> = HashSet::new();
-        let mut total_cost = 0.0;
         let mut workers_spawned = 0;
         let mut workers_succeeded = 0;
         let mut partial_outage = false;
@@ -206,6 +206,14 @@ impl AgenticSearchOrchestrator {
 
             if iteration >= MAX_ITERATIONS {
                 info!("Reached max iterations");
+                break;
+            }
+
+            // Prevent infinite loop when LLM returns should_stop=false but all operations are invalid
+            if decision.operations.is_empty() {
+                warn!(
+                    "Orchestrator returned no valid operations despite should_stop=false, forcing stop"
+                );
                 break;
             }
 
@@ -245,8 +253,6 @@ impl AgenticSearchOrchestrator {
                 info!("No new entities found, stopping");
                 break;
             }
-
-            total_cost += decision.iteration_cost;
         }
 
         // Calculate metadata before synthesis (need counts from accumulated_entities)
@@ -284,8 +290,7 @@ impl AgenticSearchOrchestrator {
                 graph_entities_in_results: graph_in_results,
                 reranking_method: RerankingMethod::HaikuOnly,
                 graph_traversal_used: graph_context > 0,
-                estimated_cost_usd: total_cost,
-                // Cache metrics are populated when usage tracking is available
+                estimated_cost_usd: 0.0,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
             },
@@ -538,7 +543,6 @@ impl AgenticSearchOrchestrator {
             should_stop: decision.should_stop,
             reason: decision.reason,
             operations,
-            iteration_cost: 0.01,
         })
     }
 
@@ -892,7 +896,6 @@ struct OrchestratorDecision {
     should_stop: bool,
     reason: String,
     operations: Vec<PlannedOperation>,
-    iteration_cost: f32,
 }
 
 /// Response from Sonnet for orchestrator decision
@@ -907,9 +910,6 @@ struct OrchestratorDecisionResponse {
 struct PlannedOperationResponse {
     operation_type: String,
     query: Option<String>,
-    // Note: search_types is ignored - all searches now use semantic only
-    #[allow(dead_code)]
-    search_types: Option<Vec<String>>,
     entity_id: Option<String>,
     relationship: Option<String>,
 }

@@ -22,8 +22,8 @@ Scoring guide:
 
 FILTERING RULES:
 - Only return results with score >= 0.40
-- Return at most 10 results
-- If fewer than 10 results are relevant, return only the relevant ones
+- Return at most {max_results} results
+- If fewer than {max_results} results are relevant, return only the relevant ones
 - If no results are relevant, return an empty rankings array
 
 CRITICAL: The entity_id values MUST be copied EXACTLY as shown in brackets [entity-xxx] in each result above.

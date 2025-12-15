@@ -296,12 +296,7 @@ async fn embed_handler(
         request.texts.len()
     );
 
-    let response = generate_embeddings(
-        request,
-        &state.clients.embedding_manager,
-        &state.config.default_bge_instruction,
-    )
-    .await?;
+    let response = generate_embeddings(request, &state.clients.embedding_manager).await?;
     Ok(Json(response))
 }
 

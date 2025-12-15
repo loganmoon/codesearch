@@ -11,6 +11,7 @@ use super::query_preprocessing::{preprocess_query, PreprocessedQuery};
 use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
+use codesearch_embeddings::EmbeddingTask;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::warn;
@@ -167,18 +168,9 @@ async fn execute_semantic_search(
     config: &SearchConfig,
     effective_filters: &Option<SearchFilters>,
 ) -> Result<Vec<CodeEntity>> {
-    let bge_instruction = request
-        .query
-        .instruction
-        .as_ref()
-        .unwrap_or(&config.default_bge_instruction)
-        .clone();
-
-    let formatted_query = format!("<instruct>{bge_instruction}\n<query>{}", request.query.text);
-
     let embeddings = clients
         .embedding_manager
-        .embed(vec![formatted_query])
+        .embed_for_task(vec![request.query.text.clone()], None, EmbeddingTask::Query)
         .await?;
 
     let dense_embedding = embeddings.into_iter().next().flatten().ok_or_else(|| {

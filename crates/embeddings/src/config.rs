@@ -5,12 +5,17 @@ use serde::{Deserialize, Serialize};
 /// Embedding provider type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EmbeddingProviderType {
-    /// OpenAI-compatible API (vLLM or remote)
+    /// Jina API (default, no self-hosting required)
     #[default]
+    Jina,
+    /// OpenAI-compatible API (vLLM or remote)
     LocalApi,
     /// Mock provider for testing
     Mock,
 }
+
+/// Default instruction for BGE models
+const DEFAULT_BGE_INSTRUCTION: &str = "Represent this sentence for searching relevant passages:";
 
 /// Configuration for embedding generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +43,9 @@ pub struct EmbeddingConfig {
 
     /// Number of retry attempts for failed embedding requests
     pub(crate) retry_attempts: usize,
+
+    /// Instruction prefix for query embeddings (BGE models only)
+    pub(crate) query_instruction: Option<String>,
 }
 
 impl EmbeddingConfig {
@@ -69,13 +77,14 @@ impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
             provider: EmbeddingProviderType::default(),
-            model: "BAAI/bge-code-v1".to_string(),
+            model: "jina-embeddings-v3".to_string(),
             texts_per_api_request: 64,
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
-            embedding_dimension: 1536,
+            embedding_dimension: 1024,
             max_concurrent_api_requests: 4,
             retry_attempts: 5,
+            query_instruction: Some(DEFAULT_BGE_INSTRUCTION.to_string()),
         }
     }
 }
@@ -90,6 +99,7 @@ pub struct EmbeddingConfigBuilder {
     embedding_dimension: Option<usize>,
     max_concurrent_api_requests: Option<usize>,
     retry_attempts: Option<usize>,
+    query_instruction: Option<Option<String>>,
 }
 
 impl EmbeddingConfigBuilder {
@@ -104,6 +114,7 @@ impl EmbeddingConfigBuilder {
             embedding_dimension: None,
             max_concurrent_api_requests: None,
             retry_attempts: None,
+            query_instruction: None,
         }
     }
 
@@ -155,6 +166,12 @@ impl EmbeddingConfigBuilder {
         self
     }
 
+    /// Set the query instruction prefix (for BGE models)
+    pub fn query_instruction(mut self, instruction: impl Into<String>) -> Self {
+        self.query_instruction = Some(Some(instruction.into()));
+        self
+    }
+
     /// Build the configuration, using defaults for unset fields
     pub fn build(self) -> EmbeddingConfig {
         let defaults = EmbeddingConfig::default();
@@ -174,6 +191,7 @@ impl EmbeddingConfigBuilder {
                 .max_concurrent_api_requests
                 .unwrap_or(defaults.max_concurrent_api_requests),
             retry_attempts: self.retry_attempts.unwrap_or(defaults.retry_attempts),
+            query_instruction: self.query_instruction.unwrap_or(defaults.query_instruction),
         }
     }
 }

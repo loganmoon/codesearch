@@ -2,27 +2,20 @@
 
 use super::models::{EmbeddingRequest, EmbeddingResponse};
 use codesearch_core::error::Result;
-use codesearch_embeddings::EmbeddingManager;
+use codesearch_embeddings::{EmbeddingManager, EmbeddingTask};
 use std::sync::Arc;
 
 /// Generate embeddings for the provided texts
+///
+/// Uses the Query task type since this endpoint is typically used for generating
+/// search query embeddings. The provider handles task-specific formatting internally.
 pub async fn generate_embeddings(
     request: EmbeddingRequest,
     embedding_manager: &Arc<EmbeddingManager>,
-    default_instruction: &str,
 ) -> Result<EmbeddingResponse> {
-    let instruction = request
-        .instruction
-        .as_deref()
-        .unwrap_or(default_instruction);
-
-    let formatted_texts: Vec<String> = request
-        .texts
-        .iter()
-        .map(|text| format!("<instruct>{instruction}\n<query>{text}"))
-        .collect();
-
-    let embeddings = embedding_manager.embed(formatted_texts).await?;
+    let embeddings = embedding_manager
+        .embed_for_task(request.texts, None, EmbeddingTask::Query)
+        .await?;
 
     let dense_embeddings: Vec<Vec<f32>> = embeddings.into_iter().flatten().collect();
 

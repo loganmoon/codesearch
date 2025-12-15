@@ -59,7 +59,9 @@ cargo run -- serve        # Start REST API server
 
 **Infrastructure:**
 - Shared Docker infrastructure at `~/.codesearch/infrastructure/`
-- Services: Postgres, Qdrant, Neo4j, vLLM (embeddings + reranker)
+- Services: Postgres, Qdrant, Neo4j, vLLM (embeddings + reranker when `provider = "localapi"`)
+- vLLM container only starts when `embeddings.provider = "localapi"` (requires GPU)
+- Default Jina provider requires no local containers for embeddings
 - Auto-starts on first `codesearch index`
 - Multi-repository support: `codesearch serve` serves all indexed repositories
 - Check status: `docker ps --filter "name=codesearch"`
@@ -73,10 +75,12 @@ cargo run -- serve        # Start REST API server
 - **Full-Text Search**: PostgreSQL GIN indexes for fast keyword search
 - **Graph Queries**: Neo4j stores code relationships (calls, inherits, implements, etc.)
 
-**BGE Model Usage (IMPORTANT):**
-- Queries use instruction prefix: `<instruct>{instruction}\n<query>{query}`
-- Documents do NOT use instruction prefix (raw content only)
-- This asymmetry is INTENTIONAL per BGE model design
+**Embedding Providers:**
+- **Jina (default)**: Uses Jina AI API for embeddings. Zero-config, no GPU required. Set `JINA_API_KEY` or `embeddings.api_key` in config.
+- **LocalApi**: Self-hosted vLLM with BGE models. Requires GPU. Set `embeddings.provider = "localapi"` in config.
+- Provider handles query vs passage formatting internally via `EmbeddingTask` enum
+- Jina: Uses task parameter (`retrieval.query`, `retrieval.passage`)
+- BGE (LocalApi): Uses instruction prefix for queries only (`<instruct>...\n<query>...`)
 
 **Neo4j Relationships:**
 - Forward: CONTAINS, IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE, INHERITS_FROM, USES, CALLS, IMPORTS

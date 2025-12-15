@@ -4,8 +4,7 @@
 //! configuration, Docker containers, database migrations, and repository registration.
 
 use anyhow::{Context, Result};
-use codesearch_core::config::{default_max_entities_per_db_operation, Config, StorageConfig};
-use std::env;
+use codesearch_core::config::{Config, StorageConfig};
 use std::path::Path;
 use tracing::info;
 
@@ -40,48 +39,8 @@ pub async fn ensure_storage_initialized(
     config_path: Option<&Path>,
     force: bool,
 ) -> Result<(Config, String)> {
-    let current_dir = env::current_dir()?;
-
-    // Determine local config file path
-    let config_file = if let Some(path) = config_path {
-        path.to_path_buf()
-    } else {
-        current_dir.join("codesearch.toml")
-    };
-
-    // If local config doesn't exist, create it with minimal settings (NO collection_name)
-    if !config_file.exists() {
-        let storage_config = StorageConfig {
-            qdrant_host: "localhost".to_string(),
-            qdrant_port: 6334,
-            qdrant_rest_port: 6333,
-            auto_start_deps: true,
-            docker_compose_file: None,
-            postgres_host: "localhost".to_string(),
-            postgres_port: 5432,
-            postgres_database: "codesearch".to_string(),
-            postgres_user: "codesearch".to_string(),
-            postgres_password: "codesearch".to_string(),
-            neo4j_host: "localhost".to_string(),
-            neo4j_http_port: 7474,
-            neo4j_bolt_port: 7687,
-            neo4j_user: "neo4j".to_string(),
-            neo4j_password: "codesearch".to_string(),
-            max_entities_per_db_operation: default_max_entities_per_db_operation(),
-            postgres_pool_size: 20,
-        };
-
-        let config = Config::builder(storage_config).build();
-        config
-            .save(&config_file)
-            .with_context(|| format!("Failed to save config to {config_file:?}"))?;
-        info!("Created local configuration at {:?}", config_file);
-    }
-
-    // Load configuration
-    let config = Config::load(Some(&config_file))?;
-    info!("Loaded config from: {}", config_file.display());
-
+    // Load configuration from global config or custom path
+    let config = Config::load(config_path)?;
     config.validate()?;
 
     // Ensure dependencies are running if auto-start is enabled

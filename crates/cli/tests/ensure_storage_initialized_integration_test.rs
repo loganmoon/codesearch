@@ -155,8 +155,10 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
     let config_path = config_dir.path().join("codesearch.toml");
 
     // Create config with invalid Qdrant port and mock embedding provider
-    let mut embeddings_config = EmbeddingsConfig::default();
-    embeddings_config.provider = "mock".to_string();
+    let embeddings_config = EmbeddingsConfig {
+        provider: "mock".to_string(),
+        ..Default::default()
+    };
 
     let config = Config::builder(StorageConfig {
         qdrant_host: "localhost".to_string(),

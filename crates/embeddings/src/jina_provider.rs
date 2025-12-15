@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Jina API endpoint for embeddings
 const JINA_API_URL: &str = "https://api.jina.ai/v1/embeddings";
@@ -106,7 +106,6 @@ pub struct JinaEmbeddingProvider {
     batch_size: usize,
     max_concurrent: usize,
     concurrency_limiter: Arc<Semaphore>,
-    #[allow(dead_code)] // TEMPORARY: Retries disabled for debugging
     retry_attempts: usize,
 }
 
@@ -115,8 +114,8 @@ impl JinaEmbeddingProvider {
     ///
     /// # Arguments
     /// * `api_key` - Jina API key for authentication
-    /// * `model` - Model name (e.g., "jina-code-embeddings-1.5b")
-    /// * `dimensions` - Embedding dimensions (e.g., 1536)
+    /// * `model` - Model name (e.g., "jina-embeddings-v3")
+    /// * `dimensions` - Embedding dimensions (e.g., 1024)
     /// * `batch_size` - Maximum texts per API request
     /// * `max_concurrent` - Maximum concurrent API requests
     /// * `retry_attempts` - Number of retry attempts for failed requests
@@ -181,14 +180,6 @@ impl JinaEmbeddingProvider {
             truncate: true,
         };
 
-        // Log full request JSON for debugging
-        if let Ok(request_json) = serde_json::to_string_pretty(&request) {
-            let debug_path = "/tmp/jina_request.json";
-            if std::fs::write(debug_path, &request_json).is_ok() {
-                debug!("Request JSON written to {debug_path}");
-            }
-        }
-
         // Acquire semaphore permit for concurrency control
         let _permit = self.concurrency_limiter.acquire().await.map_err(|e| {
             EmbeddingError::InferenceError(format!("Failed to acquire concurrency permit: {e}"))
@@ -247,7 +238,7 @@ impl JinaEmbeddingProvider {
     async fn embed_internal(
         &self,
         texts: Vec<String>,
-        contexts: Option<Vec<EmbeddingContext>>,
+        _contexts: Option<Vec<EmbeddingContext>>,
         task: EmbeddingTask,
     ) -> Result<Vec<Option<Vec<f32>>>> {
         if texts.is_empty() {
@@ -317,48 +308,39 @@ impl JinaEmbeddingProvider {
             self.batch_size
         );
 
-        // Step 3: Process batches concurrently (retries disabled for debugging)
-        let contexts = contexts.map(Arc::new);
+        // Step 3: Process batches concurrently with retries
+        let retry_attempts = self.retry_attempts;
         let results = stream::iter(batches)
-            .map(|batch| {
-                let contexts = contexts.clone();
-                async move {
-                    let (indices, texts_to_embed): (Vec<usize>, Vec<String>) =
-                        batch.into_iter().unzip();
+            .map(|batch| async move {
+                let (indices, texts_to_embed): (Vec<usize>, Vec<String>) =
+                    batch.into_iter().unzip();
+
+                let mut last_error = None;
+                for attempt in 0..=retry_attempts {
+                    if attempt > 0 {
+                        let delay = Duration::from_millis(100 * 2u64.pow(attempt as u32 - 1));
+                        warn!(
+                            "Retrying Jina embedding batch (attempt {}/{})",
+                            attempt + 1,
+                            retry_attempts + 1
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
 
                     match self.embed_batch(&texts_to_embed, task).await {
                         Ok(embeddings) => {
                             let results: Vec<(usize, Vec<f32>)> =
                                 indices.iter().copied().zip(embeddings).collect();
-                            Ok::<_, EmbeddingError>(results)
+                            return Ok::<_, EmbeddingError>(results);
                         }
                         Err(e) => {
-                            // TEMPORARY: Fail immediately without retry for debugging
-                            error!("Jina embedding generation failed: {e}");
-
-                            // Log entity context
-                            for (batch_idx, orig_idx) in indices.iter().enumerate() {
-                                let char_count = texts_to_embed
-                                    .get(batch_idx)
-                                    .map(|t| t.chars().count())
-                                    .unwrap_or(0);
-                                if let Some(ref ctxs) = contexts {
-                                    if let Some(ctx) = ctxs.get(*orig_idx) {
-                                        error!("  {} | Chars: {}", ctx, char_count);
-                                    } else {
-                                        error!("  Text {}: {} chars", orig_idx, char_count);
-                                    }
-                                } else {
-                                    error!("  Text {}: {} chars", orig_idx, char_count);
-                                }
-                            }
-
-                            // Dump debug info and panic for debugging
-                            error!("Full request written to /tmp/jina_request.json");
-                            panic!("Jina API request failed: {e}")
+                            last_error = Some(e);
                         }
                     }
                 }
+
+                Err(last_error
+                    .unwrap_or_else(|| EmbeddingError::InferenceError("Unknown error".to_string())))
             })
             .buffer_unordered(self.max_concurrent)
             .collect::<Vec<_>>()

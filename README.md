@@ -44,7 +44,7 @@ Configuration file: `~/.codesearch/config.toml`
 [embeddings]
 provider = "jina"
 api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
-model = "jina-code-embeddings-1.5b"
+model = "jina-embeddings-v3"
 ```
 
 **LocalApi (vLLM)** - Self-hosted, requires GPU:
@@ -70,7 +70,7 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `embeddings.provider` | `jina` | `jina`, `localapi`, or `mock` |
-| `embeddings.embedding_dimension` | `1536` | Vector dimension size |
+| `embeddings.embedding_dimension` | `1024` | Vector dimension size |
 | `reranking.enabled` | `false` | Enable cross-encoder reranking |
 | `reranking.candidates` | `100` | Number of candidates to rerank |
 

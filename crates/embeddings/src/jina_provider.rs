@@ -78,6 +78,8 @@ struct JinaEmbeddingRequest<'a> {
     model: &'a str,
     input: &'a [String],
     task: &'a str,
+    /// Output embedding dimensions (Matryoshka truncation)
+    dimensions: usize,
     /// Drop content exceeding max token length instead of erroring
     truncate: bool,
 }
@@ -155,11 +157,11 @@ impl JinaEmbeddingProvider {
     }
 
     /// Get the Jina task string for the given embedding task
-    /// For jina-code-embeddings models, valid tasks are: nl2code, qa, code2code, code2nl, code2completion
+    /// For jina-embeddings-v3, valid tasks are: retrieval.query, retrieval.passage, text-matching, classification
     fn task_string(&self, task: EmbeddingTask) -> &'static str {
         match task {
-            EmbeddingTask::Query => "nl2code.query",
-            EmbeddingTask::Passage => "nl2code.passage",
+            EmbeddingTask::Query => "retrieval.query",
+            EmbeddingTask::Passage => "retrieval.passage",
         }
     }
 
@@ -175,6 +177,7 @@ impl JinaEmbeddingProvider {
             model: &self.model,
             input: texts,
             task: task_str,
+            dimensions: self.dimensions,
             truncate: true,
         };
 

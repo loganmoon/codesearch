@@ -461,7 +461,7 @@ pub struct OutboxConfig {
 // Default constants
 const DEFAULT_DEVICE: &str = "cpu";
 const DEFAULT_PROVIDER: &str = "jina";
-const DEFAULT_MODEL: &str = "jina-code-embeddings-1.5b";
+const DEFAULT_MODEL: &str = "jina-embeddings-v3";
 const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
 const DEFAULT_BGE_INSTRUCTION: &str = "Represent this code search query for retrieving semantically similar code snippets, function implementations, type definitions, and code patterns";
 const DEFAULT_TASK_TYPE: &str = "retrieval";
@@ -502,7 +502,7 @@ fn default_api_base_url() -> Option<String> {
 }
 
 fn default_embedding_dimension() -> usize {
-    1536
+    1024
 }
 
 fn default_max_concurrent_api_requests() -> usize {

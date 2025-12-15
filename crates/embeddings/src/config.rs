@@ -80,11 +80,11 @@ impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
             provider: EmbeddingProviderType::default(),
-            model: "jina-code-embeddings-1.5b".to_string(),
+            model: "jina-embeddings-v3".to_string(),
             texts_per_api_request: 64,
             api_base_url: Some("http://localhost:8000/v1".to_string()),
             api_key: None,
-            embedding_dimension: 1536,
+            embedding_dimension: 1024,
             max_concurrent_api_requests: 4,
             retry_attempts: 5,
             query_instruction: Some(DEFAULT_BGE_INSTRUCTION.to_string()),

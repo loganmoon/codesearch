@@ -82,9 +82,14 @@ pub struct Config {
 }
 
 /// Configuration for embeddings generation
+///
+/// # Providers
+/// - `jina` (default): Jina API - no self-hosting required, uses JINA_API_KEY env var
+/// - `localapi`: vLLM or OpenAI-compatible API for self-hosted models
+/// - `mock`: Mock provider for testing
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EmbeddingsConfig {
-    /// Provider type: "localapi", "api", "mock"
+    /// Provider type: "jina" (default), "localapi", "mock"
     #[serde(default = "default_provider")]
     pub provider: String,
 
@@ -96,7 +101,7 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_texts_per_api_request")]
     pub texts_per_api_request: usize,
 
-    /// Device to use: "cuda" or "cpu"
+    /// Device to use: "cuda" or "cpu" (localapi only)
     #[serde(default = "default_device")]
     pub device: String,
 
@@ -104,7 +109,7 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_api_base_url")]
     pub api_base_url: Option<String>,
 
-    /// API key for authentication
+    /// API key for authentication (or use JINA_API_KEY / EMBEDDING_API_KEY env vars)
     pub api_key: Option<String>,
 
     /// Embedding dimension size
@@ -115,13 +120,17 @@ pub struct EmbeddingsConfig {
     #[serde(default = "default_max_concurrent_api_requests")]
     pub max_concurrent_api_requests: usize,
 
-    /// Default instruction for BGE embedding models
+    /// Default instruction for BGE embedding models (localapi only)
     #[serde(default = "default_bge_instruction")]
     pub default_bge_instruction: String,
 
     /// Number of retry attempts for failed embedding requests
     #[serde(default = "default_embedding_retry_attempts")]
     pub retry_attempts: usize,
+
+    /// Task type prefix for Jina embeddings (e.g., "nl2code" -> "nl2code.query"/"nl2code.passage")
+    #[serde(default = "default_task_type")]
+    pub task_type: String,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -140,6 +149,7 @@ impl std::fmt::Debug for EmbeddingsConfig {
             )
             .field("default_bge_instruction", &self.default_bge_instruction)
             .field("retry_attempts", &self.retry_attempts)
+            .field("task_type", &self.task_type)
             .finish()
     }
 }
@@ -450,10 +460,11 @@ pub struct OutboxConfig {
 
 // Default constants
 const DEFAULT_DEVICE: &str = "cpu";
-const DEFAULT_PROVIDER: &str = "localapi";
-const DEFAULT_MODEL: &str = "BAAI/bge-code-v1";
+const DEFAULT_PROVIDER: &str = "jina";
+const DEFAULT_MODEL: &str = "jina-code-embeddings-1.5b";
 const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
 const DEFAULT_BGE_INSTRUCTION: &str = "Represent this code search query for retrieving semantically similar code snippets, function implementations, type definitions, and code patterns";
+const DEFAULT_TASK_TYPE: &str = "nl2code";
 const DEFAULT_QDRANT_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_DATABASE: &str = "codesearch";
@@ -504,6 +515,10 @@ fn default_bge_instruction() -> String {
 
 fn default_embedding_retry_attempts() -> usize {
     5
+}
+
+fn default_task_type() -> String {
+    DEFAULT_TASK_TYPE.to_string()
 }
 
 fn default_debounce_ms() -> u64 {
@@ -694,6 +709,7 @@ impl Default for EmbeddingsConfig {
             max_concurrent_api_requests: default_max_concurrent_api_requests(),
             default_bge_instruction: default_bge_instruction(),
             retry_attempts: default_embedding_retry_attempts(),
+            task_type: default_task_type(),
         }
     }
 }
@@ -1162,7 +1178,7 @@ impl Config {
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
         // Validate provider
-        let valid_providers = ["localapi", "api", "mock"];
+        let valid_providers = ["jina", "localapi", "api", "mock"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
                 "Invalid provider '{}'. Must be one of: {:?}",
@@ -1452,7 +1468,7 @@ mod tests {
 
         let config = Config::from_toml_str(toml).expect("Failed to parse minimal TOML");
         // Check defaults are applied
-        assert_eq!(config.embeddings.provider, "localapi");
+        assert_eq!(config.embeddings.provider, "jina");
         assert_eq!(config.embeddings.device, "cpu");
     }
 

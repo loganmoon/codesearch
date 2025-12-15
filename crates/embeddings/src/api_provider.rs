@@ -3,7 +3,7 @@
 use crate::{
     config::EmbeddingConfig,
     error::EmbeddingError,
-    provider::{EmbeddingContext, EmbeddingProvider},
+    provider::{EmbeddingContext, EmbeddingProvider, EmbeddingTask},
 };
 use async_openai::types::{CreateEmbeddingRequest, EmbeddingInput};
 use async_openai::{config::OpenAIConfig, Client};
@@ -30,6 +30,8 @@ pub struct OpenAiApiProvider {
     max_concurrent: usize,
     concurrency_limiter: Arc<Semaphore>,
     retry_attempts: usize,
+    /// Instruction prefix for query embeddings (BGE format: `<instruct>{instruction}\n<query>{text}`)
+    query_instruction: Option<String>,
 }
 
 impl OpenAiApiProvider {
@@ -84,6 +86,7 @@ impl OpenAiApiProvider {
             max_concurrent: config.max_concurrent_api_requests,
             concurrency_limiter: Arc::new(Semaphore::new(config.max_concurrent_api_requests)),
             retry_attempts: config.retry_attempts,
+            query_instruction: config.query_instruction,
         })
     }
 
@@ -314,6 +317,32 @@ impl EmbeddingProvider for OpenAiApiProvider {
 
     fn max_sequence_length(&self) -> usize {
         self.max_context
+    }
+
+    async fn embed_for_task(
+        &self,
+        texts: Vec<String>,
+        contexts: Option<Vec<EmbeddingContext>>,
+        task: EmbeddingTask,
+    ) -> Result<Vec<Option<Vec<f32>>>> {
+        match task {
+            EmbeddingTask::Query => {
+                // Apply BGE instruction prefix for queries
+                let formatted_texts = if let Some(ref instruction) = self.query_instruction {
+                    texts
+                        .into_iter()
+                        .map(|text| format!("<instruct>{instruction}\n<query>{text}"))
+                        .collect()
+                } else {
+                    texts
+                };
+                self.embed_with_context(formatted_texts, contexts).await
+            }
+            EmbeddingTask::Passage => {
+                // Passages are embedded as-is (no instruction prefix)
+                self.embed_with_context(texts, contexts).await
+            }
+        }
     }
 }
 

@@ -10,6 +10,7 @@ use super::models::{
 use super::reranking_helpers::{extract_embedding_content, prepare_documents_for_reranking};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
+use codesearch_embeddings::EmbeddingTask;
 use futures::future;
 use ordered_float::OrderedFloat;
 use std::collections::{HashMap, HashSet};
@@ -230,22 +231,13 @@ async fn apply_structural_filters(
 async fn generate_query_embeddings(
     request: &SemanticSearchRequest,
     clients: &BackendClients,
-    config: &SearchConfig,
+    _config: &SearchConfig,
 ) -> Result<(Vec<f32>, HashMap<OrderedFloat<f32>, Vec<(u32, f32)>>)> {
     let query_text = &request.query.text;
 
-    let bge_instruction = request
-        .query
-        .instruction
-        .as_ref()
-        .unwrap_or(&config.default_bge_instruction)
-        .clone();
-
-    let formatted_query = format!("<instruct>{bge_instruction}\n<query>{query_text}");
-
     let embeddings = clients
         .embedding_manager
-        .embed(vec![formatted_query])
+        .embed_for_task(vec![query_text.clone()], None, EmbeddingTask::Query)
         .await?;
 
     let dense_embedding = embeddings

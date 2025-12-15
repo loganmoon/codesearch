@@ -15,6 +15,7 @@ mod bm25_provider;
 mod code_tokenizer;
 pub mod config;
 pub mod error;
+mod jina_provider;
 mod mock_provider;
 pub mod provider;
 mod sparse_provider;
@@ -24,8 +25,9 @@ pub use bm25_provider::Bm25SparseProvider;
 pub use code_tokenizer::CodeTokenizer;
 pub use config::{EmbeddingConfig, EmbeddingConfigBuilder, EmbeddingProviderType};
 pub use error::EmbeddingError;
+pub use jina_provider::create_jina_provider;
 pub use mock_provider::MockEmbeddingProvider;
-pub use provider::{EmbeddingContext, EmbeddingProvider};
+pub use provider::{EmbeddingContext, EmbeddingProvider, EmbeddingTask};
 pub use sparse_provider::SparseEmbeddingProvider;
 
 // Re-export Tokenizer trait for use in indexer
@@ -34,9 +36,10 @@ pub use bm25::Tokenizer;
 /// Helper function to parse provider type from string
 fn parse_provider_type(provider: &str) -> EmbeddingProviderType {
     match provider.to_lowercase().as_str() {
+        "jina" => EmbeddingProviderType::Jina,
         "localapi" | "api" => EmbeddingProviderType::LocalApi,
         "mock" => EmbeddingProviderType::Mock,
-        _ => EmbeddingProviderType::LocalApi,
+        _ => EmbeddingProviderType::Jina, // Default to Jina
     }
 }
 
@@ -56,7 +59,9 @@ pub async fn create_embedding_manager_from_app_config(
         .texts_per_api_request(embeddings_config.texts_per_api_request)
         .embedding_dimension(embeddings_config.embedding_dimension)
         .max_concurrent_api_requests(embeddings_config.max_concurrent_api_requests)
-        .retry_attempts(embeddings_config.retry_attempts);
+        .retry_attempts(embeddings_config.retry_attempts)
+        .query_instruction(embeddings_config.default_bge_instruction.clone())
+        .task_prefix(embeddings_config.task_type.clone());
 
     if let Some(ref api_base_url) = embeddings_config.api_base_url {
         config_builder = config_builder.api_base_url(api_base_url.clone());
@@ -99,6 +104,28 @@ impl EmbeddingManager {
         let model_version = config.model.clone();
 
         let provider = match config.provider {
+            EmbeddingProviderType::Jina => {
+                let api_key = config
+                    .api_key
+                    .clone()
+                    .or_else(|| std::env::var("JINA_API_KEY").ok())
+                    .ok_or_else(|| {
+                        crate::error::EmbeddingError::ModelLoadError(
+                            "Jina API key required. Set embeddings.api_key in config or JINA_API_KEY environment variable".to_string()
+                        )
+                    })?;
+                let provider = jina_provider::create_jina_provider(
+                    api_key,
+                    config.model,
+                    config.embedding_dimension,
+                    config.texts_per_api_request,
+                    config.max_concurrent_api_requests,
+                    config.retry_attempts,
+                    config.task_prefix,
+                )
+                .await?;
+                Arc::from(provider)
+            }
             EmbeddingProviderType::LocalApi => {
                 let provider = create_api_provider(config).await?;
                 Arc::from(provider)
@@ -138,6 +165,19 @@ impl EmbeddingManager {
         contexts: Option<Vec<EmbeddingContext>>,
     ) -> Result<Vec<Option<Vec<f32>>>> {
         self.provider.embed_with_context(texts, contexts).await
+    }
+
+    /// Generate embeddings for texts with task-specific handling
+    ///
+    /// This method allows specifying whether the embeddings are for queries or passages,
+    /// which affects how some providers (like Jina or BGE) format the input.
+    pub async fn embed_for_task(
+        &self,
+        texts: Vec<String>,
+        contexts: Option<Vec<EmbeddingContext>>,
+        task: EmbeddingTask,
+    ) -> Result<Vec<Option<Vec<f32>>>> {
+        self.provider.embed_for_task(texts, contexts, task).await
     }
 }
 
@@ -203,6 +243,7 @@ mod tests {
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
             retry_attempts: 3,
+            task_type: "nl2code".to_string(),
         };
 
         std::env::set_var("EMBEDDING_API_KEY", "test-api-key-from-env");
@@ -227,6 +268,7 @@ mod tests {
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
             retry_attempts: 3,
+            task_type: "nl2code".to_string(),
         };
 
         std::env::set_var("EMBEDDING_API_KEY", "env-api-key");
@@ -251,6 +293,7 @@ mod tests {
             default_bge_instruction: "Represent this sentence for searching relevant passages:"
                 .to_string(),
             retry_attempts: 3,
+            task_type: "nl2code".to_string(),
         };
 
         std::env::remove_var("EMBEDDING_API_KEY");

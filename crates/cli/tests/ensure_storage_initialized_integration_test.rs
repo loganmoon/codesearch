@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 use codesearch::init::ensure_storage_initialized;
-use codesearch_core::config::{Config, StorageConfig};
+use codesearch_core::config::{Config, EmbeddingsConfig, StorageConfig};
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::fs;
@@ -154,7 +154,10 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
     let config_dir = create_config_dir().await?;
     let config_path = config_dir.path().join("codesearch.toml");
 
-    // Create config with invalid Qdrant port
+    // Create config with invalid Qdrant port and mock embedding provider
+    let mut embeddings_config = EmbeddingsConfig::default();
+    embeddings_config.provider = "mock".to_string();
+
     let config = Config::builder(StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port: 9999, // Invalid port - nothing listening here
@@ -174,6 +177,7 @@ async fn test_handles_qdrant_connection_failure() -> Result<()> {
         max_entities_per_db_operation: 10000,
         postgres_pool_size: 20,
     })
+    .embeddings(embeddings_config)
     .build();
 
     config.save(&config_path)?;

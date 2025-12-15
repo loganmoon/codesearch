@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
-use codesearch_embeddings::{EmbeddingContext, EmbeddingManager};
+use codesearch_embeddings::{EmbeddingContext, EmbeddingManager, EmbeddingTask};
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
@@ -577,7 +577,11 @@ async fn stage_generate_embeddings(
                 .collect();
 
             let new_embeddings = embedding_manager
-                .embed_with_context(cache_miss_texts.clone(), Some(contexts))
+                .embed_for_task(
+                    cache_miss_texts.clone(),
+                    Some(contexts),
+                    EmbeddingTask::Passage,
+                )
                 .await
                 .storage_err("Failed to generate embeddings")?;
 

@@ -408,3 +408,123 @@ pub async fn create_jina_provider(
     )?;
     Ok(Box::new(provider))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_text_preserves_normal_text() {
+        let input = "fn hello_world() { println!(\"Hello, World!\"); }";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_whitespace() {
+        let input = "line1\nline2\tindented\r\nwindows";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_control_chars() {
+        // Bell, backspace, and other control characters should be removed
+        let input = "hello\x07world\x08test";
+        let output = sanitize_text(input);
+        assert_eq!(output, "helloworldtest");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_emoji_outside_bmp() {
+        // Emoji like U+1F600 (grinning face) are outside BMP and should be removed
+        let input = "hello 😀 world 🎉 test";
+        let output = sanitize_text(input);
+        assert_eq!(output, "hello  world  test");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_bmp_emoji_ranges() {
+        // Dingbats range (U+2700-U+27BF)
+        let input = "check ✓ mark";
+        let output = sanitize_text(input);
+        assert_eq!(output, "check  mark");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_zero_width_chars() {
+        // Zero-width space (U+200B) and other zero-width chars
+        let input = "hello\u{200B}world\u{200C}test";
+        let output = sanitize_text(input);
+        assert_eq!(output, "helloworldtest");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_directional_formatting() {
+        // Left-to-right mark (U+202A) and other directional chars
+        let input = "hello\u{202A}world\u{202E}test";
+        let output = sanitize_text(input);
+        assert_eq!(output, "helloworldtest");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_private_use_area() {
+        // Private use area (U+E000-U+F8FF)
+        let input = "hello\u{E000}world\u{F8FF}test";
+        let output = sanitize_text(input);
+        assert_eq!(output, "helloworldtest");
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_cjk() {
+        // CJK characters should be preserved (they're in BMP)
+        let input = "Hello 你好 世界 こんにちは 안녕하세요";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_cyrillic() {
+        let input = "Привет мир";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_arabic() {
+        let input = "مرحبا بالعالم";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_empty_string() {
+        let input = "";
+        let output = sanitize_text(input);
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_sanitize_text_only_control_chars() {
+        // String with only control characters should return empty
+        let input = "\x00\x01\x02\x03";
+        let output = sanitize_text(input);
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_common_code_symbols() {
+        // Common programming symbols should be preserved
+        let input = "fn<T: Clone>(x: &str) -> Result<(), Error> { x.len() > 0 && !x.is_empty() }";
+        let output = sanitize_text(input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_variation_selectors() {
+        // Variation selectors (U+FE00-U+FE0F) are often paired with emoji
+        let input = "test\u{FE0F}text";
+        let output = sanitize_text(input);
+        assert_eq!(output, "testtext");
+    }
+}

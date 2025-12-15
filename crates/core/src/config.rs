@@ -127,10 +127,6 @@ pub struct EmbeddingsConfig {
     /// Number of retry attempts for failed embedding requests
     #[serde(default = "default_embedding_retry_attempts")]
     pub retry_attempts: usize,
-
-    /// Task type prefix for Jina embeddings (e.g., "nl2code" -> "nl2code.query"/"nl2code.passage")
-    #[serde(default = "default_task_type")]
-    pub task_type: String,
 }
 
 impl std::fmt::Debug for EmbeddingsConfig {
@@ -149,7 +145,6 @@ impl std::fmt::Debug for EmbeddingsConfig {
             )
             .field("default_bge_instruction", &self.default_bge_instruction)
             .field("retry_attempts", &self.retry_attempts)
-            .field("task_type", &self.task_type)
             .finish()
     }
 }
@@ -464,7 +459,6 @@ const DEFAULT_PROVIDER: &str = "jina";
 const DEFAULT_MODEL: &str = "jina-embeddings-v3";
 const DEFAULT_API_BASE_URL: &str = "http://localhost:8000/v1";
 const DEFAULT_BGE_INSTRUCTION: &str = "Represent this code search query for retrieving semantically similar code snippets, function implementations, type definitions, and code patterns";
-const DEFAULT_TASK_TYPE: &str = "retrieval";
 const DEFAULT_QDRANT_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_HOST: &str = "localhost";
 const DEFAULT_POSTGRES_DATABASE: &str = "codesearch";
@@ -515,10 +509,6 @@ fn default_bge_instruction() -> String {
 
 fn default_embedding_retry_attempts() -> usize {
     5
-}
-
-fn default_task_type() -> String {
-    DEFAULT_TASK_TYPE.to_string()
 }
 
 fn default_debounce_ms() -> u64 {
@@ -709,7 +699,6 @@ impl Default for EmbeddingsConfig {
             max_concurrent_api_requests: default_max_concurrent_api_requests(),
             default_bge_instruction: default_bge_instruction(),
             retry_attempts: default_embedding_retry_attempts(),
-            task_type: default_task_type(),
         }
     }
 }

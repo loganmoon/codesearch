@@ -46,9 +46,6 @@ pub struct EmbeddingConfig {
 
     /// Instruction prefix for query embeddings (BGE models only)
     pub(crate) query_instruction: Option<String>,
-
-    /// Task type prefix for Jina embeddings (e.g., "nl2code" -> "nl2code.query", "nl2code.passage")
-    pub(crate) task_prefix: String,
 }
 
 impl EmbeddingConfig {
@@ -88,7 +85,6 @@ impl Default for EmbeddingConfig {
             max_concurrent_api_requests: 4,
             retry_attempts: 5,
             query_instruction: Some(DEFAULT_BGE_INSTRUCTION.to_string()),
-            task_prefix: "retrieval".to_string(),
         }
     }
 }
@@ -104,7 +100,6 @@ pub struct EmbeddingConfigBuilder {
     max_concurrent_api_requests: Option<usize>,
     retry_attempts: Option<usize>,
     query_instruction: Option<Option<String>>,
-    task_prefix: Option<String>,
 }
 
 impl EmbeddingConfigBuilder {
@@ -120,7 +115,6 @@ impl EmbeddingConfigBuilder {
             max_concurrent_api_requests: None,
             retry_attempts: None,
             query_instruction: None,
-            task_prefix: None,
         }
     }
 
@@ -178,12 +172,6 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the task prefix for Jina embeddings (e.g., "nl2code")
-    pub fn task_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.task_prefix = Some(prefix.into());
-        self
-    }
-
     /// Build the configuration, using defaults for unset fields
     pub fn build(self) -> EmbeddingConfig {
         let defaults = EmbeddingConfig::default();
@@ -204,7 +192,6 @@ impl EmbeddingConfigBuilder {
                 .unwrap_or(defaults.max_concurrent_api_requests),
             retry_attempts: self.retry_attempts.unwrap_or(defaults.retry_attempts),
             query_instruction: self.query_instruction.unwrap_or(defaults.query_instruction),
-            task_prefix: self.task_prefix.unwrap_or(defaults.task_prefix),
         }
     }
 }

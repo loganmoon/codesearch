@@ -117,8 +117,8 @@ Query code relationships (e.g., "functions that call X").
 
 ```
 GET  /api/v1/repositories           # List indexed repositories
-GET  /api/v1/health                  # Health check
-POST /api/v1/embeddings              # Generate embeddings
+GET  /health                         # Health check
+POST /api/v1/embed                   # Generate embeddings
 ```
 
 ## Development

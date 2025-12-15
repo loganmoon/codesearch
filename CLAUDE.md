@@ -79,7 +79,7 @@ cargo run -- serve        # Start REST API server
 - **Jina (default)**: Uses Jina AI API for embeddings. Zero-config, no GPU required. Set `JINA_API_KEY` or `embeddings.api_key` in config.
 - **LocalApi**: Self-hosted vLLM with BGE models. Requires GPU. Set `embeddings.provider = "localapi"` in config.
 - Provider handles query vs passage formatting internally via `EmbeddingTask` enum
-- Jina: Uses task parameter (`nl2code.query`, `nl2code.passage`)
+- Jina: Uses task parameter (`retrieval.query`, `retrieval.passage`)
 - BGE (LocalApi): Uses instruction prefix for queries only (`<instruct>...\n<query>...`)
 
 **Neo4j Relationships:**

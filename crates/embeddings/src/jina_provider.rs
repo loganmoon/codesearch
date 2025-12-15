@@ -30,14 +30,56 @@ const JINA_MAX_BATCH_SIZE: usize = 100;
 /// Maximum characters per individual text (matches Jina's ~32K token context)
 const JINA_MAX_TEXT_CHARS: usize = 65536;
 
+/// Sanitize text for Jina API by removing problematic characters.
+///
+/// Allows the Basic Multilingual Plane (U+0000-U+FFFF) which covers all major
+/// world languages, but blocks:
+/// - Control characters (except tab, newline, CR)
+/// - Emoji ranges within the BMP
+/// - Everything above U+FFFF (supplementary planes where most emoji live)
+fn sanitize_text(text: &str) -> String {
+    text.chars()
+        .filter(|&c| {
+            // Allow standard whitespace
+            if c == '\t' || c == '\n' || c == '\r' {
+                return true;
+            }
+            // Block control characters
+            if c.is_control() {
+                return false;
+            }
+            let cp = c as u32;
+            // Block everything outside BMP (U+10000+) - this is where most emoji live
+            if cp > 0xFFFF {
+                return false;
+            }
+            // Block emoji/symbol ranges within BMP
+            if (0x2600..=0x27BF).contains(&cp)  // Misc symbols & dingbats
+                || (0x2300..=0x23FF).contains(&cp)  // Misc technical (some emoji)
+                || (0x2B00..=0x2BFF).contains(&cp)  // Misc symbols and arrows
+                || (0xFE00..=0xFE0F).contains(&cp)  // Variation selectors
+                || (0x200B..=0x200F).contains(&cp)  // Zero-width chars
+                || (0x202A..=0x202E).contains(&cp)  // Directional formatting
+                || (0x2060..=0x206F).contains(&cp)  // Invisible operators
+                || (0xE000..=0xF8FF).contains(&cp)  // Private use area
+                || (0xFFF0..=0xFFFF).contains(&cp)
+            // Specials
+            {
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
 /// Request payload for Jina embeddings API
 #[derive(Debug, Serialize)]
 struct JinaEmbeddingRequest<'a> {
     model: &'a str,
     input: &'a [String],
     task: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dimensions: Option<usize>,
+    /// Drop content exceeding max token length instead of erroring
+    truncate: bool,
 }
 
 /// Response from Jina embeddings API
@@ -62,9 +104,8 @@ pub struct JinaEmbeddingProvider {
     batch_size: usize,
     max_concurrent: usize,
     concurrency_limiter: Arc<Semaphore>,
+    #[allow(dead_code)] // TEMPORARY: Retries disabled for debugging
     retry_attempts: usize,
-    /// Task type prefix (e.g., "nl2code" -> "nl2code.query", "nl2code.passage")
-    task_prefix: String,
 }
 
 impl JinaEmbeddingProvider {
@@ -77,8 +118,6 @@ impl JinaEmbeddingProvider {
     /// * `batch_size` - Maximum texts per API request
     /// * `max_concurrent` - Maximum concurrent API requests
     /// * `retry_attempts` - Number of retry attempts for failed requests
-    /// * `task_prefix` - Task type prefix (e.g., "nl2code")
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         api_key: String,
         model: String,
@@ -86,14 +125,12 @@ impl JinaEmbeddingProvider {
         batch_size: usize,
         max_concurrent: usize,
         retry_attempts: usize,
-        task_prefix: String,
     ) -> Result<Self> {
         info!("Initializing Jina embedding provider");
         info!("  Model: {model}");
         info!("  Dimensions: {dimensions}");
         info!("  Batch size: {batch_size}");
         info!("  Max concurrent requests: {max_concurrent}");
-        info!("  Task prefix: {task_prefix}");
 
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
@@ -114,15 +151,15 @@ impl JinaEmbeddingProvider {
             max_concurrent,
             concurrency_limiter: Arc::new(Semaphore::new(max_concurrent)),
             retry_attempts,
-            task_prefix,
         })
     }
 
     /// Get the Jina task string for the given embedding task
-    fn task_string(&self, task: EmbeddingTask) -> String {
+    /// For jina-code-embeddings models, valid tasks are: nl2code, qa, code2code, code2nl, code2completion
+    fn task_string(&self, task: EmbeddingTask) -> &'static str {
         match task {
-            EmbeddingTask::Query => format!("{}.query", self.task_prefix),
-            EmbeddingTask::Passage => format!("{}.passage", self.task_prefix),
+            EmbeddingTask::Query => "nl2code.query",
+            EmbeddingTask::Passage => "nl2code.passage",
         }
     }
 
@@ -137,9 +174,17 @@ impl JinaEmbeddingProvider {
         let request = JinaEmbeddingRequest {
             model: &self.model,
             input: texts,
-            task: &task_str,
-            dimensions: Some(self.dimensions),
+            task: task_str,
+            truncate: true,
         };
+
+        // Log full request JSON for debugging
+        if let Ok(request_json) = serde_json::to_string_pretty(&request) {
+            let debug_path = "/tmp/jina_request.json";
+            if std::fs::write(debug_path, &request_json).is_ok() {
+                debug!("Request JSON written to {debug_path}");
+            }
+        }
 
         // Acquire semaphore permit for concurrency control
         let _permit = self.concurrency_limiter.acquire().await.map_err(|e| {
@@ -209,14 +254,16 @@ impl JinaEmbeddingProvider {
         // Initialize results array - None for texts that are skipped
         let mut all_embeddings = vec![None; texts.len()];
 
-        // Step 1: Filter texts by size and build batches
+        // Step 1: Sanitize texts and filter by size
         let mut filtered_texts: Vec<(usize, String, usize)> = Vec::new();
         let mut skipped_count = 0;
 
         for (i, text) in texts.iter().enumerate() {
-            let char_count = text.chars().count();
+            // Sanitize text to remove control characters that Jina can't encode
+            let sanitized = sanitize_text(text);
+            let char_count = sanitized.chars().count();
             if char_count <= JINA_MAX_TEXT_CHARS {
-                filtered_texts.push((i, text.clone(), char_count));
+                filtered_texts.push((i, sanitized, char_count));
             } else {
                 skipped_count += 1;
                 debug!(
@@ -267,7 +314,7 @@ impl JinaEmbeddingProvider {
             self.batch_size
         );
 
-        // Step 3: Process batches concurrently with retry logic
+        // Step 3: Process batches concurrently (retries disabled for debugging)
         let contexts = contexts.map(Arc::new);
         let results = stream::iter(batches)
             .map(|batch| {
@@ -276,51 +323,36 @@ impl JinaEmbeddingProvider {
                     let (indices, texts_to_embed): (Vec<usize>, Vec<String>) =
                         batch.into_iter().unzip();
 
-                    // Retry loop with exponential backoff
-                    let mut attempt = 0;
-                    loop {
-                        match self.embed_batch(&texts_to_embed, task).await {
-                            Ok(embeddings) => {
-                                let results: Vec<(usize, Vec<f32>)> =
-                                    indices.iter().copied().zip(embeddings).collect();
-                                return Ok::<_, EmbeddingError>(results);
-                            }
-                            Err(e) if attempt < self.retry_attempts => {
-                                attempt += 1;
+                    match self.embed_batch(&texts_to_embed, task).await {
+                        Ok(embeddings) => {
+                            let results: Vec<(usize, Vec<f32>)> =
+                                indices.iter().copied().zip(embeddings).collect();
+                            Ok::<_, EmbeddingError>(results)
+                        }
+                        Err(e) => {
+                            // TEMPORARY: Fail immediately without retry for debugging
+                            error!("Jina embedding generation failed: {e}");
 
-                                // Log error with entity context if available
-                                error!("Jina embedding generation failed: {e}");
-                                for (batch_idx, orig_idx) in indices.iter().enumerate() {
-                                    let char_count = texts_to_embed
-                                        .get(batch_idx)
-                                        .map(|t| t.chars().count())
-                                        .unwrap_or(0);
-                                    if let Some(ref ctxs) = contexts {
-                                        if let Some(ctx) = ctxs.get(*orig_idx) {
-                                            error!("  {} | Chars: {}", ctx, char_count);
-                                        } else {
-                                            error!("  Text {}: {} chars", orig_idx, char_count);
-                                        }
+                            // Log entity context
+                            for (batch_idx, orig_idx) in indices.iter().enumerate() {
+                                let char_count = texts_to_embed
+                                    .get(batch_idx)
+                                    .map(|t| t.chars().count())
+                                    .unwrap_or(0);
+                                if let Some(ref ctxs) = contexts {
+                                    if let Some(ctx) = ctxs.get(*orig_idx) {
+                                        error!("  {} | Chars: {}", ctx, char_count);
                                     } else {
                                         error!("  Text {}: {} chars", orig_idx, char_count);
                                     }
+                                } else {
+                                    error!("  Text {}: {} chars", orig_idx, char_count);
                                 }
+                            }
 
-                                // Exponential backoff: 10s, 20s, 40s, 60s (capped)
-                                let backoff_secs = (10 * 2u64.pow(attempt as u32 - 1)).min(60);
-                                let backoff = Duration::from_secs(backoff_secs);
-                                warn!(
-                                    "Retrying in {backoff:?} (attempt {attempt}/{})",
-                                    self.retry_attempts
-                                );
-                                tokio::time::sleep(backoff).await;
-                            }
-                            Err(e) => {
-                                return Err(EmbeddingError::InferenceError(format!(
-                                    "Jina API request failed after {} attempts: {e}",
-                                    self.retry_attempts
-                                )));
-                            }
+                            // Dump debug info and panic for debugging
+                            error!("Full request written to /tmp/jina_request.json");
+                            panic!("Jina API request failed: {e}")
                         }
                     }
                 }
@@ -380,7 +412,6 @@ pub async fn create_jina_provider(
     batch_size: usize,
     max_concurrent: usize,
     retry_attempts: usize,
-    task_prefix: String,
 ) -> Result<Box<dyn EmbeddingProvider>> {
     let provider = JinaEmbeddingProvider::new(
         api_key,
@@ -389,7 +420,6 @@ pub async fn create_jina_provider(
         batch_size,
         max_concurrent,
         retry_attempts,
-        task_prefix,
     )?;
     Ok(Box::new(provider))
 }

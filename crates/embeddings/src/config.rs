@@ -88,7 +88,7 @@ impl Default for EmbeddingConfig {
             max_concurrent_api_requests: 4,
             retry_attempts: 5,
             query_instruction: Some(DEFAULT_BGE_INSTRUCTION.to_string()),
-            task_prefix: "nl2code".to_string(),
+            task_prefix: "retrieval".to_string(),
         }
     }
 }

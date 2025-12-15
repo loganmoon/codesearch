@@ -121,7 +121,6 @@ impl EmbeddingManager {
                     config.texts_per_api_request,
                     config.max_concurrent_api_requests,
                     config.retry_attempts,
-                    config.task_prefix,
                 )
                 .await?;
                 Arc::from(provider)

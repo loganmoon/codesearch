@@ -150,8 +150,8 @@ async fn test_orchestrator_initialization() {
     let config = AgenticSearchConfig {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
-        worker_model: "claude-haiku-4-5".to_string(),
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
+        ..Default::default()
     };
 
     let result = AgenticSearchOrchestrator::new(mock_api, config);
@@ -165,8 +165,8 @@ async fn test_orchestrator_requires_api_key() {
     let config = AgenticSearchConfig {
         api_key: None,
         orchestrator_model: "claude-sonnet-4-5".to_string(),
-        worker_model: "claude-haiku-4-5".to_string(),
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
+        ..Default::default()
     };
 
     std::env::remove_var("ANTHROPIC_API_KEY");
@@ -194,8 +194,8 @@ async fn test_end_to_end_search() {
     let config = AgenticSearchConfig {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
-        worker_model: "claude-haiku-4-5".to_string(),
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
+        ..Default::default()
     };
 
     let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();
@@ -302,8 +302,8 @@ async fn test_dual_track_metadata_population() {
     let config = AgenticSearchConfig {
         api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         orchestrator_model: "claude-sonnet-4-5".to_string(),
-        worker_model: "claude-haiku-4-5".to_string(),
         quality_gate: codesearch_agentic_search::QualityGateConfig::default(),
+        ..Default::default()
     };
 
     let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();

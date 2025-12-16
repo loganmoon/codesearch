@@ -5,6 +5,7 @@ use crate::sort_scores_descending;
 use crate::RerankerProvider;
 use async_trait::async_trait;
 use codesearch_core::error::Result;
+use futures::future::join_all;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -12,6 +13,9 @@ use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
 const JINA_API_URL: &str = "https://api.jina.ai/v1/rerank";
+
+/// Maximum documents per batch to avoid timeouts with large payloads
+const BATCH_SIZE: usize = 25;
 
 /// Request payload for Jina rerank API
 #[derive(Debug, Serialize)]
@@ -90,23 +94,80 @@ impl RerankerProvider for JinaRerankerProvider {
             return Ok(Vec::new());
         }
 
-        let doc_texts: Vec<String> = documents
+        // Calculate total content size for logging
+        let total_content_bytes: usize = documents.iter().map(|(_, c)| c.len()).sum();
+        let num_batches = documents.len().div_ceil(BATCH_SIZE);
+
+        info!(
+            "Jina rerank: {} documents ({} KB) in {} batches",
+            documents.len(),
+            total_content_bytes / 1024,
+            num_batches
+        );
+
+        // Split into batches and process in parallel
+        let batch_futures: Vec<_> = documents
+            .chunks(BATCH_SIZE)
+            .enumerate()
+            .map(|(batch_idx, batch)| self.rerank_batch(query, batch, batch_idx))
+            .collect();
+
+        let batch_results = join_all(batch_futures).await;
+
+        // Merge results from all batches
+        let mut all_scored: Vec<(String, f32)> = Vec::with_capacity(documents.len());
+        let mut failed_batches = 0;
+
+        for (batch_idx, result) in batch_results.into_iter().enumerate() {
+            match result {
+                Ok(scored) => all_scored.extend(scored),
+                Err(e) => {
+                    warn!("Batch {batch_idx} failed: {e}");
+                    failed_batches += 1;
+                }
+            }
+        }
+
+        if failed_batches > 0 {
+            warn!(
+                "Jina rerank: {failed_batches}/{num_batches} batches failed, returning partial results"
+            );
+        }
+
+        // Sort merged results by relevance score descending
+        sort_scores_descending(&mut all_scored);
+
+        info!(
+            "Jina reranking complete: {} results from {} batches",
+            all_scored.len(),
+            num_batches - failed_batches
+        );
+
+        Ok(all_scored)
+    }
+}
+
+impl JinaRerankerProvider {
+    /// Rerank a single batch of documents
+    async fn rerank_batch(
+        &self,
+        query: &str,
+        batch: &[(String, &str)],
+        batch_idx: usize,
+    ) -> Result<Vec<(String, f32)>> {
+        let doc_texts: Vec<String> = batch
             .iter()
             .map(|(_, content)| (*content).to_string())
             .collect();
+        let batch_bytes: usize = doc_texts.iter().map(|d| d.len()).sum();
 
         let request = JinaRerankRequest {
             model: self.model.clone(),
             query: query.to_string(),
             documents: doc_texts,
-            top_n: documents.len(),
+            top_n: batch.len(),
             return_documents: false,
         };
-
-        info!(
-            "Sending Jina rerank request for {} documents",
-            documents.len()
-        );
 
         // Acquire semaphore permit for concurrency control
         let _permit = self.concurrency_limiter.acquire().await.map_err(|e| {
@@ -122,7 +183,28 @@ impl RerankerProvider for JinaRerankerProvider {
             .send()
             .await
             .map_err(|e| {
-                RerankingError::InferenceError(format!("Jina rerank API request failed: {e}"))
+                let error_kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connection"
+                } else if e.is_request() {
+                    "request build"
+                } else if e.is_body() {
+                    "body"
+                } else {
+                    "unknown"
+                };
+                warn!(
+                    "Batch {batch_idx} failed ({}): {} - {} docs, {} KB",
+                    error_kind,
+                    e,
+                    batch.len(),
+                    batch_bytes / 1024
+                );
+                RerankingError::InferenceError(format!(
+                    "Jina rerank batch {batch_idx} failed ({}): {}",
+                    error_kind, e
+                ))
             })?;
 
         if !response.status().is_success() {
@@ -131,39 +213,40 @@ impl RerankerProvider for JinaRerankerProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read error response".to_string());
+            warn!(
+                "Batch {batch_idx} API error {} - {} docs, {} KB: {}",
+                status,
+                batch.len(),
+                batch_bytes / 1024,
+                error_text
+            );
             return Err(RerankingError::InferenceError(format!(
-                "Jina rerank API returned error {status}: {error_text}"
+                "Jina rerank batch {batch_idx} returned error {status}: {error_text}"
             ))
             .into());
         }
 
         let rerank_response: JinaRerankResponse = response.json().await.map_err(|e| {
-            RerankingError::InferenceError(format!("Failed to parse Jina rerank response: {e}"))
+            RerankingError::InferenceError(format!(
+                "Failed to parse Jina rerank response for batch {batch_idx}: {e}"
+            ))
         })?;
 
         // Map indices back to document IDs with scores
-        let mut scored_docs: Vec<(String, f32)> = rerank_response
+        let scored_docs: Vec<(String, f32)> = rerank_response
             .results
             .into_iter()
-            .filter_map(|result| match documents.get(result.index) {
+            .filter_map(|result| match batch.get(result.index) {
                 Some((id, _)) => Some((id.clone(), result.relevance_score)),
                 None => {
                     warn!(
-                        "Jina rerank API returned out-of-bounds index {}, dropping result",
+                        "Batch {batch_idx}: out-of-bounds index {}, dropping",
                         result.index
                     );
                     None
                 }
             })
             .collect();
-
-        // Sort by relevance score descending with NaN handling
-        sort_scores_descending(&mut scored_docs);
-
-        info!(
-            "Jina reranking complete: returned {} results",
-            scored_docs.len()
-        );
 
         Ok(scored_docs)
     }

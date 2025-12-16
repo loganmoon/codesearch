@@ -309,7 +309,7 @@ pub struct RerankingConfig {
     /// API key for reranker service (uses EMBEDDING_API_KEY env if not set)
     pub api_key: Option<String>,
 
-    /// Request timeout in seconds for reranking API calls (default: 5)
+    /// Request timeout in seconds for reranking API calls (default: 15)
     #[serde(default = "default_reranking_timeout_secs")]
     pub timeout_secs: u64,
 
@@ -639,7 +639,7 @@ fn default_reranking_top_k() -> usize {
 }
 
 fn default_reranking_timeout_secs() -> u64 {
-    5
+    15
 }
 
 fn default_reranking_max_concurrent_requests() -> usize {

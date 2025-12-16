@@ -5,7 +5,9 @@
 use crate::api::{BackendClients, SearchApiImpl, SearchConfig};
 use codesearch_agentic_search::{
     AgenticSearchConfig, AgenticSearchMetadata, AgenticSearchOrchestrator, AgenticSearchRequest,
+    RetrievalSource,
 };
+use codesearch_core::config::RerankingRequestConfig;
 use codesearch_core::error::Result;
 use codesearch_core::search_models::EntityResult;
 use codesearch_core::SearchApi;
@@ -28,11 +30,55 @@ pub struct AgenticSearchApiRequest {
     pub force_sonnet: bool,
 }
 
+/// How an entity was retrieved (API-facing type)
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiRetrievalSource {
+    /// Found via semantic search (dense embeddings + BM25)
+    Semantic,
+    /// Found via graph traversal
+    Graph {
+        source_entity_id: String,
+        relationship: String,
+    },
+}
+
+impl From<RetrievalSource> for ApiRetrievalSource {
+    fn from(source: RetrievalSource) -> Self {
+        match source {
+            RetrievalSource::Semantic => ApiRetrievalSource::Semantic,
+            RetrievalSource::Graph {
+                source_entity_id,
+                relationship,
+            } => ApiRetrievalSource::Graph {
+                source_entity_id,
+                relationship,
+            },
+        }
+    }
+}
+
+/// Entity result with retrieval source information
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AgenticEntityResult {
+    /// The entity data
+    #[serde(flatten)]
+    pub entity: EntityResult,
+
+    /// How this entity was retrieved
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ApiRetrievalSource>,
+
+    /// Relevance justification from reranking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relevance_justification: Option<String>,
+}
+
 /// Response from agentic search endpoint
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AgenticSearchApiResponse {
-    /// Search results
-    pub results: Vec<EntityResult>,
+    /// Search results with source information
+    pub results: Vec<AgenticEntityResult>,
 
     /// Search execution metadata
     pub metadata: AgenticSearchApiMetadata,
@@ -99,8 +145,20 @@ pub async fn search_agentic(
     let search_api: Arc<dyn SearchApi> =
         Arc::new(SearchApiImpl::new(clients.clone(), config.clone()));
 
-    // Create agentic search config (using defaults for now)
-    let agentic_config = AgenticSearchConfig::default();
+    // Create agentic search config with reranking settings from server config
+    let agentic_config = AgenticSearchConfig {
+        reranking: if config.reranking.enabled && clients.reranker.is_some() {
+            Some(RerankingRequestConfig {
+                enabled: Some(true),
+                candidates: Some(config.reranking.candidates),
+                top_k: Some(config.reranking.top_k),
+            })
+        } else {
+            None
+        },
+        semantic_candidates: config.reranking.candidates,
+        ..Default::default()
+    };
 
     // Create orchestrator
     let orchestrator = AgenticSearchOrchestrator::new(search_api, agentic_config).map_err(|e| {
@@ -120,7 +178,15 @@ pub async fn search_agentic(
     })?;
 
     Ok(AgenticSearchApiResponse {
-        results: response.results,
+        results: response
+            .results
+            .into_iter()
+            .map(|e| AgenticEntityResult {
+                entity: e.entity,
+                source: Some(e.source.into()),
+                relevance_justification: Some(e.relevance_justification),
+            })
+            .collect(),
         metadata: response.metadata.into(),
     })
 }

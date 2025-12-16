@@ -42,6 +42,20 @@ pub async fn search_unified(
     // Determine if fulltext should be skipped based on intent
     let enable_fulltext = request.enable_fulltext && !preprocessed.skip_fulltext;
 
+    // Compute rerank config early to determine search limits
+    // When reranking is enabled, fetch more candidates so the reranker has a meaningful pool
+    let rerank_config = request
+        .rerank
+        .as_ref()
+        .map(|r| r.merge_with(&config.reranking))
+        .unwrap_or_else(|| config.reranking.clone());
+
+    let semantic_limit_for_search = if rerank_config.enabled && clients.reranker.is_some() {
+        rerank_config.candidates
+    } else {
+        request.semantic_limit.unwrap_or(100)
+    };
+
     // Choose query for fulltext (extracted identifiers or original)
     let fulltext_query = preprocessed
         .fulltext_query
@@ -68,7 +82,14 @@ pub async fn search_unified(
         // Semantic search via Qdrant
         async {
             if request.enable_semantic {
-                execute_semantic_search(&request, clients, config, &effective_filters).await
+                execute_semantic_search(
+                    &request,
+                    clients,
+                    config,
+                    &effective_filters,
+                    semantic_limit_for_search,
+                )
+                .await
             } else {
                 Ok(vec![])
             }
@@ -87,13 +108,7 @@ pub async fn search_unified(
     // Skip specificity boost - it was having negative effects on search quality
     let boosted_results = merged_results;
 
-    // Merge rerank config: request overrides take precedence, fall back to server config
-    let rerank_config = request
-        .rerank
-        .as_ref()
-        .map(|r| r.merge_with(&config.reranking))
-        .unwrap_or_else(|| config.reranking.clone());
-
+    // rerank_config was computed earlier to determine search limits
     tracing::debug!(
         rerank_enabled = rerank_config.enabled,
         reranker_available = clients.reranker.is_some(),
@@ -167,6 +182,7 @@ async fn execute_semantic_search(
     clients: &BackendClients,
     config: &SearchConfig,
     effective_filters: &Option<SearchFilters>,
+    semantic_limit: usize,
 ) -> Result<Vec<CodeEntity>> {
     let embeddings = clients
         .embedding_manager
@@ -201,7 +217,7 @@ async fn execute_semantic_search(
         .search_similar_hybrid(
             dense_embedding,
             sparse_embedding,
-            request.semantic_limit.unwrap_or(100),
+            semantic_limit,
             filters,
             config.hybrid_search.prefetch_multiplier,
         )

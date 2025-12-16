@@ -1,13 +1,17 @@
 //! Configuration for agentic search
 
+use codesearch_core::config::RerankingRequestConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AgenticSearchConfig {
     pub api_key: Option<String>,
     pub orchestrator_model: String,
-    pub worker_model: String,
     pub quality_gate: QualityGateConfig,
+    /// Reranking config for Jina cross-encoder (passed to semantic search)
+    pub reranking: Option<RerankingRequestConfig>,
+    /// Number of candidates to fetch for reranking (default 100)
+    pub semantic_candidates: usize,
 }
 
 impl std::fmt::Debug for AgenticSearchConfig {
@@ -15,8 +19,9 @@ impl std::fmt::Debug for AgenticSearchConfig {
         f.debug_struct("AgenticSearchConfig")
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("orchestrator_model", &self.orchestrator_model)
-            .field("worker_model", &self.worker_model)
             .field("quality_gate", &self.quality_gate)
+            .field("reranking", &self.reranking)
+            .field("semantic_candidates", &self.semantic_candidates)
             .finish()
     }
 }
@@ -34,8 +39,9 @@ impl Default for AgenticSearchConfig {
         Self {
             api_key: None,
             orchestrator_model: "claude-sonnet-4-5".to_string(),
-            worker_model: "claude-haiku-4-5".to_string(),
             quality_gate: QualityGateConfig::default(),
+            reranking: None,
+            semantic_candidates: 100,
         }
     }
 }
@@ -87,7 +93,8 @@ mod tests {
     fn test_config_defaults() {
         let config = AgenticSearchConfig::default();
         assert_eq!(config.orchestrator_model, "claude-sonnet-4-5");
-        assert_eq!(config.worker_model, "claude-haiku-4-5");
+        assert_eq!(config.semantic_candidates, 100);
+        assert!(config.reranking.is_none());
         assert!(config.validate().is_ok());
     }
 

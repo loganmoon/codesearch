@@ -5,9 +5,6 @@
 //! Prompts are split into system (cacheable) and user (dynamic) parts
 //! to enable Claude API prompt caching for cost reduction.
 
-// Worker reranking prompt (not split - too small to benefit from caching)
-pub const WORKER_RERANK: &str = include_str!("../assets/prompts/worker_rerank.txt");
-
 // Split prompts for caching - System prompts (static, cacheable)
 pub const ORCHESTRATOR_PLAN_SYSTEM: &str =
     include_str!("../assets/prompts/orchestrator_plan_system.txt");
@@ -39,9 +36,6 @@ mod tests {
     #[test]
     #[allow(clippy::len_zero)] // const_is_empty conflicts with len_zero for const strings
     fn test_prompts_load() {
-        // Verify worker rerank prompt loads
-        assert!(WORKER_RERANK.len() > 0);
-
         // Verify split prompts for caching
         assert!(ORCHESTRATOR_PLAN_SYSTEM.len() > 0);
         assert!(ORCHESTRATOR_PLAN_USER.len() > 0);

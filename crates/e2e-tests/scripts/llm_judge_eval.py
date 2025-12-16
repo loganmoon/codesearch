@@ -41,6 +41,7 @@ class ScoredResult:
     reasoning: str
     original_rank: int
     original_score: float
+    source: Optional[str] = None  # "semantic" or "graph"
 
 
 @dataclass
@@ -71,7 +72,7 @@ class ComparisonEvaluation:
 class CodeSearchJudge:
     """LLM-as-a-judge evaluator using DeepEval with Gemini."""
 
-    def __init__(self, model: str = "gemini-2.5-pro", max_concurrent: int = 10):
+    def __init__(self, model: str = "gemini-2.5-flash", max_concurrent: int = 10):
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError("GOOGLE_API_KEY environment variable must be set")
@@ -132,6 +133,14 @@ class CodeSearchJudge:
                 print(f"    Warning: Failed to score result {index+1}: {e}", file=sys.stderr)
                 score, reason = 0, f"Scoring failed: {e}"
 
+            # Parse source field (semantic or graph)
+            source = result.get("source")
+            source_type = None
+            if isinstance(source, str):
+                source_type = source
+            elif isinstance(source, dict):
+                source_type = "graph"
+
             return ScoredResult(
                 entity_id=result.get("entity_id", ""),
                 qualified_name=result.get("qualified_name", ""),
@@ -141,6 +150,7 @@ class CodeSearchJudge:
                 reasoning=reason,
                 original_rank=index + 1,
                 original_score=result.get("score", 0.0),
+                source=source_type,
             )
 
     async def evaluate_query(
@@ -149,6 +159,7 @@ class CodeSearchJudge:
         query_text: str,
         results: list[dict],
         limit: int,
+        exclude_graph: bool = False,
     ) -> QueryEvaluation:
         """Score all results for a query concurrently and compute NDCG.
 
@@ -157,6 +168,7 @@ class CodeSearchJudge:
             query_text: The search query text
             results: List of search results with entity details
             limit: The result limit - NDCG is only calculated for valid k <= limit
+            exclude_graph: If True, exclude graph-sourced results from NDCG
 
         Returns:
             QueryEvaluation with scores and NDCG metrics
@@ -171,17 +183,23 @@ class CodeSearchJudge:
         ]
         scored_results = await asyncio.gather(*tasks)
 
+        # Filter out graph results if requested
+        if exclude_graph:
+            filtered_results = [r for r in scored_results if r.source != "graph"]
+        else:
+            filtered_results = list(scored_results)
+
         # Calculate NDCG only at valid cutoffs (k <= limit)
-        relevance_scores = [r.score for r in scored_results]
+        relevance_scores = [r.score for r in filtered_results]
         ndcg_scores = {}
         for k in [5, 10, 20]:
-            if k <= limit:
+            if k <= limit and len(relevance_scores) > 0:
                 ndcg_scores[k] = calculate_ndcg(relevance_scores, k=k)
 
         return QueryEvaluation(
             query_id=query_id,
             query_text=query_text,
-            scored_results=list(scored_results),
+            scored_results=list(scored_results),  # Keep all for reporting
             ndcg_scores=ndcg_scores,
         )
 
@@ -365,6 +383,7 @@ def save_results(evaluation: ComparisonEvaluation, output_path: str) -> None:
                             "reasoning": r.reasoning,
                             "original_rank": r.original_rank,
                             "original_score": r.original_score,
+                            "source": r.source,
                         }
                         for r in q.scored_results
                     ],
@@ -490,6 +509,7 @@ async def evaluate_single_query(
     limit: int,
     judge: CodeSearchJudge,
     query_semaphore: asyncio.Semaphore,
+    exclude_graph: bool = False,
 ) -> tuple[Optional[QueryEvaluation], Optional[QueryEvaluation]]:
     """Evaluate a single query against both endpoints.
 
@@ -526,7 +546,9 @@ async def evaluate_single_query(
                 continue
 
             # Score results with LLM (async concurrent scoring)
-            evaluation = await judge.evaluate_query(query_id, query_text, results, limit)
+            # Only apply exclude_graph to agentic endpoint (semantic has no graph results)
+            should_exclude = exclude_graph and endpoint == "agentic"
+            evaluation = await judge.evaluate_query(query_id, query_text, results, limit, should_exclude)
 
             if endpoint == "semantic":
                 semantic_eval = evaluation
@@ -548,6 +570,7 @@ async def run_evaluation(
     max_queries: Optional[int] = None,
     max_concurrent: int = 10,
     max_query_concurrency: int = 4,
+    exclude_graph: bool = False,
 ) -> ComparisonEvaluation:
     """Run the full evaluation pipeline for both endpoints.
 
@@ -592,7 +615,7 @@ async def run_evaluation(
         tasks = [
             evaluate_single_query(
                 i, query, len(queries), session, api_url, repository_ids,
-                limit, judge, query_semaphore
+                limit, judge, query_semaphore, exclude_graph
             )
             for i, query in enumerate(queries)
         ]
@@ -623,6 +646,7 @@ async def run_evaluation(
             "timestamp": datetime.now().isoformat(),
             "limit": limit,
             "repository": repo_name,
+            "exclude_graph": exclude_graph,
         },
         semantic=semantic_eval,
         agentic=agentic_eval,
@@ -687,6 +711,11 @@ def main():
         default=4,
         help="Maximum queries to process in parallel (default: 4, max recommended due to API rate limits)",
     )
+    parser.add_argument(
+        "--exclude-graph",
+        action="store_true",
+        help="Exclude graph-sourced results from NDCG calculation (agentic endpoint only)",
+    )
 
     args = parser.parse_args()
 
@@ -703,6 +732,8 @@ def main():
     print(f"Limit:      {args.limit} results per query")
     print(f"NDCG@k:     {', '.join(f'@{k}' for k in k_values)}")
     print(f"Parallelism: {args.max_query_concurrency} queries, {args.max_concurrent} LLM calls/query")
+    if args.exclude_graph:
+        print("Filter:     Excluding graph-sourced results from agentic NDCG")
     print("=" * 70)
 
     try:
@@ -715,6 +746,7 @@ def main():
             max_queries=args.max_queries,
             max_concurrent=args.max_concurrent,
             max_query_concurrency=args.max_query_concurrency,
+            exclude_graph=args.exclude_graph,
         ))
     except RateLimitError as e:
         print(f"\n{'='*70}", file=sys.stderr)

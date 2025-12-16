@@ -330,8 +330,9 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         )
         .collect();
 
-    // Create agentic search config
-    let agentic_config = codesearch_agentic_search::AgenticSearchConfig::default();
+    // Create agentic search config with reranking from loaded config
+    let agentic_config =
+        codesearch_agentic_search::AgenticSearchConfig::from_reranking_config(&config.reranking);
 
     // Get current working directory for repository inference
     let cwd = env::current_dir().context("Failed to get current directory")?;

@@ -154,7 +154,7 @@ async fn test_orchestrator_initialization() {
         ..Default::default()
     };
 
-    let result = AgenticSearchOrchestrator::new(mock_api, config);
+    let result = AgenticSearchOrchestrator::new(mock_api, config).await;
     assert!(result.is_ok());
 }
 
@@ -171,7 +171,7 @@ async fn test_orchestrator_requires_api_key() {
 
     std::env::remove_var("ANTHROPIC_API_KEY");
 
-    let result = AgenticSearchOrchestrator::new(mock_api, config);
+    let result = AgenticSearchOrchestrator::new(mock_api, config).await;
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -198,7 +198,9 @@ async fn test_end_to_end_search() {
         ..Default::default()
     };
 
-    let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();
+    let orchestrator = AgenticSearchOrchestrator::new(mock_api, config)
+        .await
+        .unwrap();
 
     let request = AgenticSearchRequest {
         query: "JWT authentication implementation".to_string(),
@@ -306,7 +308,9 @@ async fn test_dual_track_metadata_population() {
         ..Default::default()
     };
 
-    let orchestrator = AgenticSearchOrchestrator::new(mock_api, config).unwrap();
+    let orchestrator = AgenticSearchOrchestrator::new(mock_api, config)
+        .await
+        .unwrap();
 
     let request = AgenticSearchRequest {
         query: "JWT authentication implementation".to_string(),

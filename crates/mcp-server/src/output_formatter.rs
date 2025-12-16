@@ -187,7 +187,7 @@ mod tests {
             total_direct_candidates: 10,
             graph_context_entities: 2,
             graph_entities_in_results: 1,
-            reranking_method: RerankingMethod::Jina,
+            reranking_method: RerankingMethod::CrossEncoder,
             graph_traversal_used: true,
             estimated_cost_usd: 0.05,
             cache_read_tokens: 0,

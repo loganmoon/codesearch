@@ -1,0 +1,132 @@
+{
+  "metadata": {
+    "created": "2025-12-16",
+    "purpose": "Hybrid search evaluation (dense + sparse) with LLM-judged relevance",
+    "total_queries": 30,
+    "source_repository": "nushell/nushell",
+    "source_commit": "11d71fe3c78670a8922143dd7e8b8f20b71a97d0",
+    "generation_method": "Manual curation with keyword inclusion"
+  },
+  "queries": [
+    {
+      "id": "hyb_001",
+      "query": "Find the parse_internal_call function that processes arguments and flags when invoking built-in commands"
+    },
+    {
+      "id": "hyb_002",
+      "query": "Find functions in the nu_parser::lex module responsible for breaking source code into tokens"
+    },
+    {
+      "id": "hyb_003",
+      "query": "Find the flatten_expression_into function that converts hierarchical AST nodes into a flat list of spans"
+    },
+    {
+      "id": "hyb_004",
+      "query": "Find the lex_item function that reads characters and produces a single lexical token"
+    },
+    {
+      "id": "hyb_005",
+      "query": "Find the math_result_type function that determines what type results from arithmetic operations"
+    },
+    {
+      "id": "hyb_006",
+      "query": "Find the eval_instruction function in nu_engine that executes a single IR opcode during runtime"
+    },
+    {
+      "id": "hyb_007",
+      "query": "Find the compile_expression function that transforms parsed AST nodes into intermediate representation"
+    },
+    {
+      "id": "hyb_008",
+      "query": "Find the loop_iteration function in nu_cli::repl that handles one cycle of the read-eval-print loop"
+    },
+    {
+      "id": "hyb_009",
+      "query": "Find the Eval trait in nu_protocol that provides a common interface for expression evaluation"
+    },
+    {
+      "id": "hyb_010",
+      "query": "Find the BlockBuilder implementation that constructs sequences of IR instructions during compilation"
+    },
+    {
+      "id": "hyb_011",
+      "query": "Find the PipelineData implementation that represents data flowing between commands in a pipeline"
+    },
+    {
+      "id": "hyb_012",
+      "query": "Find the ByteStream struct and its implementation for handling raw binary data in the shell"
+    },
+    {
+      "id": "hyb_013",
+      "query": "Find the PartialOrd implementation for Value that determines how shell values are sorted"
+    },
+    {
+      "id": "hyb_014",
+      "query": "Find the Signature struct implementation that defines a command's expected arguments, flags, and types"
+    },
+    {
+      "id": "hyb_015",
+      "query": "Find the Stack implementation that manages variable bindings and environment during execution"
+    },
+    {
+      "id": "hyb_016",
+      "query": "Find the ParseError enum in nu_protocol that contains all possible parsing error variants"
+    },
+    {
+      "id": "hyb_017",
+      "query": "Find the ShellError type that represents runtime errors in nushell"
+    },
+    {
+      "id": "hyb_018",
+      "query": "Find error handling code in the nu_protocol::errors module"
+    },
+    {
+      "id": "hyb_019",
+      "query": "Find the NuCompleter implementation that provides tab completion suggestions to the user"
+    },
+    {
+      "id": "hyb_020",
+      "query": "Find the Find command implementation that searches through collections and highlights matches"
+    },
+    {
+      "id": "hyb_021",
+      "query": "Find the Ansi command that outputs terminal escape sequences for colors and formatting"
+    },
+    {
+      "id": "hyb_022",
+      "query": "Find the Cal command implementation that displays calendar output"
+    },
+    {
+      "id": "hyb_023",
+      "query": "Find the dir_entry_dict function used by the ls command to convert file metadata into records"
+    },
+    {
+      "id": "hyb_024",
+      "query": "Find the EngineInterface implementation that allows plugins to communicate with the shell core"
+    },
+    {
+      "id": "hyb_025",
+      "query": "Find the External command implementation that spawns and manages operating system processes"
+    },
+    {
+      "id": "hyb_026",
+      "query": "Find the Module implementation that organizes exported commands, constants, and submodules into namespaces"
+    },
+    {
+      "id": "hyb_027",
+      "query": "Find the NuDataFrame implementation that wraps polars dataframes for use in nushell"
+    },
+    {
+      "id": "hyb_028",
+      "query": "Find the LanguageServer implementation that provides LSP features like go-to-definition"
+    },
+    {
+      "id": "hyb_029",
+      "query": "Find the lookup_style function in nu_color_config that converts color names to terminal formatting"
+    },
+    {
+      "id": "hyb_030",
+      "query": "Find the convert_to_value function in the nuon module that parses NUON text into runtime values"
+    }
+  ]
+}

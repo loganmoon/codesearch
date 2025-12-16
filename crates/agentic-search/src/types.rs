@@ -69,8 +69,8 @@ pub struct AgenticSearchMetadata {
 pub enum RerankingMethod {
     /// No reranking applied
     None,
-    /// Jina cross-encoder reranking
-    Jina,
+    /// Cross-encoder reranking (provider-agnostic: Jina, vLLM, etc.)
+    CrossEncoder,
 }
 
 /// Tracks how an entity was retrieved

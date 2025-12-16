@@ -46,6 +46,10 @@ pub struct Config {
     /// Embeddings configuration
     pub embeddings: EmbeddingsConfig,
 
+    /// Sparse embeddings configuration
+    #[serde(default)]
+    pub sparse_embeddings: SparseEmbeddingsConfig,
+
     /// File watcher configuration
     pub watcher: WatcherConfig,
 
@@ -147,6 +151,53 @@ impl std::fmt::Debug for EmbeddingsConfig {
             .field("retry_attempts", &self.retry_attempts)
             .finish()
     }
+}
+
+/// Configuration for sparse embeddings generation
+///
+/// # Providers
+/// - `granite` (default when feature enabled): IBM Granite 30M learned sparse embeddings
+/// - `bm25`: BM25 statistical sparse embeddings (fallback, no model required)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SparseEmbeddingsConfig {
+    /// Provider type: "granite" (default), "bm25"
+    #[serde(default = "default_sparse_provider")]
+    pub provider: String,
+
+    /// Device for Granite model: "auto" (default), "cpu", "cuda", "cuda:0", "metal"
+    #[serde(default = "default_sparse_device")]
+    pub device: String,
+
+    /// Model cache directory (default: ~/.codesearch/models/)
+    #[serde(default)]
+    pub model_cache_dir: Option<String>,
+
+    /// Top-k sparse dimensions to keep (default: 256)
+    #[serde(default = "default_sparse_top_k")]
+    pub top_k: usize,
+}
+
+impl Default for SparseEmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_sparse_provider(),
+            device: default_sparse_device(),
+            model_cache_dir: None,
+            top_k: default_sparse_top_k(),
+        }
+    }
+}
+
+fn default_sparse_provider() -> String {
+    "granite".to_string()
+}
+
+fn default_sparse_device() -> String {
+    "auto".to_string()
+}
+
+fn default_sparse_top_k() -> usize {
+    256
 }
 
 /// Configuration for file watching
@@ -1201,6 +1252,41 @@ impl Config {
             return Err(Error::config(format!(
                 "embeddings.max_concurrent_api_requests too large (max 256, got {})",
                 self.embeddings.max_concurrent_api_requests
+            )));
+        }
+
+        // Validate sparse embeddings configuration
+        let valid_sparse_providers = ["granite", "bm25"];
+        if !valid_sparse_providers.contains(&self.sparse_embeddings.provider.as_str()) {
+            return Err(Error::config(format!(
+                "Invalid sparse embeddings provider '{}'. Must be one of: {:?}",
+                self.sparse_embeddings.provider, valid_sparse_providers
+            )));
+        }
+
+        // Validate sparse device (supports "auto", "cpu", "cuda", "cuda:N", "metal")
+        let device = &self.sparse_embeddings.device;
+        let valid_sparse_device = device == "auto"
+            || device == "cpu"
+            || device == "cuda"
+            || device == "metal"
+            || device.starts_with("cuda:");
+        if !valid_sparse_device {
+            return Err(Error::config(format!(
+                "Invalid sparse embeddings device '{}'. Must be one of: auto, cpu, cuda, cuda:N, metal",
+                device
+            )));
+        }
+
+        if self.sparse_embeddings.top_k == 0 {
+            return Err(Error::config(
+                "sparse_embeddings.top_k must be greater than 0".to_string(),
+            ));
+        }
+        if self.sparse_embeddings.top_k > 10000 {
+            return Err(Error::config(format!(
+                "sparse_embeddings.top_k too large (max 10000, got {})",
+                self.sparse_embeddings.top_k
             )));
         }
 
@@ -2454,6 +2540,7 @@ mod tests {
 pub struct ConfigBuilder {
     indexer: IndexerConfig,
     embeddings: EmbeddingsConfig,
+    sparse_embeddings: SparseEmbeddingsConfig,
     watcher: WatcherConfig,
     storage: StorageConfig,
     server: ServerConfig,
@@ -2471,6 +2558,7 @@ impl ConfigBuilder {
         Self {
             indexer: IndexerConfig::default(),
             embeddings: EmbeddingsConfig::default(),
+            sparse_embeddings: SparseEmbeddingsConfig::default(),
             watcher: WatcherConfig::default(),
             storage,
             server: ServerConfig::default(),
@@ -2531,11 +2619,18 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the sparse embeddings configuration
+    pub fn sparse_embeddings(mut self, sparse_embeddings: SparseEmbeddingsConfig) -> Self {
+        self.sparse_embeddings = sparse_embeddings;
+        self
+    }
+
     /// Build the Config
     pub fn build(self) -> Config {
         Config {
             indexer: self.indexer,
             embeddings: self.embeddings,
+            sparse_embeddings: self.sparse_embeddings,
             watcher: self.watcher,
             storage: self.storage,
             server: self.server,

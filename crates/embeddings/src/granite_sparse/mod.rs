@@ -1,0 +1,285 @@
+//! Granite sparse embedding provider using SPLADE architecture
+//!
+//! This module provides learned sparse embeddings using IBM's Granite 30M Sparse model.
+//! The model uses SPLADE (Sparse Lexical and Expansion via Deep Embeddings) architecture
+//! to generate interpretable sparse vectors.
+
+mod config;
+mod model;
+mod tokenizer;
+
+pub use config::GraniteSparseConfig;
+
+use crate::sparse_provider::SparseEmbeddingProvider;
+use async_trait::async_trait;
+use candle_core::Device;
+use codesearch_core::error::{Error, Result};
+use model::GraniteSparseModel;
+use std::path::{Path, PathBuf};
+use tokenizer::GraniteTokenizer;
+
+/// Default HuggingFace model ID
+const DEFAULT_MODEL_ID: &str = "ibm-granite/granite-embedding-30m-sparse";
+
+/// Device selection for Granite sparse model
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SparseDevice {
+    /// CPU inference
+    #[default]
+    Cpu,
+    /// CUDA GPU (with device index)
+    Cuda(usize),
+    /// Apple Metal GPU
+    Metal,
+}
+
+impl SparseDevice {
+    /// Detect the best available device
+    pub fn detect_best_available() -> Self {
+        #[cfg(feature = "cuda")]
+        {
+            if candle_core::utils::cuda_is_available() {
+                return Self::Cuda(0);
+            }
+        }
+
+        #[cfg(feature = "metal")]
+        {
+            if candle_core::utils::metal_is_available() {
+                return Self::Metal;
+            }
+        }
+
+        Self::Cpu
+    }
+
+    /// Parse device from configuration string
+    pub fn from_config(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "auto" => Self::detect_best_available(),
+            "cpu" => Self::Cpu,
+            "metal" => Self::Metal,
+            "cuda" => Self::Cuda(0),
+            s if s.starts_with("cuda:") => {
+                let idx = s[5..].parse().unwrap_or(0);
+                Self::Cuda(idx)
+            }
+            _ => Self::Cpu,
+        }
+    }
+
+    /// Convert to Candle device
+    pub fn to_candle_device(&self) -> Result<Device> {
+        match self {
+            Self::Cpu => Ok(Device::Cpu),
+            #[cfg(feature = "cuda")]
+            Self::Cuda(idx) => Device::new_cuda(*idx)
+                .map_err(|e| Error::embedding(format!("Failed to create CUDA device: {e}"))),
+            #[cfg(not(feature = "cuda"))]
+            Self::Cuda(_) => Err(Error::embedding(
+                "CUDA support not compiled. Rebuild with --features cuda".to_string(),
+            )),
+            #[cfg(feature = "metal")]
+            Self::Metal => Device::new_metal(0)
+                .map_err(|e| Error::embedding(format!("Failed to create Metal device: {e}"))),
+            #[cfg(not(feature = "metal"))]
+            Self::Metal => Err(Error::embedding(
+                "Metal support not compiled. Rebuild with --features metal".to_string(),
+            )),
+        }
+    }
+}
+
+/// Granite sparse embedding provider
+pub struct GraniteSparseProvider {
+    model: GraniteSparseModel,
+    tokenizer: GraniteTokenizer,
+    device: Device,
+    top_k: usize,
+}
+
+impl GraniteSparseProvider {
+    /// Create a new Granite sparse provider
+    ///
+    /// # Arguments
+    /// * `device` - Device to run inference on
+    /// * `cache_dir` - Directory to cache downloaded models
+    /// * `top_k` - Maximum number of sparse dimensions to keep
+    pub async fn new(device: SparseDevice, cache_dir: PathBuf, top_k: usize) -> Result<Self> {
+        let candle_device = device.to_candle_device()?;
+
+        // Download or use cached model
+        let model_dir = download_model(DEFAULT_MODEL_ID, &cache_dir).await?;
+
+        // Load configuration
+        let config_path = model_dir.join("config.json");
+        let config = GraniteSparseConfig::from_file(&config_path)?;
+
+        // Load model
+        let model_path = model_dir.join("model.safetensors");
+        let model = GraniteSparseModel::load(config, &model_path, &candle_device)
+            .map_err(|e| Error::embedding(format!("Failed to load model: {e}")))?;
+
+        // Load tokenizer
+        let tokenizer_path = model_dir.join("tokenizer.json");
+        let tokenizer = GraniteTokenizer::from_file(&tokenizer_path)?;
+
+        tracing::info!(
+            device = ?device,
+            top_k = top_k,
+            model_dir = %model_dir.display(),
+            "Loaded Granite sparse model"
+        );
+
+        Ok(Self {
+            model,
+            tokenizer,
+            device: candle_device,
+            top_k,
+        })
+    }
+
+    /// Get the model version string
+    pub fn model_version() -> &'static str {
+        "granite-embedding-30m-sparse-v1"
+    }
+}
+
+#[async_trait]
+impl SparseEmbeddingProvider for GraniteSparseProvider {
+    async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
+        use candle_core::Tensor;
+
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let max_length = self.model.config().max_position_embeddings;
+
+        // Tokenize all texts
+        let tokenized = self.tokenizer.encode_batch(&texts, max_length)?;
+
+        // Handle empty texts
+        let mut results = Vec::with_capacity(texts.len());
+        let mut non_empty_indices = Vec::new();
+        let mut non_empty_tokenized = Vec::new();
+
+        for (i, (text, tok)) in texts.iter().zip(tokenized.iter()).enumerate() {
+            if text.is_empty() || tok.input_ids.is_empty() {
+                continue;
+            }
+            non_empty_indices.push(i);
+            non_empty_tokenized.push(tok);
+        }
+
+        // If all texts are empty, return all None
+        if non_empty_tokenized.is_empty() {
+            return Ok(vec![None; texts.len()]);
+        }
+
+        // Build input tensors
+        let batch_size = non_empty_tokenized.len();
+        let seq_len = non_empty_tokenized[0].input_ids.len();
+
+        let input_ids: Vec<u32> = non_empty_tokenized
+            .iter()
+            .flat_map(|t| t.input_ids.iter().copied())
+            .collect();
+        let attention_mask: Vec<u32> = non_empty_tokenized
+            .iter()
+            .flat_map(|t| t.attention_mask.iter().copied())
+            .collect();
+
+        let input_ids = Tensor::from_vec(input_ids, (batch_size, seq_len), &self.device)
+            .map_err(|e| Error::embedding(format!("Failed to create input tensor: {e}")))?;
+        let attention_mask = Tensor::from_vec(attention_mask, (batch_size, seq_len), &self.device)
+            .map_err(|e| {
+                Error::embedding(format!("Failed to create attention mask tensor: {e}"))
+            })?;
+
+        // Run inference
+        let sparse_vectors = self
+            .model
+            .embed_sparse(&input_ids, &attention_mask, self.top_k)
+            .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))?;
+
+        // Build result vector with proper ordering
+        results.resize(texts.len(), None);
+        for (sparse_idx, original_idx) in non_empty_indices.into_iter().enumerate() {
+            let sparse = sparse_vectors.get(sparse_idx).cloned().unwrap_or_default();
+            if sparse.is_empty() {
+                results[original_idx] = None;
+            } else {
+                results[original_idx] = Some(sparse);
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+/// Download model from HuggingFace Hub
+async fn download_model(model_id: &str, cache_dir: &Path) -> Result<PathBuf> {
+    use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+
+    // Create cache directory if it doesn't exist
+    std::fs::create_dir_all(cache_dir).map_err(|e| {
+        Error::embedding(format!(
+            "Failed to create cache directory {}: {e}",
+            cache_dir.display()
+        ))
+    })?;
+
+    // Create HuggingFace API client with custom cache directory
+    let api = ApiBuilder::new()
+        .with_cache_dir(cache_dir.to_path_buf())
+        .build()
+        .map_err(|e| Error::embedding(format!("Failed to create HuggingFace API: {e}")))?;
+
+    let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
+
+    // Download required files
+    let files = ["config.json", "tokenizer.json", "model.safetensors"];
+    let mut model_dir: Option<PathBuf> = None;
+
+    for file in files {
+        let path = repo.get(file).map_err(|e| {
+            Error::embedding(format!("Failed to download {file} from {model_id}: {e}"))
+        })?;
+
+        if model_dir.is_none() {
+            model_dir = path.parent().map(|p| p.to_path_buf());
+        }
+    }
+
+    model_dir.ok_or_else(|| Error::embedding("Failed to determine model directory".to_string()))
+}
+
+/// Get the default model cache directory
+pub fn default_model_cache_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codesearch")
+        .join("models")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sparse_device_from_config() {
+        assert_eq!(SparseDevice::from_config("cpu"), SparseDevice::Cpu);
+        assert_eq!(SparseDevice::from_config("CPU"), SparseDevice::Cpu);
+        assert_eq!(SparseDevice::from_config("cuda"), SparseDevice::Cuda(0));
+        assert_eq!(SparseDevice::from_config("cuda:1"), SparseDevice::Cuda(1));
+        assert_eq!(SparseDevice::from_config("metal"), SparseDevice::Metal);
+        assert_eq!(SparseDevice::from_config("unknown"), SparseDevice::Cpu);
+    }
+
+    #[test]
+    fn test_default_cache_dir() {
+        let cache_dir = default_model_cache_dir();
+        assert!(cache_dir.ends_with("models"));
+    }
+}

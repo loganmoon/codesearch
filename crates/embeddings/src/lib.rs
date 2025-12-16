@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use codesearch_core::error::{Result, ResultExt};
+#[cfg(feature = "granite-sparse")]
+use std::path::PathBuf;
 use std::sync::Arc;
 
 mod api_provider;
@@ -19,6 +21,9 @@ mod jina_provider;
 mod mock_provider;
 pub mod provider;
 mod sparse_provider;
+
+#[cfg(feature = "granite-sparse")]
+pub mod granite_sparse;
 
 pub use api_provider::create_api_provider;
 pub use bm25_provider::Bm25SparseProvider;
@@ -208,7 +213,25 @@ impl SparseEmbeddingManager {
     }
 }
 
+/// Create a BM25 sparse embedding manager with the specified average document length
+///
+/// # Arguments
+/// * `avgdl` - Average document length in tokens (calculated per-repository)
+///
+/// # Returns
+/// A configured sparse embedding manager using BM25
+pub fn create_bm25_sparse_manager(avgdl: f32) -> Arc<SparseEmbeddingManager> {
+    let provider = crate::bm25_provider::Bm25SparseProvider::new(avgdl);
+    Arc::new(SparseEmbeddingManager::new(
+        Arc::new(provider),
+        "bm25-v2.3".to_string(),
+    ))
+}
+
 /// Create a sparse embedding manager with the specified average document length
+///
+/// This function uses BM25 by default. For Granite sparse embeddings, use
+/// `create_sparse_manager_from_config` with the appropriate configuration.
 ///
 /// # Arguments
 /// * `avgdl` - Average document length in tokens (calculated per-repository)
@@ -216,11 +239,70 @@ impl SparseEmbeddingManager {
 /// # Returns
 /// A configured sparse embedding manager using BM25
 pub fn create_sparse_manager(avgdl: f32) -> Result<Arc<SparseEmbeddingManager>> {
-    let provider = crate::bm25_provider::Bm25SparseProvider::new(avgdl);
+    Ok(create_bm25_sparse_manager(avgdl))
+}
+
+/// Create a Granite sparse embedding manager (requires granite-sparse feature)
+///
+/// # Arguments
+/// * `config` - Sparse embeddings configuration
+///
+/// # Returns
+/// A configured sparse embedding manager using Granite model
+#[cfg(feature = "granite-sparse")]
+pub async fn create_granite_sparse_manager(
+    config: &codesearch_core::config::SparseEmbeddingsConfig,
+) -> Result<Arc<SparseEmbeddingManager>> {
+    let device = granite_sparse::SparseDevice::from_config(&config.device);
+    let cache_dir = config
+        .model_cache_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(granite_sparse::default_model_cache_dir);
+
+    let provider =
+        granite_sparse::GraniteSparseProvider::new(device, cache_dir, config.top_k).await?;
+
     Ok(Arc::new(SparseEmbeddingManager::new(
         Arc::new(provider),
-        "bm25-v2.3".to_string(),
+        granite_sparse::GraniteSparseProvider::model_version().to_string(),
     )))
+}
+
+/// Create a sparse embedding manager from configuration
+///
+/// This function dispatches to the appropriate provider based on the configuration.
+/// When using Granite provider without the granite-sparse feature, it falls back to BM25.
+///
+/// # Arguments
+/// * `config` - Sparse embeddings configuration
+/// * `avgdl` - Average document length (only used for BM25 provider)
+///
+/// # Returns
+/// A configured sparse embedding manager
+pub async fn create_sparse_manager_from_config(
+    config: &codesearch_core::config::SparseEmbeddingsConfig,
+    avgdl: f32,
+) -> Result<Arc<SparseEmbeddingManager>> {
+    match config.provider.to_lowercase().as_str() {
+        "bm25" => Ok(create_bm25_sparse_manager(avgdl)),
+        _ => {
+            // Default to Granite (or BM25 fallback if feature not enabled)
+            #[cfg(feature = "granite-sparse")]
+            {
+                create_granite_sparse_manager(config).await
+            }
+
+            #[cfg(not(feature = "granite-sparse"))]
+            {
+                tracing::warn!(
+                    provider = config.provider,
+                    "Granite sparse embeddings require the 'granite-sparse' feature. Falling back to BM25."
+                );
+                Ok(create_bm25_sparse_manager(avgdl))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

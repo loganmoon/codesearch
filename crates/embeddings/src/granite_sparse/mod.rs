@@ -16,6 +16,7 @@ use candle_core::Device;
 use codesearch_core::error::{Error, Result};
 use model::GraniteSparseModel;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokenizer::GraniteTokenizer;
 
 /// Default HuggingFace model ID
@@ -92,7 +93,7 @@ impl SparseDevice {
 
 /// Granite sparse embedding provider
 pub struct GraniteSparseProvider {
-    model: GraniteSparseModel,
+    model: Arc<GraniteSparseModel>,
     tokenizer: GraniteTokenizer,
     device: Device,
     top_k: usize,
@@ -132,7 +133,7 @@ impl GraniteSparseProvider {
         );
 
         Ok(Self {
-            model,
+            model: Arc::new(model),
             tokenizer,
             device: candle_device,
             top_k,
@@ -148,19 +149,16 @@ impl GraniteSparseProvider {
 #[async_trait]
 impl SparseEmbeddingProvider for GraniteSparseProvider {
     async fn embed_sparse(&self, texts: Vec<&str>) -> Result<Vec<Option<Vec<(u32, f32)>>>> {
-        use candle_core::Tensor;
-
         if texts.is_empty() {
             return Ok(Vec::new());
         }
 
         let max_length = self.model.config().max_position_embeddings;
 
-        // Tokenize all texts
+        // Tokenize all texts (fast CPU-bound work, keep on async thread)
         let tokenized = self.tokenizer.encode_batch(&texts, max_length)?;
 
         // Handle empty texts
-        let mut results = Vec::with_capacity(texts.len());
         let mut non_empty_indices = Vec::new();
         let mut non_empty_tokenized = Vec::new();
 
@@ -177,39 +175,47 @@ impl SparseEmbeddingProvider for GraniteSparseProvider {
             return Ok(vec![None; texts.len()]);
         }
 
-        // Build input tensors
+        // Prepare data for blocking task
         let batch_size = non_empty_tokenized.len();
         let seq_len = non_empty_tokenized[0].input_ids.len();
 
-        let input_ids: Vec<u32> = non_empty_tokenized
+        let input_ids_vec: Vec<u32> = non_empty_tokenized
             .iter()
             .flat_map(|t| t.input_ids.iter().copied())
             .collect();
-        let attention_mask: Vec<u32> = non_empty_tokenized
+        let attention_mask_vec: Vec<u32> = non_empty_tokenized
             .iter()
             .flat_map(|t| t.attention_mask.iter().copied())
             .collect();
 
-        let input_ids = Tensor::from_vec(input_ids, (batch_size, seq_len), &self.device)
-            .map_err(|e| Error::embedding(format!("Failed to create input tensor: {e}")))?;
-        let attention_mask = Tensor::from_vec(attention_mask, (batch_size, seq_len), &self.device)
-            .map_err(|e| {
-                Error::embedding(format!("Failed to create attention mask tensor: {e}"))
-            })?;
+        // Clone Arc for the blocking task
+        let model = Arc::clone(&self.model);
+        let device = self.device.clone();
+        let top_k = self.top_k;
 
-        // Run inference
-        let sparse_vectors = self
-            .model
-            .embed_sparse(&input_ids, &attention_mask, self.top_k)
-            .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))?;
+        // Run tensor creation and inference in blocking task
+        let sparse_vectors = tokio::task::spawn_blocking(move || {
+            use candle_core::Tensor;
+
+            let input_ids = Tensor::from_vec(input_ids_vec, (batch_size, seq_len), &device)
+                .map_err(|e| Error::embedding(format!("Failed to create input tensor: {e}")))?;
+            let attention_mask =
+                Tensor::from_vec(attention_mask_vec, (batch_size, seq_len), &device).map_err(
+                    |e| Error::embedding(format!("Failed to create attention mask tensor: {e}")),
+                )?;
+
+            model
+                .embed_sparse(&input_ids, &attention_mask, top_k)
+                .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))
+        })
+        .await
+        .map_err(|e| Error::embedding(format!("Inference task panicked: {e}")))??;
 
         // Build result vector with proper ordering
-        results.resize(texts.len(), None);
+        let mut results = vec![None; texts.len()];
         for (sparse_idx, original_idx) in non_empty_indices.into_iter().enumerate() {
             let sparse = sparse_vectors.get(sparse_idx).cloned().unwrap_or_default();
-            if sparse.is_empty() {
-                results[original_idx] = None;
-            } else {
+            if !sparse.is_empty() {
                 results[original_idx] = Some(sparse);
             }
         }
@@ -220,39 +226,46 @@ impl SparseEmbeddingProvider for GraniteSparseProvider {
 
 /// Download model from HuggingFace Hub
 async fn download_model(model_id: &str, cache_dir: &Path) -> Result<PathBuf> {
-    use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
+    let model_id = model_id.to_string();
+    let cache_dir = cache_dir.to_path_buf();
 
-    // Create cache directory if it doesn't exist
-    std::fs::create_dir_all(cache_dir).map_err(|e| {
-        Error::embedding(format!(
-            "Failed to create cache directory {}: {e}",
-            cache_dir.display()
-        ))
-    })?;
+    tokio::task::spawn_blocking(move || {
+        use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
-    // Create HuggingFace API client with custom cache directory
-    let api = ApiBuilder::new()
-        .with_cache_dir(cache_dir.to_path_buf())
-        .build()
-        .map_err(|e| Error::embedding(format!("Failed to create HuggingFace API: {e}")))?;
-
-    let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
-
-    // Download required files
-    let files = ["config.json", "tokenizer.json", "model.safetensors"];
-    let mut model_dir: Option<PathBuf> = None;
-
-    for file in files {
-        let path = repo.get(file).map_err(|e| {
-            Error::embedding(format!("Failed to download {file} from {model_id}: {e}"))
+        // Create cache directory if it doesn't exist
+        std::fs::create_dir_all(&cache_dir).map_err(|e| {
+            Error::embedding(format!(
+                "Failed to create cache directory {}: {e}",
+                cache_dir.display()
+            ))
         })?;
 
-        if model_dir.is_none() {
-            model_dir = path.parent().map(|p| p.to_path_buf());
-        }
-    }
+        // Create HuggingFace API client with custom cache directory
+        let api = ApiBuilder::new()
+            .with_cache_dir(cache_dir.clone())
+            .build()
+            .map_err(|e| Error::embedding(format!("Failed to create HuggingFace API: {e}")))?;
 
-    model_dir.ok_or_else(|| Error::embedding("Failed to determine model directory".to_string()))
+        let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
+
+        // Download required files
+        let files = ["config.json", "tokenizer.json", "model.safetensors"];
+        let mut model_dir: Option<PathBuf> = None;
+
+        for file in files {
+            let path = repo.get(file).map_err(|e| {
+                Error::embedding(format!("Failed to download {file} from {model_id}: {e}"))
+            })?;
+
+            if model_dir.is_none() {
+                model_dir = path.parent().map(|p| p.to_path_buf());
+            }
+        }
+
+        model_dir.ok_or_else(|| Error::embedding("Failed to determine model directory".to_string()))
+    })
+    .await
+    .map_err(|e| Error::embedding(format!("Model download task panicked: {e}")))?
 }
 
 /// Get the default model cache directory

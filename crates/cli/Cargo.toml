@@ -67,6 +67,9 @@ console-subscriber = { version = "0.4", optional = true }
 
 [features]
 tokio-console = ["console-subscriber", "tokio/tracing"]
+granite-sparse = ["codesearch-embeddings/granite-sparse"]
+cuda = ["codesearch-embeddings/cuda"]
+metal = ["codesearch-embeddings/metal"]
 
 [dev-dependencies]
 tempfile = "3.14.0"

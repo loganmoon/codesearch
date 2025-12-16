@@ -37,7 +37,8 @@ impl AgenticSearchRequest {
 /// Response from agentic search
 #[derive(Debug, Clone, Serialize)]
 pub struct AgenticSearchResponse {
-    pub results: Vec<EntityResult>,
+    /// Results with retrieval source information
+    pub results: Vec<AgenticEntity>,
     pub metadata: AgenticSearchMetadata,
 }
 
@@ -66,8 +67,10 @@ pub struct AgenticSearchMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RerankingMethod {
-    HaikuOnly,
-    HaikuWithSonnet,
+    /// No reranking applied
+    None,
+    /// Jina cross-encoder reranking
+    Jina,
 }
 
 /// Tracks how an entity was retrieved

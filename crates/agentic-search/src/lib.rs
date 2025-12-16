@@ -36,7 +36,6 @@
 
 // Private modules - implementation details
 mod config;
-mod content_selection;
 mod error;
 mod orchestrator;
 mod prompts;

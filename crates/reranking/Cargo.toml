@@ -12,10 +12,11 @@ codesearch-core = { path = "../core" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-reqwest = "0.12.12"
+reqwest = { version = "0.12.12", features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = "0.1.83"
+futures = { workspace = true }
 
 [dev-dependencies]
 codesearch-indexer = { path = "../indexer" }

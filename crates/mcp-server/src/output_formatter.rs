@@ -4,8 +4,7 @@
 //! - Small results: Include full content
 //! - Large results: Summary with file:line references
 
-use codesearch_agentic_search::{AgenticSearchMetadata, AgenticSearchResponse};
-use codesearch_core::search_models::EntityResult;
+use codesearch_agentic_search::{AgenticEntity, AgenticSearchMetadata, AgenticSearchResponse};
 use serde::Serialize;
 
 /// Threshold for switching to summary mode (character count of all content)
@@ -69,7 +68,7 @@ pub fn format_response(response: AgenticSearchResponse, verbose: bool) -> Format
     let total_content_size: usize = response
         .results
         .iter()
-        .map(|r| r.content.as_ref().map_or(0, |c| c.len()))
+        .map(|r| r.entity.content.as_ref().map_or(0, |c| c.len()))
         .sum();
 
     let use_full_content = verbose
@@ -79,7 +78,7 @@ pub fn format_response(response: AgenticSearchResponse, verbose: bool) -> Format
     let results: Vec<FormattedResult> = response
         .results
         .into_iter()
-        .map(|entity| format_entity(entity, use_full_content))
+        .map(|agentic_entity| format_entity(agentic_entity, use_full_content))
         .collect();
 
     let note = if !use_full_content && !verbose {
@@ -99,7 +98,8 @@ pub fn format_response(response: AgenticSearchResponse, verbose: bool) -> Format
     }
 }
 
-fn format_entity(entity: EntityResult, full_content: bool) -> FormattedResult {
+fn format_entity(agentic_entity: AgenticEntity, full_content: bool) -> FormattedResult {
+    let entity = agentic_entity.entity;
     let location = format!("{}:{}", entity.file_path, entity.location.start_line);
 
     let content = if full_content {
@@ -142,12 +142,13 @@ fn format_metadata(metadata: AgenticSearchMetadata, result_count: usize) -> Form
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codesearch_agentic_search::RerankingMethod;
+    use codesearch_agentic_search::{RerankingMethod, RetrievalSource};
     use codesearch_core::entities::{EntityType, Language, SourceLocation, Visibility};
+    use codesearch_core::search_models::EntityResult;
     use uuid::Uuid;
 
-    fn make_entity(content_size: usize) -> EntityResult {
-        EntityResult {
+    fn make_agentic_entity(content_size: usize) -> AgenticEntity {
+        let entity = EntityResult {
             entity_id: Uuid::new_v4().to_string(),
             repository_id: Uuid::new_v4(),
             name: "function".to_string(),
@@ -168,6 +169,11 @@ mod tests {
             score: 0.95,
             reranked: false,
             reasoning: Some("Test match".to_string()),
+        };
+        AgenticEntity {
+            entity,
+            source: RetrievalSource::Semantic,
+            relevance_justification: "Semantic match".to_string(),
         }
     }
 
@@ -181,7 +187,7 @@ mod tests {
             total_direct_candidates: 10,
             graph_context_entities: 2,
             graph_entities_in_results: 1,
-            reranking_method: RerankingMethod::HaikuOnly,
+            reranking_method: RerankingMethod::Jina,
             graph_traversal_used: true,
             estimated_cost_usd: 0.05,
             cache_read_tokens: 0,
@@ -192,7 +198,7 @@ mod tests {
     #[test]
     fn test_small_results_get_full_content() {
         let response = AgenticSearchResponse {
-            results: vec![make_entity(100)],
+            results: vec![make_agentic_entity(100)],
             metadata: make_metadata(),
         };
 
@@ -207,7 +213,7 @@ mod tests {
     #[test]
     fn test_large_results_get_summary() {
         let response = AgenticSearchResponse {
-            results: vec![make_entity(10000)],
+            results: vec![make_agentic_entity(10000)],
             metadata: make_metadata(),
         };
 
@@ -222,7 +228,7 @@ mod tests {
     #[test]
     fn test_verbose_forces_full_content() {
         let response = AgenticSearchResponse {
-            results: vec![make_entity(10000)],
+            results: vec![make_agentic_entity(10000)],
             metadata: make_metadata(),
         };
 

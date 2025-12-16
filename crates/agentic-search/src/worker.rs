@@ -1,11 +1,10 @@
-//! Search worker implementations with Stage 1 reranking
+//! Search worker implementations using Jina cross-encoder reranking
 
 use crate::{
-    content_selection::{select_content_for_reranking, RerankStage},
-    error::{truncate_for_error, AgenticSearchError, Result},
-    prompts,
+    error::{AgenticSearchError, Result},
     types::{AgenticEntity, RetrievalSource},
 };
+use codesearch_core::config::RerankingRequestConfig;
 use codesearch_core::search_models::*;
 use codesearch_core::SearchApi;
 use futures::future::join_all;
@@ -13,9 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-
-/// Maximum number of results to return from worker reranking
-const WORKER_RERANK_LIMIT: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,12 +34,12 @@ pub struct WorkerResult {
     pub entities: Vec<AgenticEntity>,
 }
 
-/// Execute a single worker: search + Stage 1 reranking
+/// Execute a single worker: search with optional Jina reranking
 pub async fn execute_worker(
     query: WorkerQuery,
     search_api: Arc<dyn SearchApi>,
-    haiku_client: Arc<claudius::Anthropic>,
-    haiku_model: claudius::Model,
+    rerank_config: Option<RerankingRequestConfig>,
+    semantic_candidates: usize,
 ) -> Result<WorkerResult> {
     info!("Worker {:?} executing: {}", query.worker_type, query.query);
 
@@ -54,7 +50,7 @@ pub async fn execute_worker(
         .filter_map(|s| Uuid::parse_str(s).ok())
         .collect();
 
-    // Execute semantic search (combines dense embeddings + BM25 sparse retrieval)
+    // Execute semantic search with Jina reranking (if enabled)
     let request = SemanticSearchRequest {
         query: QuerySpec {
             text: query.query.clone(),
@@ -62,14 +58,14 @@ pub async fn execute_worker(
             embedding: None,
         },
         filters: None,
-        limit: 15,
+        limit: semantic_candidates,
         prefetch_multiplier: None,
         repository_ids: if repository_ids.is_empty() {
             None
         } else {
             Some(repository_ids.clone())
         },
-        rerank: None,
+        rerank: rerank_config,
     };
 
     let search_results = search_api
@@ -87,185 +83,28 @@ pub async fn execute_worker(
     }
 
     debug!(
-        "Worker {:?} found {} results, starting Stage 1 reranking",
+        "Worker {:?} found {} results (reranked by Jina if enabled)",
         query.worker_type,
         search_results.len()
     );
 
-    // Stage 1 reranking with stratified content
-    let reranked = rerank_worker_results(
-        &query.query,
-        search_results,
-        query.worker_type,
-        haiku_client,
-        haiku_model,
-    )
-    .await?;
+    // Convert search results to AgenticEntity
+    let entities: Vec<AgenticEntity> = search_results
+        .into_iter()
+        .map(|entity| {
+            let justification = format!("Semantic match: {:.2}", entity.score);
+            AgenticEntity {
+                entity,
+                source: RetrievalSource::Semantic,
+                relevance_justification: justification,
+            }
+        })
+        .collect();
 
     Ok(WorkerResult {
         worker_type: query.worker_type,
-        entities: reranked,
+        entities,
     })
-}
-
-#[derive(Debug, Deserialize)]
-struct RerankingWrapper {
-    rankings: Vec<RerankingResponse>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RerankingResponse {
-    entity_id: String,
-    score: f32,
-    reasoning: String,
-}
-
-async fn rerank_worker_results(
-    query: &str,
-    results: Vec<EntityResult>,
-    worker_type: WorkerType,
-    haiku_client: Arc<claudius::Anthropic>,
-    haiku_model: claudius::Model,
-) -> Result<Vec<AgenticEntity>> {
-    // Format results with stratified content
-    let results_text = results
-        .iter()
-        .map(|entity| {
-            let content = select_content_for_reranking(entity, RerankStage::Worker);
-            format!("[{}]\n{}", entity.entity_id, content)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
-
-    let max_results_str = WORKER_RERANK_LIMIT.to_string();
-    let prompt = prompts::format_prompt(
-        prompts::WORKER_RERANK,
-        &[
-            ("query", query),
-            ("results", &results_text),
-            ("max_results", &max_results_str),
-        ],
-    );
-
-    // Define tool schema for structured output
-    let tool_schema = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "rankings": {
-                "type": "array",
-                "description": format!("Ranked results, top {WORKER_RERANK_LIMIT} most relevant only. Exclude obviously irrelevant results."),
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "entity_id": {
-                            "type": "string",
-                            "description": "Entity ID copied exactly from input"
-                        },
-                        "score": {
-                            "type": "number",
-                            "description": "Relevance score 0.0-1.0"
-                        },
-                        "reasoning": {
-                            "type": "string",
-                            "description": "Brief explanation of ranking"
-                        }
-                    },
-                    "required": ["entity_id", "score", "reasoning"]
-                }
-            }
-        },
-        "required": ["rankings"]
-    });
-
-    let tool = claudius::ToolUnionParam::new_custom_tool("rerank_results".to_string(), tool_schema);
-
-    // Call Haiku for reranking with forced tool use
-    let params = claudius::MessageCreateParams::new(
-        4096,
-        vec![claudius::MessageParam::user(prompt)],
-        haiku_model,
-    )
-    .with_temperature(0.0)
-    .map_err(|e| AgenticSearchError::Reranking(format!("Invalid temperature: {e}")))?
-    .with_tools(vec![tool])
-    .with_tool_choice(claudius::ToolChoice::tool("rerank_results"));
-
-    let response = haiku_client
-        .send(params)
-        .await
-        .map_err(|e| AgenticSearchError::Claudius(format!("Haiku API call failed: {e}")))?;
-
-    // Extract structured decision from tool use block
-    let tool_use_block = response
-        .content
-        .iter()
-        .find_map(|block| block.as_tool_use())
-        .ok_or_else(|| {
-            // Fallback: extract text for error message
-            let response_text = response
-                .content
-                .iter()
-                .filter_map(|block| match block {
-                    claudius::ContentBlock::Text(text_block) => Some(text_block.text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            AgenticSearchError::Reranking(format!(
-                "No tool use block in Haiku response: {}",
-                truncate_for_error(&response_text)
-            ))
-        })?;
-
-    // Parse the rankings wrapper object
-    let rankings_wrapper: RerankingWrapper = serde_json::from_value(tool_use_block.input.clone())
-        .map_err(|e| {
-        AgenticSearchError::Reranking(format!(
-            "Failed to parse tool input: {e}. Input: {}",
-            truncate_for_error(&tool_use_block.input.to_string())
-        ))
-    })?;
-
-    let reranked_list = rankings_wrapper.rankings;
-
-    // Build HashMap index for O(1) lookup instead of O(n) per entity
-    let results_map: std::collections::HashMap<&str, &EntityResult> =
-        results.iter().map(|e| (e.entity_id.as_str(), e)).collect();
-
-    // Map back to AgenticEntity with updated scores and reasoning
-    let mut reranked_entities = Vec::new();
-    // All workers now use semantic search
-    let _ = worker_type; // Acknowledge the parameter even though all workers use semantic
-    let retrieval_source = RetrievalSource::Semantic;
-
-    for reranked in reranked_list.iter().take(10) {
-        if let Some(&entity_ref) = results_map.get(reranked.entity_id.as_str()) {
-            // Clone and update score/reasoning
-            let mut entity = entity_ref.clone();
-            entity.score = reranked.score;
-            entity.reasoning = Some(reranked.reasoning.clone());
-
-            let mut agentic_entity =
-                AgenticEntity::from_search_result(entity, retrieval_source.clone());
-            agentic_entity.relevance_justification = reranked.reasoning.clone();
-
-            reranked_entities.push(agentic_entity);
-        } else {
-            warn!(
-                "Reranking returned unknown entity_id '{}', skipping (possible LLM hallucination)",
-                reranked.entity_id
-            );
-        }
-    }
-
-    debug!(
-        "Worker {:?} reranked {} -> {} results",
-        worker_type,
-        results.len(),
-        reranked_entities.len()
-    );
-
-    Ok(reranked_entities)
 }
 
 /// Execute multiple workers concurrently with proper cancellation
@@ -276,8 +115,8 @@ async fn rerank_worker_results(
 pub async fn execute_workers(
     queries: Vec<WorkerQuery>,
     search_api: Arc<dyn SearchApi>,
-    haiku_client: Arc<claudius::Anthropic>,
-    haiku_model: claudius::Model,
+    rerank_config: Option<RerankingRequestConfig>,
+    semantic_candidates: usize,
 ) -> Result<Vec<WorkerResult>> {
     info!("Executing {} workers concurrently", queries.len());
 
@@ -288,8 +127,8 @@ pub async fn execute_workers(
             execute_worker(
                 query,
                 search_api.clone(),
-                haiku_client.clone(),
-                haiku_model.clone(),
+                rerank_config.clone(),
+                semantic_candidates,
             )
         })
         .collect();
@@ -352,52 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn test_reranking_response_parsing_valid() {
-        let json = r#"[
-            {"entity_id": "e1", "score": 0.95, "reasoning": "Direct implementation"},
-            {"entity_id": "e2", "score": 0.82, "reasoning": "Helper function"}
-        ]"#;
-        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].entity_id, "e1");
-        assert_eq!(parsed[0].score, 0.95);
-        assert_eq!(parsed[0].reasoning, "Direct implementation");
-        assert_eq!(parsed[1].entity_id, "e2");
-        assert_eq!(parsed[1].score, 0.82);
-    }
-
-    #[test]
-    fn test_reranking_response_parsing_empty_array() {
-        let json = r#"[]"#;
-        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
-        assert!(parsed.is_empty());
-    }
-
-    #[test]
-    fn test_reranking_response_parsing_malformed_missing_fields() {
-        // Missing 'reasoning' field
-        let json = r#"[{"entity_id": "e1", "score": 0.95}]"#;
-        let result: std::result::Result<Vec<RerankingResponse>, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_response_parsing_wrong_format() {
-        // Old format (array of strings) should fail
-        let json = r#"["entity_id_1", "entity_id_2"]"#;
-        let result: std::result::Result<Vec<RerankingResponse>, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_response_parsing_single_item() {
-        let json = r#"[{"entity_id": "single", "score": 0.99, "reasoning": "Only match"}]"#;
-        let parsed: Vec<RerankingResponse> = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0].entity_id, "single");
-    }
-
-    #[test]
     fn test_all_workers_failed_error() {
         // Verify the AllWorkersFailed error type works correctly
         let err = AgenticSearchError::AllWorkersFailed;
@@ -411,90 +204,5 @@ mod tests {
             total: 3,
         };
         assert!(err.to_string().contains("2/3"));
-    }
-
-    // RerankingWrapper deserialization tests (structured output format)
-
-    #[test]
-    fn test_reranking_wrapper_valid() {
-        let json = r#"{
-            "rankings": [
-                {"entity_id": "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", "score": 0.95, "reasoning": "Direct match"},
-                {"entity_id": "entity-f6e5d4c3b2a1a8b9c0d1e2f3a4b5c6d7", "score": 0.82, "reasoning": "Related"}
-            ]
-        }"#;
-        let parsed: RerankingWrapper = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.rankings.len(), 2);
-        assert_eq!(
-            parsed.rankings[0].entity_id,
-            "entity-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
-        );
-        assert_eq!(parsed.rankings[0].score, 0.95);
-    }
-
-    #[test]
-    fn test_reranking_wrapper_empty_rankings() {
-        let json = r#"{"rankings": []}"#;
-        let parsed: RerankingWrapper = serde_json::from_str(json).unwrap();
-        assert!(parsed.rankings.is_empty());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_missing_rankings_field() {
-        let json = r#"{}"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_malformed_item_missing_entity_id() {
-        let json = r#"{
-            "rankings": [
-                {"score": 0.95, "reasoning": "Missing entity_id"}
-            ]
-        }"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_malformed_item_missing_score() {
-        let json = r#"{
-            "rankings": [
-                {"entity_id": "entity-abc", "reasoning": "Missing score"}
-            ]
-        }"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_malformed_item_missing_reasoning() {
-        let json = r#"{
-            "rankings": [
-                {"entity_id": "entity-abc", "score": 0.95}
-            ]
-        }"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_wrong_rankings_type() {
-        // rankings should be an array, not an object
-        let json = r#"{"rankings": {"entity_id": "e1", "score": 0.9}}"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_reranking_wrapper_invalid_score_type() {
-        let json = r#"{
-            "rankings": [
-                {"entity_id": "entity-abc", "score": "high", "reasoning": "Wrong score type"}
-            ]
-        }"#;
-        let result: std::result::Result<RerankingWrapper, _> = serde_json::from_str(json);
-        assert!(result.is_err());
     }
 }

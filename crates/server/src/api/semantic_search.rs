@@ -54,11 +54,25 @@ pub async fn search_semantic(
     }
 
     // Step 4: Execute parallel repository searches
+    // When reranking is enabled, fetch more candidates from Qdrant so the reranker
+    // has a meaningful pool to work with (default 100 instead of user's limit)
+    let rerank_config = request
+        .rerank
+        .as_ref()
+        .map(|r| r.merge_with(&config.reranking))
+        .unwrap_or_else(|| config.reranking.clone());
+
+    let search_limit = if rerank_config.enabled && clients.reranker.is_some() {
+        rerank_config.candidates
+    } else {
+        limit
+    };
+
     let candidates = search_repositories(
         &dense_embedding,
         &avgdl_to_sparse,
         &target_repos,
-        limit,
+        search_limit,
         &request,
         clients,
         config,

@@ -126,10 +126,7 @@ fn format_entities_for_prompt(entities: &[AgenticEntity], limit: usize) -> Strin
 pub struct AgenticSearchOrchestrator {
     search_api: Arc<dyn SearchApi>,
     sonnet_client: Arc<claudius::Anthropic>,
-    haiku_client: Arc<claudius::Anthropic>,
     sonnet_model: claudius::Model,
-    haiku_model: claudius::Model,
-    #[allow(dead_code)]
     config: AgenticSearchConfig,
 }
 
@@ -137,9 +134,7 @@ impl std::fmt::Debug for AgenticSearchOrchestrator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgenticSearchOrchestrator")
             .field("sonnet_client", &"<Anthropic>")
-            .field("haiku_client", &"<Anthropic>")
             .field("sonnet_model", &self.sonnet_model)
-            .field("haiku_model", &self.haiku_model)
             .field("config", &self.config)
             .finish()
     }
@@ -153,22 +148,16 @@ impl AgenticSearchOrchestrator {
             .resolve_api_key()
             .ok_or(AgenticSearchError::MissingApiKey)?;
 
-        let sonnet_client = Arc::new(claudius::Anthropic::new(Some(api_key.clone())).map_err(
-            |e| AgenticSearchError::Config(format!("Failed to create Sonnet client: {e}")),
-        )?);
-        let haiku_client = Arc::new(claudius::Anthropic::new(Some(api_key)).map_err(|e| {
-            AgenticSearchError::Config(format!("Failed to create Haiku client: {e}"))
+        let sonnet_client = Arc::new(claudius::Anthropic::new(Some(api_key)).map_err(|e| {
+            AgenticSearchError::Config(format!("Failed to create Sonnet client: {e}"))
         })?);
 
         let sonnet_model = claudius::Model::Custom(config.orchestrator_model.clone());
-        let haiku_model = claudius::Model::Custom(config.worker_model.clone());
 
         Ok(Self {
             search_api,
             sonnet_client,
-            haiku_client,
             sonnet_model,
-            haiku_model,
             config,
         })
     }
@@ -277,8 +266,15 @@ impl AgenticSearchOrchestrator {
             .filter(|e| e.is_graph_context())
             .count();
 
+        // Determine reranking method based on config
+        let reranking_method = if self.config.reranking.is_some() {
+            RerankingMethod::Jina
+        } else {
+            RerankingMethod::None
+        };
+
         Ok(AgenticSearchResponse {
-            results: final_results.into_iter().map(|e| e.entity).collect(),
+            results: final_results,
             metadata: AgenticSearchMetadata {
                 query_time_ms,
                 iterations: iteration,
@@ -288,7 +284,7 @@ impl AgenticSearchOrchestrator {
                 total_direct_candidates: direct_candidates,
                 graph_context_entities: graph_context,
                 graph_entities_in_results: graph_in_results,
-                reranking_method: RerankingMethod::HaikuOnly,
+                reranking_method,
                 graph_traversal_used: graph_context > 0,
                 estimated_cost_usd: 0.0,
                 cache_read_tokens: 0,
@@ -604,12 +600,16 @@ impl AgenticSearchOrchestrator {
                         .collect();
                     let count = worker_queries.len();
                     let search_api = self.search_api.clone();
-                    let haiku_client = self.haiku_client.clone();
-                    let haiku_model = self.haiku_model.clone();
+                    let rerank_config = self.config.reranking.clone();
+                    let semantic_candidates = self.config.semantic_candidates;
                     async move {
-                        let result =
-                            execute_workers(worker_queries, search_api, haiku_client, haiku_model)
-                                .await;
+                        let result = execute_workers(
+                            worker_queries,
+                            search_api,
+                            rerank_config,
+                            semantic_candidates,
+                        )
+                        .await;
                         (count, result)
                     }
                 })

@@ -62,6 +62,31 @@ impl Default for QualityGateConfig {
 }
 
 impl AgenticSearchConfig {
+    /// Create config from application-level reranking configuration.
+    ///
+    /// This factory method eliminates duplication when constructing `AgenticSearchConfig`
+    /// from the global `RerankingConfig` in different entry points (CLI, server, MCP).
+    pub fn from_reranking_config(reranking: &RerankingConfig) -> Self {
+        Self {
+            reranking: if reranking.enabled {
+                Some(reranking.clone())
+            } else {
+                None
+            },
+            reranking_request: if reranking.enabled {
+                Some(RerankingRequestConfig {
+                    enabled: Some(true),
+                    candidates: Some(reranking.candidates),
+                    top_k: Some(reranking.top_k),
+                })
+            } else {
+                None
+            },
+            semantic_candidates: reranking.candidates,
+            ..Default::default()
+        }
+    }
+
     pub fn resolve_api_key(&self) -> Option<String> {
         self.api_key
             .clone()
@@ -120,5 +145,54 @@ mod tests {
         let debug_output = format!("{config:?}");
         assert!(!debug_output.contains("secret-api-key-12345"));
         assert!(debug_output.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn test_from_reranking_config_enabled() {
+        let reranking = RerankingConfig {
+            enabled: true,
+            provider: "jina".to_string(),
+            model: "jina-reranker-v2".to_string(),
+            candidates: 50,
+            top_k: 10,
+            ..Default::default()
+        };
+
+        let config = AgenticSearchConfig::from_reranking_config(&reranking);
+
+        // Verify reranking config is set
+        assert!(config.reranking.is_some());
+        let rerank = config.reranking.as_ref().unwrap();
+        assert!(rerank.enabled);
+        assert_eq!(rerank.candidates, 50);
+
+        // Verify request config is set
+        assert!(config.reranking_request.is_some());
+        let req = config.reranking_request.as_ref().unwrap();
+        assert_eq!(req.enabled, Some(true));
+        assert_eq!(req.candidates, Some(50));
+        assert_eq!(req.top_k, Some(10));
+
+        // Verify semantic_candidates matches
+        assert_eq!(config.semantic_candidates, 50);
+    }
+
+    #[test]
+    fn test_from_reranking_config_disabled() {
+        let reranking = RerankingConfig {
+            enabled: false,
+            candidates: 100,
+            top_k: 20,
+            ..Default::default()
+        };
+
+        let config = AgenticSearchConfig::from_reranking_config(&reranking);
+
+        // Verify reranking is not set when disabled
+        assert!(config.reranking.is_none());
+        assert!(config.reranking_request.is_none());
+
+        // semantic_candidates still reflects the reranking config value
+        assert_eq!(config.semantic_candidates, 100);
     }
 }

@@ -7,7 +7,6 @@ use codesearch_agentic_search::{
     AgenticSearchConfig, AgenticSearchMetadata, AgenticSearchOrchestrator, AgenticSearchRequest,
     RetrievalSource,
 };
-use codesearch_core::config::RerankingRequestConfig;
 use codesearch_core::error::Result;
 use codesearch_core::search_models::EntityResult;
 use codesearch_core::SearchApi;
@@ -146,26 +145,7 @@ pub async fn search_agentic(
         Arc::new(SearchApiImpl::new(clients.clone(), config.clone()));
 
     // Create agentic search config with reranking settings from server config
-    let agentic_config = AgenticSearchConfig {
-        // Full reranking config for internal reranker creation (final synthesis)
-        reranking: if config.reranking.enabled {
-            Some(config.reranking.clone())
-        } else {
-            None
-        },
-        // Request-level reranking overrides passed to semantic search workers
-        reranking_request: if config.reranking.enabled {
-            Some(RerankingRequestConfig {
-                enabled: Some(true),
-                candidates: Some(config.reranking.candidates),
-                top_k: Some(config.reranking.top_k),
-            })
-        } else {
-            None
-        },
-        semantic_candidates: config.reranking.candidates,
-        ..Default::default()
-    };
+    let agentic_config = AgenticSearchConfig::from_reranking_config(&config.reranking);
 
     // Create orchestrator
     let orchestrator = AgenticSearchOrchestrator::new(search_api, agentic_config)

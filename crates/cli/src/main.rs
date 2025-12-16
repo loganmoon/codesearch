@@ -331,26 +331,8 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         .collect();
 
     // Create agentic search config with reranking from loaded config
-    let agentic_config = codesearch_agentic_search::AgenticSearchConfig {
-        // Full reranking config for internal reranker creation (final synthesis)
-        reranking: if config.reranking.enabled {
-            Some(config.reranking.clone())
-        } else {
-            None
-        },
-        // Request-level reranking overrides passed to semantic search workers
-        reranking_request: if config.reranking.enabled {
-            Some(codesearch_core::config::RerankingRequestConfig {
-                enabled: Some(true),
-                candidates: Some(config.reranking.candidates),
-                top_k: Some(config.reranking.top_k),
-            })
-        } else {
-            None
-        },
-        semantic_candidates: config.reranking.candidates,
-        ..Default::default()
-    };
+    let agentic_config =
+        codesearch_agentic_search::AgenticSearchConfig::from_reranking_config(&config.reranking);
 
     // Get current working directory for repository inference
     let cwd = env::current_dir().context("Failed to get current directory")?;

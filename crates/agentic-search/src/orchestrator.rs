@@ -359,9 +359,10 @@ impl AgenticSearchOrchestrator {
             .filter(|e| e.is_graph_context())
             .count();
 
-        // Determine reranking method based on config
-        let reranking_method = if self.config.reranking.is_some() {
-            RerankingMethod::Jina
+        // Determine reranking method based on actual reranker availability
+        // (reranker creation can fail even if config is present)
+        let reranking_method = if self.reranker.is_some() {
+            RerankingMethod::CrossEncoder
         } else {
             RerankingMethod::None
         };

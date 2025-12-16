@@ -87,6 +87,7 @@ impl CodesearchMcpServer {
         // Create orchestrator
         let orchestrator =
             AgenticSearchOrchestrator::new(self.search_api.clone(), self.agentic_config.clone())
+                .await
                 .map_err(|e| to_mcp_error_str(&format!("Failed to create orchestrator: {e}")))?;
 
         // Build search request

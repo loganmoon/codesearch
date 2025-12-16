@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 codesearch-core = { path = "../core" }
+codesearch-reranking = { path = "../reranking" }
 claudius = "0.16.0"
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }

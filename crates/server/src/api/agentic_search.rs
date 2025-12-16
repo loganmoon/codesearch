@@ -147,7 +147,14 @@ pub async fn search_agentic(
 
     // Create agentic search config with reranking settings from server config
     let agentic_config = AgenticSearchConfig {
-        reranking: if config.reranking.enabled && clients.reranker.is_some() {
+        // Full reranking config for internal reranker creation (final synthesis)
+        reranking: if config.reranking.enabled {
+            Some(config.reranking.clone())
+        } else {
+            None
+        },
+        // Request-level reranking overrides passed to semantic search workers
+        reranking_request: if config.reranking.enabled {
             Some(RerankingRequestConfig {
                 enabled: Some(true),
                 candidates: Some(config.reranking.candidates),
@@ -161,9 +168,13 @@ pub async fn search_agentic(
     };
 
     // Create orchestrator
-    let orchestrator = AgenticSearchOrchestrator::new(search_api, agentic_config).map_err(|e| {
-        codesearch_core::error::Error::from(anyhow::anyhow!("Failed to create orchestrator: {e}"))
-    })?;
+    let orchestrator = AgenticSearchOrchestrator::new(search_api, agentic_config)
+        .await
+        .map_err(|e| {
+            codesearch_core::error::Error::from(anyhow::anyhow!(
+                "Failed to create orchestrator: {e}"
+            ))
+        })?;
 
     // Build search request
     let search_request = AgenticSearchRequest {

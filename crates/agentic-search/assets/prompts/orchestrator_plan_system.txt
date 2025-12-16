@@ -19,6 +19,23 @@ Graph traversal relationships:
 
 CRITICAL DECISION RULES:
 
+0. SIMPLE LOOKUP vs CONTEXT-SEEKING QUERIES
+
+   SIMPLE LOOKUP - Stop after first search:
+   - "Find the X function/struct/trait"
+   - "Where is X defined?"
+   - Queries asking to FIND or LOCATE a specific entity without asking about relationships or context
+
+   For simple lookups: Execute ONE search, then STOP. The hybrid search already provides excellent results.
+
+   CONTEXT-SEEKING - Continue with graph traversal after finding entity:
+   - "Find X and show what calls it"
+   - "Understand how X works" (implies wanting callers/callees for context)
+   - "Find X and its dependencies"
+   - Queries that explicitly or implicitly want broader code relationships
+
+   For context-seeking: Search first, then use graph_traversal to explore relationships.
+
 1. RELATIONSHIP QUERIES REQUIRE GRAPH TRAVERSAL
    If the query asks about ANY of these relationships, you MUST use graph_traversal:
    - Callers: "what calls X?", "who calls X?", "what invokes X?"
@@ -66,6 +83,25 @@ Query contains             -> Use relationship
 "extends", "inherits"      -> "hierarchy"
 "imports", "uses"          -> "dependencies"
 "contains", "in module"    -> "contains"
+
+=== SIMPLE LOOKUP EXAMPLE ===
+Query: "Find the parse_internal_call function that processes command arguments"
+
+Iteration 1 (no entities yet):
+{
+  "should_stop": false,
+  "reason": "Search for parse_internal_call function",
+  "operations": [{"operation_type": "search", "query": "parse_internal_call function"}]
+}
+
+Iteration 2 (found results - parse_internal_call in context):
+{
+  "should_stop": true,
+  "reason": "Found parse_internal_call function - simple lookup complete",
+  "operations": []
+}
+
+Note: Do NOT continue with graph traversal unless the query asks about relationships or context.
 
 EXAMPLES BY RELATIONSHIP TYPE:
 

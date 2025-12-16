@@ -12,14 +12,71 @@ use crate::{
 };
 use codesearch_core::search_models::{GraphQueryParameters, GraphQueryRequest, GraphQueryType};
 use codesearch_core::SearchApi;
+use codesearch_reranking::{create_reranker_provider, RerankerProvider};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
+use tracing::error;
 use tracing::{debug, info, warn};
 
 const MAX_ITERATIONS: usize = 5;
+const MAX_ITERATIONS_SIMPLE_LOOKUP: usize = 1;
 const MAX_LLM_QUERY_LENGTH: usize = 1000;
+
+/// Detect if query is a simple entity lookup (vs complex relational query).
+/// Simple lookups should complete in 1 iteration - no need for query reformulation.
+fn is_simple_lookup_query(query: &str) -> bool {
+    let query_lower = query.to_lowercase();
+
+    // Pattern: "Find the X function/struct/trait/class/method"
+    // Pattern: "Where is X defined"
+    // Pattern: "Show me the X"
+    // Pattern: "What is the X function"
+    let simple_patterns = [
+        "find the ",
+        "find function ",
+        "find struct ",
+        "find trait ",
+        "find class ",
+        "find method ",
+        "where is ",
+        "show me the ",
+        "what is the ",
+        "locate the ",
+        "get the ",
+    ];
+
+    // Check if starts with a simple lookup pattern
+    let starts_with_simple = simple_patterns.iter().any(|p| query_lower.starts_with(p));
+
+    // Check for relational keywords that indicate complex queries
+    let relational_keywords = [
+        "calls",
+        "called by",
+        "who calls",
+        "callers",
+        "callees",
+        "implements",
+        "implementors",
+        "inherits",
+        "extends",
+        "uses",
+        "used by",
+        "dependencies",
+        "imports",
+        "related to",
+        "connected to",
+        "hierarchy",
+        "all functions that",
+        "all methods that",
+        "everything that",
+    ];
+
+    let has_relational = relational_keywords.iter().any(|k| query_lower.contains(k));
+
+    starts_with_simple && !has_relational
+}
 
 const VALID_RELATIONSHIPS: &[&str] = &[
     "callers",
@@ -128,6 +185,8 @@ pub struct AgenticSearchOrchestrator {
     sonnet_client: Arc<claudius::Anthropic>,
     sonnet_model: claudius::Model,
     config: AgenticSearchConfig,
+    /// Optional reranker for final result synthesis against original query
+    reranker: Option<Arc<dyn RerankerProvider>>,
 }
 
 impl std::fmt::Debug for AgenticSearchOrchestrator {
@@ -136,12 +195,13 @@ impl std::fmt::Debug for AgenticSearchOrchestrator {
             .field("sonnet_client", &"<Anthropic>")
             .field("sonnet_model", &self.sonnet_model)
             .field("config", &self.config)
+            .field("reranker", &self.reranker.is_some())
             .finish()
     }
 }
 
 impl AgenticSearchOrchestrator {
-    pub fn new(search_api: Arc<dyn SearchApi>, config: AgenticSearchConfig) -> Result<Self> {
+    pub async fn new(search_api: Arc<dyn SearchApi>, config: AgenticSearchConfig) -> Result<Self> {
         config.validate().map_err(AgenticSearchError::Config)?;
 
         let api_key = config
@@ -154,11 +214,31 @@ impl AgenticSearchOrchestrator {
 
         let sonnet_model = claudius::Model::Custom(config.orchestrator_model.clone());
 
+        // Create reranker from config if reranking is configured
+        let reranker = if let Some(ref reranking_config) = config.reranking {
+            match create_reranker_provider(reranking_config).await {
+                Ok(r) => {
+                    info!(
+                        "Created {} reranker for final synthesis",
+                        reranking_config.provider
+                    );
+                    Some(r)
+                }
+                Err(e) => {
+                    error!("Failed to create reranker, continuing without: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             search_api,
             sonnet_client,
             sonnet_model,
             config,
+            reranker,
         })
     }
 
@@ -175,26 +255,33 @@ impl AgenticSearchOrchestrator {
         let mut workers_succeeded = 0;
         let mut partial_outage = false;
 
+        // Detect simple lookup queries and limit iterations accordingly
+        let is_simple = is_simple_lookup_query(&request.query);
+        let max_iterations = if is_simple {
+            info!(
+                "Detected simple lookup query, limiting to {} iteration(s)",
+                MAX_ITERATIONS_SIMPLE_LOOKUP
+            );
+            MAX_ITERATIONS_SIMPLE_LOOKUP
+        } else {
+            MAX_ITERATIONS
+        };
+
         info!("Starting agentic search: {}", request.query);
 
         // Agentic loop
         loop {
             iteration += 1;
-            info!("Iteration {}/{}", iteration, MAX_ITERATIONS);
+            info!("Iteration {}/{}", iteration, max_iterations);
 
             // Call orchestrator to evaluate and plan next operations
             let decision = self
                 .orchestrator_loop_iteration(&request.query, &accumulated_entities, iteration)
                 .await?;
 
-            // Check stop conditions
+            // Check stop conditions BEFORE executing (orchestrator said to stop)
             if decision.should_stop {
                 info!("Orchestrator decided to stop: {}", decision.reason);
-                break;
-            }
-
-            if iteration >= MAX_ITERATIONS {
-                info!("Reached max iterations");
                 break;
             }
 
@@ -240,6 +327,12 @@ impl AgenticSearchOrchestrator {
 
             if new_count == 0 && iteration > 1 {
                 info!("No new entities found, stopping");
+                break;
+            }
+
+            // Check iteration limit AFTER executing (so we complete at least one iteration)
+            if iteration >= max_iterations {
+                info!("Reached max iterations ({})", max_iterations);
                 break;
             }
         }
@@ -600,7 +693,7 @@ impl AgenticSearchOrchestrator {
                         .collect();
                     let count = worker_queries.len();
                     let search_api = self.search_api.clone();
-                    let rerank_config = self.config.reranking.clone();
+                    let rerank_config = self.config.reranking_request.clone();
                     let semantic_candidates = self.config.semantic_candidates;
                     async move {
                         let result = execute_workers(
@@ -826,6 +919,9 @@ impl AgenticSearchOrchestrator {
     ///
     /// Graph results are exhaustive and unranked (e.g., ALL callers of X), so they
     /// should not be filtered. Direct candidates get quality-gated to pick the best.
+    ///
+    /// When a reranker is available, direct candidates are reranked against the
+    /// original query to ensure consistent scoring across multiple iterations.
     async fn synthesize_final_results(
         &self,
         entities: Vec<AgenticEntity>,
@@ -835,9 +931,12 @@ impl AgenticSearchOrchestrator {
         let (direct_candidates, graph_context): (Vec<_>, Vec<_>) =
             entities.into_iter().partition(|e| e.is_direct_match());
 
-        // If no graph context, use simple score-based ranking for direct candidates
+        // If no graph context, rerank and return top direct candidates
         if graph_context.is_empty() {
-            return self.simple_top_n_by_score(direct_candidates, 10);
+            let reranked = self
+                .rerank_against_original_query(direct_candidates, query)
+                .await?;
+            return self.simple_top_n_by_score(reranked, 10);
         }
 
         // Graph context exists: quality-gate direct candidates, include ALL graph results
@@ -852,6 +951,59 @@ impl AgenticSearchOrchestrator {
         final_results.extend(graph_context);
 
         Ok(final_results)
+    }
+
+    /// Rerank entities against the original query using cross-encoder.
+    ///
+    /// This ensures consistent scoring when multiple search iterations with
+    /// different queries have accumulated results. If no reranker is configured,
+    /// returns entities unchanged.
+    async fn rerank_against_original_query(
+        &self,
+        mut entities: Vec<AgenticEntity>,
+        query: &str,
+    ) -> Result<Vec<AgenticEntity>> {
+        let reranker = match &self.reranker {
+            Some(r) => r,
+            None => return Ok(entities),
+        };
+
+        if entities.is_empty() {
+            return Ok(entities);
+        }
+
+        info!(
+            "Reranking {} entities against original query for final synthesis",
+            entities.len()
+        );
+
+        // Prepare documents for reranking: (entity_id, content)
+        let documents: Vec<(String, &str)> = entities
+            .iter()
+            .map(|e| {
+                let content = e.entity.content.as_deref().unwrap_or("");
+                (e.entity.entity_id.clone(), content)
+            })
+            .collect();
+
+        // Call reranker
+        let rerank_results = reranker
+            .rerank(query, &documents)
+            .await
+            .map_err(|e| AgenticSearchError::Reranking(e.to_string()))?;
+
+        // Build a map of entity_id -> new score
+        let score_map: std::collections::HashMap<String, f32> =
+            rerank_results.into_iter().collect();
+
+        // Update entity scores
+        for entity in &mut entities {
+            if let Some(&new_score) = score_map.get(&entity.entity.entity_id) {
+                entity.entity.score = new_score;
+            }
+        }
+
+        Ok(entities)
     }
 
     /// Simple top N by score (fallback when no graph context)
@@ -968,6 +1120,44 @@ mod tests {
         let decision: OrchestratorDecisionResponse = serde_json::from_str(json).unwrap();
         assert!(decision.should_stop);
         assert_eq!(decision.operations.len(), 0);
+    }
+
+    // ========================================================================
+    // Simple Lookup Query Detection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_simple_lookup_detection() {
+        // Simple lookup queries - should return true
+        assert!(is_simple_lookup_query(
+            "Find the lex_item function that reads characters"
+        ));
+        assert!(is_simple_lookup_query(
+            "Find the math_result_type function that determines types"
+        ));
+        assert!(is_simple_lookup_query("Where is the Config struct defined"));
+        assert!(is_simple_lookup_query("Show me the main function"));
+        assert!(is_simple_lookup_query("What is the Parser trait"));
+        assert!(is_simple_lookup_query("Locate the error handling module"));
+        assert!(is_simple_lookup_query("Get the configuration struct"));
+
+        // Complex/relational queries - should return false
+        assert!(!is_simple_lookup_query("What functions call parse_token"));
+        assert!(!is_simple_lookup_query(
+            "Find all functions that implement the Parser trait"
+        ));
+        assert!(!is_simple_lookup_query("Show me the callers of main"));
+        assert!(!is_simple_lookup_query(
+            "What uses the Config struct and how is it used by other modules"
+        ));
+        assert!(!is_simple_lookup_query(
+            "Find the dependencies of the lexer module"
+        ));
+        assert!(!is_simple_lookup_query("Show the class hierarchy for Node"));
+
+        // Non-matching patterns - should return false
+        assert!(!is_simple_lookup_query("How does the parser work"));
+        assert!(!is_simple_lookup_query("Explain the architecture"));
     }
 
     // ========================================================================

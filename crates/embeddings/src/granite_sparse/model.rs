@@ -410,7 +410,13 @@ impl GraniteSparseModel {
         model_path: &std::path::Path,
         device: &Device,
     ) -> Result<Self> {
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], DType::F32, device)? };
+        let model_data = std::fs::read(model_path).map_err(|e| {
+            candle_core::Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("Failed to read model file {}: {e}", model_path.display()),
+            ))
+        })?;
+        let vb = VarBuilder::from_buffered_safetensors(model_data, DType::F32, device)?;
 
         Self::new(&config, vb)
     }

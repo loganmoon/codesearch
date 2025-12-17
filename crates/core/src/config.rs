@@ -177,7 +177,7 @@ pub struct SparseEmbeddingsConfig {
     pub top_k: usize,
 
     /// Batch size for Granite model inference (default: 32)
-    /// Larger batches improve CPU throughput but use more memory (~103MB per item)
+    /// Larger batches improve GPU throughput; smaller batches reduce memory usage
     #[serde(default = "default_sparse_batch_size")]
     pub batch_size: usize,
 }

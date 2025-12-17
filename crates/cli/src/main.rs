@@ -294,6 +294,31 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         }
     };
 
+    // Pre-initialize sparse manager at startup for Granite (doesn't need avgdl from DB)
+    let sparse_manager = if config.sparse_embeddings.provider.to_lowercase() != "bm25" {
+        info!(
+            "Pre-initializing sparse embedding manager (provider: {})",
+            config.sparse_embeddings.provider
+        );
+        match codesearch_embeddings::create_sparse_manager_from_config(
+            &config.sparse_embeddings,
+            0.0,
+        )
+        .await
+        {
+            Ok(mgr) => {
+                info!("Sparse embedding manager initialized successfully");
+                Some(mgr)
+            }
+            Err(e) => {
+                warn!("Failed to pre-initialize sparse manager: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Build BackendClients
     let backend_clients = std::sync::Arc::new(codesearch_server::api::BackendClients {
         postgres: postgres_client,
@@ -301,6 +326,7 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         neo4j: neo4j_client,
         embedding_manager,
         reranker,
+        sparse_manager,
     });
 
     // Build SearchConfig

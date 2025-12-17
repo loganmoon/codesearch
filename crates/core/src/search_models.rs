@@ -121,60 +121,6 @@ pub struct SemanticSearchResponse {
     pub metadata: ResponseMetadata,
 }
 
-/// Full-text search request
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
-pub struct FulltextSearchRequest {
-    pub repository_id: Uuid,
-    pub query: String,
-    pub limit: usize,
-}
-
-/// Full-text search response
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
-pub struct FulltextSearchResponse {
-    pub results: Vec<EntityResult>,
-    pub metadata: ResponseMetadata,
-}
-
-/// Unified search request (combines full-text + semantic)
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
-pub struct UnifiedSearchRequest {
-    pub repository_id: Uuid,
-    pub query: QuerySpec,
-    pub filters: Option<SearchFilters>,
-    pub limit: usize,
-    pub enable_fulltext: bool,
-    pub enable_semantic: bool,
-    pub fulltext_limit: Option<usize>,
-    pub semantic_limit: Option<usize>,
-    pub rrf_k: Option<usize>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
-    pub rerank: Option<RerankingRequestConfig>,
-}
-
-/// Response metadata for unified search
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
-pub struct UnifiedResponseMetadata {
-    pub total_results: usize,
-    pub fulltext_count: usize,
-    pub semantic_count: usize,
-    pub merged_via_rrf: bool,
-    pub reranked: bool,
-    pub query_time_ms: u64,
-}
-
-/// Unified search response
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "openapi", derive(ToSchema))]
-pub struct UnifiedSearchResponse {
-    pub results: Vec<EntityResult>,
-    pub metadata: UnifiedResponseMetadata,
-}
-
 /// Graph query types
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(feature = "openapi", derive(ToSchema))]

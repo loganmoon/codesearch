@@ -17,15 +17,6 @@ pub trait SearchApi: Send + Sync {
         request: SemanticSearchRequest,
     ) -> Result<SemanticSearchResponse>;
 
-    /// Perform full-text search using BM25
-    async fn search_fulltext(
-        &self,
-        request: FulltextSearchRequest,
-    ) -> Result<FulltextSearchResponse>;
-
-    /// Perform unified search combining full-text and semantic search
-    async fn search_unified(&self, request: UnifiedSearchRequest) -> Result<UnifiedSearchResponse>;
-
     /// Query the code graph for relationships
     async fn query_graph(&self, request: GraphQueryRequest) -> Result<GraphQueryResponse>;
 }

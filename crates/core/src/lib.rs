@@ -39,11 +39,9 @@ pub use project_manifest::{
 pub use search_api::SearchApi;
 pub use search_models::{
     BatchEntityRequest, BatchEntityResponse, EmbeddingRequest, EmbeddingResponse, EntityResult,
-    FulltextSearchRequest, FulltextSearchResponse, GraphQueryParameters, GraphQueryRequest,
-    GraphQueryResponse, GraphQueryType, GraphResponseMetadata, GraphResult,
-    ListRepositoriesResponse, QuerySpec, RepositoryInfo, ResponseMetadata, SearchFilters,
-    SemanticSearchRequest, SemanticSearchResponse, UnifiedResponseMetadata, UnifiedSearchRequest,
-    UnifiedSearchResponse,
+    GraphQueryParameters, GraphQueryRequest, GraphQueryResponse, GraphQueryType,
+    GraphResponseMetadata, GraphResult, ListRepositoriesResponse, QuerySpec, RepositoryInfo,
+    ResponseMetadata, SearchFilters, SemanticSearchRequest, SemanticSearchResponse,
 };
 
 /// Version of the core library

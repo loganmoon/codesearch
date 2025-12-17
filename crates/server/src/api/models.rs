@@ -3,10 +3,7 @@
 // Re-export search models from core
 pub use codesearch_core::search_models::*;
 
-use codesearch_core::config::{
-    HybridSearchConfig, QueryPreprocessingConfig, RerankingConfig, SparseEmbeddingsConfig,
-    SpecificityConfig,
-};
+use codesearch_core::config::{HybridSearchConfig, RerankingConfig, SparseEmbeddingsConfig};
 use codesearch_embeddings::{EmbeddingManager, SparseEmbeddingManager};
 use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{
@@ -29,8 +26,6 @@ pub struct BackendClients {
 pub struct SearchConfig {
     pub hybrid_search: HybridSearchConfig,
     pub reranking: RerankingConfig,
-    pub query_preprocessing: QueryPreprocessingConfig,
-    pub specificity: SpecificityConfig,
     pub sparse_embeddings: SparseEmbeddingsConfig,
     pub default_bge_instruction: String,
     pub max_batch_size: usize,

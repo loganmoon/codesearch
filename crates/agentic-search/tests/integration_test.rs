@@ -55,40 +55,6 @@ impl SearchApi for MockSearchApi {
         })
     }
 
-    async fn search_fulltext(
-        &self,
-        _request: FulltextSearchRequest,
-    ) -> CoreResult<FulltextSearchResponse> {
-        // Fulltext search is no longer used by agentic search
-        Ok(FulltextSearchResponse {
-            results: vec![],
-            metadata: ResponseMetadata {
-                total_results: 0,
-                repositories_searched: 1,
-                reranked: false,
-                query_time_ms: 100,
-            },
-        })
-    }
-
-    async fn search_unified(
-        &self,
-        _request: UnifiedSearchRequest,
-    ) -> CoreResult<UnifiedSearchResponse> {
-        // Unified search is no longer used by agentic search
-        Ok(UnifiedSearchResponse {
-            results: vec![],
-            metadata: UnifiedResponseMetadata {
-                total_results: 0,
-                fulltext_count: 0,
-                semantic_count: 0,
-                merged_via_rrf: false,
-                reranked: false,
-                query_time_ms: 100,
-            },
-        })
-    }
-
     async fn query_graph(&self, _request: GraphQueryRequest) -> CoreResult<GraphQueryResponse> {
         Ok(GraphQueryResponse {
             results: self.graph_results.clone(),

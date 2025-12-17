@@ -189,6 +189,7 @@ impl IndexStats {
 ///     PathBuf::from("/path/to/repo"),
 ///     "550e8400-e29b-41d4-a716-446655440000".to_string(),
 ///     embedding_manager,
+///     None, // sparse_manager
 ///     postgres_client,
 ///     None,
 ///     IndexerConfig::default(),
@@ -200,6 +201,7 @@ pub fn create_indexer(
     repository_path: PathBuf,
     repository_id: String,
     embedding_manager: std::sync::Arc<codesearch_embeddings::EmbeddingManager>,
+    sparse_manager: Option<std::sync::Arc<codesearch_embeddings::SparseEmbeddingManager>>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
     config: config::IndexerConfig,
@@ -208,6 +210,7 @@ pub fn create_indexer(
         repository_path,
         repository_id,
         embedding_manager,
+        sparse_manager,
         postgres_client,
         git_repo,
         config,
@@ -234,7 +237,7 @@ pub fn create_indexer(
 /// # Example
 ///
 /// ```no_run
-/// use codesearch_indexer::start_watching;
+/// use codesearch_indexer::{start_watching, IndexerConfig};
 /// use tokio::sync::mpsc;
 /// use std::sync::Arc;
 /// use std::path::PathBuf;
@@ -246,6 +249,7 @@ pub fn create_indexer(
 /// # let embedding_manager = panic!("example code");
 /// # let postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait> = panic!("example code");
 /// let (tx, rx) = mpsc::channel(100);
+/// let config = IndexerConfig::default();
 ///
 /// let task = start_watching(
 ///     rx,
@@ -253,6 +257,7 @@ pub fn create_indexer(
 ///     repo_root,
 ///     embedding_manager,
 ///     postgres_client,
+///     config,
 /// );
 ///
 /// // Task runs until tx is dropped or channel is closed
@@ -267,11 +272,11 @@ pub fn start_watching(
     repo_root: PathBuf,
     embedding_manager: Arc<codesearch_embeddings::EmbeddingManager>,
     postgres_client: Arc<dyn codesearch_storage::PostgresClientTrait>,
+    config: IndexerConfig,
 ) -> JoinHandle<Result<()>> {
     tokio::spawn(async move {
         tracing::info!("File watcher indexer task started");
 
-        let config = IndexerConfig::default();
         let mut batcher = EventBatcher::new(config.watch_batch_size, config.watch_timeout_ms);
 
         loop {
@@ -290,6 +295,7 @@ pub fn start_watching(
                                     &repo_root,
                                     &embedding_manager,
                                     &postgres_client,
+                                    &config.sparse_embeddings,
                                 )
                                 .await
                                 {
@@ -314,6 +320,7 @@ pub fn start_watching(
                             &repo_root,
                             &embedding_manager,
                             &postgres_client,
+                            &config.sparse_embeddings,
                         )
                         .await
                         {

@@ -10,6 +10,7 @@ pub struct GraniteTokenizer {
 }
 
 /// Tokenized output
+#[derive(Clone)]
 pub struct TokenizedInput {
     /// Token IDs
     pub input_ids: Vec<u32>,

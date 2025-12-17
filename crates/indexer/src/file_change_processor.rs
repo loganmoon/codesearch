@@ -5,6 +5,7 @@
 use crate::common::{get_current_commit, path_to_str};
 use crate::entity_processor;
 use crate::Result;
+use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::PostgresClientTrait;
@@ -44,6 +45,7 @@ pub async fn process_file_changes(
     repo_root: &Path,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
+    sparse_embeddings_config: &SparseEmbeddingsConfig,
 ) -> Result<ProcessingStats> {
     if changes.is_empty() {
         return Ok(ProcessingStats::default());
@@ -165,6 +167,7 @@ pub async fn process_file_changes(
             embedding_manager,
             postgres_client,
             package_map.as_ref(),
+            sparse_embeddings_config,
         )
         .await
         {
@@ -198,6 +201,7 @@ pub async fn process_file_changes(
 }
 
 /// Process a batch of files for indexing
+#[allow(clippy::too_many_arguments)]
 async fn process_file_batch(
     file_paths: &[PathBuf],
     repo_id: Uuid,
@@ -206,6 +210,7 @@ async fn process_file_batch(
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &Arc<dyn PostgresClientTrait>,
     package_map: Option<&PackageMap>,
+    sparse_embeddings_config: &SparseEmbeddingsConfig,
 ) -> Result<ProcessingStats> {
     let mut stats = ProcessingStats::default();
     let mut batch_entities = Vec::new();
@@ -298,6 +303,7 @@ async fn process_file_batch(
         embedding_manager,
         postgres_client.as_ref(),
         postgres_client.max_entity_batch_size(),
+        sparse_embeddings_config,
     )
     .await?;
 

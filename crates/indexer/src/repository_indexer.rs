@@ -8,6 +8,7 @@ use crate::entity_processor;
 use crate::{IndexResult, IndexStats};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
@@ -66,6 +67,8 @@ pub struct RepositoryIndexer {
     repository_path: PathBuf,
     repository_id: uuid::Uuid,
     embedding_manager: std::sync::Arc<EmbeddingManager>,
+    /// Pre-initialized sparse embedding manager (optional - falls back to lazy creation if None)
+    sparse_manager: Option<Arc<codesearch_embeddings::SparseEmbeddingManager>>,
     postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
     git_repo: Option<codesearch_watcher::GitRepository>,
     config: IndexerConfig,
@@ -75,10 +78,21 @@ pub struct RepositoryIndexer {
 
 impl RepositoryIndexer {
     /// Create a new repository indexer
+    ///
+    /// # Arguments
+    /// * `repository_path` - Path to the repository root
+    /// * `repository_id` - UUID string identifying the repository
+    /// * `embedding_manager` - Manager for generating dense embeddings
+    /// * `sparse_manager` - Optional pre-initialized sparse embedding manager (for Granite).
+    ///   If None, falls back to creating sparse manager lazily (required for BM25 which needs avgdl).
+    /// * `postgres_client` - PostgreSQL client for storage operations
+    /// * `git_repo` - Optional Git repository handle
+    /// * `config` - Indexer configuration
     pub fn new(
         repository_path: PathBuf,
         repository_id: String,
         embedding_manager: std::sync::Arc<EmbeddingManager>,
+        sparse_manager: Option<Arc<codesearch_embeddings::SparseEmbeddingManager>>,
         postgres_client: std::sync::Arc<dyn codesearch_storage::PostgresClientTrait>,
         git_repo: Option<codesearch_watcher::GitRepository>,
         config: IndexerConfig,
@@ -116,6 +130,7 @@ impl RepositoryIndexer {
             repository_path,
             repository_id,
             embedding_manager,
+            sparse_manager,
             postgres_client,
             git_repo,
             config,
@@ -447,12 +462,14 @@ async fn stage_extract_entities(
     Ok((total_extracted, total_failed))
 }
 
-/// Stage 3: Generate embeddings for entities in parallel
+///// Stage 3: Generate embeddings for entities in parallel
 async fn stage_generate_embeddings(
     mut entity_rx: mpsc::Receiver<EntityBatch>,
     embedded_tx: mpsc::Sender<EmbeddedBatch>,
     embedding_manager: Arc<EmbeddingManager>,
     postgres_client: Arc<dyn PostgresClientTrait>,
+    sparse_embeddings_config: SparseEmbeddingsConfig,
+    pre_initialized_sparse_manager: Option<Arc<codesearch_embeddings::SparseEmbeddingManager>>,
 ) -> Result<usize> {
     let mut total_embedded = 0;
     let mut total_skipped = 0;
@@ -598,18 +615,42 @@ async fn stage_generate_embeddings(
                 cache_miss_count
             );
 
-            let bm25_stats = postgres_client
-                .get_bm25_statistics(batch.repo_id)
+            // Use pre-initialized sparse manager if available, otherwise create one
+            let sparse_manager = if let Some(ref mgr) = pre_initialized_sparse_manager {
+                Arc::clone(mgr)
+            } else {
+                // Fall back to lazy creation (needed for BM25 which requires avgdl from DB)
+                let bm25_stats = postgres_client
+                    .get_bm25_statistics(batch.repo_id)
+                    .await
+                    .storage_err("Failed to get BM25 statistics")?;
+
+                match codesearch_embeddings::create_sparse_manager_from_config(
+                    &sparse_embeddings_config,
+                    bm25_stats.avgdl,
+                )
                 .await
-                .storage_err("Failed to get BM25 statistics")?;
+                {
+                    Ok(mgr) => mgr,
+                    Err(e) => {
+                        error!("Stage 3: Failed to create sparse embedding manager: {e}");
+                        return Err(e);
+                    }
+                }
+            };
 
-            let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
-                .storage_err("Failed to create sparse embedding manager")?;
-
-            let new_sparse_embeddings = sparse_manager
+            let new_sparse_embeddings = match sparse_manager
                 .embed_sparse(cache_miss_texts.iter().map(|s| s.as_str()).collect())
                 .await
-                .storage_err("Failed to generate sparse embeddings for cache misses")?;
+            {
+                Ok(embs) => embs,
+                Err(e) => {
+                    error!("Stage 3: Failed to generate sparse embeddings: {e}");
+                    return Err(Error::Storage(format!(
+                        "Failed to generate sparse embeddings: {e}"
+                    )));
+                }
+            };
 
             // Fill in newly generated sparse embeddings
             for (miss_idx, sparse_opt) in
@@ -1121,11 +1162,15 @@ impl crate::Indexer for RepositoryIndexer {
         ));
 
         let postgres_client_3 = self.postgres_client.clone();
+        let sparse_embeddings_config = self.config.sparse_embeddings.clone();
+        let sparse_manager = self.sparse_manager.clone();
         let stage3 = tokio::spawn(stage_generate_embeddings(
             entity_rx,
             embedded_tx,
             embedding_manager,
             postgres_client_3,
+            sparse_embeddings_config,
+            sparse_manager,
         ));
 
         let stage4 = tokio::spawn(stage_store_entities(

@@ -4,6 +4,7 @@
 //! and storage that are used by both full repository indexing and incremental file updates.
 
 use crate::common::{path_to_str, ResultExt};
+use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::{EmbeddingContext, EmbeddingManager, EmbeddingTask};
@@ -138,6 +139,7 @@ pub struct BatchProcessingStats {
 }
 
 /// Process a batch of entities: generate embeddings, check metadata, and store with outbox
+#[allow(clippy::too_many_arguments)]
 pub async fn process_entity_batch(
     entities: Vec<CodeEntity>,
     repo_id: Uuid,
@@ -146,6 +148,7 @@ pub async fn process_entity_batch(
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
     max_batch_size: usize,
+    sparse_embeddings_config: &SparseEmbeddingsConfig,
 ) -> Result<(BatchProcessingStats, HashMap<String, Vec<String>>)> {
     let mut stats = BatchProcessingStats::default();
     let mut entities_by_file: HashMap<String, Vec<String>> = HashMap::new();
@@ -254,6 +257,7 @@ pub async fn process_entity_batch(
             git_commit.clone(),
             embedding_manager,
             postgres_client,
+            sparse_embeddings_config,
         )
         .await?;
 
@@ -282,6 +286,7 @@ async fn process_entity_chunk(
     git_commit: Option<String>,
     embedding_manager: &Arc<EmbeddingManager>,
     postgres_client: &(dyn PostgresClientTrait + Send + Sync),
+    sparse_embeddings_config: &SparseEmbeddingsConfig,
 ) -> Result<(BatchProcessingStats, HashMap<String, Vec<String>>)> {
     let mut stats = BatchProcessingStats::default();
     let mut entities_by_file: HashMap<String, Vec<String>> = HashMap::new();
@@ -299,8 +304,12 @@ async fn process_entity_chunk(
         .storage_err("Failed to get BM25 statistics")?;
 
     // Create sparse embedding manager with current avgdl
-    let sparse_manager = codesearch_embeddings::create_sparse_manager(bm25_stats.avgdl)
-        .storage_err("Failed to create sparse embedding manager")?;
+    let sparse_manager = codesearch_embeddings::create_sparse_manager_from_config(
+        sparse_embeddings_config,
+        bm25_stats.avgdl,
+    )
+    .await
+    .storage_err("Failed to create sparse embedding manager")?;
 
     // Phase 1: Compute content hashes for all entities
     let entity_contents_and_hashes: Vec<(String, String)> = entities

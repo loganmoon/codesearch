@@ -313,8 +313,13 @@ async fn search_repositories(
         .map(|avgdl| {
             let avgdl_val = *avgdl;
             let query_text = request.query.text.clone();
+            let sparse_config = config.sparse_embeddings.clone();
             async move {
-                let sparse_manager = codesearch_embeddings::create_sparse_manager(avgdl_val.0)?;
+                let sparse_manager = codesearch_embeddings::create_sparse_manager_from_config(
+                    &sparse_config,
+                    avgdl_val.0,
+                )
+                .await?;
                 let sparse_embeddings = sparse_manager
                     .embed_sparse(vec![query_text.as_str()])
                     .await?;

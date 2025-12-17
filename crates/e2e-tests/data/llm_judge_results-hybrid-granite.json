@@ -1,0 +1,2434 @@
+{
+  "metadata": {
+    "judge_model": "gemini-2.5-flash",
+    "timestamp": "2025-12-17T14:16:36.365577",
+    "limit": 10,
+    "repository": "nushell",
+    "exclude_graph": true
+  },
+  "semantic": {
+    "endpoint": "semantic",
+    "aggregate_metrics": {
+      "num_queries": 20,
+      "k_values": [
+        5,
+        10
+      ],
+      "mean_ndcg_5": 0.9475195488263065,
+      "std_ndcg_5": 0.05969343905273652,
+      "min_ndcg_5": 0.7692798105748722,
+      "max_ndcg_5": 1.0,
+      "mean_ndcg_10": 0.8969022978774944,
+      "std_ndcg_10": 0.11963492489991664,
+      "min_ndcg_10": 0.5406858240686612,
+      "max_ndcg_10": 1.0
+    },
+    "per_query_results": [
+      {
+        "query_id": "hyb_001",
+        "query": "Find the parse_internal_call function that processes arguments and flags when invoking built-in commands",
+        "ndcg_scores": {
+          "5": 0.9406335599074369,
+          "10": 0.9413009361091008
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-fe29fc83f594f25d8d1833ea89f942d2",
+            "qualified_name": "nu_parser::parser::parse_internal_call",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.60275173,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0741ee414d89d409469752294375c0e8",
+            "qualified_name": "nu_parser::parse_keywords::parse_where_expr",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parse_keywords.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input's request. Great job!",
+            "original_rank": 2,
+            "original_score": 0.43080673,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e0bb5d527e8772dbe7ddc93b58aa9978",
+            "qualified_name": "nu_parser::parse_keywords::parse_for",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parse_keywords.rs",
+            "score": 1,
+            "reasoning": "The score is 0.56 because a substantial part of the output was irrelevant, discussing the 'parse_for' function and 'for' loops instead of the requested 'parse_internal_call'. However, there was still some partially relevant information to prevent a lower score.",
+            "original_rank": 3,
+            "original_score": 0.31078088,
+            "source": null
+          },
+          {
+            "entity_id": "entity-3131a157e30bfa8c15b0626b3b724642",
+            "qualified_name": "nu_parser::parse_keywords::parse_source",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parse_keywords.rs",
+            "score": 1,
+            "reasoning": "The score is 0.54 because the output largely describes the `parse_source` function and its internal details, including arguments, return types, and error handling, instead of focusing on `parse_internal_call` and its argument/flag processing as requested. This extensive irrelevance prevents a higher score, though some minimal relevant context might be present to justify it not being zero.",
+            "original_rank": 4,
+            "original_score": 0.21845895,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b7ef24a7b6d073d313b297b5837cca12",
+            "qualified_name": "nu_parser::parser::ArgumentParsingLevel",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 5,
+            "original_score": 0.17920816,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e2fbab781f4a68facb19eaee876cafa1",
+            "qualified_name": "parse_call",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/tests/test_parser.rs",
+            "score": 1,
+            "reasoning": "The score is 0.50 because the output contained several irrelevant statements, frequently discussing 'parse_call' instead of the requested 'parse_internal_call' and focusing on command definitions or assertions rather than the function's argument and flag processing. This significantly reduced its relevancy, preventing a higher score, but it likely still contained some partially relevant information to achieve 0.50.",
+            "original_rank": 6,
+            "original_score": 0.15677047,
+            "source": null
+          },
+          {
+            "entity_id": "entity-3ab207d0e20485de90e7c5b4e34cc114",
+            "qualified_name": "<external::BytesIndexOf as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/bytes/index_of.rs",
+            "score": 0,
+            "reasoning": "The score is 0.17 because the output largely focused on describing a specific command's 'run' method and its internal argument handling, rather than the 'parse_internal_call' function and its role in processing arguments and flags for built-in commands as requested. This significant deviation from the input's focus resulted in most of the content being irrelevant, leading to a very low score.",
+            "original_rank": 7,
+            "original_score": 0.1189116,
+            "source": null
+          },
+          {
+            "entity_id": "entity-82d230d5b93b4034f496e9a3e98cb382",
+            "qualified_name": "<external::NuCheck as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/system/nu_check.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input's request to find the 'parse_internal_call' function, instead providing extensive details about 'external::NuCheck' and its 'run' method, which is entirely irrelevant to built-in command argument processing.",
+            "original_rank": 8,
+            "original_score": 0.10961337,
+            "source": null
+          },
+          {
+            "entity_id": "entity-39fd9424a8c9ff368936355b3bb51b16",
+            "qualified_name": "nu_parser::parse_keywords::parse_def_predecl",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parse_keywords.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on describing 'parse_def_predecl' and its flag processing for defining commands, rather than the requested 'parse_internal_call' for invoking built-in commands. This made the entire response irrelevant to the input query.",
+            "original_rank": 9,
+            "original_score": 0.1053393,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a6fd0cbf8a6c8f0866c2f4014842af1e",
+            "qualified_name": "<external::Find as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely missed the requested 'parse_internal_call' function, instead focusing entirely on the 'run' method of a specific command, making all statements irrelevant to the input.",
+            "original_rank": 10,
+            "original_score": 0.10123242,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_002",
+        "query": "Find functions in the nu_parser::lex module responsible for breaking source code into tokens",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 1.0
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-5117c2fb73d9d1e77ec134f5316fce01",
+            "qualified_name": "nu_parser::lex",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lib.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.39001796,
+            "source": null
+          },
+          {
+            "entity_id": "entity-86ad6a93d495a858637f120fe2e9924d",
+            "qualified_name": "nu_parser::lex::lex",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent work!",
+            "original_rank": 2,
+            "original_score": 0.33905438,
+            "source": null
+          },
+          {
+            "entity_id": "entity-12cd50b308ff6908f2caa28ab8890a90",
+            "qualified_name": "nu_parser::lex::is_assignment_operator",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent work!",
+            "original_rank": 3,
+            "original_score": 0.30420518,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a43bb07ae56cc314cefa4b63cc86a4d6",
+            "qualified_name": "nu_parser::lex::lex_n_tokens",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.26598978,
+            "source": null
+          },
+          {
+            "entity_id": "entity-93adeae5ed0b2333461cbb5dbbc70c2f",
+            "qualified_name": "nu_parser::lex::lex_internal",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 5,
+            "original_score": 0.22584406,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e95faaa1eda48ad4fcaf54e02cab3983",
+            "qualified_name": "lex_parenthesis",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/tests/test_lex.rs",
+            "score": 2,
+            "reasoning": "The score is 0.89 because while the majority of the output was relevant to finding functions in the nu_parser::lex module responsible for breaking source code into tokens, it included a statement describing a test assertion, which was irrelevant to the input, preventing a higher score.",
+            "original_rank": 6,
+            "original_score": 0.14151224,
+            "source": null
+          },
+          {
+            "entity_id": "entity-f53439518eb2870d2196b06608443ecb",
+            "qualified_name": "nu_parser::lex::lex_item",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent work!",
+            "original_rank": 7,
+            "original_score": 0.1401518,
+            "source": null
+          },
+          {
+            "entity_id": "entity-26b167471b549f42240e8611e8e1281a",
+            "qualified_name": "lex_comments",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/tests/test_lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent work!",
+            "original_rank": 8,
+            "original_score": 0.13646325,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0bd8e8f91c168e7d4ad4d1b9e81d373a",
+            "qualified_name": "nu_parser::lex::lex_signature",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent work!",
+            "original_rank": 9,
+            "original_score": 0.12929441,
+            "source": null
+          },
+          {
+            "entity_id": "entity-cc5dc4c47a88588e8e8559902147d104",
+            "qualified_name": "nu_parser::lex::BlockKind",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 10,
+            "original_score": 0.10997102,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_003",
+        "query": "Find the flatten_expression_into function that converts hierarchical AST nodes into a flat list of spans",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.859432561824486
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-7908f5325f3ba2846bf7fc875e01bee2",
+            "qualified_name": "nu_parser::flatten::flatten_expression_into",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant information. Great job!",
+            "original_rank": 1,
+            "original_score": 0.6315677,
+            "source": null
+          },
+          {
+            "entity_id": "entity-abc088423d7843ec8ebffca6c38c16bd",
+            "qualified_name": "nu_parser::flatten::flatten_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, addressing all aspects without any irrelevant information. Great job!",
+            "original_rank": 2,
+            "original_score": 0.62896186,
+            "source": null
+          },
+          {
+            "entity_id": "entity-90571665bfb4a2831b2d766ec3af2916",
+            "qualified_name": "nu_cli::completions::custom_completions::get_command_arguments",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/completions/custom_completions.rs",
+            "score": 1,
+            "reasoning": "The score is 0.47 because the output predominantly described the 'get_command_arguments' function, which was not requested, instead of the 'flatten_expression_into' function specified in the input. This significant irrelevance prevented a higher score, while the current score reflects that some information, albeit about the wrong function, was still provided.",
+            "original_rank": 3,
+            "original_score": 0.25687087,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ab2efcdb275f4cd24a3eae75706a805c",
+            "qualified_name": "nu_parser::flatten::flatten_pipeline_element_into",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 0,
+            "reasoning": "The score is 0.15 because the output consistently described 'flatten_pipeline_element_into' instead of the requested 'flatten_expression_into', making almost all information irrelevant to the input query.",
+            "original_rank": 4,
+            "original_score": 0.23625386,
+            "source": null
+          },
+          {
+            "entity_id": "entity-389c6baf8941b04e2003903f964b0dbb",
+            "qualified_name": "nu_parser::flatten::flatten_pattern_into",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output consistently referred to 'flatten_pattern_into' instead of the requested 'flatten_expression_into', making it entirely irrelevant to the input query.",
+            "original_rank": 5,
+            "original_score": 0.18909788,
+            "source": null
+          },
+          {
+            "entity_id": "entity-f13dfa85b2e685c22bf9ff6a0549a548",
+            "qualified_name": "flatten",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/tests/commands/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, addressing all aspects without any irrelevant information. Great job!",
+            "original_rank": 6,
+            "original_score": 0.17513421,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d96c280ff00b1e8a97f2363499e05ba0",
+            "qualified_name": "external::JsonFlattener::flatten_object",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-utils/src/flatten_json.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively discusses 'flatten_object' and 'JsonFlattener', which are entirely irrelevant to the requested 'flatten_expression_into' function and its purpose of converting AST nodes into a list of spans. The output provided no relevant information for the input query.",
+            "original_rank": 7,
+            "original_score": 0.14404887,
+            "source": null
+          },
+          {
+            "entity_id": "entity-7c45af1ae7bfdbbb1ce50c063de01f73",
+            "qualified_name": "<external::Flatten as external::Command>::examples",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/flatten.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely misinterpreted the request, focusing on data structure flattening (tables, columns, shell commands) rather than the specified task of converting hierarchical Abstract Syntax Tree (AST) nodes into a flat list of spans. All statements in the output were irrelevant to the input's query about AST node conversion.",
+            "original_rank": 8,
+            "original_score": 0.11684748,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ff528d151f2a3daf5ae1af4d5aa90670",
+            "qualified_name": "nu_parser::flatten::FlatShape",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 0,
+            "reasoning": "The score is 0.12 because the output contained an overwhelming amount of irrelevant information describing various `FlatShape` variants, which did not contribute to finding or understanding the `flatten_expression_into` function as requested in the input. This significant irrelevance prevented a higher score, while the current low score reflects the minimal to no relevant content provided.",
+            "original_rank": 9,
+            "original_score": 0.09731732,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8ffb304e176684f91fded863f7d831ff",
+            "qualified_name": "external::JsonFlattener::flatten_array",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-utils/src/flatten_json.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on an unrelated `JsonFlattener::flatten_array` method for JSON, completely missing the requested `flatten_expression_into` function for AST nodes and spans. Thus, it provided no relevant information.",
+            "original_rank": 10,
+            "original_score": 0.09332451,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_004",
+        "query": "Find the lex_item function that reads characters and produces a single lexical token",
+        "ndcg_scores": {
+          "5": 0.9010196182278053,
+          "10": 0.9596113960599912
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-f53439518eb2870d2196b06608443ecb",
+            "qualified_name": "nu_parser::lex::lex_item",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.64166725,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5117c2fb73d9d1e77ec134f5316fce01",
+            "qualified_name": "nu_parser::lex",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lib.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.23152885,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e4c107e110135ec4b805f5ade8cad41f",
+            "qualified_name": "nu_command::strings::detect_columns::find_columns",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/strings/detect_columns.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the requested 'lex_item' function, instead focusing entirely on 'find_columns', making all statements irrelevant to the input query.",
+            "original_rank": 3,
+            "original_score": 0.18812788,
+            "source": null
+          },
+          {
+            "entity_id": "entity-121fd319d7d2d326b90650d67283ebe3",
+            "qualified_name": "nu_parser::lex::Token",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Excellent work!",
+            "original_rank": 4,
+            "original_score": 0.16325203,
+            "source": null
+          },
+          {
+            "entity_id": "entity-dff2076d11119913f0913a06c6f7eb4c",
+            "qualified_name": "nu_parser::lex::LexState",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 5,
+            "original_score": 0.1489636,
+            "source": null
+          },
+          {
+            "entity_id": "entity-86ad6a93d495a858637f120fe2e9924d",
+            "qualified_name": "nu_parser::lex::lex",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 2,
+            "reasoning": "The score is 0.86 because it largely addresses the request to find a `lex_item` function. However, it is not higher because the output describes a `lex` function that returns multiple tokens (`Vec<Token>`), while the input specifically asks for a function that produces a *single* lexical token.",
+            "original_rank": 6,
+            "original_score": 0.13355733,
+            "source": null
+          },
+          {
+            "entity_id": "entity-f5b95cd69e2e1a1bdda77876b119f006",
+            "qualified_name": "nu_command::strings::detect_columns::baseline",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/strings/detect_columns.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 7,
+            "original_score": 0.12950593,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d2ddf594467fa0e3b59fb7db1cd354db",
+            "qualified_name": "nu_command::generators::seq_char::seq_char",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/generators/seq_char.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively describes the `seq_char` function, which is entirely irrelevant to the requested `lex_item` function, resulting in no relevant information being provided.",
+            "original_rank": 8,
+            "original_score": 0.12693134,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e95faaa1eda48ad4fcaf54e02cab3983",
+            "qualified_name": "lex_parenthesis",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/tests/test_lex.rs",
+            "score": 1,
+            "reasoning": "The score is 0.33 because the output largely failed to address the core request of finding the lex_item function. Instead, it focused on irrelevant details such as lex_parenthesis, test data, general lex function calls, and test assertions, which do not describe the definition or location of the requested function.",
+            "original_rank": 9,
+            "original_score": 0.06859301,
+            "source": null
+          },
+          {
+            "entity_id": "entity-79a497d5c2e095dce8f8f5f8a67dc667",
+            "qualified_name": "nu_parser::lex::is_item_terminator",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/lex.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the requested 'lex_item' function, instead focusing entirely on 'is_item_terminator', making all statements irrelevant to the input.",
+            "original_rank": 10,
+            "original_score": 0.06554635,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_005",
+        "query": "Find the math_result_type function that determines what type results from arithmetic operations",
+        "ndcg_scores": {
+          "5": 0.7692798105748722,
+          "10": 0.6519009240771524
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-8924f9d06642c579ea7df7f6e6018c5d",
+            "qualified_name": "nu_parser::type_check::math_result_type",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/type_check.rs",
+            "score": 1,
+            "reasoning": "The score is 0.67 because while the output did provide some relevant information about the `math_result_type` function, a significant portion of the content was irrelevant, focusing on non-arithmetic operations like boolean, comparison, regex, string comparison, membership, containment, and assignment operators, which were not part of the input's request for 'arithmetic operations'.",
+            "original_rank": 1,
+            "original_score": 0.6479764,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a2d1a1be792cc96f72a5b417316c1ad6",
+            "qualified_name": "nu_parser::parser::parse_math_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 0,
+            "reasoning": "The score is 0.10 because the output almost entirely focused on `parse_math_expression` and its internal details, rather than providing information about the requested `math_result_type` function. This makes the output highly irrelevant to the input query.",
+            "original_rank": 2,
+            "original_score": 0.40584213,
+            "source": null
+          },
+          {
+            "entity_id": "entity-da6560efe04b7ac9c0ff34d2da20477c",
+            "qualified_name": "nu_parser::type_check::compound_assignment_result_type",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/type_check.rs",
+            "score": 1,
+            "reasoning": "The score is 0.67 because the output contained significant irrelevant information, primarily describing 'compound_assignment_result_type' and its details instead of the requested 'math_result_type' function. This misidentification prevented a higher score, though some relevant concepts might have been present to achieve the current score.",
+            "original_rank": 3,
+            "original_score": 0.21524484,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8822dd927d7e0b38bd7fcfb2a7de57c2",
+            "qualified_name": "nu_protocol::ast::operator::Math",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.11 because the output primarily listed specific arithmetic operations and a concatenation operation without providing information about the requested math_result_type function that determines the result type of such operations.",
+            "original_rank": 4,
+            "original_score": 0.17889121,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b2b9b90ab5e8fbc18aa7708a9fc33a8c",
+            "qualified_name": "external::Operator::precedence",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output provided information entirely about operator precedence and related methods, which is completely irrelevant to the requested 'math_result_type' function. It is not higher because none of the output addressed the input's query.",
+            "original_rank": 5,
+            "original_score": 0.08278369,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c2982f902108e72d4a6c5e52a1fa0f55",
+            "qualified_name": "nu_plugin_polars::dataframe::command::computation::math::command_expr",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_polars/src/dataframe/command/computation/math.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input's request to find the 'math_result_type' function and describe its type determination for arithmetic operations. Instead, it focused entirely on 'command_expr' and its internal workings, making all statements irrelevant to the query.",
+            "original_rank": 6,
+            "original_score": 0.08052842,
+            "source": null
+          },
+          {
+            "entity_id": "entity-fc38f5adc1db759c564e9c3c0dcc2450",
+            "qualified_name": "external::Signature::get_output_type",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/signature.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on 'get_output_type' instead of the requested 'math_result_type' function, making it completely irrelevant to the input query.",
+            "original_rank": 7,
+            "original_score": 0.07189347,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b1ddb9ddcee1c1002c301c8b3f0ef1d8",
+            "qualified_name": "nu_plugin_polars::dataframe::values::nu_expression::custom_value::apply_arithmetic",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_polars/src/dataframe/values/nu_expression/custom_value.rs",
+            "score": 2,
+            "reasoning": "The score is 0.91 because the output largely addresses the input by focusing on the `math_result_type` function and its purpose. It is not higher due to the inclusion of a statement describing a caching mechanism, which is an implementation detail and irrelevant to determining the type of result from arithmetic operations.",
+            "original_rank": 8,
+            "original_score": 0.06882367,
+            "source": null
+          },
+          {
+            "entity_id": "entity-69ca8888e1301d603cb997efaf8bfdb8",
+            "qualified_name": "external::Math::as_str",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.08 because the output almost entirely describes the `as_str` function, which is irrelevant to the requested `math_result_type` function. This significant irrelevance prevents a higher score, while the minimal score reflects the complete lack of relevant information.",
+            "original_rank": 9,
+            "original_score": 0.06659999,
+            "source": null
+          },
+          {
+            "entity_id": "entity-3a6dc5cfb4cf20e817f7e91daef36c98",
+            "qualified_name": "impl external::Operator",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output provided information entirely unrelated to the requested 'math_result_type' function and its purpose of determining result types from arithmetic operations. Instead, it focused on operator definitions, string representations, and precedence, completely missing the target of the input.",
+            "original_rank": 10,
+            "original_score": 0.05264648,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_006",
+        "query": "Find the eval_instruction function in nu_engine that executes a single IR opcode during runtime",
+        "ndcg_scores": {
+          "5": 0.9010196182278053,
+          "10": 0.9081989035557798
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-d909b5ddbb031c582b4d2e31ae4f9f65",
+            "qualified_name": "nu_engine::eval_ir::eval_instruction",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval_ir.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.6408236,
+            "source": null
+          },
+          {
+            "entity_id": "entity-fde34517286aa15f90f187a9f7acf86c",
+            "qualified_name": "nu_engine::eval_ir",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/lib.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.29428956,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b51e6c6f48168445057e78e0009615d5",
+            "qualified_name": "nu_cmd_lang::example_support::eval",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cmd-lang/src/example_support.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on 'nu_cmd_lang::example_support::eval' instead of the requested 'eval_instruction' function in 'nu_engine', making it completely irrelevant to the input query.",
+            "original_rank": 3,
+            "original_score": 0.24803281,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b7402cf8394048268931dfee4b1b837f",
+            "qualified_name": "nu_engine::eval_ir::eval_ir_block_impl",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval_ir.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.2461096,
+            "source": null
+          },
+          {
+            "entity_id": "entity-34fc707ba0e95d5b1cd596ba745975b9",
+            "qualified_name": "nu_engine::eval_ir::InstructionResult",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval_ir.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 5,
+            "original_score": 0.2436477,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d42683df40f494d5d3698d6ee1ea422b",
+            "qualified_name": "nu_cmd_lang::example_support::eval_block",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cmd-lang/src/example_support.rs",
+            "score": 0,
+            "reasoning": "The score is 0.06 because the output almost entirely focused on 'eval_block' and its details, rather than the requested 'eval_instruction' function in 'nu_engine', making it highly irrelevant to the input query.",
+            "original_rank": 6,
+            "original_score": 0.20118013,
+            "source": null
+          },
+          {
+            "entity_id": "entity-13ea0f97bfc8765e532760bfeb49ae22",
+            "qualified_name": "nu_engine::eval_ir::binary_op",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval_ir.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively describes the 'binary_op' function, which is entirely irrelevant to the input's request to find and describe the 'eval_instruction' function. Consequently, no relevant information was provided for the query.",
+            "original_rank": 7,
+            "original_score": 0.1838415,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e4c6ff98b291e42e33b557eeb6c75682",
+            "qualified_name": "nu_engine::eval::eval_call",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 0,
+            "reasoning": "The score is 0.11 because the output consistently described `eval_call` instead of `eval_instruction`, which was the function specified in the input. This made the output largely irrelevant to the query, resulting in a very low score.",
+            "original_rank": 8,
+            "original_score": 0.18234144,
+            "source": null
+          },
+          {
+            "entity_id": "entity-98ff1da1cf9dda90fb2f6f05c3e3f6ba",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>::eval_subexpression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 2,
+            "reasoning": "The score is 0.93 because it included a statement about a code comment for ctrl-c protection, which was irrelevant to finding the `eval_instruction` function or understanding its core execution logic. However, the output was largely relevant to the query about finding the `eval_instruction` function in `nu_engine` that executes a single IR opcode.",
+            "original_rank": 9,
+            "original_score": 0.17970116,
+            "source": null
+          },
+          {
+            "entity_id": "entity-973fd83882eb252ccf0d63ffb4e2f1ee",
+            "qualified_name": "nu_engine::eval::eval_block_with_early_return",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on the `eval_block_with_early_return` function, which was not the `eval_instruction` function requested in the input.",
+            "original_rank": 10,
+            "original_score": 0.16532981,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_007",
+        "query": "Find the compile_expression function that transforms parsed AST nodes into intermediate representation",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.7232338316640191
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-693e3984cef18a7cb746baa4e70bfbda",
+            "qualified_name": "nu_engine::compile::expression::compile_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/expression.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Excellent work!",
+            "original_rank": 1,
+            "original_score": 0.62562585,
+            "source": null
+          },
+          {
+            "entity_id": "entity-71b22189aba61812272f8b4168957f4e",
+            "qualified_name": "nu_engine::compile::operator::compile_binary_op",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively described `compile_binary_op` instead of the requested `compile_expression`, making it entirely irrelevant to the input query.",
+            "original_rank": 2,
+            "original_score": 0.29625636,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e958786bdeb457026c8e0533351d4133",
+            "qualified_name": "nu_engine::compile::compile",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/mod.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on describing the 'compile' and 'compile_block' functions, completely failing to address the requested 'compile_expression' function, making it entirely irrelevant to the input.",
+            "original_rank": 3,
+            "original_score": 0.2841832,
+            "source": null
+          },
+          {
+            "entity_id": "entity-6a3090f4b538e5c92ea1156c12b9131d",
+            "qualified_name": "nu_engine::compile::call::compile_call",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/call.rs",
+            "score": 0,
+            "reasoning": "The score is 0.25 because the output predominantly describes the 'compile_call' function, its arguments, return types, and internal logic, rather than the 'compile_expression' function as explicitly requested in the input. This significant mismatch in the function discussed leads to a very low relevancy score, as most of the information provided is irrelevant to the user's query.",
+            "original_rank": 4,
+            "original_score": 0.2711842,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0e2dc0dd5154cfd0fd44250d40bd8ddf",
+            "qualified_name": "nu_parser::parser::parse_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 0,
+            "reasoning": "The score is 0.02 because the output almost entirely discusses 'parse_expression' and its internal details, while the input explicitly asks for information about 'compile_expression'. This complete mismatch in the function discussed leads to a very low relevancy score, as virtually no part of the output addresses the user's query.",
+            "original_rank": 5,
+            "original_score": 0.21769412,
+            "source": null
+          },
+          {
+            "entity_id": "entity-67aee175d0e3ee2f05ebc295d29b1584",
+            "qualified_name": "nu_engine::compile::operator::compile_assignment",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively described the 'compile_assignment' function, which is irrelevant to the input's request for information about the 'compile_expression' function. This complete mismatch in focus led to a score of zero.",
+            "original_rank": 6,
+            "original_score": 0.204566,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c74afaa2e9f1377c5189475836ef5b3a",
+            "qualified_name": "nu_protocol::ast::expr::Expr",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/expr.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Excellent work!",
+            "original_rank": 7,
+            "original_score": 0.07955404,
+            "source": null
+          },
+          {
+            "entity_id": "entity-abc088423d7843ec8ebffca6c38c16bd",
+            "qualified_name": "nu_parser::flatten::flatten_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/flatten.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively discussed the `flatten_expression` function, which is entirely irrelevant to the requested `compile_expression` function, leading to a complete lack of relevant information.",
+            "original_rank": 8,
+            "original_score": 0.06753384,
+            "source": null
+          },
+          {
+            "entity_id": "entity-f3ae2dda04864932db352259ecdaae3b",
+            "qualified_name": "nu_engine::compile::redirect::redirect_modes_of_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/redirect.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output was entirely irrelevant, describing a different function ('redirect_modes_of_expression') instead of the requested 'compile_expression'.",
+            "original_rank": 9,
+            "original_score": 0.06007073,
+            "source": null
+          },
+          {
+            "entity_id": "entity-13455aa268a4692d149cf728d4c363e4",
+            "qualified_name": "nu_parser::parser::parse_operator",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely discusses the 'parse_operator' function instead of the requested 'compile_expression' function, making it entirely irrelevant to the input.",
+            "original_rank": 10,
+            "original_score": 0.05926744,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_008",
+        "query": "Find the loop_iteration function in nu_cli::repl that handles one cycle of the read-eval-print loop",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 1.0
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-a8ff62066b5e826ef1e349d4a974b623",
+            "qualified_name": "nu_cli::repl::loop_iteration",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.6739113,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a2c8de1fbfe52bb1f1f8dd8c3c5c5997",
+            "qualified_name": "nu_cli::repl::ReplOperation",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 1,
+            "reasoning": "The score is 0.36 because the output contained too many granular details about ReplOperation variants and their fields, which were irrelevant to directly locating the loop_iteration function. While it provided some context related to the REPL cycle, it failed to directly address the core request of finding the specific function, leading to a low but not zero score.",
+            "original_rank": 2,
+            "original_score": 0.301396,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c05cbe4dd3e9599b74073c259af7387f",
+            "qualified_name": "<external::Loop as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-cmd-lang/src/core_commands/loop_.rs",
+            "score": 0,
+            "reasoning": "The score is 0.06 because the output almost entirely focused on the 'loop' command and its 'run' function, rather than the requested 'loop_iteration' function within the 'nu_cli::repl' module, leading to very low relevancy.",
+            "original_rank": 3,
+            "original_score": 0.260142,
+            "source": null
+          },
+          {
+            "entity_id": "entity-87575de3d1ed379932f2b7df720a5f03",
+            "qualified_name": "nu_cli::repl::LoopContext",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.11 because the output primarily described fields of the `LoopContext` struct instead of the requested `loop_iteration` function, leading to significant irrelevance to the input's query.",
+            "original_rank": 4,
+            "original_score": 0.15790637,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d3859de646e2f4b01869489a66b5346a",
+            "qualified_name": "nu_cli::repl::parse_operation",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focuses on the `parse_operation` function, whereas the input specifically requested information about the `loop_iteration` function. This complete mismatch in the subject of the output leads to a score of zero.",
+            "original_rank": 5,
+            "original_score": 0.09476566,
+            "source": null
+          },
+          {
+            "entity_id": "entity-72bc0670c8ea29a4e7abb3087c1fce0e",
+            "qualified_name": "nu_cli::repl::escape_special_vscode_bytes",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input's request, focusing entirely on an unrelated function (escape_special_vscode_bytes) instead of the requested loop_iteration function. This resulted in no relevant information being provided.",
+            "original_rank": 6,
+            "original_score": 0.08030585,
+            "source": null
+          },
+          {
+            "entity_id": "entity-81ce9ab1fd58759c3ca0308ad2afa4e9",
+            "qualified_name": "nu_cli::repl::looks_like_path_windows_drive_path_works",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input's request for the 'loop_iteration' function, instead focusing entirely on irrelevant 'looks_like_path' functions.",
+            "original_rank": 7,
+            "original_score": 0.07712919,
+            "source": null
+          },
+          {
+            "entity_id": "entity-23ae300a68e28023dd36fd43e27346b8",
+            "qualified_name": "<external::For as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-cmd-lang/src/core_commands/for_.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output was entirely irrelevant to the input query, focusing exclusively on the 'for' command instead of finding the 'loop_iteration' function within 'nu_cli::repl'.",
+            "original_rank": 8,
+            "original_score": 0.07363157,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5aa4d92966a5316e5ab8ebaab1d1d8e5",
+            "qualified_name": "nu_cli::repl::evaluate_repl",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.25 because the output primarily described the `evaluate_repl` function and its internal setup details, rather than focusing on the requested `loop_iteration` function, leading to significant irrelevance.",
+            "original_rank": 9,
+            "original_score": 0.06285304,
+            "source": null
+          },
+          {
+            "entity_id": "entity-65289b8601428b522846a29d2988fefb",
+            "qualified_name": "nu_cli::repl::test_auto_cd::auto_cd_root",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/repl.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input, providing information about an entirely different function (`auto_cd_root`) and submodule (`test_auto_cd`) instead of the requested `loop_iteration` function in `nu_cli::repl`.",
+            "original_rank": 10,
+            "original_score": 0.05886963,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_009",
+        "query": "Find the Eval trait in nu_protocol that provides a common interface for expression evaluation",
+        "ndcg_scores": {
+          "5": 0.9164881130889048,
+          "10": 0.9164881130889048
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-2b53cad79507ddba4f9b6031c1a82f05",
+            "qualified_name": "nu_protocol::eval_base::Eval",
+            "entity_type": "trait",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/eval_base.rs",
+            "score": 2,
+            "reasoning": "The score is 0.98 because the output was highly relevant to finding the `Eval` trait, but it included minor details about a function not directly part of the trait's common interface, preventing a perfect score.",
+            "original_rank": 1,
+            "original_score": 0.56626374,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8a56ced08b517e5742f4bcbabf2bada6",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>::eval_call",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 1,
+            "reasoning": "The score is 0.60 because while some relevant information was provided, it was not higher due to the inclusion of irrelevant statements such as a label introducing a code block and a code comment, which did not contribute to finding the 'Eval trait' or its interface.",
+            "original_rank": 2,
+            "original_score": 0.3807916,
+            "source": null
+          },
+          {
+            "entity_id": "entity-086a79cfdf1c7072aa0f669f2768ec6c",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 1,
+            "reasoning": "The score is 0.31 because a substantial portion of the output consisted of irrelevant implementation details, error handling specifics, and utility function descriptions, none of which directly addressed the core request of identifying the Eval trait or its common interface for expression evaluation. This heavy dilution of relevant information significantly lowered the score, despite any minimal relevant content that might have been present.",
+            "original_rank": 3,
+            "original_score": 0.31895208,
+            "source": null
+          },
+          {
+            "entity_id": "entity-af883ddf956d737ebd8e5ce1c8689778",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>::eval_overlay",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Excellent work!",
+            "original_rank": 4,
+            "original_score": 0.28072065,
+            "source": null
+          },
+          {
+            "entity_id": "entity-bbeeba0206d3931d44e71ab8447af466",
+            "qualified_name": "nu_engine::eval::eval_expression",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 0,
+            "reasoning": "The score is 0.09 because the output consistently misidentified functions and expressions instead of the requested 'Eval trait', providing irrelevant details about function parameters, return types, and implementation. This significantly reduced its relevancy, though it did touch upon 'eval' in some capacity, preventing a score of 0.",
+            "original_rank": 5,
+            "original_score": 0.260925,
+            "source": null
+          },
+          {
+            "entity_id": "entity-edfe56f228cc31172f0372d360690c90",
+            "qualified_name": "nu_protocol::eval_base::eval",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/eval_base.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output entirely focused on describing an 'eval function' and its internal workings, completely missing the input's request for an 'Eval trait'. There was no relevant information provided to address the prompt.",
+            "original_rank": 6,
+            "original_score": 0.2603635,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d1ab4f6b70481922f4ae4a534f7b8965",
+            "qualified_name": "nu_protocol::ast::operator::eval_operator",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/operator.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to identify an 'Eval trait' as requested by the input, instead focusing entirely on a function named 'eval_operator' and its implementation details. This makes the entire output irrelevant to the prompt.",
+            "original_rank": 7,
+            "original_score": 0.25154614,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b8ea73e5f09d366d0452522cd914d7e9",
+            "qualified_name": "nu_engine::eval::eval_variable",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to address the input's request for the 'Eval' trait in 'nu_protocol', instead focusing entirely on an irrelevant 'eval_variable' function in 'nu_engine'. This resulted in no relevant information being provided.",
+            "original_rank": 8,
+            "original_score": 0.24144946,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ffa0e0854112278f9fb401c3429b2449",
+            "qualified_name": "external::PluginTest::eval",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-test-support/src/plugin_test.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to identify or describe the 'Eval trait' as requested in the input, instead providing information about functions, methods, and their implementations, which are irrelevant to the query.",
+            "original_rank": 9,
+            "original_score": 0.23646767,
+            "source": null
+          },
+          {
+            "entity_id": "entity-77d4450e87253e9680734d8b2eff3b6b",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>::eval_row_condition_or_closure",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 0,
+            "reasoning": "The score is 0.08 because the output almost entirely focused on describing specific functions and their implementation details, rather than providing information about the `Eval` trait's common interface as requested in the input. This made the output highly irrelevant to the user's query.",
+            "original_rank": 10,
+            "original_score": 0.23501337,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_010",
+        "query": "Find the BlockBuilder implementation that constructs sequences of IR instructions during compilation",
+        "ndcg_scores": {
+          "5": 0.92173083885621,
+          "10": 0.8719294380664875
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-1e337c9fe4fb64dccc5a709efaa1b89f",
+            "qualified_name": "nu_engine::compile::builder::BlockBuilder",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/builder.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.54794276,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5dbaeec13f2f05bb491ed322ece7ea7f",
+            "qualified_name": "impl external::BlockBuilder",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/builder.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant information. Excellent work!",
+            "original_rank": 2,
+            "original_score": 0.23973009,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8dae8a444d785e1e683b3087fc8ea477",
+            "qualified_name": "nu_engine::compile::compile_pipeline",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/mod.rs",
+            "score": 0,
+            "reasoning": "The score is 0.23 because a substantial portion of the output was irrelevant, focusing on details like function signatures, return types, variable initialization, source code spans, and various aspects of 'redirection modes', rather than directly addressing the 'BlockBuilder' implementation or IR instruction construction. The score is not higher due to this significant amount of off-topic information.",
+            "original_rank": 3,
+            "original_score": 0.22714719,
+            "source": null
+          },
+          {
+            "entity_id": "entity-67aee175d0e3ee2f05ebc295d29b1584",
+            "qualified_name": "nu_engine::compile::operator::compile_assignment",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/operator.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.18330273,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5de380d95694a00adac35de1e18f5bf8",
+            "qualified_name": "nu_engine::compile::keyword::compile_match",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/keyword.rs",
+            "score": 1,
+            "reasoning": "The score is 0.60 because a significant portion of the output contained irrelevant details about the match compilation process, function locations, return types, and register management, rather than focusing on the BlockBuilder's role in constructing IR instructions. Despite these irrelevant statements, some pertinent information was provided, preventing a lower score.",
+            "original_rank": 5,
+            "original_score": 0.18131593,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2ef46760fda81c5be7fe812885b2f751",
+            "qualified_name": "external::BlockBuilder::branch_if_empty",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/builder.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 6,
+            "original_score": 0.1666894,
+            "source": null
+          },
+          {
+            "entity_id": "entity-eadee356cc45319d8dbf70c281bfe952",
+            "qualified_name": "nu_engine::compile::keyword::compile_return",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/keyword.rs",
+            "score": 1,
+            "reasoning": "The score is 0.40 because the output contained numerous irrelevant statements, focusing on function identification, location, return types, internal operations, and comments, rather than directly addressing the request to find the BlockBuilder implementation that constructs IR instructions. While it touched upon related code elements, it failed to pinpoint the specific BlockBuilder implementation as requested.",
+            "original_rank": 7,
+            "original_score": 0.1632505,
+            "source": null
+          },
+          {
+            "entity_id": "entity-280129302dc2babe6a5729f920da486b",
+            "qualified_name": "<external::Block as external::From>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/block.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output completely failed to identify a `BlockBuilder` implementation for constructing IR instructions, instead focusing on unrelated `Block` and `From` trait implementations, making it entirely irrelevant to the input's request.",
+            "original_rank": 8,
+            "original_score": 0.16103855,
+            "source": null
+          },
+          {
+            "entity_id": "entity-476b3b3d50bfc929d45be1d3a7ce8a93",
+            "qualified_name": "nu_engine::compile::keyword::compile_loop",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/keyword.rs",
+            "score": 2,
+            "reasoning": "The score is 0.93 because the output largely addresses finding the BlockBuilder implementation and its role in constructing IR instructions. However, it is not higher due to minor irrelevant statements describing error handling for a keyword and a property of io_reg's state, which are not directly related to the core request.",
+            "original_rank": 9,
+            "original_score": 0.14886668,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9c3a405a8a71379f06e93200a17d87ac",
+            "qualified_name": "nu_engine::compile::keyword::compile_break",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/compile/keyword.rs",
+            "score": 1,
+            "reasoning": "The score is 0.38 because a significant portion of the output was irrelevant, detailing the `compile_break` function's file location, return types, and error handling, instead of focusing on the `BlockBuilder` implementation and its IR instruction construction as requested. The score reflects that while an attempt was made, the output largely failed to provide the core information.",
+            "original_rank": 10,
+            "original_score": 0.14260271,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_011",
+        "query": "Find the PipelineData implementation that represents data flowing between commands in a pipeline",
+        "ndcg_scores": {
+          "5": 0.92173083885621,
+          "10": 0.8879654017168989
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-a428b0f0117105001e9d9c0890a7bf69",
+            "qualified_name": "nu_protocol::pipeline::pipeline_data::PipelineData",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.5809506,
+            "source": null
+          },
+          {
+            "entity_id": "entity-15bc2f97e3bc67cfac2d837b0dc221a2",
+            "qualified_name": "impl external::PipelineData",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent job!",
+            "original_rank": 2,
+            "original_score": 0.5589422,
+            "source": null
+          },
+          {
+            "entity_id": "entity-28ad5bd69761d1e1b269ffc848370c78",
+            "qualified_name": "nu_command::filters::find::find_internal",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 0,
+            "reasoning": "The score is 0.25 because a substantial portion of the output focused on the 'find_internal' function, its parameters, and internal operations, which were not directly relevant to the requested 'PipelineData' implementation or how it represents data flow. While there might have been some minimal relevant information, the extensive irrelevant details about 'find_internal' significantly lowered the overall relevancy.",
+            "original_rank": 3,
+            "original_score": 0.41551673,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b0cd0ac9aaee1caa517e2527b00a86ac",
+            "qualified_name": "nu_command::viewers::table::handle_table_command",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/viewers/table.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent job!",
+            "original_rank": 4,
+            "original_score": 0.2317031,
+            "source": null
+          },
+          {
+            "entity_id": "entity-13dde3e255de91b1d22385fdf9c819b0",
+            "qualified_name": "external::PipelineData::try_into_stream",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 1,
+            "reasoning": "The score is 0.67 because while some relevant information was likely provided, the output included numerous irrelevant details about specific method implementations and their internal workings, rather than focusing on the overall PipelineData implementation as a data structure for data flow as requested.",
+            "original_rank": 5,
+            "original_score": 0.20635252,
+            "source": null
+          },
+          {
+            "entity_id": "entity-dd4141b7420087bea03baffe4d00e5f5",
+            "qualified_name": "<external::I as external::IntoInterruptiblePipelineData>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 6,
+            "original_score": 0.20067817,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a05b4c98a4449fa1a9d6a876d0996936",
+            "qualified_name": "nu_command::filters::insert::insert",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/insert.rs",
+            "score": 1,
+            "reasoning": "The score is 0.46 because a substantial part of the output focused on the internal operations and conditional branches of the 'insert' function, which was irrelevant to the requested 'PipelineData' implementation and its role in data flow. However, it still contained some relevant information, preventing a lower score.",
+            "original_rank": 7,
+            "original_score": 0.19674706,
+            "source": null
+          },
+          {
+            "entity_id": "entity-156dd75b3323d111f8306a1202f8de83",
+            "qualified_name": "nu_command::filters::find::find_in_pipelinedata",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.19348857,
+            "source": null
+          },
+          {
+            "entity_id": "entity-6bb7c98fc5876cf4c4091aa70a90b15e",
+            "qualified_name": "<external::PipelineData as external::IntoIterator>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent job!",
+            "original_rank": 9,
+            "original_score": 0.18969944,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c1578e394dbc4d3a90f4f4a92b29631e",
+            "qualified_name": "<external::I as external::IntoInterruptiblePipelineData>::into_pipeline_data",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/pipeline_data.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements whatsoever. Excellent job!",
+            "original_rank": 10,
+            "original_score": 0.18685314,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_012",
+        "query": "Find the ByteStream struct and its implementation for handling raw binary data in the shell",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.979125294157639
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-743e5fb8aa8bcd8ffc353aee46f81819",
+            "qualified_name": "nu_protocol::pipeline::byte_stream::ByteStream",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.59596807,
+            "source": null
+          },
+          {
+            "entity_id": "entity-7b3a638071e51eaf4a84afd9bf6d4f98",
+            "qualified_name": "impl external::ByteStream",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.4208467,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b1bce4e9de5fe04cde77eac977ee352e",
+            "qualified_name": "external::ByteStream::read",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 3,
+            "original_score": 0.30215397,
+            "source": null
+          },
+          {
+            "entity_id": "entity-68a2e6a675465f9d66875011c0d0475b",
+            "qualified_name": "external::ByteStream::new",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.29784954,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5534ee06ab833c29b30a4069386b50b8",
+            "qualified_name": "external::ByteStream::write_to",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 0.95 because the output largely addresses finding the ByteStream struct and its implementation for raw binary data. However, it is not higher due to an irrelevant statement describing general stdout and stderr handling, which is not directly related to the core request.",
+            "original_rank": 5,
+            "original_score": 0.25992388,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2f53572ca8d6a4cd3eeffcf509ec234a",
+            "qualified_name": "external::ByteStream::from_iter",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 6,
+            "original_score": 0.24919143,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d4f585b4c35a24b271e9141fb57cb599",
+            "qualified_name": "nu_command::formats::from::xlsx::collect_binary",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/formats/from/xlsx.rs",
+            "score": 1,
+            "reasoning": "The score is 0.38 because the output largely failed to address the input's request for the ByteStream struct and its implementation. Instead, it focused predominantly on an unrelated function, collect_binary, detailing its location, parameters, return types, general steps, error handling, and control flow, which are all irrelevant to the ByteStream struct. This significant deviation from the prompt's core subject led to a very low relevancy score.",
+            "original_rank": 7,
+            "original_score": 0.24368794,
+            "source": null
+          },
+          {
+            "entity_id": "entity-7c9a37ea98b3f3dc9e4fe766d4bdaaa2",
+            "qualified_name": "external::ByteStream::from_result_iter",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.22530743,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ad6d99c038e1041a0ed789c28f8569b2",
+            "qualified_name": "test_simple_positive_slice_exclusive_streaming",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/tests/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 0.80 because the output largely addressed finding the ByteStream struct and its implementation. However, it included some irrelevant details about test function visibility and test assertions, which are not directly part of the struct or its core implementation, preventing a higher score.",
+            "original_rank": 9,
+            "original_score": 0.22214879,
+            "source": null
+          },
+          {
+            "entity_id": "entity-86c14b971ebfcada6ecd9e9a16b442fc",
+            "qualified_name": "external::ByteStream::lines",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/pipeline/byte_stream.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 10,
+            "original_score": 0.21218157,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_013",
+        "query": "Find the PartialOrd implementation for Value that determines how shell values are sorted",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.979125294157639
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-9eabdb8669d43fd2c007feeb2b94f9ac",
+            "qualified_name": "<super::Value as external::PartialOrd>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/value/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.6101469,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0d7790b3f3aa2c3a991c54e23ee492f4",
+            "qualified_name": "<super::Value as external::PartialOrd>::partial_cmp",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/value/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.5410203,
+            "source": null
+          },
+          {
+            "entity_id": "entity-20821a131886e82bdbcb68390a13b318",
+            "qualified_name": "external::PluginInterface::custom_value_partial_cmp",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-engine/src/interface/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 0.94 because the output largely addressed the input by finding the PartialOrd implementation for Value. However, it included a specific error message that was not relevant to understanding how shell values are sorted, preventing a perfect score.",
+            "original_rank": 3,
+            "original_score": 0.45159248,
+            "source": null
+          },
+          {
+            "entity_id": "entity-02bb6712047c5d7059676989506dfcb9",
+            "qualified_name": "<external::SecondCustomValue as nu_protocol::CustomValue>::partial_cmp",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_custom_values/src/second_custom_value.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, addressing all aspects without any irrelevant information. Great job!",
+            "original_rank": 4,
+            "original_score": 0.43509132,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9dfa10a6e1abdc634c90daa3c4e25d16",
+            "qualified_name": "nu_plugin_polars::dataframe::values::custom_value_partial_cmp",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_polars/src/dataframe/values/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, addressing all aspects without any irrelevant information. Great job!",
+            "original_rank": 5,
+            "original_score": 0.41621983,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2bb684b3bce4e17d539101f7eae8ffd0",
+            "qualified_name": "<external::Sort as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/sort.rs",
+            "score": 1,
+            "reasoning": "The score is 0.50 because a significant portion of the output was irrelevant to the specific 'PartialOrd' implementation for 'Value' that determines how shell values are sorted, focusing instead on various other aspects of the sorting process or function details. However, it likely contained some relevant information to achieve a score of 0.50.",
+            "original_rank": 6,
+            "original_score": 0.32572746,
+            "source": null
+          },
+          {
+            "entity_id": "entity-aae75e6305c778d0d714b03b95fbf77f",
+            "qualified_name": "nu_command::sort_utils::compare_key_closure",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/sort_utils.rs",
+            "score": 2,
+            "reasoning": "The score is 0.77 because while it provided some relevant information, it included irrelevant details such as the function's file location, public visibility, and internal 'span' parameter, which do not directly describe the PartialOrd implementation or how shell values are sorted, thus preventing a higher score.",
+            "original_rank": 7,
+            "original_score": 0.31336218,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e4ed0e4932234d2dcdf0636b6c6fab16",
+            "qualified_name": "nu_protocol::value::custom_value::partial_cmp",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/value/custom_value.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.30403894,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9d1357495c8f266861ff2e5c4b8e76d8",
+            "qualified_name": "nu_command::sort_utils::compare_by",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/sort_utils.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 9,
+            "original_score": 0.29474965,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2d73cba20026018119a6d2b485576072",
+            "qualified_name": "<external::CoolCustomValue as nu_protocol::CustomValue>::partial_cmp",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_custom_values/src/cool_custom_value.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, addressing all aspects without any irrelevant information. Great job!",
+            "original_rank": 10,
+            "original_score": 0.28465456,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_014",
+        "query": "Find the Signature struct implementation that defines a command's expected arguments, flags, and types",
+        "ndcg_scores": {
+          "5": 0.9539844355981544,
+          "10": 0.979125294157639
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-727fe81006a2e9aa0fe01e5ae8370156",
+            "qualified_name": "<external::Find as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.60271907,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ef9ea89c64346a2107f8c9a76092e53a",
+            "qualified_name": "nu_protocol::signature::Signature",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/signature.rs",
+            "score": 1,
+            "reasoning": "The score is 0.37 because the output contained numerous statements describing fields and properties of the `Signature` struct that are not related to defining a command's expected arguments, flags, and types, which was the core focus of the input. This significant amount of irrelevant information prevented a higher score, though it's not zero, suggesting some relevant content might have been present.",
+            "original_rank": 2,
+            "original_score": 0.49056166,
+            "source": null
+          },
+          {
+            "entity_id": "entity-00b32aac2a46023a6263f7dc25f5d54b",
+            "qualified_name": "impl external::Signature",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/signature.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 3,
+            "original_score": 0.45945483,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9f4356048bcf8c4f07e5460a30fb2ba6",
+            "qualified_name": "<external::Table as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/viewers/table.rs",
+            "score": 2,
+            "reasoning": "The score is 0.93 because the output largely addressed the request to find the Signature struct implementation for defining a command's arguments, flags, and types. However, it included minor irrelevant details such as development notes/comments and the command's category, which are not part of the signature's definition, preventing a perfect score.",
+            "original_rank": 4,
+            "original_score": 0.3550849,
+            "source": null
+          },
+          {
+            "entity_id": "entity-245902c8f5f3e7fb5f690e87c2eaf1b7",
+            "qualified_name": "<external::One as nu_plugin::SimplePluginCommand>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_example/src/commands/one.rs",
+            "score": 2,
+            "reasoning": "The score is 0.91 because while the output largely addressed the core request of finding the Signature struct implementation that defines a command's expected arguments, flags, and types, it included a statement describing the command's category, which was irrelevant to the specific details of the signature's definition.",
+            "original_rank": 5,
+            "original_score": 0.35412362,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2a6e6fd3b54b796cb118aa5512618add",
+            "qualified_name": "<external::HttpHead as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/network/http/head.rs",
+            "score": 2,
+            "reasoning": "The score is 0.94 because while it largely addresses the request to find the Signature struct implementation, it included a statement describing the command's category, which was irrelevant to defining arguments, flags, or types within the Signature struct. The score is high because the output was mostly relevant to the core request.",
+            "original_rank": 6,
+            "original_score": 0.3484058,
+            "source": null
+          },
+          {
+            "entity_id": "entity-15c711dedb227d91e0fcec36999ac1ef",
+            "qualified_name": "<external::IntoDuration as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/conversions/into/duration.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 7,
+            "original_score": 0.3398429,
+            "source": null
+          },
+          {
+            "entity_id": "entity-553ced67e85bc1bda5a523310116240c",
+            "qualified_name": "<external::Two as nu_plugin::SimplePluginCommand>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu_plugin_example/src/commands/two.rs",
+            "score": 2,
+            "reasoning": "The score is 0.90 because the output largely addressed the input's request to find the Signature struct implementation that defines a command's expected arguments, flags, and types. However, it was not higher due to the inclusion of an irrelevant statement about the command's category being metadata and not defining its arguments, flags, or types, which slightly detracted from perfect relevancy.",
+            "original_rank": 8,
+            "original_score": 0.3199504,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9a629d62dec2d9113e12ef44bc6fb844",
+            "qualified_name": "<external::InputListen as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/platform/input/input_listen.rs",
+            "score": 2,
+            "reasoning": "The score is 0.93 because it included a statement describing the command's category, which was not requested by the input. However, the output largely focused on finding the Signature struct implementation that defines a command's arguments, flags, and types, directly addressing the core of the input.",
+            "original_rank": 9,
+            "original_score": 0.3181923,
+            "source": null
+          },
+          {
+            "entity_id": "entity-1c18afe272bfc9f87b4f7edf9dee275a",
+            "qualified_name": "<external::Http as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/network/http/http_.rs",
+            "score": 2,
+            "reasoning": "The score is 0.95 because the output was highly relevant to finding the Signature struct implementation that defines a command's expected arguments, flags, and types. It is not higher due to a minor irrelevant statement describing the command's category, which was not part of the input's specific request.",
+            "original_rank": 10,
+            "original_score": 0.31261742,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_015",
+        "query": "Find the Stack implementation that manages variable bindings and environment during execution",
+        "ndcg_scores": {
+          "5": 0.9406335599074369,
+          "10": 0.92774396339551
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-fc43214cc34b55340fb467ce430a4c80",
+            "qualified_name": "nu_protocol::engine::stack::Stack",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 1,
+            "reasoning": "The score is 0.68 because the output included several irrelevant statements concerning IR evaluation, error handlers, recursion count, config usage, and output destination, which are not directly related to variable bindings and environment management. These extraneous details prevented a higher score, despite likely containing some relevant information.",
+            "original_rank": 1,
+            "original_score": 0.4783763,
+            "source": null
+          },
+          {
+            "entity_id": "entity-ea50f9199c531590a1778abffdd1157d",
+            "qualified_name": "impl super::Stack",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 2,
+            "reasoning": "The score is 0.79 because while some relevant information was provided, it frequently included irrelevant details about output redirection, which is not related to variable bindings or environment management.",
+            "original_rank": 2,
+            "original_score": 0.35495624,
+            "source": null
+          },
+          {
+            "entity_id": "entity-086a79cfdf1c7072aa0f669f2768ec6c",
+            "qualified_name": "<external::EvalRuntime as nu_protocol::eval_base::Eval>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 2,
+            "reasoning": "The score is 0.77 because while it provides some relevant information regarding the Stack implementation, it also includes several irrelevant implementation details and functions not directly related to the Stack's role in managing variable bindings and environment, preventing a higher score.",
+            "original_rank": 3,
+            "original_score": 0.22957534,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5cbfd9c700b18369fb34525fc0f9c5e8",
+            "qualified_name": "super::Stack::new",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 1,
+            "reasoning": "The score is 0.73 because while the output likely contained some relevant information about stack implementations, it also included several irrelevant statements concerning function/command arguments, error handlers, recursion depth, and output destination, which are not related to managing variable bindings and environment during execution.",
+            "original_rank": 4,
+            "original_score": 0.21996301,
+            "source": null
+          },
+          {
+            "entity_id": "entity-02051134c97a7ff2976181bc5fd0027b",
+            "qualified_name": "super::Stack::add_var",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 5,
+            "original_score": 0.19190028,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b8ea73e5f09d366d0452522cd914d7e9",
+            "qualified_name": "nu_engine::eval::eval_variable",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-engine/src/eval.rs",
+            "score": 1,
+            "reasoning": "The score is 0.71 because while it likely identified a stack implementation, it included several irrelevant details such as the public visibility, return type, sorting, and return format of environment variables, which did not explain how the stack manages variable bindings or environment during execution.",
+            "original_rank": 6,
+            "original_score": 0.1905722,
+            "source": null
+          },
+          {
+            "entity_id": "entity-4f5a73d2086680812e1fb816535786fb",
+            "qualified_name": "super::Stack::with_parent",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 2,
+            "reasoning": "The score is 0.75 because a substantial part of the output was relevant to finding a stack implementation for variable bindings and environment; however, it included irrelevant details like arguments, error handlers, recursion count, and output destination, preventing a higher score.",
+            "original_rank": 7,
+            "original_score": 0.1713387,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8ea82fcc9b7b039bcc69fd8465a17a4f",
+            "qualified_name": "<external::Collect as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-cmd-lang/src/core_commands/collect.rs",
+            "score": 1,
+            "reasoning": "The score is 0.57 because a significant portion of the output contained irrelevant details like ownership, file paths, return types, and generic variable operations, which did not directly address the stack's role in managing variable bindings and environment during execution. While some relevant information may have been present, these irrelevant statements prevented a higher score.",
+            "original_rank": 8,
+            "original_score": 0.16676793,
+            "source": null
+          },
+          {
+            "entity_id": "entity-d2c94781f2c37c4418d71dafa0a8327a",
+            "qualified_name": "super::Stack::get_stack_env_vars",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 9,
+            "original_score": 0.15046766,
+            "source": null
+          },
+          {
+            "entity_id": "entity-e99c886ab16afc504e374b8c576d3b5f",
+            "qualified_name": "impl external::EngineState",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/engine_state.rs",
+            "score": 1,
+            "reasoning": "The score is 0.50 because a significant portion of the output was irrelevant to managing variable bindings and environment during execution, covering topics like general configuration, signal handling, and plugin management. While some relevant information was present, the high volume of irrelevant details prevented a higher score.",
+            "original_rank": 10,
+            "original_score": 0.14686461,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_016",
+        "query": "Find the ParseError enum in nu_protocol that contains all possible parsing error variants",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.5406858240686612
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-0c755be64471cb0a2179d7b82d57500c",
+            "qualified_name": "nu_protocol::errors::parse_error::ParseError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/parse_error.rs",
+            "score": 1,
+            "reasoning": "The score is 0.42 because a substantial portion of the output consisted of irrelevant statements describing semantic, type-checking, runtime, or other non-syntactic errors, or provided general context, rather than focusing on the requested syntactic parsing error variants. This significantly reduced its relevancy, though some pertinent information was likely present to achieve the current score.",
+            "original_rank": 1,
+            "original_score": 0.69344425,
+            "source": null
+          },
+          {
+            "entity_id": "entity-17aed224484ea8a6dd3cd31351aa317c",
+            "qualified_name": "nu_parser::parser::parse_short_flags",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 0,
+            "reasoning": "The score is 0.11 because the output almost entirely focused on describing a function and its internal details, rather than providing information about the requested ParseError enum. This led to a very low relevancy as the core request was not addressed.",
+            "original_rank": 2,
+            "original_score": 0.39459842,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b93a64ef3d17e4461ff289cfbc7f8574",
+            "qualified_name": "nu_protocol::errors::shell_error::ShellError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/mod.rs",
+            "score": 0,
+            "reasoning": "The score is 0.03 because the output almost entirely failed to address the input's request about the 'ParseError' enum, instead describing numerous other error variants that were irrelevant to the query.",
+            "original_rank": 3,
+            "original_score": 0.36997032,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c8f8910737f4a097a44eb2b5bcd46cf0",
+            "qualified_name": "nu_protocol::errors::compile_error::CompileError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/compile_error.rs",
+            "score": 0,
+            "reasoning": "The score is 0.12 because the output largely failed to identify actual parsing error variants, instead focusing on a wide range of compilation, semantic, and runtime errors. This indicates a significant lack of relevance to the input's request for `ParseError` enum variants. The score is not zero, suggesting a minimal, perhaps structural, connection to the input's terms, but the content was overwhelmingly off-topic.",
+            "original_rank": 4,
+            "original_score": 0.26539707,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9d70b2b3f6ee4096cee0c9ac3cc7c684",
+            "qualified_name": "nu_protocol::syntax_shape::SyntaxShape",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/syntax_shape.rs",
+            "score": 0,
+            "reasoning": "The score is 0.05 because the output largely failed to address the input's request to find the `ParseError` enum, instead focusing on the `SyntaxShape` enum and describing numerous irrelevant syntactic elements. The score is not zero, indicating a minimal, likely indirect, connection to the topic, but the overwhelming majority of the content was off-topic.",
+            "original_rank": 5,
+            "original_score": 0.24899353,
+            "source": null
+          },
+          {
+            "entity_id": "entity-81422c30eb09eccd25564a256852ef40",
+            "qualified_name": "nu_parser::parser::parse_input_output_types",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-parser/src/parser.rs",
+            "score": 0,
+            "reasoning": "The score is 0.23 because the output predominantly described the 'parse_input_output_types' function and its internal details, rather than directly addressing the input's request to find and describe the 'ParseError' enum and its variants. This significant deviation from the prompt's focus led to a low relevancy score.",
+            "original_rank": 6,
+            "original_score": 0.23509638,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0c64f6d3d09883a358cc2b0ef0d1158d",
+            "qualified_name": "nu_protocol::ast::unit::Unit::Err",
+            "entity_type": "type_alias",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/ast/unit.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, providing all necessary information without any irrelevant statements. Excellent work!",
+            "original_rank": 7,
+            "original_score": 0.23334184,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0ad7a85ffcbfd3c3047004a12792fabd",
+            "qualified_name": "nu_derive_value::error::DeriveError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-derive-value/src/error.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input. Great job!",
+            "original_rank": 8,
+            "original_score": 0.2085759,
+            "source": null
+          },
+          {
+            "entity_id": "entity-59a9487775128c4cf6cb11e7e578ee7c",
+            "qualified_name": "nu_protocol::errors::config::ConfigError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/config.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output consistently referred to the ConfigError enum instead of the ParseError enum, which was the subject of the input, making the entire response irrelevant.",
+            "original_rank": 9,
+            "original_score": 0.20017926,
+            "source": null
+          },
+          {
+            "entity_id": "entity-3660ea5ea651f2ee6839096bc8679f3c",
+            "qualified_name": "<external::Parse as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/strings/parse.rs",
+            "score": 0,
+            "reasoning": "The score is 0.00 because the output exclusively discussed the 'Parse' command and its details, completely failing to address the input's request for information about the 'ParseError' enum.",
+            "original_rank": 10,
+            "original_score": 0.18844658,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_017",
+        "query": "Find the ShellError type that represents runtime errors in nushell",
+        "ndcg_scores": {
+          "5": 0.8621397444250859,
+          "10": 0.9165267436461706
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-b93a64ef3d17e4461ff289cfbc7f8574",
+            "qualified_name": "nu_protocol::errors::shell_error::ShellError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/mod.rs",
+            "score": 0,
+            "reasoning": "Scoring failed: call timed out after 88.5s (per attempt). Increase DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE (None disables) or reduce work per attempt.",
+            "original_rank": 1,
+            "original_score": 0.6339806,
+            "source": null
+          },
+          {
+            "entity_id": "entity-10bf04f3936005c5137f31028144a513",
+            "qualified_name": "nu_plugin_protocol::Result<Vec<u8>, LabeledError>::Error",
+            "entity_type": "type_alias",
+            "file_path": "/tmp/nushell-eval/crates/nu-plugin-protocol/src/lib.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.434879,
+            "source": null
+          },
+          {
+            "entity_id": "entity-b98fdaeef3814d0f01d8da7fdb1b775d",
+            "qualified_name": "nu_protocol::engine::engine_state::EngineState::error",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/engine_state.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 3,
+            "original_score": 0.34926534,
+            "source": null
+          },
+          {
+            "entity_id": "entity-38269355265794951aba09b9205a821f",
+            "qualified_name": "super::Stack::get_var",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/engine/stack.rs",
+            "score": 1,
+            "reasoning": "The score is 0.62 because while some relevant information was present, the output included irrelevant details about method arguments, internal implementation, and successful return paths, preventing a higher score.",
+            "original_rank": 4,
+            "original_score": 0.25577417,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2ebff4a11cc48b1291f9a0a011caab45",
+            "qualified_name": "nu_command::network::http::client::lookup_error_to_shell_error",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/network/http/client.rs",
+            "score": 2,
+            "reasoning": "The score is 0.91 because the output largely identified relevant information regarding ShellError types for runtime errors. However, it included some statements describing unhandled error cases and general error handling strategies, which were not directly focused on identifying a specific ShellError type for runtime errors, thus preventing a perfect score.",
+            "original_rank": 5,
+            "original_score": 0.25464877,
+            "source": null
+          },
+          {
+            "entity_id": "entity-13b9ccef487181dc7aa7e69bffbd82ee",
+            "qualified_name": "<crate::ShellError as external::From>::from",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/plugin/identity.rs",
+            "score": 2,
+            "reasoning": "The score is 0.89 because while it successfully identified the ShellError type for runtime errors in nushell, it included irrelevant information such as the file path where a function is defined, which is not relevant to the core request.",
+            "original_rank": 6,
+            "original_score": 0.2243188,
+            "source": null
+          },
+          {
+            "entity_id": "entity-44f245a1f57d77ab49adc2c1455d8636",
+            "qualified_name": "nu_protocol::debugger::profiler::profiler_error",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/debugger/profiler.rs",
+            "score": 1,
+            "reasoning": "The score is 0.57 because the output largely focused on a function's definition, location, and parameters, failing to directly identify the requested ShellError type for runtime errors. This indicates a significant deviation from the input's core request, preventing a higher score, while still suggesting some tangential relevance.",
+            "original_rank": 7,
+            "original_score": 0.20044422,
+            "source": null
+          },
+          {
+            "entity_id": "entity-6d44eb96fa74d31ee13d06bd8f343891",
+            "qualified_name": "nu_protocol::errors::shell_error::bridge::ShellErrorBridge",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/bridge.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.18933636,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8b80ecbe4c3b4f3c57ef56c60bacc1af",
+            "qualified_name": "nu_command::system::nu_check::check_parse",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/system/nu_check.rs",
+            "score": 1,
+            "reasoning": "The score is 0.43 because a significant portion of the output was irrelevant, focusing on file paths, function parameters, internal logic, and successful return paths rather than directly identifying a ShellError type for runtime errors. The score is not lower as there might have been some minimal contextual relevance to ShellError or nushell, but it largely failed to address the core request.",
+            "original_rank": 9,
+            "original_score": 0.18931486,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0c755be64471cb0a2179d7b82d57500c",
+            "qualified_name": "nu_protocol::errors::parse_error::ParseError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/parse_error.rs",
+            "score": 1,
+            "reasoning": "The score is 0.46 because a significant portion of the output discussed parse-time, syntax, and semantic errors, explicitly stating they are not runtime errors, which was the specific focus of the input. This indicates a failure to accurately identify and filter for the requested runtime error types, leading to low relevancy despite potentially mentioning some ShellError types.",
+            "original_rank": 10,
+            "original_score": 0.18925309,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_018",
+        "query": "Find error handling code in the nu_protocol::errors module",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 0.979125294157639
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-f2ea2586cfa73c47371943fd1a46468b",
+            "qualified_name": "nu_protocol::errors::shell_error::job::JobError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/job.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.36756188,
+            "source": null
+          },
+          {
+            "entity_id": "entity-875fcab6ff55ff9b2effaf39f2fc3cd2",
+            "qualified_name": "nu_protocol::errors::report_error::CliError",
+            "entity_type": "struct",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/report_error.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is completely relevant to the input, with no irrelevant statements. Excellent work!",
+            "original_rank": 2,
+            "original_score": 0.35884804,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0c755be64471cb0a2179d7b82d57500c",
+            "qualified_name": "nu_protocol::errors::parse_error::ParseError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/parse_error.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is completely relevant to the input, with no irrelevant statements. Excellent work!",
+            "original_rank": 3,
+            "original_score": 0.35824728,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a4e7a52475f89f4d2cc5cdd8de91866b",
+            "qualified_name": "external::LabeledError::with_code",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/labeled_error.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is completely relevant to the input, with no irrelevant statements. Excellent work!",
+            "original_rank": 4,
+            "original_score": 0.2871363,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a4677445153b98026c0e9600956b6fa9",
+            "qualified_name": "nu_protocol::errors",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/lib.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is completely relevant to the input, with no irrelevant statements. Excellent work!",
+            "original_rank": 5,
+            "original_score": 0.2740475,
+            "source": null
+          },
+          {
+            "entity_id": "entity-59a9487775128c4cf6cb11e7e578ee7c",
+            "qualified_name": "nu_protocol::errors::config::ConfigError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/config.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 6,
+            "original_score": 0.25874466,
+            "source": null
+          },
+          {
+            "entity_id": "entity-55a0b1fcc322cf956bd4aee922634856",
+            "qualified_name": "nu_protocol::errors::labeled_error",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 7,
+            "original_score": 0.25770634,
+            "source": null
+          },
+          {
+            "entity_id": "entity-1e77cf308774bf4b34fcdac3ef5b3a6b",
+            "qualified_name": "nu_protocol::errors::shell_error::network::NetworkError",
+            "entity_type": "enum",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/network.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.23741125,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c7ee1b22613f6338dc9ab8f4865d08e1",
+            "qualified_name": "nu_protocol::errors::shell_error::test",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/shell_error/mod.rs",
+            "score": 1,
+            "reasoning": "The score is 0.50 because the output included irrelevant information about defining implementations in a test module, which was not requested. However, it likely provided some relevant error handling code from the `nu_protocol::errors` module, partially addressing the input.",
+            "original_rank": 9,
+            "original_score": 0.23252414,
+            "source": null
+          },
+          {
+            "entity_id": "entity-bf2738fd0e4381c380ed17eb5c256741",
+            "qualified_name": "nu_protocol::errors::short_handler",
+            "entity_type": "module",
+            "file_path": "/tmp/nushell-eval/crates/nu-protocol/src/errors/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 10,
+            "original_score": 0.23175728,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_019",
+        "query": "Find the NuCompleter implementation that provides tab completion suggestions to the user",
+        "ndcg_scores": {
+          "5": 0.92173083885621,
+          "10": 0.9165267436461706
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-a6055d406335eaf1ee047679620921d3",
+            "qualified_name": "<external::NuCompleter as reedline::Completer>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/completions/completer.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 1,
+            "original_score": 0.66639733,
+            "source": null
+          },
+          {
+            "entity_id": "entity-134a81f002a40e9d88a1588d3b6865d1",
+            "qualified_name": "<external::NuCompleter as reedline::Completer>::complete",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/completions/completer.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant and directly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.36850592,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a423aabb5625e16277178525436eccda",
+            "qualified_name": "which_command_completions",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 0,
+            "reasoning": "The score is 0.12 because the output almost entirely focuses on test functions, test setups, test cases, and expected outputs related to NuCompleter, rather than providing details about the NuCompleter implementation itself. This strong deviation from the requested implementation details results in a very low relevancy score.",
+            "original_rank": 3,
+            "original_score": 0.3350149,
+            "source": null
+          },
+          {
+            "entity_id": "entity-532cc55a8567e98f786894381486cf19",
+            "qualified_name": "dotnu_completions",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.32226297,
+            "source": null
+          },
+          {
+            "entity_id": "entity-2f753cf229afe2656bac5542d7519b5d",
+            "qualified_name": "operator_completions",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 1,
+            "reasoning": "The score is 0.35 because a substantial portion of the output focused on test cases, assertions, and expected results rather than the actual NuCompleter implementation, preventing a higher score. However, some relevant information about the NuCompleter implementation was present, which accounts for the current score.",
+            "original_rank": 5,
+            "original_score": 0.2942832,
+            "source": null
+          },
+          {
+            "entity_id": "entity-8743e05691440e8b4efa75d1f56bfe24",
+            "qualified_name": "file_completion_quoted",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 1,
+            "reasoning": "The score is 0.31 because the output largely focuses on test-related code and internal components like the quote engine, rather than directly providing the NuCompleter implementation for tab completion suggestions.",
+            "original_rank": 6,
+            "original_score": 0.282879,
+            "source": null
+          },
+          {
+            "entity_id": "entity-9c47affa325fc3eb6f094b5d4fcba125",
+            "qualified_name": "attributable_completions",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 1,
+            "reasoning": "The score is 0.45 because the output largely focused on test functions, test cases, and assertions related to NuCompleter, rather than providing details about its core implementation as requested in the input.",
+            "original_rank": 7,
+            "original_score": 0.28014702,
+            "source": null
+          },
+          {
+            "entity_id": "entity-6c5792cf7c3d4e055da2fc054dbb8ac6",
+            "qualified_name": "impl external::NuHelpCompleter",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/src/menus/help_completions.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.2780869,
+            "source": null
+          },
+          {
+            "entity_id": "entity-7a12585e6fa9c9708bfdf2217ad0c3d9",
+            "qualified_name": "quoted_cell_path_completions",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 9,
+            "original_score": 0.27085963,
+            "source": null
+          },
+          {
+            "entity_id": "entity-c45f4226df709aa28c694f5151b9331b",
+            "qualified_name": "filecompletions_triggers_after_cursor",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-cli/tests/completions/mod.rs",
+            "score": 1,
+            "reasoning": "The score is 0.67 because while some relevant information was present, it included several irrelevant statements describing test expectations and assertions for NuCompleter rather than its direct implementation, which was the focus of the input. However, it still provided enough context or related details about NuCompleter to achieve this score.",
+            "original_rank": 10,
+            "original_score": 0.2614836,
+            "source": null
+          }
+        ]
+      },
+      {
+        "query_id": "hyb_020",
+        "query": "Find the Find command implementation that searches through collections and highlights matches",
+        "ndcg_scores": {
+          "5": 1.0,
+          "10": 1.0
+        },
+        "scored_results": [
+          {
+            "entity_id": "entity-e73f9db5f839e60779e117a8c8b85f73",
+            "qualified_name": "<external::Find as external::Command>",
+            "entity_type": "impl",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 0.98 because the output was highly relevant to finding the 'Find' command's implementation for searching and highlighting. It is not higher due to a minor irrelevant statement discussing a type system limitation rather than the 'find' command's implementation details.",
+            "original_rank": 1,
+            "original_score": 0.4970849,
+            "source": null
+          },
+          {
+            "entity_id": "entity-28ad5bd69761d1e1b269ffc848370c78",
+            "qualified_name": "nu_command::filters::find::find_internal",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 2,
+            "original_score": 0.316678,
+            "source": null
+          },
+          {
+            "entity_id": "entity-727fe81006a2e9aa0fe01e5ae8370156",
+            "qualified_name": "<external::Find as external::Command>::signature",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 0.88 because while it provided substantial relevant information regarding the 'Find' command's implementation for searching and highlighting, it included several irrelevant statements about general implementation details, type definition critiques, and command categories, preventing a perfect score.",
+            "original_rank": 3,
+            "original_score": 0.26464623,
+            "source": null
+          },
+          {
+            "entity_id": "entity-0dbc69cd6f83222889bc8cae2109ab66",
+            "qualified_name": "nu_command::filters::find::highlight_matches_in_value",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 4,
+            "original_score": 0.24482355,
+            "source": null
+          },
+          {
+            "entity_id": "entity-5b23adfae2a1258054344fd81def355b",
+            "qualified_name": "<external::NuTheme as dialoguer::theme::Theme>::format_fuzzy_select_prompt_item",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/platform/input/list.rs",
+            "score": 2,
+            "reasoning": "The score is 0.94 because the output largely addressed the request to find the Find command implementation that searches through collections and highlights matches. It is not higher due to a minor irrelevant statement about potential code refactoring, which did not describe the current implementation.",
+            "original_rank": 5,
+            "original_score": 0.23936294,
+            "source": null
+          },
+          {
+            "entity_id": "entity-a6fd0cbf8a6c8f0866c2f4014842af1e",
+            "qualified_name": "<external::Find as external::Command>::run",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output perfectly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 6,
+            "original_score": 0.23700571,
+            "source": null
+          },
+          {
+            "entity_id": "entity-435bd81948cb63f897b388639df3ace6",
+            "qualified_name": "<external::Find as external::Command>::examples",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/src/filters/find.rs",
+            "score": 2,
+            "reasoning": "The score is 0.93 because the output largely addressed the input by focusing on finding the Find command implementation for searching collections and highlighting matches. However, it included a minor irrelevant statement about a post-processing step, which prevented a perfect score.",
+            "original_rank": 7,
+            "original_score": 0.19431621,
+            "source": null
+          },
+          {
+            "entity_id": "entity-96e695695d624e05a758d5a1318fc4c2",
+            "qualified_name": "external::CommandRegistry::find_command",
+            "entity_type": "method",
+            "file_path": "/tmp/nushell-eval/crates/nu-explore/src/registry/mod.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output perfectly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 8,
+            "original_score": 0.16422163,
+            "source": null
+          },
+          {
+            "entity_id": "entity-090628d33033a2df5af659b718cd3776",
+            "qualified_name": "find_with_string_search_with_special_char_1",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/tests/commands/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output is perfectly relevant to the input, with no irrelevant statements. Great job!",
+            "original_rank": 9,
+            "original_score": 0.14327216,
+            "source": null
+          },
+          {
+            "entity_id": "entity-35611edd297823203b4f5922b6517425",
+            "qualified_name": "find_and_highlight_in_nested_list",
+            "entity_type": "function",
+            "file_path": "/tmp/nushell-eval/crates/nu-command/tests/commands/find.rs",
+            "score": 2,
+            "reasoning": "The score is 1.00 because the output perfectly addresses the input without any irrelevant statements. Great job!",
+            "original_rank": 10,
+            "original_score": 0.14095724,
+            "source": null
+          }
+        ]
+      }
+    ]
+  },
+  "agentic": {
+    "endpoint": "agentic",
+    "aggregate_metrics": {},
+    "per_query_results": []
+  }
+}

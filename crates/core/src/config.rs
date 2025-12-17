@@ -175,6 +175,11 @@ pub struct SparseEmbeddingsConfig {
     /// Top-k sparse dimensions to keep (default: 256)
     #[serde(default = "default_sparse_top_k")]
     pub top_k: usize,
+
+    /// Batch size for Granite model inference (default: 32)
+    /// Larger batches improve CPU throughput but use more memory (~103MB per item)
+    #[serde(default = "default_sparse_batch_size")]
+    pub batch_size: usize,
 }
 
 impl Default for SparseEmbeddingsConfig {
@@ -184,6 +189,7 @@ impl Default for SparseEmbeddingsConfig {
             device: default_sparse_device(),
             model_cache_dir: None,
             top_k: default_sparse_top_k(),
+            batch_size: default_sparse_batch_size(),
         }
     }
 }
@@ -198,6 +204,10 @@ fn default_sparse_device() -> String {
 
 fn default_sparse_top_k() -> usize {
     256
+}
+
+fn default_sparse_batch_size() -> usize {
+    32
 }
 
 /// Configuration for file watching

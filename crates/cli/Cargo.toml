@@ -70,6 +70,8 @@ tokio-console = ["console-subscriber", "tokio/tracing"]
 granite-sparse = ["codesearch-embeddings/granite-sparse"]
 cuda = ["codesearch-embeddings/cuda"]
 metal = ["codesearch-embeddings/metal"]
+mkl = ["codesearch-embeddings/mkl"]
+accelerate = ["codesearch-embeddings/accelerate"]
 
 [dev-dependencies]
 tempfile = "3.14.0"

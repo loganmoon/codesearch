@@ -376,26 +376,6 @@ pub trait PostgresClientTrait: Send + Sync {
     /// This is used during USES relationship resolution.
     async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>>;
 
-    /// Full-text search entities using PostgreSQL's tsvector
-    ///
-    /// Returns entities ranked by: (1) qualified_name ILIKE matches first,
-    /// then (2) ts_rank relevance score. Only searches entities with non-NULL content.
-    ///
-    /// # Parameters
-    ///
-    /// * `repository_id` - Repository to search in
-    /// * `query` - Search query string (will be parsed using plainto_tsquery)
-    /// * `limit` - Maximum number of results to return
-    /// * `fuzzy` - If true, allows SQL wildcards (% and _) in qualified_name matching.
-    ///   If false (default), these characters are escaped for exact matching.
-    async fn search_entities_fulltext(
-        &self,
-        repository_id: Uuid,
-        query: &str,
-        limit: i64,
-        fuzzy: bool,
-    ) -> Result<Vec<CodeEntity>>;
-
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///
     /// Maximum batch size is 1000 entity IDs.

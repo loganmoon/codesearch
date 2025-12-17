@@ -5,11 +5,10 @@
 
 use crate::api::{
     generate_embeddings, get_entities_batch, list_repositories, query_graph, search_agentic,
-    search_fulltext, search_semantic, search_unified, AgenticSearchApiRequest,
-    AgenticSearchApiResponse, BackendClients, BatchEntityRequest, BatchEntityResponse,
-    EmbeddingRequest, EmbeddingResponse, FulltextSearchRequest, FulltextSearchResponse,
+    search_semantic, AgenticSearchApiRequest, AgenticSearchApiResponse, BackendClients,
+    BatchEntityRequest, BatchEntityResponse, EmbeddingRequest, EmbeddingResponse,
     GraphQueryRequest, GraphQueryResponse, ListRepositoriesResponse, RepositoryInfo, SearchConfig,
-    SemanticSearchRequest, SemanticSearchResponse, UnifiedSearchRequest, UnifiedSearchResponse,
+    SemanticSearchRequest, SemanticSearchResponse,
 };
 use axum::{
     extract::State,
@@ -42,8 +41,6 @@ pub(crate) fn build_router(state: AppState, server_config: &ServerConfig) -> Rou
     let router = Router::new()
         // Search endpoints
         .route("/api/v1/search/semantic", post(semantic_search_handler))
-        .route("/api/v1/search/fulltext", post(fulltext_search_handler))
-        .route("/api/v1/search/unified", post(unified_search_handler))
         .route("/api/v1/search/agentic", post(agentic_search_handler))
         .route("/api/v1/graph/query", post(graph_query_handler))
         // Entity operations
@@ -110,61 +107,6 @@ async fn semantic_search_handler(
     );
 
     let response = search_semantic(request, &state.clients, &state.config).await?;
-    Ok(Json(response))
-}
-
-/// POST /api/v1/search/fulltext
-#[utoipa::path(
-    post,
-    path = "/api/v1/search/fulltext",
-    request_body = FulltextSearchRequest,
-    responses(
-        (status = 200, description = "Full-text search results", body = FulltextSearchResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "search"
-)]
-async fn fulltext_search_handler(
-    State(state): State<AppState>,
-    Json(request): Json<FulltextSearchRequest>,
-) -> Result<Json<FulltextSearchResponse>, ApiError> {
-    tracing::info!(
-        "Full-text search request: repository={}, query='{}', limit={}",
-        request.repository_id,
-        request.query,
-        request.limit
-    );
-
-    let response = search_fulltext(request, &state.clients.postgres).await?;
-    Ok(Json(response))
-}
-
-/// POST /api/v1/search/unified
-#[utoipa::path(
-    post,
-    path = "/api/v1/search/unified",
-    request_body = UnifiedSearchRequest,
-    responses(
-        (status = 200, description = "Unified search results (full-text + semantic merged via RRF)", body = UnifiedSearchResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "search"
-)]
-async fn unified_search_handler(
-    State(state): State<AppState>,
-    Json(request): Json<UnifiedSearchRequest>,
-) -> Result<Json<UnifiedSearchResponse>, ApiError> {
-    tracing::info!(
-        "Unified search request: repository={}, fulltext={}, semantic={}, limit={}",
-        request.repository_id,
-        request.enable_fulltext,
-        request.enable_semantic,
-        request.limit
-    );
-
-    let response = search_unified(request, &state.clients, &state.config).await?;
     Ok(Json(response))
 }
 
@@ -413,8 +355,6 @@ impl From<anyhow::Error> for ApiError {
 #[openapi(
     paths(
         semantic_search_handler,
-        fulltext_search_handler,
-        unified_search_handler,
         agentic_search_handler,
         graph_query_handler,
         entities_batch_handler,
@@ -425,10 +365,6 @@ impl From<anyhow::Error> for ApiError {
     components(schemas(
         SemanticSearchRequest,
         SemanticSearchResponse,
-        FulltextSearchRequest,
-        FulltextSearchResponse,
-        UnifiedSearchRequest,
-        UnifiedSearchResponse,
         AgenticSearchApiRequest,
         AgenticSearchApiResponse,
         crate::api::AgenticSearchApiMetadata,
@@ -441,7 +377,7 @@ impl From<anyhow::Error> for ApiError {
         ListRepositoriesResponse
     )),
     tags(
-        (name = "search", description = "Semantic, full-text, and agentic search endpoints"),
+        (name = "search", description = "Semantic and agentic search endpoints"),
         (name = "graph", description = "Code graph query endpoints"),
         (name = "entities", description = "Entity retrieval endpoints"),
         (name = "embeddings", description = "Embedding generation endpoints"),

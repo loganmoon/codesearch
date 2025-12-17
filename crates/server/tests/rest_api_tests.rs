@@ -42,14 +42,11 @@ async fn test_health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 /// Tests for input validation logic
 #[cfg(test)]
 mod input_validation_tests {
-    /// Test that limit values are properly clamped in unified search
+    /// Test that limit values are properly clamped in search requests
     ///
-    /// Validates that:
-    /// - limit is clamped to [1, 1000]
-    /// - fulltext_limit is clamped to [1, 1000]
-    /// - semantic_limit is clamped to [1, 1000]
+    /// Validates that limit is clamped to [1, 1000]
     #[test]
-    fn test_unified_search_limit_clamping() {
+    fn test_search_limit_clamping() {
         // Test that limits below 1 are clamped to 1
         assert_eq!(0_usize.clamp(1, 1000), 1);
 

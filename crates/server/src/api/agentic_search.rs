@@ -1,6 +1,6 @@
 //! Agentic search API endpoint
 //!
-//! Provides AI-powered multi-agent search combining semantic, fulltext, and graph traversal.
+//! Provides AI-powered multi-agent search combining semantic (dense + sparse) and graph traversal.
 
 use crate::api::{BackendClients, SearchApiImpl, SearchConfig};
 use codesearch_agentic_search::{

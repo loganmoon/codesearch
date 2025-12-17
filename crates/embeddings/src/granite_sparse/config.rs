@@ -93,7 +93,7 @@ fn default_pad_token_id() -> usize {
 }
 
 fn default_type_vocab_size() -> usize {
-    1
+    2 // Match actual Granite model
 }
 
 impl Default for GraniteSparseConfig {
@@ -107,8 +107,8 @@ impl Default for GraniteSparseConfig {
             max_position_embeddings: default_max_position_embeddings(),
             hidden_act: default_hidden_act(),
             layer_norm_eps: default_layer_norm_eps(),
-            attention_probs_dropout_prob: 0.0,
-            hidden_dropout_prob: 0.0,
+            attention_probs_dropout_prob: 0.1,
+            hidden_dropout_prob: 0.1,
             pad_token_id: default_pad_token_id(),
             type_vocab_size: default_type_vocab_size(),
         }

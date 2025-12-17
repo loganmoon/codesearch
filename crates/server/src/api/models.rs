@@ -4,9 +4,10 @@
 pub use codesearch_core::search_models::*;
 
 use codesearch_core::config::{
-    HybridSearchConfig, QueryPreprocessingConfig, RerankingConfig, SpecificityConfig,
+    HybridSearchConfig, QueryPreprocessingConfig, RerankingConfig, SparseEmbeddingsConfig,
+    SpecificityConfig,
 };
-use codesearch_embeddings::EmbeddingManager;
+use codesearch_embeddings::{EmbeddingManager, SparseEmbeddingManager};
 use codesearch_reranking::RerankerProvider;
 use codesearch_storage::{
     Neo4jClientTrait, PostgresClientTrait, SearchFilters as StorageSearchFilters, StorageClient,
@@ -20,6 +21,8 @@ pub struct BackendClients {
     pub neo4j: Option<Arc<dyn Neo4jClientTrait>>,
     pub embedding_manager: Arc<EmbeddingManager>,
     pub reranker: Option<Arc<dyn RerankerProvider>>,
+    /// Pre-initialized sparse embedding manager for Granite (None for BM25 which needs avgdl)
+    pub sparse_manager: Option<Arc<SparseEmbeddingManager>>,
 }
 
 /// Container for search configuration
@@ -28,6 +31,7 @@ pub struct SearchConfig {
     pub reranking: RerankingConfig,
     pub query_preprocessing: QueryPreprocessingConfig,
     pub specificity: SpecificityConfig,
+    pub sparse_embeddings: SparseEmbeddingsConfig,
     pub default_bge_instruction: String,
     pub max_batch_size: usize,
 }

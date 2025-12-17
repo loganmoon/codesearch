@@ -14,6 +14,7 @@ use crate::sparse_provider::SparseEmbeddingProvider;
 use async_trait::async_trait;
 use candle_core::Device;
 use codesearch_core::error::{Error, Result};
+use futures::future::join_all;
 use model::GraniteSparseModel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -91,12 +92,18 @@ impl SparseDevice {
     }
 }
 
+/// Default batch size for Granite model inference
+const DEFAULT_BATCH_SIZE: usize = 32;
+
 /// Granite sparse embedding provider
 pub struct GraniteSparseProvider {
     model: Arc<GraniteSparseModel>,
     tokenizer: GraniteTokenizer,
     device: Device,
     top_k: usize,
+    max_batch_size: usize,
+    /// Whether running on GPU (requires sequential chunk processing)
+    is_gpu: bool,
 }
 
 impl GraniteSparseProvider {
@@ -106,28 +113,59 @@ impl GraniteSparseProvider {
     /// * `device` - Device to run inference on
     /// * `cache_dir` - Directory to cache downloaded models
     /// * `top_k` - Maximum number of sparse dimensions to keep
-    pub async fn new(device: SparseDevice, cache_dir: PathBuf, top_k: usize) -> Result<Self> {
+    /// * `batch_size` - Maximum batch size for inference (default: 32)
+    pub async fn new(
+        device: SparseDevice,
+        cache_dir: PathBuf,
+        top_k: usize,
+        batch_size: usize,
+    ) -> Result<Self> {
         let candle_device = device.to_candle_device()?;
 
         // Download or use cached model
+        tracing::debug!("Downloading/caching Granite sparse model...");
         let model_dir = download_model(DEFAULT_MODEL_ID, &cache_dir).await?;
+        tracing::debug!(model_dir = %model_dir.display(), "Model files downloaded");
 
         // Load configuration
         let config_path = model_dir.join("config.json");
+        tracing::debug!(config_path = %config_path.display(), "Loading model config");
         let config = GraniteSparseConfig::from_file(&config_path)?;
+        tracing::debug!(
+            hidden_size = config.hidden_size,
+            num_layers = config.num_hidden_layers,
+            vocab_size = config.vocab_size,
+            "Config loaded"
+        );
 
         // Load model
         let model_path = model_dir.join("model.safetensors");
-        let model = GraniteSparseModel::load(config, &model_path, &candle_device)
-            .map_err(|e| Error::embedding(format!("Failed to load model: {e}")))?;
+        tracing::debug!(model_path = %model_path.display(), "Loading model weights");
+        let model = GraniteSparseModel::load(config, &model_path, &candle_device).map_err(|e| {
+            tracing::error!(error = %e, "Failed to load Granite model weights");
+            Error::embedding(format!("Failed to load model: {e}"))
+        })?;
+        tracing::debug!("Model weights loaded successfully");
 
         // Load tokenizer
         let tokenizer_path = model_dir.join("tokenizer.json");
+        tracing::debug!(tokenizer_path = %tokenizer_path.display(), "Loading tokenizer");
         let tokenizer = GraniteTokenizer::from_file(&tokenizer_path)?;
+        tracing::debug!("Tokenizer loaded successfully");
+
+        let max_batch_size = if batch_size == 0 {
+            DEFAULT_BATCH_SIZE
+        } else {
+            batch_size
+        };
+
+        let is_gpu = matches!(device, SparseDevice::Cuda(_) | SparseDevice::Metal);
 
         tracing::info!(
             device = ?device,
             top_k = top_k,
+            max_batch_size = max_batch_size,
+            is_gpu = is_gpu,
             model_dir = %model_dir.display(),
             "Loaded Granite sparse model"
         );
@@ -137,6 +175,8 @@ impl GraniteSparseProvider {
             tokenizer,
             device: candle_device,
             top_k,
+            max_batch_size,
+            is_gpu,
         })
     }
 
@@ -158,7 +198,7 @@ impl SparseEmbeddingProvider for GraniteSparseProvider {
         // Tokenize all texts (fast CPU-bound work, keep on async thread)
         let tokenized = self.tokenizer.encode_batch(&texts, max_length)?;
 
-        // Handle empty texts
+        // Handle empty texts - collect non-empty with their original indices
         let mut non_empty_indices = Vec::new();
         let mut non_empty_tokenized = Vec::new();
 
@@ -167,7 +207,7 @@ impl SparseEmbeddingProvider for GraniteSparseProvider {
                 continue;
             }
             non_empty_indices.push(i);
-            non_empty_tokenized.push(tok);
+            non_empty_tokenized.push(tok.clone());
         }
 
         // If all texts are empty, return all None
@@ -175,46 +215,143 @@ impl SparseEmbeddingProvider for GraniteSparseProvider {
             return Ok(vec![None; texts.len()]);
         }
 
-        // Prepare data for blocking task
-        let batch_size = non_empty_tokenized.len();
         let seq_len = non_empty_tokenized[0].input_ids.len();
+        let total_items = non_empty_tokenized.len();
+        let num_chunks = total_items.div_ceil(self.max_batch_size);
 
-        let input_ids_vec: Vec<u32> = non_empty_tokenized
-            .iter()
-            .flat_map(|t| t.input_ids.iter().copied())
-            .collect();
-        let attention_mask_vec: Vec<u32> = non_empty_tokenized
-            .iter()
-            .flat_map(|t| t.attention_mask.iter().copied())
-            .collect();
+        if num_chunks > 1 {
+            tracing::debug!(
+                total_items = total_items,
+                max_batch_size = self.max_batch_size,
+                num_chunks = num_chunks,
+                is_gpu = self.is_gpu,
+                "Processing sparse embeddings in chunks"
+            );
+        }
 
-        // Clone Arc for the blocking task
-        let model = Arc::clone(&self.model);
-        let device = self.device.clone();
-        let top_k = self.top_k;
+        // Process chunks - sequential on GPU (to avoid VRAM exhaustion), parallel on CPU
+        let all_sparse_vectors = if self.is_gpu {
+            // GPU: process chunks sequentially to avoid OOM
+            let mut results = Vec::with_capacity(total_items);
+            for (chunk_idx, chunk) in non_empty_tokenized.chunks(self.max_batch_size).enumerate() {
+                let chunk_size = chunk.len();
+                let input_ids_vec: Vec<u32> = chunk
+                    .iter()
+                    .flat_map(|t| t.input_ids.iter().copied())
+                    .collect();
+                let attention_mask_vec: Vec<u32> = chunk
+                    .iter()
+                    .flat_map(|t| t.attention_mask.iter().copied())
+                    .collect();
 
-        // Run tensor creation and inference in blocking task
-        let sparse_vectors = tokio::task::spawn_blocking(move || {
-            use candle_core::Tensor;
+                let model = Arc::clone(&self.model);
+                let device = self.device.clone();
+                let top_k = self.top_k;
 
-            let input_ids = Tensor::from_vec(input_ids_vec, (batch_size, seq_len), &device)
-                .map_err(|e| Error::embedding(format!("Failed to create input tensor: {e}")))?;
-            let attention_mask =
-                Tensor::from_vec(attention_mask_vec, (batch_size, seq_len), &device).map_err(
-                    |e| Error::embedding(format!("Failed to create attention mask tensor: {e}")),
-                )?;
+                let chunk_vectors = tokio::task::spawn_blocking(move || {
+                    use candle_core::Tensor;
 
-            model
-                .embed_sparse(&input_ids, &attention_mask, top_k)
-                .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))
-        })
-        .await
-        .map_err(|e| Error::embedding(format!("Inference task panicked: {e}")))??;
+                    let input_ids = Tensor::from_vec(input_ids_vec, (chunk_size, seq_len), &device)
+                        .map_err(|e| {
+                            Error::embedding(format!("Failed to create input tensor: {e}"))
+                        })?;
+                    let attention_mask =
+                        Tensor::from_vec(attention_mask_vec, (chunk_size, seq_len), &device)
+                            .map_err(|e| {
+                                Error::embedding(format!(
+                                    "Failed to create attention mask tensor: {e}"
+                                ))
+                            })?;
+
+                    model
+                        .embed_sparse(&input_ids, &attention_mask, top_k)
+                        .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))
+                })
+                .await
+                .map_err(|e| Error::embedding(format!("Inference task panicked: {e}")))??;
+
+                if num_chunks > 1 {
+                    tracing::debug!(
+                        chunk = chunk_idx + 1,
+                        total_chunks = num_chunks,
+                        items_in_chunk = chunk_vectors.len(),
+                        "Processed chunk"
+                    );
+                }
+
+                results.extend(chunk_vectors);
+            }
+            results
+        } else {
+            // CPU: process chunks in parallel for throughput
+            let chunk_futures: Vec<_> = non_empty_tokenized
+                .chunks(self.max_batch_size)
+                .map(|chunk| {
+                    let chunk_size = chunk.len();
+                    let input_ids_vec: Vec<u32> = chunk
+                        .iter()
+                        .flat_map(|t| t.input_ids.iter().copied())
+                        .collect();
+                    let attention_mask_vec: Vec<u32> = chunk
+                        .iter()
+                        .flat_map(|t| t.attention_mask.iter().copied())
+                        .collect();
+
+                    let model = Arc::clone(&self.model);
+                    let device = self.device.clone();
+                    let top_k = self.top_k;
+
+                    tokio::task::spawn_blocking(move || {
+                        use candle_core::Tensor;
+
+                        let input_ids =
+                            Tensor::from_vec(input_ids_vec, (chunk_size, seq_len), &device)
+                                .map_err(|e| {
+                                    Error::embedding(format!("Failed to create input tensor: {e}"))
+                                })?;
+                        let attention_mask =
+                            Tensor::from_vec(attention_mask_vec, (chunk_size, seq_len), &device)
+                                .map_err(|e| {
+                                    Error::embedding(format!(
+                                        "Failed to create attention mask tensor: {e}"
+                                    ))
+                                })?;
+
+                        model
+                            .embed_sparse(&input_ids, &attention_mask, top_k)
+                            .map_err(|e| Error::embedding(format!("Model inference failed: {e}")))
+                    })
+                })
+                .collect();
+
+            let chunk_results = join_all(chunk_futures).await;
+
+            let mut results = Vec::with_capacity(total_items);
+            for (chunk_idx, result) in chunk_results.into_iter().enumerate() {
+                let chunk_vectors = result
+                    .map_err(|e| Error::embedding(format!("Inference task panicked: {e}")))??;
+
+                if num_chunks > 1 {
+                    tracing::debug!(
+                        chunk = chunk_idx + 1,
+                        total_chunks = num_chunks,
+                        items_in_chunk = chunk_vectors.len(),
+                        "Processed chunk"
+                    );
+                }
+
+                results.extend(chunk_vectors);
+            }
+            results
+        };
 
         // Build result vector with proper ordering
         let mut results = vec![None; texts.len()];
         for (sparse_idx, original_idx) in non_empty_indices.into_iter().enumerate() {
-            let sparse = sparse_vectors.get(sparse_idx).cloned().unwrap_or_default();
+            let sparse = all_sparse_vectors
+                .get(sparse_idx)
+                .cloned()
+                .unwrap_or_default();
             if !sparse.is_empty() {
                 results[original_idx] = Some(sparse);
             }

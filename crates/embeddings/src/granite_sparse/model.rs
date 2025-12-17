@@ -137,30 +137,37 @@ impl GraniteSelfAttention {
         let value = self.value.forward(hidden_states)?;
 
         // Reshape for multi-head attention: (batch, seq, heads, head_dim)
+        // Note: contiguous() is required after transpose for matmul compatibility
         let query = query
             .reshape((batch_size, seq_len, self.num_attention_heads, self.head_dim))?
-            .transpose(1, 2)?; // (batch, heads, seq, head_dim)
+            .transpose(1, 2)?
+            .contiguous()?; // (batch, heads, seq, head_dim)
         let key = key
             .reshape((batch_size, seq_len, self.num_attention_heads, self.head_dim))?
-            .transpose(1, 2)?;
+            .transpose(1, 2)?
+            .contiguous()?;
         let value = value
             .reshape((batch_size, seq_len, self.num_attention_heads, self.head_dim))?
-            .transpose(1, 2)?;
+            .transpose(1, 2)?
+            .contiguous()?;
 
         // Scaled dot-product attention
         let scale = (self.head_dim as f64).sqrt();
-        let attention_scores = query.matmul(&key.transpose(2, 3)?)? / scale;
+        let key_t = key.transpose(2, 3)?.contiguous()?;
+        let attention_scores = (query.matmul(&key_t)? / scale)?;
 
         // Apply attention mask if provided
         let attention_scores = match attention_mask {
             Some(mask) => {
-                // Mask shape: (batch, 1, 1, seq) for broadcasting
+                // Mask shape: (batch, seq) -> (batch, 1, 1, seq) for broadcasting
                 let mask = mask.unsqueeze(1)?.unsqueeze(1)?;
-                // Convert mask to attention bias: 0 -> 0, 1 -> -10000
-                let mask_bias = ((Tensor::ones_like(&mask)? - mask)? * (-10000.0))?;
-                (attention_scores + mask_bias)?
+                // Convert to f32 and create bias: 1 (valid) -> 0, 0 (padding) -> -10000
+                let mask_f32 = mask.to_dtype(attention_scores.dtype())?;
+                let mask_bias = ((1.0 - mask_f32)? * (-10000.0f64))?;
+                // Use broadcast_add for automatic shape broadcasting
+                attention_scores.broadcast_add(&mask_bias)?
             }
-            None => attention_scores?,
+            None => attention_scores,
         };
 
         // Softmax
@@ -170,7 +177,8 @@ impl GraniteSelfAttention {
         let context = attention_probs.matmul(&value)?;
 
         // Reshape back: (batch, heads, seq, head_dim) -> (batch, seq, hidden)
-        context.transpose(1, 2)?.reshape((
+        // contiguous() required after transpose for reshape compatibility
+        context.transpose(1, 2)?.contiguous()?.reshape((
             batch_size,
             seq_len,
             self.num_attention_heads * self.head_dim,
@@ -337,26 +345,38 @@ impl GraniteEncoder {
 }
 
 /// MLM prediction head for SPLADE
+///
+/// Note: In RoBERTa, the decoder.weight is tied to the word embeddings.
+/// We handle this by accepting the word embeddings tensor directly.
 pub struct GraniteLMHead {
     dense: Linear,
     layer_norm: LayerNorm,
-    decoder: Linear,
+    decoder_weight: Tensor,
+    decoder_bias: Tensor,
 }
 
 impl GraniteLMHead {
-    pub fn new(config: &GraniteSparseConfig, vb: VarBuilder) -> Result<Self> {
+    pub fn new(
+        config: &GraniteSparseConfig,
+        vb: VarBuilder,
+        word_embeddings_weight: Tensor,
+    ) -> Result<Self> {
         let dense = linear(config.hidden_size, config.hidden_size, vb.pp("dense"))?;
         let layer_norm = layer_norm_config(
             config.hidden_size,
             config.layer_norm_eps,
             vb.pp("layer_norm"),
         )?;
-        let decoder = linear(config.hidden_size, config.vocab_size, vb.pp("decoder"))?;
+
+        // In RoBERTa, lm_head.decoder.weight is tied to roberta.embeddings.word_embeddings.weight
+        // The bias is stored separately
+        let decoder_bias = vb.get(config.vocab_size, "bias")?;
 
         Ok(Self {
             dense,
             layer_norm,
-            decoder,
+            decoder_weight: word_embeddings_weight,
+            decoder_bias,
         })
     }
 
@@ -364,7 +384,14 @@ impl GraniteLMHead {
         let hidden_states = self.dense.forward(hidden_states)?;
         let hidden_states = Activation::Gelu.forward(&hidden_states)?;
         let hidden_states = self.layer_norm.forward(&hidden_states)?;
-        self.decoder.forward(&hidden_states)
+
+        // Manual linear: x @ W^T + b
+        // decoder_weight shape: (vocab_size, hidden_size)
+        // hidden_states shape: (batch, seq, hidden_size)
+        // We need: (batch, seq, hidden_size) @ (hidden_size, vocab_size) = (batch, seq, vocab_size)
+        // Use broadcast_matmul to handle 3D × 2D broadcasting correctly
+        let output = hidden_states.broadcast_matmul(&self.decoder_weight.t()?)?;
+        output.broadcast_add(&self.decoder_bias)
     }
 }
 
@@ -383,16 +410,28 @@ impl GraniteSparseModel {
         model_path: &std::path::Path,
         device: &Device,
     ) -> Result<Self> {
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path], DType::F32, device)? };
+        let model_data = std::fs::read(model_path).map_err(|e| {
+            candle_core::Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("Failed to read model file {}: {e}", model_path.display()),
+            ))
+        })?;
+        let vb = VarBuilder::from_buffered_safetensors(model_data, DType::F32, device)?;
 
         Self::new(&config, vb)
     }
 
     /// Create model from VarBuilder
     pub fn new(config: &GraniteSparseConfig, vb: VarBuilder) -> Result<Self> {
+        // Load word embeddings weight first - it's needed for both embeddings and LM head (weight tying)
+        let word_embeddings_weight = vb.get(
+            (config.vocab_size, config.hidden_size),
+            "roberta.embeddings.word_embeddings.weight",
+        )?;
+
         let embeddings = GraniteEmbeddings::new(config, vb.pp("roberta.embeddings"))?;
         let encoder = GraniteEncoder::new(config, vb.pp("roberta.encoder"))?;
-        let lm_head = GraniteLMHead::new(config, vb.pp("lm_head"))?;
+        let lm_head = GraniteLMHead::new(config, vb.pp("lm_head"), word_embeddings_weight.clone())?;
 
         Ok(Self {
             embeddings,
@@ -427,10 +466,11 @@ impl GraniteSparseModel {
         let splade_scores = (relu_logits + 1.0)?.log()?;
 
         // Apply attention mask to zero out padding tokens
-        // Expand mask: (batch, seq) -> (batch, seq, 1)
+        // Expand mask: (batch, seq) -> (batch, seq, 1) for broadcasting
         let mask = attention_mask.unsqueeze(2)?;
         let mask = mask.to_dtype(splade_scores.dtype())?;
-        let masked_scores = (splade_scores * mask)?;
+        // Use broadcast_mul for proper (batch, seq, vocab) * (batch, seq, 1) broadcasting
+        let masked_scores = splade_scores.broadcast_mul(&mask)?;
 
         // Max pool across sequence dimension: (batch, seq, vocab) -> (batch, vocab)
         let pooled = masked_scores.max(1)?;

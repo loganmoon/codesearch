@@ -260,8 +260,13 @@ pub async fn create_granite_sparse_manager(
         .map(PathBuf::from)
         .unwrap_or_else(granite_sparse::default_model_cache_dir);
 
-    let provider =
-        granite_sparse::GraniteSparseProvider::new(device, cache_dir, config.top_k).await?;
+    let provider = granite_sparse::GraniteSparseProvider::new(
+        device,
+        cache_dir,
+        config.top_k,
+        config.batch_size,
+    )
+    .await?;
 
     Ok(Arc::new(SparseEmbeddingManager::new(
         Arc::new(provider),

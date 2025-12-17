@@ -198,7 +198,18 @@ async fn execute_semantic_search(
         .get_bm25_statistics(request.repository_id)
         .await?;
 
-    let sparse_manager = codesearch_embeddings::create_sparse_manager(stats.avgdl)?;
+    // Use pre-initialized sparse manager if available (Granite), otherwise create per-query (BM25)
+    let sparse_manager = match &clients.sparse_manager {
+        Some(mgr) => mgr.clone(),
+        None => {
+            // Fallback to lazy initialization (BM25 or if pre-init failed)
+            codesearch_embeddings::create_sparse_manager_from_config(
+                &config.sparse_embeddings,
+                stats.avgdl,
+            )
+            .await?
+        }
+    };
     let sparse_embeddings = sparse_manager
         .embed_sparse(vec![request.query.text.as_str()])
         .await?;

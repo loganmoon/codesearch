@@ -134,6 +134,34 @@ pub async fn run_rest_server(
         }
     };
 
+    // Pre-initialize sparse manager at startup for Granite (doesn't need avgdl from DB)
+    // BM25 needs avgdl so it must be created lazily per-query
+    let sparse_manager = if config.sparse_embeddings.provider.to_lowercase() != "bm25" {
+        info!(
+            "Pre-initializing sparse embedding manager (provider: {})",
+            config.sparse_embeddings.provider
+        );
+        match codesearch_embeddings::create_sparse_manager_from_config(
+            &config.sparse_embeddings,
+            0.0, // avgdl not needed for Granite
+        )
+        .await
+        {
+            Ok(mgr) => {
+                info!("Sparse embedding manager initialized successfully");
+                Some(mgr)
+            }
+            Err(e) => {
+                warn!("Failed to pre-initialize sparse manager: {e}");
+                warn!("Sparse embeddings will be initialized lazily per-query (slower)");
+                None
+            }
+        }
+    } else {
+        info!("BM25 sparse provider requires per-query initialization (avgdl-dependent)");
+        None
+    };
+
     // Build AppState
     let app_state = rest_server::AppState {
         clients: Arc::new(BackendClients {
@@ -142,12 +170,14 @@ pub async fn run_rest_server(
             neo4j: neo4j_client,
             embedding_manager,
             reranker,
+            sparse_manager,
         }),
         config: Arc::new(SearchConfig {
             hybrid_search: config.hybrid_search.clone(),
             reranking: config.reranking.clone(),
             query_preprocessing: config.query_preprocessing.clone(),
             specificity: config.specificity.clone(),
+            sparse_embeddings: config.sparse_embeddings.clone(),
             default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
             max_batch_size: config.storage.max_entities_per_db_operation,
         }),

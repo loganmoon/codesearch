@@ -294,6 +294,31 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         }
     };
 
+    // Pre-initialize sparse manager at startup for Granite (doesn't need avgdl from DB)
+    let sparse_manager = if config.sparse_embeddings.provider.to_lowercase() != "bm25" {
+        info!(
+            "Pre-initializing sparse embedding manager (provider: {})",
+            config.sparse_embeddings.provider
+        );
+        match codesearch_embeddings::create_sparse_manager_from_config(
+            &config.sparse_embeddings,
+            0.0,
+        )
+        .await
+        {
+            Ok(mgr) => {
+                info!("Sparse embedding manager initialized successfully");
+                Some(mgr)
+            }
+            Err(e) => {
+                warn!("Failed to pre-initialize sparse manager: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Build BackendClients
     let backend_clients = std::sync::Arc::new(codesearch_server::api::BackendClients {
         postgres: postgres_client,
@@ -301,6 +326,7 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         neo4j: neo4j_client,
         embedding_manager,
         reranker,
+        sparse_manager,
     });
 
     // Build SearchConfig
@@ -309,6 +335,7 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
         reranking: config.reranking.clone(),
         query_preprocessing: config.query_preprocessing.clone(),
         specificity: config.specificity.clone(),
+        sparse_embeddings: config.sparse_embeddings.clone(),
         default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
         max_batch_size: config.storage.max_entities_per_db_operation,
     });
@@ -426,7 +453,34 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         .with_channel_buffer_size(config.indexer.pipeline_channel_capacity)
         .with_max_entity_batch_size(config.indexer.entities_per_embedding_batch)
         .with_file_extraction_concurrency(config.indexer.max_concurrent_file_extractions)
-        .with_snapshot_update_concurrency(config.indexer.max_concurrent_snapshot_updates);
+        .with_snapshot_update_concurrency(config.indexer.max_concurrent_snapshot_updates)
+        .with_sparse_embeddings(config.sparse_embeddings.clone());
+
+    // Pre-initialize sparse manager at startup for Granite (doesn't need avgdl from DB)
+    // BM25 needs avgdl so it must be created lazily
+    let sparse_manager = if config.sparse_embeddings.provider.to_lowercase() != "bm25" {
+        info!(
+            "Pre-initializing sparse embedding manager (provider: {})",
+            config.sparse_embeddings.provider
+        );
+        match codesearch_embeddings::create_sparse_manager_from_config(
+            &config.sparse_embeddings,
+            0.0,
+        )
+        .await
+        {
+            Ok(mgr) => {
+                info!("Sparse embedding manager initialized successfully");
+                Some(mgr)
+            }
+            Err(e) => {
+                warn!("Failed to pre-initialize sparse manager, will use lazy initialization: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Create and run indexer
     tracing::debug!(
@@ -437,6 +491,7 @@ async fn index_repository(repo_root: &Path, config_path: Option<&Path>, force: b
         repo_root.to_path_buf(),
         repository_id.to_string(),
         embedding_manager,
+        sparse_manager,
         postgres_client,
         git_repo,
         indexer_config,

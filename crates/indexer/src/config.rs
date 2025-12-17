@@ -2,9 +2,13 @@
 //!
 //! Contains tunable parameters for indexing operations.
 
+use codesearch_core::config::SparseEmbeddingsConfig;
+
 /// Configuration for indexer operations
 #[derive(Debug, Clone)]
 pub struct IndexerConfig {
+    /// Sparse embeddings configuration
+    pub sparse_embeddings: SparseEmbeddingsConfig,
     /// Batch size for file change watching
     pub watch_batch_size: usize,
     /// Timeout in milliseconds for watch batching
@@ -24,6 +28,7 @@ pub struct IndexerConfig {
 impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
+            sparse_embeddings: SparseEmbeddingsConfig::default(),
             watch_batch_size: 10,
             watch_timeout_ms: 1000,
             index_batch_size: 50,
@@ -75,6 +80,12 @@ impl IndexerConfig {
     /// Set snapshot update concurrency
     pub fn with_snapshot_update_concurrency(mut self, concurrency: usize) -> Self {
         self.snapshot_update_concurrency = concurrency;
+        self
+    }
+
+    /// Set sparse embeddings configuration
+    pub fn with_sparse_embeddings(mut self, sparse_embeddings: SparseEmbeddingsConfig) -> Self {
+        self.sparse_embeddings = sparse_embeddings;
         self
     }
 }

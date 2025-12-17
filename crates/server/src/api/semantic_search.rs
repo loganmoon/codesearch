@@ -307,14 +307,27 @@ async fn search_repositories(
             .push(*repo_id);
     }
 
-    // Generate sparse embeddings in parallel for all unique avgdl values
+    // Generate sparse embeddings for all unique avgdl values
+    // Use pre-initialized sparse manager if available (Granite), otherwise create per-query (BM25)
     let sparse_futures: Vec<_> = avgdl_to_repos
         .keys()
         .map(|avgdl| {
             let avgdl_val = *avgdl;
             let query_text = request.query.text.clone();
+            let sparse_config = config.sparse_embeddings.clone();
+            let cached_sparse_manager = clients.sparse_manager.clone();
             async move {
-                let sparse_manager = codesearch_embeddings::create_sparse_manager(avgdl_val.0)?;
+                let sparse_manager = match cached_sparse_manager {
+                    Some(mgr) => mgr,
+                    None => {
+                        // Fallback to lazy initialization (BM25 or if pre-init failed)
+                        codesearch_embeddings::create_sparse_manager_from_config(
+                            &sparse_config,
+                            avgdl_val.0,
+                        )
+                        .await?
+                    }
+                };
                 let sparse_embeddings = sparse_manager
                     .embed_sparse(vec![query_text.as_str()])
                     .await?;

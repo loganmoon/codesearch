@@ -3,6 +3,7 @@
 //! This module handles catching up the index when offline changes have occurred.
 
 use crate::{common::ResultExt, file_change_processor::process_file_changes, Result};
+use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_embeddings::EmbeddingManager;
 use codesearch_storage::PostgresClientTrait;
 use codesearch_watcher::{DiffStats, FileChange, FileDiffChangeType, FileMetadata, GitRepository};
@@ -31,6 +32,7 @@ pub async fn catch_up_from_git(
     postgres_client: &Arc<dyn PostgresClientTrait>,
     embedding_manager: &Arc<EmbeddingManager>,
     git_repo: &GitRepository,
+    sparse_embeddings_config: &SparseEmbeddingsConfig,
 ) -> Result<CatchUpStats> {
     let mut stats = CatchUpStats::default();
 
@@ -108,6 +110,7 @@ pub async fn catch_up_from_git(
         repo_root,
         embedding_manager,
         postgres_client,
+        sparse_embeddings_config,
     )
     .await
     {

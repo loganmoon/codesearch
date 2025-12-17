@@ -70,9 +70,8 @@ cargo run -- serve        # Start REST API server
 ## KEY FEATURES
 
 **Search Architecture:**
-- **Hybrid Search**: Combines BM25 sparse retrieval + dense vector embeddings using RRF fusion (default)
+- **Hybrid Search**: Combines sparse retrieval (Granite/BM25) + dense vector embeddings using RRF fusion in Qdrant (default)
 - **Reranking**: Optional cross-encoder reranking for improved relevance (configure in `~/.codesearch/config.toml`)
-- **Full-Text Search**: PostgreSQL GIN indexes for fast keyword search
 - **Graph Queries**: Neo4j stores code relationships (calls, inherits, implements, etc.)
 
 **Embedding Providers:**

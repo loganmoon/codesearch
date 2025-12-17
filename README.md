@@ -28,9 +28,9 @@ codesearch serve
 
 **Search:**
 ```bash
-curl -X POST http://localhost:3000/api/v1/search/unified \
+curl -X POST http://localhost:3000/api/v1/search/semantic \
   -H "Content-Type: application/json" \
-  -d '{"repository_id": "...", "query": {"text": "authentication handler"}}'
+  -d '{"repository_id": "...", "query": {"text": "authentication handler"}, "limit": 10}'
 ```
 
 ## Configuration
@@ -87,25 +87,19 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 - `cli` - Command-line interface
 
 **Infrastructure:**
-- PostgreSQL - Entity metadata, full-text search (GIN indexes)
-- Qdrant - Dense and sparse vector storage
+- PostgreSQL - Entity metadata storage
+- Qdrant - Dense and sparse vector storage with hybrid search
 - Neo4j - Code relationship graph (calls, imports, inherits)
 
 ## API Reference
 
 ### Search Endpoints
 
-**Unified Search** (recommended):
-```
-POST /api/v1/search/unified
-```
-Combines full-text and semantic search with RRF fusion.
-
-**Semantic Search**:
+**Semantic Search** (recommended):
 ```
 POST /api/v1/search/semantic
 ```
-Vector similarity search with optional hybrid mode.
+Hybrid search combining dense embeddings + sparse retrieval (Granite/BM25) with RRF fusion.
 
 **Graph Query**:
 ```

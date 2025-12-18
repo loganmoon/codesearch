@@ -11,7 +11,7 @@
 mod common;
 
 use codesearch_languages::tsg::{
-    evaluate_cross_file_resolution_with_config, is_python_builtin, CrossFileEvalConfig, TsgExecutor,
+    evaluate_cross_file_resolution_with_config, CrossFileEvalConfig, TsgExecutor,
 };
 use tempfile::TempDir;
 
@@ -40,7 +40,6 @@ fn test_evaluate_python_dotenv_codebase() {
             "build",
             ".eggs",
         ],
-        is_builtin: is_python_builtin,
     };
 
     let stats = evaluate_cross_file_resolution_with_config(&cloned_path, executor, &config)

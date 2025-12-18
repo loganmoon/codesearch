@@ -8,8 +8,7 @@
 mod common;
 
 use codesearch_languages::tsg::{
-    evaluate_cross_file_resolution_with_config, is_javascript_builtin, CrossFileEvalConfig,
-    TsgExecutor,
+    evaluate_cross_file_resolution_with_config, CrossFileEvalConfig, TsgExecutor,
 };
 use tempfile::TempDir;
 
@@ -30,7 +29,6 @@ fn test_evaluate_nanoid_codebase() {
     let config = CrossFileEvalConfig {
         extension: "js",
         skip_dirs: &["node_modules", "dist", "build", ".git", "coverage"],
-        is_builtin: is_javascript_builtin,
     };
 
     let stats = evaluate_cross_file_resolution_with_config(&cloned_path, executor, &config)

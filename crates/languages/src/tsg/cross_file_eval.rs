@@ -7,7 +7,6 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use super::evaluation::is_primitive_or_prelude;
 use super::executor::TsgExecutor;
 use super::graph_types::{ResolutionNode, ResolutionNodeKind};
 use anyhow::Result;
@@ -21,8 +20,6 @@ pub struct CrossFileEvalConfig<'a> {
     pub extension: &'a str,
     /// Directories to skip during traversal
     pub skip_dirs: &'a [&'a str],
-    /// Function to check if a name is a builtin (should be skipped in resolution)
-    pub is_builtin: fn(&str) -> bool,
 }
 
 /// Statistics from cross-file resolution evaluation
@@ -137,7 +134,6 @@ pub fn evaluate_cross_file_resolution(codebase_path: &Path) -> Result<CrossFileE
     let config = CrossFileEvalConfig {
         extension: "rs",
         skip_dirs: &["target", ".git"],
-        is_builtin: is_primitive_or_prelude,
     };
     evaluate_cross_file_resolution_with_config(codebase_path, executor, &config)
 }
@@ -247,38 +243,33 @@ pub fn evaluate_cross_file_resolution_with_config(
             }
         }
 
-        // Count references - only those to internal definitions/imports
+        // Count references - only those to names that exist as definitions in the codebase
+        // This automatically excludes builtins, stdlib, and external packages without needing
+        // a massive hardcoded list. If a name isn't defined anywhere, we don't try to resolve it.
         for node in nodes
             .iter()
             .filter(|n| n.kind == ResolutionNodeKind::Reference)
         {
-            // Skip builtins
-            if (config.is_builtin)(&node.name) {
-                continue;
-            }
-
             // Normalize the name (strip quotes from forward references like "Position")
             let name = node.name.trim_matches('"').trim_matches('\'');
 
-            // Skip references to external imports - these are outside our codebase
-            if external_imports.contains(name) {
+            // Only count references to names that exist somewhere in the codebase.
+            // This filters out builtins (print, len, str), stdlib (os.path.join),
+            // and external packages without needing hardcoded lists.
+            if !definitions_by_name.contains_key(name) {
                 continue;
             }
 
             stats.total_references += 1;
 
-            // Try to resolve: first local definitions, then internal imports, then global definitions
-            // Global definitions handle cases like `module.function()` where function is defined
-            // in another file but accessed through a module import
+            // Try to resolve: local definition first, then via import chain
             if local_definitions.contains(name) {
                 stats.resolved_via_local_definition += 1;
             } else if internal_imports.contains(name) {
                 stats.resolved_via_import += 1;
-            } else if definitions_by_name.contains_key(name) {
-                // Reference matches a definition somewhere in the codebase
-                // (e.g., dotenv.load_dotenv where load_dotenv is defined in another file)
-                stats.resolved_via_import += 1;
             } else {
+                // Name exists in codebase but not accessible from this file
+                // (missing import or not in scope)
                 stats.references_unresolved += 1;
                 *stats
                     .unresolved_reference_names

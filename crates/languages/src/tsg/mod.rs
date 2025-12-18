@@ -25,9 +25,12 @@ pub mod codebase_eval;
 pub mod cross_file_eval;
 
 pub use evaluation::{
-    build_intra_file_edges, categorize_unresolved, is_primitive_or_prelude, EvaluationResult,
+    build_intra_file_edges, categorize_unresolved, is_javascript_builtin, is_primitive_or_prelude,
+    is_python_builtin, is_rust_builtin, EvaluationResult,
 };
-pub use executor::TsgExecutor;
+pub use executor::{
+    TsgExecutor, JAVASCRIPT_TSG_RULES, PYTHON_TSG_RULES, RUST_TSG_RULES, TYPESCRIPT_TSG_RULES,
+};
 pub use graph_types::{ResolutionEdge, ResolutionEdgeKind, ResolutionNode, ResolutionNodeKind};
 pub use resolution::{
     queries as resolution_queries, ResolutionResult, ResolutionSession, ResolutionStats,

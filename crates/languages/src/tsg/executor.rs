@@ -29,6 +29,9 @@ struct AttrIds {
     base_path: Identifier,
     context: Identifier,
     is_glob: Identifier,
+    // Python-specific attributes
+    module: Identifier,
+    relative_prefix: Identifier,
 }
 
 impl AttrIds {
@@ -44,6 +47,9 @@ impl AttrIds {
             base_path: Identifier::from("base_path"),
             context: Identifier::from("context"),
             is_glob: Identifier::from("is_glob"),
+            // Python-specific attributes
+            module: Identifier::from("module"),
+            relative_prefix: Identifier::from("relative_prefix"),
         }
     }
 }
@@ -57,6 +63,15 @@ fn attr_ids() -> &'static AttrIds {
 
 /// The TSG rules for Rust source extraction
 pub const RUST_TSG_RULES: &str = include_str!("rust.tsg");
+
+/// The TSG rules for JavaScript source extraction
+pub const JAVASCRIPT_TSG_RULES: &str = include_str!("javascript.tsg");
+
+/// The TSG rules for TypeScript source extraction
+pub const TYPESCRIPT_TSG_RULES: &str = include_str!("typescript.tsg");
+
+/// The TSG rules for Python source extraction
+pub const PYTHON_TSG_RULES: &str = include_str!("python.tsg");
 
 /// Extract simple name from a potentially qualified path
 /// e.g., "std::io::Read" -> "Read", "crate::module::Foo" -> "Foo"
@@ -77,6 +92,66 @@ impl TsgExecutor {
         let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
         let tsg_file = TsgFile::from_str(language.clone(), RUST_TSG_RULES)
             .map_err(|e| anyhow!("Failed to parse TSG rules: {e}"))?;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .map_err(|e| anyhow!("Failed to set parser language: {e}"))?;
+
+        let functions = Functions::stdlib();
+
+        Ok(Self {
+            tsg_file,
+            parser,
+            functions,
+        })
+    }
+
+    /// Create a new TSG executor for JavaScript
+    pub fn new_javascript() -> Result<Self> {
+        let language: tree_sitter::Language = tree_sitter_javascript::LANGUAGE.into();
+        let tsg_file = TsgFile::from_str(language.clone(), JAVASCRIPT_TSG_RULES)
+            .map_err(|e| anyhow!("Failed to parse JavaScript TSG rules: {e}"))?;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .map_err(|e| anyhow!("Failed to set parser language: {e}"))?;
+
+        let functions = Functions::stdlib();
+
+        Ok(Self {
+            tsg_file,
+            parser,
+            functions,
+        })
+    }
+
+    /// Create a new TSG executor for TypeScript
+    pub fn new_typescript() -> Result<Self> {
+        let language: tree_sitter::Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        let tsg_file = TsgFile::from_str(language.clone(), TYPESCRIPT_TSG_RULES)
+            .map_err(|e| anyhow!("Failed to parse TypeScript TSG rules: {e}"))?;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&language)
+            .map_err(|e| anyhow!("Failed to set parser language: {e}"))?;
+
+        let functions = Functions::stdlib();
+
+        Ok(Self {
+            tsg_file,
+            parser,
+            functions,
+        })
+    }
+
+    /// Create a new TSG executor for Python
+    pub fn new_python() -> Result<Self> {
+        let language: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
+        let tsg_file = TsgFile::from_str(language.clone(), PYTHON_TSG_RULES)
+            .map_err(|e| anyhow!("Failed to parse Python TSG rules: {e}"))?;
 
         let mut parser = Parser::new();
         parser
@@ -150,6 +225,11 @@ impl TsgExecutor {
             let is_glob_str = get_optional_string_attr(&graph_node.attributes, &ids.is_glob);
             let is_glob = is_glob_str.as_deref() == Some("true");
 
+            // Python-specific: module attribute for from-imports
+            let module = get_optional_string_attr(&graph_node.attributes, &ids.module);
+            let relative_prefix =
+                get_optional_string_attr(&graph_node.attributes, &ids.relative_prefix);
+
             // For imports/exports, extract simple name from full path (e.g., "std::io::Read" -> "Read")
             let name = match kind {
                 ResolutionNodeKind::Import | ResolutionNodeKind::Export => {
@@ -162,9 +242,21 @@ impl TsgExecutor {
                 _ => raw_name.clone(),
             };
 
-            // Construct full import path for grouped imports (use base_path + name)
+            // Construct full import path based on language-specific attributes
             let full_path = if let Some(base) = &base_path {
+                // Rust grouped imports: use base_path + name
                 Some(format!("{base}::{raw_name}"))
+            } else if let Some(mod_path) = &module {
+                // Python from-imports: module.name (e.g., "os.path.join")
+                if let Some(prefix) = &relative_prefix {
+                    // Relative import: prefix + module + name
+                    Some(format!("{prefix}{mod_path}.{raw_name}"))
+                } else {
+                    Some(format!("{mod_path}.{raw_name}"))
+                }
+            } else if let Some(prefix) = &relative_prefix {
+                // Python relative import without module: prefix + name
+                Some(format!("{prefix}{raw_name}"))
             } else {
                 path.clone()
             };
@@ -559,5 +651,192 @@ fn test() {
         // Check for variant name references (e.g., Search, Index, Clear)
         let search_refs: Vec<_> = references.iter().filter(|r| r.name == "Search").collect();
         println!("Search references: {}", search_refs.len());
+    }
+
+    #[test]
+    fn test_python_executor_creation() {
+        let executor = TsgExecutor::new_python();
+        match &executor {
+            Ok(_) => {}
+            Err(e) => panic!("Failed to create Python executor: {e}"),
+        }
+        assert!(executor.is_ok());
+    }
+
+    #[test]
+    fn test_python_extract_definitions() {
+        let source = r#"
+def my_function():
+    pass
+
+class MyClass:
+    def method(self):
+        pass
+
+@decorator
+def decorated_function():
+    pass
+
+@decorator
+class DecoratedClass:
+    pass
+"#;
+
+        let mut executor = TsgExecutor::new_python().unwrap();
+        let nodes = executor.extract(source, &PathBuf::from("test.py")).unwrap();
+
+        let definitions: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.kind == ResolutionNodeKind::Definition)
+            .collect();
+
+        println!(
+            "Python definitions: {:?}",
+            definitions
+                .iter()
+                .map(|d| (&d.name, d.definition_kind.as_deref()))
+                .collect::<Vec<_>>()
+        );
+
+        // Should have: my_function, MyClass, method, decorated_function, DecoratedClass
+        assert!(
+            definitions.len() >= 4,
+            "Expected at least 4 definitions, got {}: {:?}",
+            definitions.len(),
+            definitions.iter().map(|d| &d.name).collect::<Vec<_>>()
+        );
+
+        // Check function
+        let my_function = definitions.iter().find(|n| n.name == "my_function");
+        assert!(my_function.is_some(), "my_function should be extracted");
+        assert_eq!(
+            my_function.unwrap().definition_kind.as_deref(),
+            Some("function")
+        );
+
+        // Check class
+        let my_class = definitions.iter().find(|n| n.name == "MyClass");
+        assert!(my_class.is_some(), "MyClass should be extracted");
+        assert_eq!(my_class.unwrap().definition_kind.as_deref(), Some("class"));
+
+        // Check decorated function
+        let decorated_fn = definitions.iter().find(|n| n.name == "decorated_function");
+        assert!(
+            decorated_fn.is_some(),
+            "decorated_function should be extracted"
+        );
+    }
+
+    #[test]
+    fn test_python_extract_imports() {
+        let source = r#"
+import os
+import os.path as osp
+from collections import defaultdict
+from typing import List as L
+from os.path import *
+from . import utils
+from ..helpers import helper as h
+"#;
+
+        let mut executor = TsgExecutor::new_python().unwrap();
+        let nodes = executor.extract(source, &PathBuf::from("test.py")).unwrap();
+
+        let imports: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.kind == ResolutionNodeKind::Import)
+            .collect();
+
+        println!(
+            "Python imports: {:?}",
+            imports
+                .iter()
+                .map(|i| (&i.name, &i.import_path, i.is_glob))
+                .collect::<Vec<_>>()
+        );
+
+        // Should have multiple imports
+        assert!(
+            imports.len() >= 5,
+            "Expected at least 5 imports, got {}: {:?}",
+            imports.len(),
+            imports.iter().map(|i| &i.name).collect::<Vec<_>>()
+        );
+
+        // Check simple import
+        let os_import = imports.iter().find(|n| n.name == "os" && !n.is_glob);
+        assert!(os_import.is_some(), "Should have os import");
+
+        // Check aliased import
+        let osp_import = imports.iter().find(|n| n.name == "osp");
+        assert!(osp_import.is_some(), "Should have osp (aliased) import");
+
+        // Check glob import
+        let glob_import = imports.iter().find(|n| n.is_glob);
+        assert!(glob_import.is_some(), "Should have glob import");
+        assert_eq!(glob_import.unwrap().name, "*");
+    }
+
+    #[test]
+    fn test_python_extract_references() {
+        let source = r#"
+def process(data: List[str]) -> Result:
+    result = transform(data)
+    obj.method()
+    return result
+
+class MyClass(BaseClass):
+    pass
+"#;
+
+        let mut executor = TsgExecutor::new_python().unwrap();
+        let nodes = executor.extract(source, &PathBuf::from("test.py")).unwrap();
+
+        let references: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.kind == ResolutionNodeKind::Reference)
+            .collect();
+
+        println!(
+            "Python references: {:?}",
+            references
+                .iter()
+                .map(|r| (&r.name, r.reference_context.as_deref()))
+                .collect::<Vec<_>>()
+        );
+
+        // Should have references for calls, types, and inheritance
+        assert!(!references.is_empty(), "Expected some references, got none");
+
+        // Check for call reference
+        let call_refs: Vec<_> = references
+            .iter()
+            .filter(|r| r.reference_context.as_deref() == Some("call"))
+            .collect();
+        assert!(!call_refs.is_empty(), "Should have call references");
+
+        // Check for method call reference
+        let method_refs: Vec<_> = references
+            .iter()
+            .filter(|r| r.reference_context.as_deref() == Some("method_call"))
+            .collect();
+        assert!(
+            !method_refs.is_empty(),
+            "Should have method call references"
+        );
+
+        // Check for inheritance reference
+        let inheritance_refs: Vec<_> = references
+            .iter()
+            .filter(|r| r.reference_context.as_deref() == Some("inheritance"))
+            .collect();
+        assert!(
+            !inheritance_refs.is_empty(),
+            "Should have inheritance references"
+        );
+        assert!(
+            inheritance_refs.iter().any(|r| r.name == "BaseClass"),
+            "Should reference BaseClass"
+        );
     }
 }

@@ -117,8 +117,13 @@ pub fn build_intra_file_edges(nodes: &[ResolutionNode]) -> (usize, Vec<&Resoluti
     (resolved, unresolved)
 }
 
-/// Check if a name is a primitive type, prelude type, or should be skipped
+/// Check if a name is a Rust primitive type, prelude type, or should be skipped
 pub fn is_primitive_or_prelude(name: &str) -> bool {
+    is_rust_builtin(name)
+}
+
+/// Check if a name is a Rust primitive type, prelude type, or should be skipped
+pub fn is_rust_builtin(name: &str) -> bool {
     // Underscore is used for unused bindings
     if name == "_" {
         return true;
@@ -205,6 +210,315 @@ pub fn is_primitive_or_prelude(name: &str) -> bool {
             // Path types (very commonly used)
             | "Path"
             | "PathBuf"
+    )
+}
+
+/// Check if a name is a JavaScript/TypeScript builtin or global
+pub fn is_javascript_builtin(name: &str) -> bool {
+    // Underscore is used for unused bindings
+    if name == "_" {
+        return true;
+    }
+
+    // Skip single-letter uppercase names (generic type parameters like T, U)
+    if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+        return true;
+    }
+
+    matches!(
+        name,
+        // JavaScript globals
+        "undefined"
+            | "null"
+            | "NaN"
+            | "Infinity"
+            | "globalThis"
+            | "window"
+            | "document"
+            | "navigator"
+            | "location"
+            | "history"
+            // Built-in constructors and types
+            | "Object"
+            | "Array"
+            | "String"
+            | "Number"
+            | "Boolean"
+            | "Symbol"
+            | "BigInt"
+            | "Function"
+            | "Date"
+            | "RegExp"
+            | "Error"
+            | "TypeError"
+            | "RangeError"
+            | "ReferenceError"
+            | "SyntaxError"
+            | "Map"
+            | "Set"
+            | "WeakMap"
+            | "WeakSet"
+            | "Promise"
+            | "Proxy"
+            | "Reflect"
+            | "JSON"
+            | "Math"
+            | "Intl"
+            | "ArrayBuffer"
+            | "DataView"
+            | "Int8Array"
+            | "Uint8Array"
+            | "Int16Array"
+            | "Uint16Array"
+            | "Int32Array"
+            | "Uint32Array"
+            | "Float32Array"
+            | "Float64Array"
+            // Global functions
+            | "console"
+            | "setTimeout"
+            | "setInterval"
+            | "clearTimeout"
+            | "clearInterval"
+            | "setImmediate"
+            | "clearImmediate"
+            | "fetch"
+            | "alert"
+            | "confirm"
+            | "prompt"
+            | "eval"
+            | "isNaN"
+            | "isFinite"
+            | "parseInt"
+            | "parseFloat"
+            | "encodeURI"
+            | "decodeURI"
+            | "encodeURIComponent"
+            | "decodeURIComponent"
+            | "atob"
+            | "btoa"
+            // Node.js globals
+            | "Buffer"
+            | "process"
+            | "global"
+            | "__dirname"
+            | "__filename"
+            | "module"
+            | "exports"
+            | "require"
+            // Web APIs
+            | "URL"
+            | "URLSearchParams"
+            | "Request"
+            | "Response"
+            | "Headers"
+            | "FormData"
+            | "Blob"
+            | "File"
+            | "FileReader"
+            | "AbortController"
+            | "AbortSignal"
+            | "Event"
+            | "EventTarget"
+            | "CustomEvent"
+            | "Element"
+            | "HTMLElement"
+            | "Node"
+            | "NodeList"
+            | "Document"
+            | "Window"
+            // TypeScript utility types
+            | "Partial"
+            | "Required"
+            | "Readonly"
+            | "Record"
+            | "Pick"
+            | "Omit"
+            | "Exclude"
+            | "Extract"
+            | "NonNullable"
+            | "ReturnType"
+            | "Parameters"
+            | "InstanceType"
+            | "ThisType"
+            | "Awaited"
+            | "ConstructorParameters"
+            | "ThisParameterType"
+            | "OmitThisParameter"
+            | "Uppercase"
+            | "Lowercase"
+            | "Capitalize"
+            | "Uncapitalize"
+            // Common type names
+            | "any"
+            | "unknown"
+            | "never"
+            | "void"
+            | "string"
+            | "number"
+            | "boolean"
+            | "object"
+            | "symbol"
+            | "bigint"
+    )
+}
+
+/// Check if a name is a Python builtin type, function, or should be skipped
+pub fn is_python_builtin(name: &str) -> bool {
+    // Underscore is used for unused bindings
+    if name == "_" {
+        return true;
+    }
+
+    // Skip single-letter uppercase names (generic type parameters like T, U)
+    if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+        return true;
+    }
+
+    matches!(
+        name,
+        // Built-in types
+        "int"
+            | "float"
+            | "str"
+            | "bool"
+            | "bytes"
+            | "bytearray"
+            | "list"
+            | "dict"
+            | "set"
+            | "frozenset"
+            | "tuple"
+            | "type"
+            | "object"
+            | "complex"
+            | "range"
+            | "slice"
+            | "memoryview"
+            // Built-in constants
+            | "None"
+            | "True"
+            | "False"
+            | "Ellipsis"
+            | "NotImplemented"
+            // Self references
+            | "self"
+            | "cls"
+            // Built-in functions
+            | "print"
+            | "len"
+            | "enumerate"
+            | "zip"
+            | "map"
+            | "filter"
+            | "sorted"
+            | "reversed"
+            | "iter"
+            | "next"
+            | "open"
+            | "input"
+            | "isinstance"
+            | "issubclass"
+            | "hasattr"
+            | "getattr"
+            | "setattr"
+            | "delattr"
+            | "super"
+            | "property"
+            | "staticmethod"
+            | "classmethod"
+            | "abs"
+            | "all"
+            | "any"
+            | "bin"
+            | "hex"
+            | "oct"
+            | "ord"
+            | "chr"
+            | "repr"
+            | "callable"
+            | "compile"
+            | "eval"
+            | "exec"
+            | "globals"
+            | "locals"
+            | "vars"
+            | "dir"
+            | "id"
+            | "hash"
+            | "min"
+            | "max"
+            | "sum"
+            | "pow"
+            | "round"
+            | "divmod"
+            | "format"
+            | "ascii"
+            | "breakpoint"
+            // Typing module types (commonly used without import)
+            | "List"
+            | "Dict"
+            | "Set"
+            | "Tuple"
+            | "FrozenSet"
+            | "Optional"
+            | "Union"
+            | "Any"
+            | "Callable"
+            | "Type"
+            | "Sequence"
+            | "Mapping"
+            | "MutableMapping"
+            | "MutableSequence"
+            | "MutableSet"
+            | "Iterator"
+            | "Iterable"
+            | "Generator"
+            | "Coroutine"
+            | "AsyncIterator"
+            | "AsyncIterable"
+            | "AsyncGenerator"
+            | "Awaitable"
+            | "Generic"
+            | "Protocol"
+            | "Final"
+            | "Literal"
+            | "ClassVar"
+            | "TypeVar"
+            | "TypeAlias"
+            | "TypeGuard"
+            | "ParamSpec"
+            | "Concatenate"
+            | "Self"
+            | "Never"
+            | "NoReturn"
+            // Common exception types
+            | "Exception"
+            | "BaseException"
+            | "ValueError"
+            | "TypeError"
+            | "KeyError"
+            | "IndexError"
+            | "AttributeError"
+            | "RuntimeError"
+            | "StopIteration"
+            | "StopAsyncIteration"
+            | "GeneratorExit"
+            | "ImportError"
+            | "ModuleNotFoundError"
+            | "OSError"
+            | "IOError"
+            | "FileNotFoundError"
+            | "PermissionError"
+            | "TimeoutError"
+            | "AssertionError"
+            | "NotImplementedError"
+            | "RecursionError"
+            | "SyntaxError"
+            | "IndentationError"
+            | "TabError"
+            | "SystemExit"
+            | "KeyboardInterrupt"
     )
 }
 

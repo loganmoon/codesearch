@@ -6,8 +6,8 @@
 #![allow(dead_code)]
 
 use codesearch_languages::tsg::{
-    build_intra_file_edges, categorize_unresolved, is_javascript_builtin, is_python_builtin,
-    EvaluationResult, ResolutionNode, ResolutionNodeKind, TsgExecutor,
+    build_intra_file_edges, categorize_unresolved, EvaluationResult, ResolutionNode,
+    ResolutionNodeKind, TsgExecutor,
 };
 use git2::Repository;
 use std::collections::HashMap;
@@ -41,7 +41,6 @@ pub struct DetailedEvaluation {
 pub struct EvalConfig<'a> {
     pub extension: &'a str,
     pub skip_dirs: &'a [&'a str],
-    pub is_builtin: fn(&str) -> bool,
 }
 
 /// JavaScript evaluation configuration
@@ -49,7 +48,6 @@ pub fn javascript_config() -> EvalConfig<'static> {
     EvalConfig {
         extension: "js",
         skip_dirs: &["node_modules", "dist", "build", ".git", "coverage"],
-        is_builtin: is_javascript_builtin,
     }
 }
 
@@ -58,7 +56,6 @@ pub fn typescript_config() -> EvalConfig<'static> {
     EvalConfig {
         extension: "ts",
         skip_dirs: &["node_modules", "dist", "build", ".git", "coverage", "lib"],
-        is_builtin: is_javascript_builtin, // TS uses same builtins
     }
 }
 
@@ -77,7 +74,6 @@ pub fn python_config() -> EvalConfig<'static> {
             ".eggs",
             "*.egg-info",
         ],
-        is_builtin: is_python_builtin,
     }
 }
 
@@ -135,36 +131,15 @@ pub fn evaluate_directory(
                 ResolutionNodeKind::Definition => result.definition_count += 1,
                 ResolutionNodeKind::Export => result.export_count += 1,
                 ResolutionNodeKind::Import => result.import_count += 1,
-                ResolutionNodeKind::Reference => {
-                    // Only count non-builtin references for resolution rate calculation
-                    if !(config.is_builtin)(&node.name) {
-                        result.reference_count += 1;
-                    }
-                }
+                ResolutionNodeKind::Reference => result.reference_count += 1,
             }
         }
 
-        // Filter out builtins before resolution
-        let filtered_nodes: Vec<_> = nodes
-            .iter()
-            .filter(|n| {
-                if n.kind == ResolutionNodeKind::Reference {
-                    !(config.is_builtin)(&n.name)
-                } else {
-                    true
-                }
-            })
-            .cloned()
-            .collect();
-
-        let (resolved, unresolved) = build_intra_file_edges(&filtered_nodes);
+        // build_intra_file_edges now handles filtering internally
+        let (resolved, unresolved) = build_intra_file_edges(&nodes);
         result.intra_file_resolved += resolved;
 
         for unresolved_ref in &unresolved {
-            // Skip builtins in unresolved count
-            if (config.is_builtin)(&unresolved_ref.name) {
-                continue;
-            }
             result.unresolved += 1;
             let category = categorize_unresolved(unresolved_ref);
             *result

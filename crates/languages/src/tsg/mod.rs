@@ -28,10 +28,7 @@ pub use cross_file_eval::{
     evaluate_cross_file_resolution, evaluate_cross_file_resolution_with_config,
     CrossFileEvalConfig, CrossFileEvalStats,
 };
-pub use evaluation::{
-    build_intra_file_edges, categorize_unresolved, is_javascript_builtin, is_primitive_or_prelude,
-    is_python_builtin, is_rust_builtin, EvaluationResult,
-};
+pub use evaluation::{build_intra_file_edges, categorize_unresolved, EvaluationResult};
 pub use executor::{
     TsgExecutor, JAVASCRIPT_TSG_RULES, PYTHON_TSG_RULES, RUST_TSG_RULES, TYPESCRIPT_TSG_RULES,
 };

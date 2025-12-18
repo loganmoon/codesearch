@@ -706,6 +706,9 @@ pub fn is_javascript_builtin(name: &str) -> bool {
 
 /// Check if a name is a Python builtin type, function, or should be skipped
 pub fn is_python_builtin(name: &str) -> bool {
+    // Handle forward reference strings (e.g., "Position" -> Position)
+    let name = name.trim_matches('"').trim_matches('\'');
+
     // Underscore is used for unused bindings
     if name == "_" {
         return true;
@@ -870,7 +873,11 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "TabError"
             | "SystemExit"
             | "KeyboardInterrupt"
-            // pathlib.Path methods
+            // pathlib module
+            | "Path"
+            | "PurePath"
+            | "PosixPath"
+            | "WindowsPath"
             | "write_text"
             | "read_text"
             | "write_bytes"
@@ -911,6 +918,30 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "getenv"
             | "putenv"
             | "path"
+            | "execvpe"
+            | "execvp"
+            | "execve"
+            | "execv"
+            // os.path functions
+            | "abspath"
+            | "basename"
+            | "dirname"
+            | "isfile"
+            | "isdir"
+            | "isabs"
+            | "islink"
+            | "expanduser"
+            | "expandvars"
+            | "normpath"
+            | "realpath"
+            | "relpath"
+            | "commonpath"
+            | "commonprefix"
+            | "splitext"
+            | "getsize"
+            | "getatime"
+            | "getmtime"
+            | "getctime"
             // logging module
             | "getLogger"
             | "debug"
@@ -930,6 +961,10 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "skipif"
             | "xfail"
             | "fail"
+            | "importorskip"
+            | "MonkeyPatch"
+            | "delenv"
+            | "setenv"
             // unittest.mock methods
             | "MagicMock"
             | "Mock"
@@ -941,12 +976,23 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "assert_called_once_with"
             | "assert_not_called"
             | "assert_any_call"
+            | "assert_has_calls"
             | "reset_mock"
             | "return_value"
             | "side_effect"
-            // click testing
+            // click framework and testing
             | "invoke"
             | "CliRunner"
+            | "Command"
+            | "Group"
+            | "Choice"
+            | "isolated_filesystem"
+            // re module
+            | "sub"
+            | "subn"
+            | "findall"
+            | "finditer"
+            | "fullmatch"
             // IPython
             | "run_line_magic"
             | "run_cell_magic"
@@ -1000,6 +1046,20 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "stderr"
             | "version"
             | "modules"
+            | "_getframe"
+            | "gettrace"
+            | "settrace"
+            // json module
+            | "dumps"
+            | "loads"
+            | "dump"
+            | "load"
+            | "JSONDecodeError"
+            // shlex module
+            | "quote"
+            | "shlex"
+            // builtins
+            | "__import__"
             // click framework
             | "echo"
             | "argument"
@@ -1008,6 +1068,8 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "group"
             | "pass_context"
             | "Context"
+            | "version_option"
+            | "help_option"
             // textwrap
             | "dedent"
             | "indent"
@@ -1025,10 +1087,30 @@ pub fn is_python_builtin(name: &str) -> bool {
             | "mkstemp"
             | "mkdtemp"
             | "gettempdir"
-            // stat/os chmod
+            // stat module
             | "chmod"
             | "chown"
             | "stat"
+            | "S_ISFIFO"
+            | "S_ISREG"
+            | "S_ISDIR"
+            | "S_ISLNK"
+            | "S_ISSOCK"
+            | "S_ISBLK"
+            | "S_ISCHR"
+            // subprocess module
+            | "communicate"
+            | "wait"
+            | "poll"
+            | "Popen"
+            | "PIPE"
+            | "STDOUT"
+            | "CalledProcessError"
+            // zipfile module
+            | "ZipFile"
+            | "writestr"
+            | "namelist"
+            | "extractall"
             // shutil
             | "copyfile"
             | "copytree"

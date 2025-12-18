@@ -61,6 +61,22 @@
   attr (@def.node) end_row = (end-row @def)
 }
 
+; Type alias definitions: TypeName = Union[...], TypeName = Optional[...]
+; Captures module-level assignments where RHS is a generic type (subscript)
+(module
+  (expression_statement
+    (assignment
+      left: (identifier) @name
+      right: (subscript))) @def)
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
 ; ============================================================
 ; IMPORTS - Import statements
 ; ============================================================

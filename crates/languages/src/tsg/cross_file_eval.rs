@@ -257,8 +257,11 @@ pub fn evaluate_cross_file_resolution_with_config(
                 continue;
             }
 
+            // Normalize the name (strip quotes from forward references like "Position")
+            let name = node.name.trim_matches('"').trim_matches('\'');
+
             // Skip references to external imports - these are outside our codebase
-            if external_imports.contains(node.name.as_str()) {
+            if external_imports.contains(name) {
                 continue;
             }
 
@@ -267,11 +270,11 @@ pub fn evaluate_cross_file_resolution_with_config(
             // Try to resolve: first local definitions, then internal imports, then global definitions
             // Global definitions handle cases like `module.function()` where function is defined
             // in another file but accessed through a module import
-            if local_definitions.contains(node.name.as_str()) {
+            if local_definitions.contains(name) {
                 stats.resolved_via_local_definition += 1;
-            } else if internal_imports.contains(node.name.as_str()) {
+            } else if internal_imports.contains(name) {
                 stats.resolved_via_import += 1;
-            } else if definitions_by_name.contains_key(node.name.as_str()) {
+            } else if definitions_by_name.contains_key(name) {
                 // Reference matches a definition somewhere in the codebase
                 // (e.g., dotenv.load_dotenv where load_dotenv is defined in another file)
                 stats.resolved_via_import += 1;
@@ -279,7 +282,7 @@ pub fn evaluate_cross_file_resolution_with_config(
                 stats.references_unresolved += 1;
                 *stats
                     .unresolved_reference_names
-                    .entry(node.name.clone())
+                    .entry(name.to_string())
                     .or_insert(0) += 1;
             }
         }

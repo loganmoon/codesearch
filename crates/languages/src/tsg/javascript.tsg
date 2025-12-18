@@ -25,7 +25,7 @@
 ; Exported function declarations: `export function foo() {}`
 (export_statement
   declaration: (function_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_fdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -40,7 +40,7 @@
 (export_statement
   "default" @_default
   declaration: (function_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_fdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -66,7 +66,7 @@
 ; Exported class declarations: `export class Foo {}`
 (export_statement
   declaration: (class_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_cdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -81,7 +81,7 @@
 (export_statement
   "default" @_default
   declaration: (class_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_cdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -110,7 +110,7 @@
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
-    value: (arrow_function) @_arrow) @decl) @def
+    value: (arrow_function) @_arrow) @_decl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -125,7 +125,7 @@
   declaration: (lexical_declaration
     (variable_declarator
       name: (identifier) @name
-      value: (arrow_function) @_arrow) @_decl) @def) @_export
+      value: (arrow_function) @_arrow) @_decl) @_lexdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -140,7 +140,7 @@
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
-    value: (function_expression) @_func) @decl) @def
+    value: (function_expression) @_func) @_decl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -155,7 +155,7 @@
   declaration: (lexical_declaration
     (variable_declarator
       name: (identifier) @name
-      value: (function_expression) @_func) @_decl) @def) @_export
+      value: (function_expression) @_func) @_decl) @_lexdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -164,6 +164,50 @@
   attr (@def.node) visibility = "export"
   attr (@def.node) start_row = (start-row @def)
   attr (@def.node) end_row = (end-row @def)
+}
+
+; Simple variable declarations: `const/let foo = value`
+; This captures all variable bindings (including those to non-function values)
+; Note: This rule may create duplicate nodes for arrow/function expressions,
+; which is acceptable as the definitions have the same name
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name) @def) @_lexdecl
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "variable"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @_lexdecl)
+  attr (@def.node) end_row = (end-row @_lexdecl)
+}
+
+; Destructuring assignment with object pattern: `const { foo, bar } = obj`
+(lexical_declaration
+  (variable_declarator
+    name: (object_pattern
+      (shorthand_property_identifier_pattern) @def))) @_lexdecl
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "variable"
+  attr (@def.node) name = (source-text @def)
+  attr (@def.node) start_row = (start-row @_lexdecl)
+  attr (@def.node) end_row = (end-row @_lexdecl)
+}
+
+; Destructuring assignment with array pattern: `const [a, b] = arr`
+(lexical_declaration
+  (variable_declarator
+    name: (array_pattern
+      (identifier) @def))) @_lexdecl
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "variable"
+  attr (@def.node) name = (source-text @def)
+  attr (@def.node) start_row = (start-row @_lexdecl)
+  attr (@def.node) end_row = (end-row @_lexdecl)
 }
 
 ; ============================================================

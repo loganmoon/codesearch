@@ -839,4 +839,42 @@ class MyClass(BaseClass):
             "Should reference BaseClass"
         );
     }
+
+    #[test]
+    fn test_javascript_variable_declarations() {
+        let source = r#"
+const foo = () => {}
+let bar = customAlphabet()
+const { a, b } = obj
+export function exported() {}
+"#;
+
+        let mut executor = TsgExecutor::new_javascript().unwrap();
+        let nodes = executor.extract(source, &PathBuf::from("test.js")).unwrap();
+
+        let definitions: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.kind == ResolutionNodeKind::Definition)
+            .collect();
+
+        println!(
+            "JavaScript definitions: {:?}",
+            definitions.iter().map(|d| &d.name).collect::<Vec<_>>()
+        );
+
+        // Should have definitions for foo, bar, a, b, and exported
+        let def_names: Vec<_> = definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            def_names.contains(&"foo"),
+            "Should have definition for 'foo'"
+        );
+        assert!(
+            def_names.contains(&"bar"),
+            "Should have definition for 'bar'"
+        );
+        assert!(
+            def_names.contains(&"exported"),
+            "Should have definition for 'exported'"
+        );
+    }
 }

@@ -28,7 +28,7 @@
 ; Exported function declarations: `export function foo() {}`
 (export_statement
   declaration: (function_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_fdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -43,7 +43,7 @@
 (export_statement
   "default" @_default
   declaration: (function_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_fdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -69,7 +69,7 @@
 ; Exported class declarations: `export class Foo {}`
 (export_statement
   declaration: (class_declaration
-    name: (type_identifier) @name) @def) @_export
+    name: (type_identifier) @name) @_cdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -84,7 +84,7 @@
 (export_statement
   "default" @_default
   declaration: (class_declaration
-    name: (type_identifier) @name) @def) @_export
+    name: (type_identifier) @name) @_cdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -110,7 +110,7 @@
 ; Exported abstract class declarations: `export abstract class Foo {}`
 (export_statement
   declaration: (abstract_class_declaration
-    name: (type_identifier) @name) @def) @_export
+    name: (type_identifier) @name) @_acdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -136,7 +136,7 @@
 ; Exported interface declarations: `export interface Foo {}`
 (export_statement
   declaration: (interface_declaration
-    name: (type_identifier) @name) @def) @_export
+    name: (type_identifier) @name) @_idecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -162,7 +162,7 @@
 ; Exported type alias declarations: `export type Foo = {}`
 (export_statement
   declaration: (type_alias_declaration
-    name: (type_identifier) @name) @def) @_export
+    name: (type_identifier) @name) @_tadecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -188,7 +188,7 @@
 ; Exported enum declarations: `export enum Foo {}`
 (export_statement
   declaration: (enum_declaration
-    name: (identifier) @name) @def) @_export
+    name: (identifier) @name) @_edecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -231,7 +231,7 @@
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
-    value: (arrow_function) @_arrow) @decl) @def
+    value: (arrow_function) @_arrow) @_decl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -246,7 +246,7 @@
   declaration: (lexical_declaration
     (variable_declarator
       name: (identifier) @name
-      value: (arrow_function) @_arrow) @_decl) @def) @_export
+      value: (arrow_function) @_arrow) @_decl) @_lexdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -261,7 +261,7 @@
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
-    value: (function_expression) @_func) @decl) @def
+    value: (function_expression) @_func) @_decl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"
@@ -276,7 +276,7 @@
   declaration: (lexical_declaration
     (variable_declarator
       name: (identifier) @name
-      value: (function_expression) @_func) @_decl) @def) @_export
+      value: (function_expression) @_func) @_decl) @_lexdecl) @def
 {
   node @def.node
   attr (@def.node) type = "Definition"

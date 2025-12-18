@@ -19,11 +19,15 @@ pub mod executor;
 pub mod graph_types;
 pub mod resolution;
 
-#[cfg(test)]
-pub mod codebase_eval;
-#[cfg(test)]
 pub mod cross_file_eval;
 
+#[cfg(test)]
+pub mod codebase_eval;
+
+pub use cross_file_eval::{
+    evaluate_cross_file_resolution, evaluate_cross_file_resolution_with_config,
+    CrossFileEvalConfig, CrossFileEvalStats,
+};
 pub use evaluation::{
     build_intra_file_edges, categorize_unresolved, is_javascript_builtin, is_primitive_or_prelude,
     is_python_builtin, is_rust_builtin, EvaluationResult,

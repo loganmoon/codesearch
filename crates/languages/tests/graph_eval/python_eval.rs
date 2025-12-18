@@ -1,15 +1,8 @@
-//! Evaluation test for Python TSG extraction on the python-dotenv codebase
+//! Integration test for Python TSG extraction evaluation on the python-dotenv codebase
 //!
-//! This test clones the python-dotenv repository (BSD licensed) and evaluates
-//! our Python TSG extraction against it.
-//!
-//! Run with: cargo test -p codesearch-languages --test python_tsg_eval_test -- --ignored --nocapture
-//!
-//! This test uses cross-file resolution to evaluate how well references can be
-//! resolved through imports to definitions in other files.
+//! Run with: cargo test -p codesearch-languages --test graph_eval python -- --ignored --nocapture
 
-mod common;
-
+use crate::common;
 use codesearch_languages::tsg::{
     evaluate_cross_file_resolution_with_config, CrossFileEvalConfig, TsgExecutor,
 };
@@ -21,12 +14,15 @@ const TARGET_RATE: f64 = 0.80;
 #[test]
 #[ignore] // Requires network access
 fn test_evaluate_python_dotenv_codebase() {
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let temp_dir =
+        TempDir::new().unwrap_or_else(|e| panic!("Failed to create temp directory: {e}"));
     let repo_path = temp_dir.path().join("python-dotenv");
 
-    let cloned_path = common::clone_repo(REPO_URL, &repo_path).expect("Failed to clone repository");
+    let cloned_path = common::clone_repo(REPO_URL, &repo_path)
+        .unwrap_or_else(|e| panic!("Failed to clone python-dotenv repository: {e}"));
 
-    let executor = TsgExecutor::new_python().expect("Failed to create Python TSG executor");
+    let executor = TsgExecutor::new_python()
+        .unwrap_or_else(|e| panic!("Failed to create Python executor: {e}"));
 
     let config = CrossFileEvalConfig {
         extension: "py",
@@ -36,21 +32,19 @@ fn test_evaluate_python_dotenv_codebase() {
             "venv",
             ".tox",
             ".git",
-            "dist",
             "build",
+            "dist",
             ".eggs",
+            "*.egg-info",
         ],
     };
 
     let stats = evaluate_cross_file_resolution_with_config(&cloned_path, executor, &config)
-        .expect("Failed to evaluate cross-file resolution");
+        .unwrap_or_else(|e| panic!("Failed to evaluate cross-file resolution: {e}"));
 
     stats.print_summary();
 
-    assert!(
-        stats.total_files > 0,
-        "Should process at least one Python file"
-    );
+    assert!(stats.total_files > 0, "Should process at least one file");
     assert!(
         stats.total_definitions > 0,
         "Should extract at least one definition"

@@ -1,38 +1,36 @@
-//! Integration test for TypeScript TSG extraction evaluation on the ms codebase
+//! Integration test for JavaScript TSG extraction evaluation on the nanoid codebase
 //!
-//! Run with: cargo test -p codesearch-languages --test typescript_tsg_eval_test -- --ignored --nocapture
-//!
-//! This test uses cross-file resolution to evaluate how well references can be
-//! resolved through imports to definitions in other files.
+//! Run with: cargo test -p codesearch-languages --test graph_eval javascript -- --ignored --nocapture
 
-mod common;
-
+use crate::common;
 use codesearch_languages::tsg::{
     evaluate_cross_file_resolution_with_config, CrossFileEvalConfig, TsgExecutor,
 };
 use tempfile::TempDir;
 
-const REPO_URL: &str = "https://github.com/vercel/ms";
+const REPO_URL: &str = "https://github.com/ai/nanoid";
 const TARGET_RATE: f64 = 0.80;
 
 #[test]
 #[ignore] // Requires network access
-fn test_evaluate_ms_codebase() {
-    let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    let repo_path = temp_dir.path().join("ms");
+fn test_evaluate_nanoid_codebase() {
+    let temp_dir =
+        TempDir::new().unwrap_or_else(|e| panic!("Failed to create temp directory: {e}"));
+    let repo_path = temp_dir.path().join("nanoid");
 
-    let cloned_path =
-        common::clone_repo(REPO_URL, &repo_path).expect("Failed to clone ms repository");
+    let cloned_path = common::clone_repo(REPO_URL, &repo_path)
+        .unwrap_or_else(|e| panic!("Failed to clone nanoid repository: {e}"));
 
-    let executor = TsgExecutor::new_typescript().expect("Failed to create TypeScript executor");
+    let executor = TsgExecutor::new_javascript()
+        .unwrap_or_else(|e| panic!("Failed to create JavaScript executor: {e}"));
 
     let config = CrossFileEvalConfig {
-        extension: "ts",
-        skip_dirs: &["node_modules", "dist", "build", ".git", "coverage", "lib"],
+        extension: "js",
+        skip_dirs: &["node_modules", "dist", "build", ".git", "coverage"],
     };
 
     let stats = evaluate_cross_file_resolution_with_config(&cloned_path, executor, &config)
-        .expect("Failed to evaluate cross-file resolution");
+        .unwrap_or_else(|e| panic!("Failed to evaluate cross-file resolution: {e}"));
 
     stats.print_summary();
 

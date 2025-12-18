@@ -157,18 +157,12 @@ pub async fn resolve_pending_from_postgres(
         let pending_ids: Vec<i64> = resolved.iter().map(|(id, _, _, _)| *id).collect();
 
         // Build relationship tuples for Neo4j
-        // For CONTAINS: target (parent) -[CONTAINS]-> source (child)
-        // For other types: source -[REL_TYPE]-> target
+        // All relationships: source -[REL_TYPE]-> target
+        // For CONTAINS: source = parent, target = child (parent CONTAINS child)
         let relationships: Vec<(String, String, String)> = resolved
             .into_iter()
             .map(|(_, source_entity_id, target_entity_id, rel_type)| {
-                if rel_type == "CONTAINS" {
-                    // CONTAINS is inverted: parent contains child
-                    (target_entity_id, source_entity_id, rel_type)
-                } else {
-                    // Other relationships: source -> target
-                    (source_entity_id, target_entity_id, rel_type)
-                }
+                (source_entity_id, target_entity_id, rel_type)
             })
             .collect();
 

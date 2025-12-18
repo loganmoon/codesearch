@@ -1460,11 +1460,19 @@ impl PostgresClient {
             .map(|(entity, ..)| (**entity).clone())
             .collect();
 
-        // Build qualified_name -> entity_id map for O(1) relationship resolution
-        let name_to_id: std::collections::HashMap<&str, &str> = entities_in_batch
-            .iter()
-            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
-            .collect();
+        // Build name -> entity_id map for O(1) relationship resolution
+        // Include both qualified_name and simple name as keys to handle parent_scope lookups
+        // (parent_scope may be just the name, not the full qualified_name)
+        let mut name_to_id: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::with_capacity(entities_in_batch.len() * 2);
+        for entity in &entities_in_batch {
+            // Add qualified_name as primary key
+            name_to_id.insert(entity.qualified_name.as_str(), entity.entity_id.as_str());
+            // Also add simple name (only if not already present to avoid collisions)
+            name_to_id
+                .entry(entity.name.as_str())
+                .or_insert(entity.entity_id.as_str());
+        }
 
         let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_outbox (
@@ -2256,21 +2264,43 @@ impl PostgresClient {
         repository_id: Uuid,
         limit: i64,
     ) -> Result<Vec<(i64, String, String, String)>> {
+        // Resolve pending relationships by joining to entity_metadata for both source and target.
+        // source_entity_id can be either:
+        //   - An entity_id (for resolved relationships)
+        //   - A qualified_name (for unresolved CONTAINS relationships)
+        //   - A simple name (when parent_scope is just the name, not full qualified_name)
+        // We use LEFT JOIN to try to resolve source, falling back to as-is.
         let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-            "SELECT pr.id::BIGINT, pr.source_entity_id, e.entity_id AS target_entity_id, pr.relationship_type
+            "SELECT pr.id::BIGINT,
+                    COALESCE(src.entity_id, pr.source_entity_id) AS source_entity_id,
+                    target.entity_id AS target_entity_id,
+                    pr.relationship_type
              FROM pending_relationships pr
-             JOIN entity_metadata e
-               ON pr.repository_id = e.repository_id
-               AND e.deleted_at IS NULL
+             -- Resolve target by qualified_name
+             JOIN entity_metadata target
+               ON pr.repository_id = target.repository_id
+               AND target.deleted_at IS NULL
                AND (
                  -- Exact match
-                 e.qualified_name = pr.target_qualified_name
+                 target.qualified_name = pr.target_qualified_name
                  -- Match after stripping external::/crate:: prefixes
-                 OR e.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', '')
+                 OR target.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', '')
                  -- Match after stripping generic parameters <...>
-                 OR e.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '<[^>]*>$', '')
+                 OR target.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '<[^>]*>$', '')
                  -- Match after stripping both prefixes and generics
-                 OR e.qualified_name = REGEXP_REPLACE(REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', ''), '<[^>]*>$', '')
+                 OR target.qualified_name = REGEXP_REPLACE(REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', ''), '<[^>]*>$', '')
+               )
+             -- Optionally resolve source (for unresolved CONTAINS with qualified_name or name)
+             LEFT JOIN entity_metadata src
+               ON pr.repository_id = src.repository_id
+               AND src.deleted_at IS NULL
+               AND (
+                 -- Exact match on qualified_name
+                 src.qualified_name = pr.source_entity_id
+                 -- Match by name (when parent_scope is just the simple name)
+                 OR src.name = pr.source_entity_id
+                 -- Match when qualified_name ends with the source (suffix match)
+                 OR src.qualified_name LIKE '%.' || pr.source_entity_id
                )
              WHERE pr.repository_id = $1
              LIMIT $2",

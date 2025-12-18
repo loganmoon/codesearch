@@ -211,3 +211,66 @@ function topLevelFunction() {
     assert_eq!(entity.qualified_name, "topLevelFunction");
     assert!(entity.parent_scope.is_none());
 }
+
+#[test]
+fn test_export_default_function() {
+    // Test that export default function is extracted
+    let source = r#"
+export default function pLimit(concurrency) {
+    const queue = [];
+    let activeCount = 0;
+
+    const next = () => {
+        activeCount--;
+    };
+
+    return next;
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    // Should extract pLimit
+    assert_eq!(entities.len(), 1, "Should extract the exported function");
+    let entity = &entities[0];
+    assert_eq!(entity.name, "pLimit");
+    assert_eq!(entity.qualified_name, "pLimit");
+}
+
+#[test]
+fn test_nested_arrow_functions_have_parent_scope() {
+    // Test that arrow functions inside a function have parent_scope set
+    let source = r#"
+function outer() {
+    const inner = () => {
+        return 42;
+    };
+    return inner;
+}
+"#;
+
+    // First extract the outer function
+    let outer_entities =
+        extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+            .expect("Failed to extract outer function");
+    assert_eq!(outer_entities.len(), 1);
+    assert_eq!(outer_entities[0].name, "outer");
+
+    // Now extract the arrow function
+    let inner_entities = extract_with_handler(
+        source,
+        queries::ARROW_FUNCTION_QUERY,
+        handle_arrow_function_impl,
+    )
+    .expect("Failed to extract arrow function");
+    assert_eq!(inner_entities.len(), 1);
+    let inner = &inner_entities[0];
+    assert_eq!(inner.name, "inner");
+    assert_eq!(
+        inner.parent_scope.as_deref(),
+        Some("outer"),
+        "Arrow function inside function_declaration should have parent_scope"
+    );
+    assert_eq!(inner.qualified_name, "outer.inner");
+}

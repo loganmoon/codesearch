@@ -877,4 +877,50 @@ export function exported() {}
             "Should have definition for 'exported'"
         );
     }
+
+    #[test]
+    fn test_associated_type_not_extracted() {
+        // Test that associated types in impl blocks are NOT extracted as definitions
+        // Only top-level type aliases should be extracted
+        let source = r#"
+use std::str::FromStr;
+
+type TopLevel = String;
+
+impl FromStr for Foo {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Foo)
+    }
+}
+"#;
+        let mut executor = TsgExecutor::new_rust().unwrap();
+        let nodes = executor.extract(source, &PathBuf::from("test.rs")).unwrap();
+
+        println!("\n=== All definitions ===");
+        for node in &nodes {
+            if node.kind == ResolutionNodeKind::Definition {
+                println!(
+                    "DEF: {} ({:?}) at line {}",
+                    node.name, node.definition_kind, node.start_line
+                );
+            }
+        }
+
+        // TopLevel should be extracted as type_alias
+        let top_level = nodes.iter().find(|n| n.name == "TopLevel");
+        assert!(top_level.is_some(), "Should extract TopLevel type alias");
+
+        // Err should NOT be extracted as a DEFINITION
+        // (it's an associated type, not a top-level alias)
+        let err_def = nodes
+            .iter()
+            .find(|n| n.name == "Err" && n.kind == ResolutionNodeKind::Definition);
+        assert!(
+            err_def.is_none(),
+            "Should NOT extract associated type Err as definition, but found: {:?}",
+            err_def
+        );
+    }
 }

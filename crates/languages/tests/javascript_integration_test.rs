@@ -207,3 +207,88 @@ fn test_extract_multiple_entities() {
     assert!(names.contains(&"bar"));
     assert!(names.contains(&"Baz"));
 }
+
+#[test]
+fn test_extract_plimit_structure() {
+    // Test extraction of p-limit style code (export default function with nested arrows)
+    let source = r#"
+import Queue from 'yocto-queue';
+
+export default function pLimit(concurrency) {
+    const queue = new Queue();
+    let activeCount = 0;
+
+    const next = () => {
+        activeCount--;
+        if (queue.size > 0) {
+            queue.dequeue()();
+        }
+    };
+
+    const run = async (fn, resolve, args) => {
+        activeCount++;
+        const result = (async () => fn(...args))();
+        resolve(result);
+        try {
+            await result;
+        } catch {}
+        next();
+    };
+
+    const enqueue = (fn, resolve, args) => {
+        queue.enqueue(run.bind(undefined, fn, resolve, args));
+    };
+
+    const generator = (fn, ...args) => new Promise(resolve => {
+        enqueue(fn, resolve, args);
+    });
+
+    return generator;
+}
+"#;
+
+    let extractor = create_extractor(Path::new("index.js"), "test-repo", None, None)
+        .expect("Failed to create extractor")
+        .expect("No extractor for .js");
+
+    let entities = extractor
+        .extract(source, Path::new("index.js"))
+        .expect("Failed to extract entities");
+
+    // Print all extracted entities for debugging
+    eprintln!(
+        "\nExtracted {} entities from p-limit structure:",
+        entities.len()
+    );
+    for entity in &entities {
+        eprintln!(
+            "  - {} ({:?}) parent_scope={:?}",
+            entity.name, entity.entity_type, entity.parent_scope
+        );
+    }
+
+    // Should extract pLimit function
+    let plimit = entities.iter().find(|e| e.name == "pLimit");
+    assert!(plimit.is_some(), "Should extract pLimit function");
+    assert!(
+        plimit.unwrap().parent_scope.is_none(),
+        "pLimit should have no parent"
+    );
+
+    // Should extract nested arrow functions with parent_scope
+    let next = entities.iter().find(|e| e.name == "next");
+    assert!(next.is_some(), "Should extract 'next' arrow function");
+    assert_eq!(
+        next.unwrap().parent_scope.as_deref(),
+        Some("pLimit"),
+        "'next' should have pLimit as parent"
+    );
+
+    let run = entities.iter().find(|e| e.name == "run");
+    assert!(run.is_some(), "Should extract 'run' arrow function");
+    assert_eq!(
+        run.unwrap().parent_scope.as_deref(),
+        Some("pLimit"),
+        "'run' should have pLimit as parent"
+    );
+}

@@ -1,7 +1,21 @@
 //! Cross-file resolution evaluation (in-memory simulation)
 //!
 //! This module simulates cross-file resolution without Neo4j by building
-//! in-memory lookup tables. This is useful for evaluation and testing.
+//! in-memory lookup tables. This is useful for quick TSG extraction quality
+//! evaluation during development.
+//!
+//! ## Note on Test Fidelity
+//!
+//! This in-memory simulation provides an approximation of resolution behavior.
+//! For comprehensive, high-fidelity resolution testing that exercises the
+//! complete pipeline (AST parsing → qualified name resolution → Neo4j graph
+//! creation → relationship resolution), use the E2E tests in:
+//!
+//! ```text
+//! crates/e2e-tests/tests/test_resolution_e2e.rs
+//! ```
+//!
+//! The E2E tests use real codebases and verify actual Neo4j graph structure.
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]

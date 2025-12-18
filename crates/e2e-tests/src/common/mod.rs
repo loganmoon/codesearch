@@ -49,10 +49,14 @@ pub fn codesearch_binary() -> std::path::PathBuf {
 
     BINARY_PATH
         .get_or_init(|| {
+            // CARGO_MANIFEST_DIR = crates/e2e-tests
+            // parent = crates/
+            // parent.parent = workspace root
             let manifest_dir = env!("CARGO_MANIFEST_DIR");
             let workspace_root = std::path::Path::new(manifest_dir)
                 .parent()
-                .expect("tests directory should have a parent");
+                .and_then(|p| p.parent())
+                .expect("e2e-tests crate should be in crates/ directory");
             let binary_path = workspace_root.join("target/debug/codesearch");
 
             if !binary_path.exists() {
@@ -78,7 +82,8 @@ pub fn workspace_manifest() -> std::path::PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     std::path::Path::new(manifest_dir)
         .parent()
-        .expect("tests directory should have a parent")
+        .and_then(|p| p.parent())
+        .expect("e2e-tests crate should be in crates/ directory")
         .join("Cargo.toml")
 }
 
@@ -115,6 +120,54 @@ pub fn run_cli_with_test_infra(
         .env("POSTGRES_DATABASE", db_name)
         .env("POSTGRES_USER", "codesearch")
         .env("POSTGRES_PASSWORD", "codesearch")
+        .output()
+        .context("Failed to run codesearch CLI")
+}
+
+/// Run the codesearch CLI with all infrastructure including Neo4j
+///
+/// This variant includes Neo4j configuration for full E2E testing including
+/// graph resolution. Uses the config file at `repo_path/codesearch.toml`.
+///
+/// # Arguments
+/// * `repo_path` - Repository directory to use as current directory
+/// * `args` - CLI arguments (e.g., `&["index"]`)
+/// * `qdrant` - Testcontainer Qdrant instance
+/// * `postgres` - Testcontainer Postgres instance
+/// * `neo4j` - Testcontainer Neo4j instance
+/// * `db_name` - Isolated test database name
+pub fn run_cli_with_full_infra(
+    repo_path: &Path,
+    args: &[&str],
+    qdrant: &Arc<TestQdrant>,
+    postgres: &Arc<TestPostgres>,
+    neo4j: &Arc<TestNeo4j>,
+    db_name: &str,
+) -> Result<std::process::Output> {
+    let config_path = repo_path.join("codesearch.toml");
+
+    // Build args with --config first
+    let mut full_args = vec!["--config", config_path.to_str().unwrap_or("codesearch.toml")];
+    full_args.extend(args.iter().copied());
+
+    Command::new(codesearch_binary())
+        .current_dir(repo_path)
+        .args(&full_args)
+        .env("RUST_LOG", "info")
+        // Override environment variables to use testcontainer ports
+        .env("QDRANT_HOST", "localhost")
+        .env("QDRANT_PORT", qdrant.port().to_string())
+        .env("QDRANT_REST_PORT", qdrant.rest_port().to_string())
+        .env("POSTGRES_HOST", "localhost")
+        .env("POSTGRES_PORT", postgres.port().to_string())
+        .env("POSTGRES_DATABASE", db_name)
+        .env("POSTGRES_USER", "codesearch")
+        .env("POSTGRES_PASSWORD", "codesearch")
+        .env("NEO4J_HOST", "localhost")
+        .env("NEO4J_BOLT_PORT", neo4j.bolt_port().to_string())
+        .env("NEO4J_HTTP_PORT", neo4j.http_port().to_string())
+        .env("NEO4J_USER", "neo4j")
+        .env("NEO4J_PASSWORD", "")
         .output()
         .context("Failed to run codesearch CLI")
 }

@@ -415,6 +415,92 @@ pub fn health_check() -> &'static str {
         .await
 }
 
+// =============================================================================
+// Real Codebase Fixtures
+// =============================================================================
+
+/// Clone a git repository at a specific tag/branch to a temp directory
+///
+/// This provides real-world codebases for comprehensive E2E testing.
+pub async fn git_clone(url: &str, tag: &str) -> Result<TempDir> {
+    let temp_dir = TempDir::new().context("Failed to create temp directory for clone")?;
+
+    let output = std::process::Command::new("git")
+        .args(["clone", "--depth", "1", "--branch", tag, url])
+        .arg(temp_dir.path())
+        .output()
+        .context("Failed to execute git clone")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "Failed to clone {url} at {tag}: {stderr}"
+        ));
+    }
+
+    Ok(temp_dir)
+}
+
+/// Clone the `anyhow` Rust crate for testing
+///
+/// anyhow is a small, well-structured error handling crate with:
+/// - Clear trait implementations
+/// - Good module organization
+/// - Comprehensive documentation
+///
+/// Expected: ~20-30 entities including structs, traits, impls, and functions
+pub async fn real_rust_crate_anyhow() -> Result<TempDir> {
+    git_clone("https://github.com/dtolnay/anyhow", "1.0.75").await
+}
+
+/// Clone the `thiserror` Rust crate for testing
+///
+/// thiserror is a derive macro crate with:
+/// - Procedural macro implementations
+/// - Trait definitions
+/// - Clean module structure
+///
+/// Expected: ~15-25 entities
+pub async fn real_rust_crate_thiserror() -> Result<TempDir> {
+    git_clone("https://github.com/dtolnay/thiserror", "1.0.50").await
+}
+
+/// Clone the `python-dotenv` Python package for testing
+///
+/// python-dotenv is a small Python package with:
+/// - Clear module structure
+/// - IPython integration
+/// - CLI interface
+///
+/// Expected: ~30-50 entities including classes, functions, and methods
+pub async fn real_python_package() -> Result<TempDir> {
+    git_clone("https://github.com/theskumar/python-dotenv", "v1.0.0").await
+}
+
+/// Clone a small TypeScript project for testing
+///
+/// p-limit is a concurrency limiter with:
+/// - Clean TypeScript types
+/// - ES module exports
+/// - Async/Promise patterns
+///
+/// Expected: ~10-20 entities
+pub async fn real_typescript_project() -> Result<TempDir> {
+    git_clone("https://github.com/sindresorhus/p-limit", "v4.0.0").await
+}
+
+/// Clone a JavaScript project for testing
+///
+/// ms is a tiny time parsing utility with:
+/// - Simple ES module structure
+/// - TypeScript type declarations
+/// - Well-tested codebase
+///
+/// Expected: ~5-15 entities
+pub async fn real_javascript_project() -> Result<TempDir> {
+    git_clone("https://github.com/vercel/ms", "2.1.3").await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

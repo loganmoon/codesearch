@@ -7,9 +7,10 @@ use codesearch_languages::tsg::{
 };
 use std::path::Path;
 
-// Slightly lower than 80% to account for prelude items (Err, Result, Ok, Some, None)
-// that appear as definitions in the codebase but are actually std prelude references
-const TARGET_RATE: f64 = 0.79;
+// Target rate for Rust. Remaining unresolved are mostly:
+// - Test helpers used across test files without imports
+// - Method calls requiring type-aware resolution
+const TARGET_RATE: f64 = 0.80;
 
 #[test]
 #[ignore] // Slow test

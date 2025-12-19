@@ -388,6 +388,58 @@ impl Neo4jClient {
         Ok(all_node_ids)
     }
 
+    /// Batch create External stub nodes for references to external/stdlib code
+    ///
+    /// Uses MERGE to create or update nodes, avoiding duplicates.
+    pub async fn batch_create_external_nodes(
+        &self,
+        external_refs: &[(String, String, Option<String>)],
+    ) -> Result<()> {
+        if external_refs.is_empty() {
+            return Ok(());
+        }
+
+        let _db = self.get_current_database().await?;
+
+        // Build list of external reference maps for UNWIND
+        let ref_maps: Vec<std::collections::HashMap<String, neo4rs::BoltType>> = external_refs
+            .iter()
+            .map(|(entity_id, qualified_name, package)| {
+                let mut map = std::collections::HashMap::new();
+                map.insert("id".to_string(), entity_id.clone().into());
+                map.insert("qualified_name".to_string(), qualified_name.clone().into());
+                // Extract simple name from qualified name
+                let name = qualified_name
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(qualified_name)
+                    .to_string();
+                map.insert("name".to_string(), name.into());
+                map.insert(
+                    "package".to_string(),
+                    package.clone().unwrap_or_default().into(),
+                );
+                map
+            })
+            .collect();
+
+        // MERGE on id to avoid duplicates, update properties if exists
+        let query_str = "UNWIND $refs AS ref
+             MERGE (n:External {id: ref.id})
+             SET n.qualified_name = ref.qualified_name,
+                 n.name = ref.name,
+                 n.package = ref.package";
+
+        let query = Query::new(query_str.to_string()).param("refs", ref_maps);
+
+        self.graph
+            .run(query)
+            .await
+            .context("Failed to create external nodes")?;
+
+        Ok(())
+    }
+
     /// Delete a node by entity_id
     pub async fn delete_entity_node(&self, entity_id: &str) -> Result<()> {
         let _db = self.get_current_database().await?;
@@ -1045,6 +1097,13 @@ impl Neo4jClientTrait for Neo4jClient {
 
     async fn batch_create_nodes(&self, entities: &[CodeEntity]) -> Result<Vec<i64>> {
         Self::batch_create_nodes(self, entities).await
+    }
+
+    async fn batch_create_external_nodes(
+        &self,
+        external_refs: &[(String, String, Option<String>)],
+    ) -> Result<()> {
+        Self::batch_create_external_nodes(self, external_refs).await
     }
 
     async fn delete_entity_node(&self, entity_id: &str) -> Result<()> {

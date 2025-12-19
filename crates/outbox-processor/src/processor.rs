@@ -2,7 +2,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::StorageConfig;
 use codesearch_storage::{
     create_storage_client_from_config, EmbeddedEntity, Neo4jClientTrait, QdrantConfig,
-    StorageClient, ALLOWED_RELATIONSHIP_TYPES,
+    StorageClient,
 };
 use codesearch_storage::{OutboxEntry, PostgresClientTrait};
 use moka::future::Cache;
@@ -33,7 +33,6 @@ pub struct OutboxProcessor {
     max_embedding_dim: usize,
     client_cache: Cache<String, Arc<dyn StorageClient>>,
     neo4j_client: Arc<Mutex<Option<Arc<dyn Neo4jClientTrait>>>>,
-    enable_per_batch_resolution: bool,
 }
 
 impl OutboxProcessor {
@@ -50,7 +49,6 @@ impl OutboxProcessor {
         max_retries: i32,
         max_embedding_dim: usize,
         max_cached_collections: u64,
-        enable_per_batch_resolution: bool,
     ) -> Self {
         Self {
             postgres_client,
@@ -64,7 +62,6 @@ impl OutboxProcessor {
                 .max_capacity(max_cached_collections)
                 .build(),
             neo4j_client: Arc::new(Mutex::new(None)),
-            enable_per_batch_resolution,
         }
     }
 
@@ -514,16 +511,6 @@ impl OutboxProcessor {
             "Batch processing completed"
         );
 
-        // Step 6: Resolve pending relationships after successful batch processing
-        // This runs outside the transaction to avoid holding locks during resolution
-        // In drain mode (index command), resolution is deferred until the outbox drains
-        if self.enable_per_batch_resolution {
-            if let Err(e) = self.resolve_pending_relationships().await {
-                warn!("Failed to resolve pending relationships: {}", e);
-                // Don't fail the batch processing if resolution fails - it will be retried next cycle
-            }
-        }
-
         Ok(true) // Work was done, check for more immediately
     }
 
@@ -914,13 +901,12 @@ impl OutboxProcessor {
 
             let mut processed_ids = Vec::new();
             let mut failed_ids = Vec::new();
-            let mut unresolved_relationships: Vec<(String, String, String)> = Vec::new();
 
             // Batch process INSERT/UPDATE operations
             if !insert_update_entries.is_empty() {
                 // Parse all entities first, tracking which ones succeed
                 let mut entities_to_create = Vec::new();
-                let mut entity_entry_map = Vec::new(); // (entity_idx, entry, payload)
+                let mut entity_entry_map: Vec<(&OutboxEntry, usize)> = Vec::new();
 
                 for entry in &insert_update_entries {
                     let payload: serde_json::Value = entry.payload.clone();
@@ -932,7 +918,7 @@ impl OutboxProcessor {
                         Ok(entity) => {
                             let idx = entities_to_create.len();
                             entities_to_create.push(entity);
-                            entity_entry_map.push((idx, *entry, payload));
+                            entity_entry_map.push((entry, idx));
                         }
                         Err(e) => {
                             warn!(
@@ -954,10 +940,10 @@ impl OutboxProcessor {
                             let mut node_id_updates: Vec<(Uuid, String, i64)> =
                                 Vec::with_capacity(entity_entry_map.len());
 
-                            // Process relationships and collect node ID updates
-                            for (idx, entry, payload) in entity_entry_map {
-                                if idx < neo4j_node_ids.len() {
-                                    let neo4j_node_id = neo4j_node_ids[idx];
+                            // Collect node ID updates and mark entries as processed
+                            for (entry, idx) in &entity_entry_map {
+                                if *idx < neo4j_node_ids.len() {
+                                    let neo4j_node_id = neo4j_node_ids[*idx];
 
                                     // Collect for bulk update
                                     node_id_updates.push((
@@ -965,118 +951,6 @@ impl OutboxProcessor {
                                         entry.entity_id.clone(),
                                         neo4j_node_id,
                                     ));
-
-                                    // Process relationships
-                                    let relationships: Vec<serde_json::Value> =
-                                        match serde_json::from_value(
-                                            payload["relationships"].clone(),
-                                        ) {
-                                            Ok(rels) => rels,
-                                            Err(e) => {
-                                                warn!(
-                                                    "Failed to parse relationships for entity {}: {}",
-                                                    entry.entity_id, e
-                                                );
-                                                Vec::new()
-                                            }
-                                        };
-
-                                    for rel in relationships {
-                                        // Extract required fields with proper error handling
-                                        let rel_type = match rel["type"].as_str() {
-                                            Some(t) => t,
-                                            None => {
-                                                warn!(
-                                                "Missing relationship type for entity {}, skipping relationship",
-                                                entry.entity_id
-                                            );
-                                                continue;
-                                            }
-                                        };
-                                        let resolved = rel["resolved"].as_bool().unwrap_or(false);
-
-                                        // Validate relationship type against allowlist (prevents Cypher injection)
-                                        if !ALLOWED_RELATIONSHIP_TYPES.contains(&rel_type) {
-                                            warn!(
-                                            "Invalid relationship type '{}' for entity {}, skipping. Allowed types: {:?}",
-                                            rel_type, entry.entity_id, ALLOWED_RELATIONSHIP_TYPES
-                                        );
-                                            continue;
-                                        }
-
-                                        if resolved {
-                                            // Resolved relationship: store in pending_relationships for post-batch resolution
-                                            // For CONTAINS: from_id is parent, current entity is child (target)
-                                            let from_id = match rel["from_id"].as_str() {
-                                                Some(id) if !id.is_empty() => id,
-                                                _ => {
-                                                    warn!(
-                                                    "Missing or empty from_id for {} relationship on entity {}, skipping",
-                                                    rel_type, entry.entity_id
-                                                );
-                                                    continue;
-                                                }
-                                            };
-
-                                            // Get the current entity's qualified_name for pending_relationships
-                                            let target_qname =
-                                                &entities_to_create[idx].qualified_name;
-
-                                            // Store for batch insert to PostgreSQL (same as unresolved)
-                                            // Format: (source_entity_id, rel_type, target_qualified_name)
-                                            unresolved_relationships.push((
-                                                from_id.to_string(),
-                                                rel_type.to_string(),
-                                                target_qname.clone(),
-                                            ));
-                                        } else {
-                                            // Unresolved relationship: need to resolve by name later
-                                            // Two patterns supported:
-                                            // 1. from_id + to_name: source known, target needs resolution
-                                            // 2. from_name + to_id: source needs resolution, target known
-                                            let from_id =
-                                                rel["from_id"].as_str().filter(|s| !s.is_empty());
-                                            let from_name =
-                                                rel["from_name"].as_str().filter(|s| !s.is_empty());
-                                            let to_name =
-                                                rel["to_name"].as_str().filter(|s| !s.is_empty());
-                                            let to_id =
-                                                rel["to_id"].as_str().filter(|s| !s.is_empty());
-
-                                            // Determine which pattern we have
-                                            let (source_identifier, target_identifier) = if let (
-                                                Some(from),
-                                                Some(to),
-                                            ) =
-                                                (from_id, to_name)
-                                            {
-                                                // Pattern 1: from_id -> to_name (e.g., CALLS, USES)
-                                                (from.to_string(), to.to_string())
-                                            } else if let (Some(from), Some(_to)) =
-                                                (from_name, to_id)
-                                            {
-                                                // Pattern 2: from_name -> to_id (e.g., CONTAINS)
-                                                // Use target's qualified_name for resolution
-                                                let target_qname =
-                                                    &entities_to_create[idx].qualified_name;
-                                                (from.to_string(), target_qname.clone())
-                                            } else {
-                                                warn!(
-                                                        "Invalid unresolved {} relationship on entity {}: need (from_id + to_name) or (from_name + to_id), skipping",
-                                                        rel_type, entry.entity_id
-                                                    );
-                                                continue;
-                                            };
-
-                                            // Collect for batch insert to PostgreSQL
-                                            // Format: (source_identifier, rel_type, target_identifier)
-                                            unresolved_relationships.push((
-                                                source_identifier,
-                                                rel_type.to_string(),
-                                                target_identifier,
-                                            ));
-                                        }
-                                    }
 
                                     processed_ids.push(entry.outbox_id);
                                 }
@@ -1115,7 +989,7 @@ impl OutboxProcessor {
                         Err(e) => {
                             warn!("Failed to batch create Neo4j nodes: {}", e);
                             // Mark all entities in this batch as failed
-                            for (_, entry, _) in entity_entry_map {
+                            for (entry, _) in entity_entry_map {
                                 failed_ids.push(entry.outbox_id);
                             }
                         }
@@ -1137,26 +1011,6 @@ impl OutboxProcessor {
                     Err(e) => {
                         warn!("Failed to delete Neo4j node for {}: {}", entity_id, e);
                         failed_ids.push(entry.outbox_id);
-                    }
-                }
-            }
-
-            // Batch insert ALL relationships to PostgreSQL for post-batch resolution
-            // Both "resolved" (CONTAINS) and "unresolved" relationships are stored here
-            if !unresolved_relationships.is_empty() {
-                match self
-                    .postgres_client
-                    .insert_pending_relationships(repository_id, &unresolved_relationships)
-                    .await
-                {
-                    Ok(count) => {
-                        debug!(
-                            "Inserted {} pending relationships for later resolution",
-                            count
-                        );
-                    }
-                    Err(e) => {
-                        warn!("Failed to insert pending relationships: {}", e);
                     }
                 }
             }
@@ -1207,11 +1061,20 @@ impl OutboxProcessor {
     /// This method checks for repositories with the pending_relationship_resolution flag set
     /// and runs all relationship resolvers to create relationship edges in Neo4j.
     ///
-    /// Called after processing batches of entity outbox entries to ensure relationships
-    /// are resolved as entities become available. In serve mode, this runs after each batch.
-    /// In index mode (drain mode), this is called once when the outbox drains.
+    /// Resolution uses dedicated resolvers that query entity_metadata directly:
+    /// - ContainsResolver: parent/child relationships via parent_scope
+    /// - TraitImplResolver: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE
+    /// - InheritanceResolver: INHERITS_FROM for class inheritance
+    /// - TypeUsageResolver: USES for type references in fields
+    /// - CallGraphResolver: CALLS for function/method calls
+    /// - ImportsResolver: IMPORTS for module imports
+    ///
+    /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
-        use crate::neo4j_relationship_resolver::resolve_pending_from_postgres;
+        use crate::neo4j_relationship_resolver::{
+            resolve_relationships_generic, CallGraphResolver, ContainsResolver, ImportsResolver,
+            InheritanceResolver, TraitImplResolver, TypeUsageResolver,
+        };
 
         // Get repositories that need resolution
         let repo_ids = self
@@ -1230,6 +1093,16 @@ impl OutboxProcessor {
 
         // Get Neo4j client
         let neo4j_client = self.get_neo4j_client().await?;
+
+        // Define all resolvers to run
+        let resolvers: &[&dyn crate::neo4j_relationship_resolver::RelationshipResolver] = &[
+            &ContainsResolver,
+            &TraitImplResolver,
+            &InheritanceResolver,
+            &TypeUsageResolver,
+            &CallGraphResolver,
+            &ImportsResolver,
+        ];
 
         // Resolve relationships for each repository
         for repository_id in repo_ids {
@@ -1258,28 +1131,39 @@ impl OutboxProcessor {
 
             neo4j_client.use_database(&db_name).await?;
 
-            // Resolve pending relationships from PostgreSQL table
-            // This is the efficient approach using JOINs instead of JSONB scans
-            match resolve_pending_from_postgres(
+            // Run all resolvers
+            for resolver in resolvers {
+                if let Err(e) = resolve_relationships_generic(
+                    &self.postgres_client,
+                    neo4j_client.as_ref(),
+                    repository_id,
+                    *resolver,
+                )
+                .await
+                {
+                    warn!(
+                        "Failed to resolve {} relationships for repository {}: {}",
+                        resolver.name(),
+                        repository_id,
+                        e
+                    );
+                    // Continue with other resolvers even if one fails
+                }
+            }
+
+            // Resolve external references (creates External stub nodes)
+            if let Err(e) = crate::neo4j_relationship_resolver::resolve_external_references(
                 &self.postgres_client,
                 neo4j_client.as_ref(),
                 repository_id,
             )
             .await
             {
-                Ok(count) if count > 0 => {
-                    info!(
-                        "Resolved {} relationships from PostgreSQL for repository {}",
-                        count, repository_id
-                    );
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    warn!(
-                        "Failed to resolve pending relationships from PostgreSQL for repository {}: {}",
-                        repository_id, e
-                    );
-                }
+                warn!(
+                    "Failed to resolve external references for repository {}: {}",
+                    repository_id, e
+                );
+                // Continue even if external resolution fails
             }
 
             // Clear the pending flag and set graph_ready

@@ -115,102 +115,45 @@ async fn get_repository_id(postgres: &Arc<TestPostgres>, db_name: &str) -> Resul
 }
 
 /// Pending relationship counts split by resolvability
+///
+/// NOTE: The pending_relationships table has been eliminated. All resolution
+/// now happens through dedicated resolvers querying entity_metadata directly.
+/// This struct is kept for backwards compatibility but always returns zeros.
 #[derive(Debug, Default)]
 struct PendingCounts {
-    /// Pending relationships where target exists in codebase (should eventually resolve)
+    /// Pending relationships where target exists in codebase (always 0 now)
     resolvable: usize,
-    /// Pending relationships where target doesn't exist (external dependencies)
+    /// Pending relationships where target doesn't exist (always 0 now)
     external: usize,
 }
 
-/// Get pending relationship counts from PostgreSQL
+/// Get pending relationship counts
 ///
-/// Separates pending relationships into:
-/// - resolvable: target qualified_name matches an entity in this repository
-/// - external: target refers to external code (std::, third-party crates, etc.)
+/// NOTE: The pending_relationships table has been eliminated. All resolution
+/// now happens through dedicated resolvers. This function returns zeros.
+#[allow(unused_variables)]
 async fn get_pending_counts(
     postgres: &Arc<TestPostgres>,
     db_name: &str,
     repository_id: &str,
 ) -> Result<PendingCounts> {
-    let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
-        postgres.port()
-    );
-    let pool = sqlx::PgPool::connect(&connection_url).await?;
-
-    // Count pending relationships where target EXISTS in our codebase
-    let resolvable: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*) FROM pending_relationships pr
-        WHERE pr.repository_id = $1::uuid
-        AND EXISTS (
-            SELECT 1 FROM entity_metadata em
-            WHERE em.repository_id = pr.repository_id
-            AND em.qualified_name = pr.target_qualified_name
-            AND em.deleted_at IS NULL
-        )
-        "#,
-    )
-    .bind(repository_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
-
-    // Count pending relationships where target does NOT exist (external)
-    let external: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*) FROM pending_relationships pr
-        WHERE pr.repository_id = $1::uuid
-        AND NOT EXISTS (
-            SELECT 1 FROM entity_metadata em
-            WHERE em.repository_id = pr.repository_id
-            AND em.qualified_name = pr.target_qualified_name
-            AND em.deleted_at IS NULL
-        )
-        "#,
-    )
-    .bind(repository_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
-
-    pool.close().await;
-    Ok(PendingCounts {
-        resolvable: resolvable as usize,
-        external: external as usize,
-    })
+    // pending_relationships table no longer used - resolution happens directly
+    // through dedicated resolvers querying entity_metadata
+    Ok(PendingCounts::default())
 }
 
 /// Get breakdown of pending relationships for debugging
+///
+/// NOTE: The pending_relationships table has been eliminated.
+/// This function returns an empty list.
+#[allow(unused_variables)]
 async fn get_pending_breakdown(
     postgres: &Arc<TestPostgres>,
     db_name: &str,
     repository_id: &str,
 ) -> Result<Vec<(String, String, i64)>> {
-    let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
-        postgres.port()
-    );
-    let pool = sqlx::PgPool::connect(&connection_url).await?;
-
-    let rows: Vec<(String, String, i64)> = sqlx::query_as(
-        r#"
-        SELECT relationship_type, target_qualified_name, COUNT(*) as cnt
-        FROM pending_relationships
-        WHERE repository_id = $1::uuid
-        GROUP BY relationship_type, target_qualified_name
-        ORDER BY cnt DESC
-        LIMIT 20
-        "#,
-    )
-    .bind(repository_id)
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_default();
-
-    pool.close().await;
-    Ok(rows)
+    // pending_relationships table no longer used
+    Ok(Vec::new())
 }
 
 /// Get entities with parent_scope set (for debugging)
@@ -594,11 +537,11 @@ async fn resolution_benchmark() -> Result<()> {
         .await,
     );
 
-    // JavaScript: ms
-    println!("Benchmarking ms (JavaScript)...");
+    // JavaScript: eventemitter3
+    println!("Benchmarking eventemitter3 (JavaScript)...");
     results.push(
         benchmark_codebase(
-            "ms",
+            "eventemitter3",
             "JavaScript",
             real_javascript_project,
             &qdrant,

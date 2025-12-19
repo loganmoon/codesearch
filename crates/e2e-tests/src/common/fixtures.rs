@@ -491,14 +491,14 @@ pub async fn real_typescript_project() -> Result<TempDir> {
 
 /// Clone a JavaScript project for testing
 ///
-/// ms is a tiny time parsing utility with:
-/// - Simple ES module structure
-/// - TypeScript type declarations
-/// - Well-tested codebase
+/// eventemitter3 is a high-performance event emitter with:
+/// - EventEmitter class with multiple methods (on, off, emit, once, etc.)
+/// - Clean class/method structure ideal for testing CONTAINS relationships
+/// - No dependencies, small codebase
 ///
-/// Expected: ~5-15 entities
+/// Expected: ~10-20 entities with proper class/method nesting
 pub async fn real_javascript_project() -> Result<TempDir> {
-    git_clone("https://github.com/vercel/ms", "2.1.3").await
+    git_clone("https://github.com/primus/eventemitter3", "5.0.1").await
 }
 
 #[cfg(test)]

@@ -815,6 +815,34 @@ impl PostgresClient {
         Ok(entities)
     }
 
+    /// Get all entities in a repository
+    pub async fn get_all_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        let rows: Vec<(serde_json::Value, Option<String>)> = sqlx::query_as(
+            "SELECT entity_data, content
+             FROM entity_metadata
+             WHERE repository_id = $1
+               AND deleted_at IS NULL",
+        )
+        .bind(repository_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::storage(format!("Failed to get all entities: {e}")))?;
+
+        let entities = rows
+            .into_iter()
+            .filter_map(|(json, content)| {
+                serde_json::from_value::<CodeEntity>(json)
+                    .ok()
+                    .map(|mut entity| {
+                        entity.content = content;
+                        entity
+                    })
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
     /// Get file snapshot (list of entity IDs in file)
     pub async fn get_file_snapshot(
         &self,
@@ -2217,134 +2245,6 @@ impl PostgresClient {
         serde_json::to_value(&payload)
             .map_err(|e| Error::storage(format!("Failed to serialize Neo4j payload: {e}")))
     }
-
-    // ========================================================================
-    // Pending Relationship Methods
-    // ========================================================================
-
-    /// Insert pending relationships for later resolution
-    pub async fn insert_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        relationships: &[(String, String, String)],
-    ) -> Result<u64> {
-        if relationships.is_empty() {
-            return Ok(0);
-        }
-
-        // Build UNNEST query for bulk insert
-        let source_ids: Vec<&str> = relationships.iter().map(|(s, _, _)| s.as_str()).collect();
-        let rel_types: Vec<&str> = relationships.iter().map(|(_, r, _)| r.as_str()).collect();
-        let target_qnames: Vec<&str> = relationships.iter().map(|(_, _, t)| t.as_str()).collect();
-
-        let result = sqlx::query(
-            "INSERT INTO pending_relationships (repository_id, source_entity_id, relationship_type, target_qualified_name)
-             SELECT $1, * FROM UNNEST($2::text[], $3::text[], $4::text[])
-             ON CONFLICT (repository_id, source_entity_id, relationship_type, target_qualified_name) DO NOTHING",
-        )
-        .bind(repository_id)
-        .bind(&source_ids)
-        .bind(&rel_types)
-        .bind(&target_qnames)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to insert pending relationships: {e}")))?;
-
-        Ok(result.rows_affected())
-    }
-
-    /// Resolve pending relationships using efficient JOIN
-    ///
-    /// The resolution strategy handles multiple name formats:
-    /// 1. Exact match on qualified_name
-    /// 2. Strip `external::` and `crate::` prefixes from target
-    /// 3. Strip generic parameters `<...>` from target
-    pub async fn resolve_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        limit: i64,
-    ) -> Result<Vec<(i64, String, String, String)>> {
-        // Resolve pending relationships by joining to entity_metadata for both source and target.
-        // source_entity_id can be either:
-        //   - An entity_id (for resolved relationships)
-        //   - A qualified_name (for unresolved CONTAINS relationships)
-        //   - A simple name (when parent_scope is just the name, not full qualified_name)
-        // We use LEFT JOIN to try to resolve source, falling back to as-is.
-        let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-            "SELECT pr.id::BIGINT,
-                    COALESCE(src.entity_id, pr.source_entity_id) AS source_entity_id,
-                    target.entity_id AS target_entity_id,
-                    pr.relationship_type
-             FROM pending_relationships pr
-             -- Resolve target by qualified_name
-             JOIN entity_metadata target
-               ON pr.repository_id = target.repository_id
-               AND target.deleted_at IS NULL
-               AND (
-                 -- Exact match
-                 target.qualified_name = pr.target_qualified_name
-                 -- Match after stripping external::/crate:: prefixes
-                 OR target.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', '')
-                 -- Match after stripping generic parameters <...>
-                 OR target.qualified_name = REGEXP_REPLACE(pr.target_qualified_name, '<[^>]*>$', '')
-                 -- Match after stripping both prefixes and generics
-                 OR target.qualified_name = REGEXP_REPLACE(REGEXP_REPLACE(pr.target_qualified_name, '^(external::|crate::)', ''), '<[^>]*>$', '')
-               )
-             -- Optionally resolve source (for unresolved CONTAINS with qualified_name or name)
-             LEFT JOIN entity_metadata src
-               ON pr.repository_id = src.repository_id
-               AND src.deleted_at IS NULL
-               AND (
-                 -- Exact match on qualified_name
-                 src.qualified_name = pr.source_entity_id
-                 -- Match by name (when parent_scope is just the simple name)
-                 OR src.name = pr.source_entity_id
-                 -- Match when qualified_name ends with the source (suffix match)
-                 OR src.qualified_name LIKE '%.' || pr.source_entity_id
-               )
-             WHERE pr.repository_id = $1
-             LIMIT $2",
-        )
-        .bind(repository_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to resolve pending relationships: {e}")))?;
-
-        Ok(rows)
-    }
-
-    /// Delete resolved pending relationships by ID
-    pub async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()> {
-        if pending_ids.is_empty() {
-            return Ok(());
-        }
-
-        sqlx::query("DELETE FROM pending_relationships WHERE id = ANY($1)")
-            .bind(pending_ids)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::storage(format!("Failed to delete pending relationships: {e}")))?;
-
-        Ok(())
-    }
-
-    /// Count pending relationships for a repository
-    pub async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64> {
-        let row = sqlx::query(
-            "SELECT COUNT(*) as count FROM pending_relationships WHERE repository_id = $1",
-        )
-        .bind(repository_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| Error::storage(format!("Failed to count pending relationships: {e}")))?;
-
-        let count: i64 = row
-            .try_get("count")
-            .map_err(|e| Error::storage(format!("Failed to extract count: {e}")))?;
-
-        Ok(count)
-    }
 }
 
 // Trait implementation delegates to inherent methods for testability and flexibility
@@ -2616,6 +2516,10 @@ impl super::PostgresClientTrait for PostgresClient {
         self.get_all_type_entities(repository_id).await
     }
 
+    async fn get_all_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        self.get_all_entities(repository_id).await
+    }
+
     async fn search_entities_fulltext(
         &self,
         repository_id: Uuid,
@@ -2750,32 +2654,6 @@ impl super::PostgresClientTrait for PostgresClient {
     ) -> Result<std::collections::HashMap<String, CodeEntity>> {
         self.get_entities_by_qualified_names(repository_id, qualified_names)
             .await
-    }
-
-    async fn insert_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        relationships: &[(String, String, String)],
-    ) -> Result<u64> {
-        self.insert_pending_relationships(repository_id, relationships)
-            .await
-    }
-
-    async fn resolve_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        limit: i64,
-    ) -> Result<Vec<(i64, String, String, String)>> {
-        self.resolve_pending_relationships(repository_id, limit)
-            .await
-    }
-
-    async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()> {
-        self.delete_pending_relationships(pending_ids).await
-    }
-
-    async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64> {
-        self.count_pending_relationships(repository_id).await
     }
 }
 

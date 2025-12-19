@@ -1,41 +1,32 @@
 //! Neo4j relationship resolution framework
 //!
-//! This module provides the infrastructure for resolving relationships between entities
-//! in Neo4j. Relationship resolution happens in the outbox processor after entities have
-//! been created in the graph database.
+//! This module provides dedicated resolvers for creating relationship edges in Neo4j.
+//! Each resolver queries entity_metadata directly using entity attributes to find
+//! related entities and create appropriate graph edges.
 //!
 //! # Architecture
 //!
-//! Relationships are stored in two ways during entity indexing:
-//! 1. **Resolved relationships**: Both source and target entities exist in the same batch.
-//!    These are created directly as edges in Neo4j during outbox processing.
-//! 2. **Pending relationships**: The target entity doesn't exist yet (not in batch).
-//!    These are stored in the PostgreSQL `pending_relationships` table for efficient
-//!    resolution via JOINs when the target entity is later indexed.
+//! Relationship information is stored in entity metadata attributes during extraction:
+//! - `parent_scope`: Qualified name of containing entity (for CONTAINS)
+//! - `implements_trait`: Trait name being implemented (for IMPLEMENTS)
+//! - `for_type`: Type that impl block is for (for ASSOCIATES)
+//! - `extends`: Parent class/interface name (for INHERITS_FROM, EXTENDS_INTERFACE)
+//! - `fields`: JSON array with field types (for USES)
+//! - `calls`: JSON array of called functions (for CALLS)
+//! - `imports`: JSON array of imported modules (for IMPORTS)
 //!
-//! This module handles resolving pending relationships by:
-//! - Querying PostgreSQL for relationships where the target entity now exists (JOIN query)
-//! - Batch creating relationship edges in Neo4j
-//! - Deleting resolved rows from PostgreSQL
-//!
-//! # Resolution Triggers
-//!
-//! Relationship resolution is triggered by the outbox processor:
-//! - After processing a batch of entity outbox entries
-//! - When a repository's `pending_relationship_resolution` flag is set
-//! - Periodically to handle any missed resolutions
+//! Resolution is triggered once when indexing completes (drain mode) and queries
+//! entity_metadata to build lookup maps and create Neo4j edges.
 //!
 //! # Resolver Implementations
 //!
-//! Each relationship type has its own resolver implementation:
-//! - `TraitImplResolver`: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE relationships
-//! - `InheritanceResolver`: INHERITS_FROM relationships (class inheritance)
-//! - `TypeUsageResolver`: USES relationships (field type dependencies)
-//! - `CallGraphResolver`: CALLS relationships (function/method calls)
-//! - `ImportsResolver`: IMPORTS relationships (module imports)
-//!
-//! The `resolve_pending_from_postgres` function handles all relationship types uniformly
-//! by querying the pending_relationships table and batch creating edges in Neo4j.
+//! Each relationship type has its own resolver:
+//! - `ContainsResolver`: CONTAINS relationships (parent_scope -> parent)
+//! - `TraitImplResolver`: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE
+//! - `InheritanceResolver`: INHERITS_FROM for class inheritance
+//! - `TypeUsageResolver`: USES for field type dependencies
+//! - `CallGraphResolver`: CALLS for function/method calls
+//! - `ImportsResolver`: IMPORTS for module imports
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -115,82 +106,6 @@ pub async fn resolve_relationships_generic(
     );
 
     Ok(())
-}
-
-/// Resolve pending relationships from PostgreSQL table
-///
-/// This function queries the `pending_relationships` table for relationships
-/// that can now be resolved (target entity exists in entity_metadata), creates
-/// the edges in Neo4j, and deletes the resolved rows.
-///
-/// # Prerequisites
-/// The caller MUST ensure the Neo4j database is already selected via `use_database()`
-/// before calling this function.
-///
-/// # Arguments
-/// * `postgres` - PostgreSQL client for querying pending relationships
-/// * `neo4j` - Neo4j client for creating relationship edges (must have database already selected)
-/// * `repository_id` - UUID of the repository to resolve relationships for
-///
-/// # Returns
-/// * Number of relationships resolved
-pub async fn resolve_pending_from_postgres(
-    postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-    neo4j: &dyn Neo4jClientTrait,
-    repository_id: Uuid,
-) -> Result<usize> {
-    const BATCH_SIZE: i64 = 1000;
-    let mut total_resolved = 0;
-
-    loop {
-        // Query PostgreSQL for resolvable relationships
-        let resolved = postgres
-            .resolve_pending_relationships(repository_id, BATCH_SIZE)
-            .await
-            .context("Failed to query pending relationships")?;
-
-        if resolved.is_empty() {
-            break;
-        }
-
-        let batch_count = resolved.len();
-        let pending_ids: Vec<i64> = resolved.iter().map(|(id, _, _, _)| *id).collect();
-
-        // Build relationship tuples for Neo4j
-        // All relationships: source -[REL_TYPE]-> target
-        // For CONTAINS: source = parent, target = child (parent CONTAINS child)
-        let relationships: Vec<(String, String, String)> = resolved
-            .into_iter()
-            .map(|(_, source_entity_id, target_entity_id, rel_type)| {
-                (source_entity_id, target_entity_id, rel_type)
-            })
-            .collect();
-
-        // Batch create edges in Neo4j
-        neo4j
-            .batch_create_relationships(&relationships)
-            .await
-            .context("Failed to batch create relationship edges")?;
-
-        // Delete resolved rows from PostgreSQL
-        postgres
-            .delete_pending_relationships(&pending_ids)
-            .await
-            .context("Failed to delete resolved pending relationships")?;
-
-        total_resolved += batch_count;
-        info!(
-            "Resolved {} pending relationships from PostgreSQL",
-            batch_count
-        );
-
-        // If we got less than batch size, we're done
-        if batch_count < BATCH_SIZE as usize {
-            break;
-        }
-    }
-
-    Ok(total_resolved)
 }
 
 // ============================================================================
@@ -368,6 +283,10 @@ impl RelationshipResolver for InheritanceResolver {
 }
 
 /// Resolver for type usage (USES relationships)
+///
+/// Handles:
+/// - Struct field types (from `fields` attribute)
+/// - Function/Method parameter and return types (from `uses_types` attribute)
 pub struct TypeUsageResolver;
 
 #[async_trait]
@@ -385,14 +304,19 @@ impl RelationshipResolver for TypeUsageResolver {
         use std::collections::HashMap;
 
         // Fetch entity types in parallel
-        let (structs_result, all_types_result) = tokio::join!(
+        let (structs_result, functions_result, methods_result, all_types_result) = tokio::join!(
             postgres.get_entities_by_type(repository_id, EntityType::Struct),
+            postgres.get_entities_by_type(repository_id, EntityType::Function),
+            postgres.get_entities_by_type(repository_id, EntityType::Method),
             postgres.get_all_type_entities(repository_id),
         );
 
         let structs = structs_result.context("Failed to get structs")?;
+        let functions = functions_result.context("Failed to get functions")?;
+        let methods = methods_result.context("Failed to get methods")?;
         let all_types = all_types_result.context("Failed to get type entities")?;
 
+        // Build type lookup map (name -> entity_id)
         let type_map: HashMap<String, String> = all_types
             .iter()
             .map(|t| (t.name.clone(), t.entity_id.clone()))
@@ -400,6 +324,7 @@ impl RelationshipResolver for TypeUsageResolver {
 
         let mut relationships = Vec::new();
 
+        // Process struct field types
         for struct_entity in structs {
             if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
                 if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
@@ -424,6 +349,34 @@ impl RelationshipResolver for TypeUsageResolver {
                                     ));
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process function and method uses_types
+        let callables: Vec<_> = functions.into_iter().chain(methods).collect();
+        for callable in callables {
+            if let Some(uses_types_json) = callable.metadata.attributes.get("uses_types") {
+                if let Ok(types) = serde_json::from_str::<Vec<String>>(uses_types_json) {
+                    for type_ref in types {
+                        // Strip generics and get the base type name
+                        let type_name = type_ref.split('<').next().unwrap_or(&type_ref).trim();
+
+                        if let Some(type_id) = type_map.get(type_name) {
+                            // Forward edge: function/method -> type
+                            relationships.push((
+                                callable.entity_id.clone(),
+                                type_id.clone(),
+                                "USES".to_string(),
+                            ));
+                            // Reciprocal edge: type -> function/method
+                            relationships.push((
+                                type_id.clone(),
+                                callable.entity_id.clone(),
+                                "USED_BY".to_string(),
+                            ));
                         }
                     }
                 }
@@ -550,5 +503,299 @@ impl RelationshipResolver for ImportsResolver {
         }
 
         Ok(relationships)
+    }
+}
+
+/// Resolver for containment (CONTAINS relationships)
+///
+/// Creates parent-child relationships based on entity.parent_scope.
+/// Queries entity_metadata directly to build qualified_name -> entity_id map.
+pub struct ContainsResolver;
+
+#[async_trait]
+impl RelationshipResolver for ContainsResolver {
+    fn name(&self) -> &'static str {
+        "containment"
+    }
+
+    async fn resolve(
+        &self,
+        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Vec<(String, String, String)>> {
+        use std::collections::HashMap;
+
+        // Get all entities for this repository
+        let entities = postgres
+            .get_all_entities(repository_id)
+            .await
+            .context("Failed to get all entities")?;
+
+        // Build qualified_name -> entity_id map for parent lookup
+        let qname_to_id: HashMap<&str, &str> = entities
+            .iter()
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .collect();
+
+        let mut relationships = Vec::new();
+
+        for entity in &entities {
+            if let Some(parent_scope) = &entity.parent_scope {
+                // Look up parent by qualified_name
+                if let Some(&parent_id) = qname_to_id.get(parent_scope.as_str()) {
+                    // Forward edge: parent CONTAINS child
+                    relationships.push((
+                        parent_id.to_string(),
+                        entity.entity_id.clone(),
+                        "CONTAINS".to_string(),
+                    ));
+                    // Note: No reciprocal edge for CONTAINS - it's directional
+                }
+            }
+        }
+
+        Ok(relationships)
+    }
+}
+
+// ============================================================================
+// External Reference Resolution
+// ============================================================================
+
+/// External reference collected from entity attributes
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExternalRef {
+    /// Qualified name of the external reference
+    qualified_name: String,
+    /// Package/crate name (extracted from first segment)
+    package: Option<String>,
+}
+
+impl ExternalRef {
+    fn new(qualified_name: String) -> Self {
+        // Extract package from first path segment
+        let package = qualified_name
+            .trim_start_matches("external::")
+            .split("::")
+            .next()
+            .map(|s| s.to_string());
+
+        Self {
+            qualified_name,
+            package,
+        }
+    }
+
+    /// Generate a stable entity_id for this external reference
+    fn entity_id(&self) -> String {
+        format!(
+            "external::{}",
+            self.qualified_name.trim_start_matches("external::")
+        )
+    }
+}
+
+/// Resolve external references and create External stub nodes
+///
+/// This function:
+/// 1. Collects all unresolved references from entity attributes
+/// 2. Creates External stub nodes in Neo4j for those references
+/// 3. Creates relationships from source entities to External nodes
+///
+/// External references are identified by:
+/// - explicit "external::" prefix in resolved attributes
+/// - references in implements_trait, extends, uses_types that don't match any entity
+pub async fn resolve_external_references(
+    postgres: &std::sync::Arc<dyn PostgresClientTrait>,
+    neo4j: &dyn Neo4jClientTrait,
+    repository_id: Uuid,
+) -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+
+    info!("Resolving external references...");
+
+    // Get all entities for this repository
+    let entities = postgres
+        .get_all_entities(repository_id)
+        .await
+        .context("Failed to get all entities")?;
+
+    if entities.is_empty() {
+        return Ok(());
+    }
+
+    // Build set of known qualified names
+    let known_names: HashSet<&str> = entities.iter().map(|e| e.qualified_name.as_str()).collect();
+
+    // Also build a name -> qualified_name map for simple name lookups
+    let name_to_qname: HashMap<&str, &str> = entities
+        .iter()
+        .map(|e| (e.name.as_str(), e.qualified_name.as_str()))
+        .collect();
+
+    // Collect all external references with their source relationships
+    let mut external_refs: HashSet<ExternalRef> = HashSet::new();
+    let mut relationships: Vec<(String, String, String)> = Vec::new();
+
+    for entity in &entities {
+        // Check implements_trait
+        if let Some(trait_ref) = entity.metadata.attributes.get("implements_trait") {
+            if is_external_ref(trait_ref, &known_names, &name_to_qname) {
+                let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((
+                    entity.entity_id.clone(),
+                    ext_id.clone(),
+                    "IMPLEMENTS".to_string(),
+                ));
+                relationships.push((
+                    ext_id,
+                    entity.entity_id.clone(),
+                    "IMPLEMENTED_BY".to_string(),
+                ));
+            }
+        }
+
+        // Check extends (for classes/interfaces)
+        if let Some(extends_ref) = entity.metadata.attributes.get("extends") {
+            if is_external_ref(extends_ref, &known_names, &name_to_qname) {
+                let ext_ref = ExternalRef::new(normalize_external_ref(extends_ref));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((
+                    entity.entity_id.clone(),
+                    ext_id.clone(),
+                    "INHERITS_FROM".to_string(),
+                ));
+                relationships.push((ext_id, entity.entity_id.clone(), "HAS_SUBCLASS".to_string()));
+            }
+        }
+
+        // Check uses_types (JSON array of type references)
+        if let Some(uses_types_str) = entity.metadata.attributes.get("uses_types") {
+            if let Ok(types) = serde_json::from_str::<Vec<String>>(uses_types_str) {
+                for type_ref in types {
+                    if is_external_ref(&type_ref, &known_names, &name_to_qname) {
+                        let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref));
+                        let ext_id = ext_ref.entity_id();
+                        external_refs.insert(ext_ref);
+                        relationships.push((
+                            entity.entity_id.clone(),
+                            ext_id.clone(),
+                            "USES".to_string(),
+                        ));
+                        relationships.push((
+                            ext_id,
+                            entity.entity_id.clone(),
+                            "USED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Check calls (JSON array of function calls)
+        if let Some(calls_str) = entity.metadata.attributes.get("calls") {
+            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_str) {
+                for call_ref in calls {
+                    if is_external_ref(&call_ref, &known_names, &name_to_qname) {
+                        let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref));
+                        let ext_id = ext_ref.entity_id();
+                        external_refs.insert(ext_ref);
+                        relationships.push((
+                            entity.entity_id.clone(),
+                            ext_id.clone(),
+                            "CALLS".to_string(),
+                        ));
+                        relationships.push((
+                            ext_id,
+                            entity.entity_id.clone(),
+                            "CALLED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if external_refs.is_empty() {
+        info!("No external references to resolve");
+        return Ok(());
+    }
+
+    // Create External nodes
+    let ext_nodes: Vec<(String, String, Option<String>)> = external_refs
+        .iter()
+        .map(|r| (r.entity_id(), r.qualified_name.clone(), r.package.clone()))
+        .collect();
+
+    neo4j
+        .batch_create_external_nodes(&ext_nodes)
+        .await
+        .context("Failed to create external nodes")?;
+
+    info!("Created {} external nodes", ext_nodes.len());
+
+    // Create relationships to external nodes
+    neo4j
+        .batch_create_relationships(&relationships)
+        .await
+        .context("Failed to create external relationships")?;
+
+    info!(
+        "Resolved {} external references ({} relationships)",
+        external_refs.len(),
+        relationships.len()
+    );
+
+    Ok(())
+}
+
+/// Check if a reference is external (not in the known entity set)
+fn is_external_ref(
+    ref_name: &str,
+    known_names: &std::collections::HashSet<&str>,
+    name_to_qname: &std::collections::HashMap<&str, &str>,
+) -> bool {
+    // Explicit external prefix
+    if ref_name.starts_with("external::") {
+        return true;
+    }
+
+    // Check if it matches any known qualified name
+    if known_names.contains(ref_name) {
+        return false;
+    }
+
+    // Check if the simple name (last segment) matches any known name
+    let simple_name = ref_name.rsplit("::").next().unwrap_or(ref_name);
+    if name_to_qname.contains_key(simple_name) {
+        return false;
+    }
+
+    // Also check if it could be resolved by stripping generics
+    let without_generics = ref_name.split('<').next().unwrap_or(ref_name);
+    if known_names.contains(without_generics) {
+        return false;
+    }
+
+    // Assume it's external if we can't find it
+    true
+}
+
+/// Normalize an external reference name
+fn normalize_external_ref(ref_name: &str) -> String {
+    // Strip crate:: prefix, keep external:: or add it
+    let cleaned = ref_name
+        .trim_start_matches("crate::")
+        .split('<')
+        .next()
+        .unwrap_or(ref_name);
+
+    if cleaned.starts_with("external::") {
+        cleaned.to_string()
+    } else {
+        format!("external::{cleaned}")
     }
 }

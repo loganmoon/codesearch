@@ -547,57 +547,24 @@ impl ResolutionMetrics {
 
 /// Get resolution metrics for a repository
 ///
-/// Queries both pending_relationships (PostgreSQL) and Neo4j to compute
-/// how many relationships were successfully resolved vs still pending.
+/// NOTE: The pending_relationships table has been eliminated. All resolution
+/// now happens through dedicated resolvers querying entity_metadata directly.
+/// This function now only returns resolved counts from Neo4j with pending always 0.
+#[allow(unused_variables)]
 pub async fn get_resolution_metrics(
     postgres: &Arc<TestPostgres>,
     neo4j: &Arc<TestNeo4j>,
     db_name: &str,
     repository_id: &str,
 ) -> Result<ResolutionMetrics> {
-    // Query pending relationships from PostgreSQL
-    let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
-        postgres.port()
-    );
-    let pool = sqlx::PgPool::connect(&connection_url).await?;
-
-    // Get total pending count
-    let pending_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pending_relationships WHERE repository_id = $1::uuid",
-    )
-    .bind(repository_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
-
-    // Get pending breakdown by type
-    let pending_rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT relationship_type, COUNT(*) as cnt
-         FROM pending_relationships
-         WHERE repository_id = $1::uuid
-         GROUP BY relationship_type",
-    )
-    .bind(repository_id)
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_default();
-
-    pool.close().await;
-
-    let pending_by_type: std::collections::HashMap<String, usize> = pending_rows
-        .into_iter()
-        .map(|(t, c)| (t, c as usize))
-        .collect();
-
     // Get resolved count from Neo4j (total relationships)
     let stats = get_neo4j_graph_stats(neo4j, repository_id).await?;
     let resolved_count = stats.total_relationships();
 
     Ok(ResolutionMetrics {
-        pending_count: pending_count as usize,
+        pending_count: 0, // pending_relationships table no longer used
         resolved_count,
-        pending_by_type,
+        pending_by_type: std::collections::HashMap::new(),
     })
 }
 

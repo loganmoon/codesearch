@@ -98,6 +98,25 @@ pub trait Neo4jClientTrait: Send + Sync {
     /// * `Result<Vec<i64>>` - Internal Neo4j node IDs
     async fn batch_create_nodes(&self, entities: &[CodeEntity]) -> Result<Vec<i64>>;
 
+    /// Batch create External stub nodes for references to external/stdlib code
+    ///
+    /// Creates lightweight nodes with label "External" for representing references
+    /// to external code (stdlib, third-party libraries) that are not in the repository.
+    /// Uses MERGE to avoid creating duplicates.
+    ///
+    /// # Arguments
+    /// * `external_refs` - Slice of (entity_id, qualified_name, package) tuples where:
+    ///   - entity_id: Unique identifier for the external reference
+    ///   - qualified_name: Full qualified name (e.g., "std::collections::HashMap")
+    ///   - package: Optional package/crate name (e.g., "std", "tokio")
+    ///
+    /// # Returns
+    /// * `Result<()>` - Success or error
+    async fn batch_create_external_nodes(
+        &self,
+        external_refs: &[(String, String, Option<String>)],
+    ) -> Result<()>;
+
     /// Delete a node by entity_id
     ///
     /// # Arguments

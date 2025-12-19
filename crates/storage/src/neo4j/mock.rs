@@ -149,6 +149,7 @@ impl Neo4jClientTrait for MockNeo4jClient {
 
     async fn batch_create_external_nodes(
         &self,
+        _repository_id: &str,
         _external_refs: &[(String, String, Option<String>)],
     ) -> Result<()> {
         // Mock implementation - external nodes are not tracked in mock

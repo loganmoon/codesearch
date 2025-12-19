@@ -23,12 +23,12 @@ struct CodebaseResult {
     indexing_time: Duration,
     entity_count: usize,
     relationships: RelationshipCounts,
-    /// Pending relationships that should be resolvable (target exists in codebase)
-    pending_resolvable: usize,
-    /// Pending relationships to external code (will never resolve)
-    pending_external: usize,
-    /// Resolution rate for internal relationships only
-    resolution_rate: f64,
+    /// Count of External stub nodes (unresolved external references)
+    external_count: usize,
+    /// Resolution rate: resolved / (resolved + external) * 100
+    internal_resolution_rate: f64,
+    /// Relationship density: relationships per entity
+    relationship_density: f64,
     error: Option<String>,
 }
 
@@ -40,11 +40,20 @@ struct RelationshipCounts {
     imports: usize,
     uses: usize,
     inherits: usize,
+    associates: usize,
+    extends_interface: usize,
 }
 
 impl RelationshipCounts {
     fn total(&self) -> usize {
-        self.contains + self.implements + self.calls + self.imports + self.uses + self.inherits
+        self.contains
+            + self.implements
+            + self.calls
+            + self.imports
+            + self.uses
+            + self.inherits
+            + self.associates
+            + self.extends_interface
     }
 }
 
@@ -114,80 +123,6 @@ async fn get_repository_id(postgres: &Arc<TestPostgres>, db_name: &str) -> Resul
     Ok(id)
 }
 
-/// Pending relationship counts split by resolvability
-///
-/// NOTE: The pending_relationships table has been eliminated. All resolution
-/// now happens through dedicated resolvers querying entity_metadata directly.
-/// This struct is kept for backwards compatibility but always returns zeros.
-#[derive(Debug, Default)]
-struct PendingCounts {
-    /// Pending relationships where target exists in codebase (always 0 now)
-    resolvable: usize,
-    /// Pending relationships where target doesn't exist (always 0 now)
-    external: usize,
-}
-
-/// Get pending relationship counts
-///
-/// NOTE: The pending_relationships table has been eliminated. All resolution
-/// now happens through dedicated resolvers. This function returns zeros.
-#[allow(unused_variables)]
-async fn get_pending_counts(
-    postgres: &Arc<TestPostgres>,
-    db_name: &str,
-    repository_id: &str,
-) -> Result<PendingCounts> {
-    // pending_relationships table no longer used - resolution happens directly
-    // through dedicated resolvers querying entity_metadata
-    Ok(PendingCounts::default())
-}
-
-/// Get breakdown of pending relationships for debugging
-///
-/// NOTE: The pending_relationships table has been eliminated.
-/// This function returns an empty list.
-#[allow(unused_variables)]
-async fn get_pending_breakdown(
-    postgres: &Arc<TestPostgres>,
-    db_name: &str,
-    repository_id: &str,
-) -> Result<Vec<(String, String, i64)>> {
-    // pending_relationships table no longer used
-    Ok(Vec::new())
-}
-
-/// Get entities with parent_scope set (for debugging)
-async fn get_parent_scopes(
-    postgres: &Arc<TestPostgres>,
-    db_name: &str,
-    repository_id: &str,
-) -> Result<Vec<(String, String)>> {
-    let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
-        postgres.port()
-    );
-    let pool = sqlx::PgPool::connect(&connection_url).await?;
-
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        r#"
-        SELECT name, parent_scope
-        FROM entity_metadata
-        WHERE repository_id = $1::uuid
-        AND parent_scope IS NOT NULL
-        AND deleted_at IS NULL
-        ORDER BY name
-        LIMIT 20
-        "#,
-    )
-    .bind(repository_id)
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_default();
-
-    pool.close().await;
-    Ok(rows)
-}
-
 /// Benchmark a single codebase
 async fn benchmark_codebase<F, Fut>(
     name: &str,
@@ -207,9 +142,9 @@ where
         indexing_time: Duration::ZERO,
         entity_count: 0,
         relationships: RelationshipCounts::default(),
-        pending_resolvable: 0,
-        pending_external: 0,
-        resolution_rate: 0.0,
+        external_count: 0,
+        internal_resolution_rate: 0.0,
+        relationship_density: 0.0,
         error: None,
     };
 
@@ -286,9 +221,12 @@ where
         }
     };
 
-    // Collect metrics
+    // Collect metrics from Neo4j
     if let Ok(stats) = get_neo4j_graph_stats(neo4j, &repo_id).await {
         result.entity_count = stats.node_count;
+        result.external_count = stats.external_edge_count;
+        result.internal_resolution_rate = stats.internal_resolution_rate();
+        result.relationship_density = stats.relationship_density();
         result.relationships = RelationshipCounts {
             contains: stats.contains_count,
             implements: stats.implements_count,
@@ -296,6 +234,8 @@ where
             imports: stats.imports_count,
             uses: stats.uses_count,
             inherits: stats.inherits_count,
+            associates: stats.associates_count,
+            extends_interface: stats.extends_interface_count,
         };
 
         // Debug: list entities for small codebases
@@ -309,44 +249,6 @@ where
         }
     }
 
-    if let Ok(pending) = get_pending_counts(postgres, &db_name, &repo_id).await {
-        result.pending_resolvable = pending.resolvable;
-        result.pending_external = pending.external;
-        // Resolution rate only considers internal relationships
-        // (resolved + resolvable pending, not external references)
-        let resolved = result.relationships.total();
-        let total_internal = resolved + pending.resolvable;
-        result.resolution_rate = if total_internal > 0 {
-            (resolved as f64 / total_internal as f64) * 100.0
-        } else {
-            100.0
-        };
-
-        // Debug: show pending relationship types for small codebases with no relationships
-        if result.relationships.total() == 0 && result.entity_count > 0 {
-            if let Ok(pending_info) = get_pending_breakdown(postgres, &db_name, &repo_id).await {
-                if !pending_info.is_empty() {
-                    println!("\n  Pending relationships in {}:", name);
-                    for (rel_type, target, count) in pending_info.iter().take(10) {
-                        println!("    - {} -> {} ({}x)", rel_type, target, count);
-                    }
-                }
-            }
-
-            // Debug: show parent_scope values for entities
-            if let Ok(scopes) = get_parent_scopes(postgres, &db_name, &repo_id).await {
-                if !scopes.is_empty() {
-                    println!("\n  Entities with parent_scope in {}:", name);
-                    for (name, parent) in scopes.iter().take(10) {
-                        println!("    - {} -> parent: {}", name, parent);
-                    }
-                } else {
-                    println!("\n  No entities have parent_scope set in {}", name);
-                }
-            }
-        }
-    }
-
     // Cleanup
     let _ = drop_test_database(postgres, &db_name).await;
 
@@ -355,81 +257,89 @@ where
 
 /// Print the benchmark report
 fn print_report(results: &[CodebaseResult]) {
-    println!("\n{}", "=".repeat(90));
-    println!("                         RESOLUTION BENCHMARK REPORT");
-    println!("{}\n", "=".repeat(90));
+    println!("\n{}", "=".repeat(100));
+    println!("                              RESOLUTION BENCHMARK REPORT");
+    println!("{}\n", "=".repeat(100));
 
     // Summary table header
     println!(
-        "{:<20} {:>8} {:>8} {:>10} {:>10} {:>10} {:>10}",
-        "Codebase", "Language", "Entities", "Resolved", "Pending", "External", "Rate"
+        "{:<15} {:>8} {:>8} {:>10} {:>10} {:>10} {:>10}",
+        "Codebase", "Language", "Entities", "Resolved", "External", "Rate", "Density"
     );
-    println!("{:-<90}", "");
+    println!("{:-<100}", "");
 
     let mut total_entities = 0;
     let mut total_resolved = 0;
-    let mut total_pending = 0;
     let mut total_external = 0;
     let mut failed = 0;
 
     for r in results {
         if let Some(ref err) = r.error {
-            println!("{:<20} {:>8} FAILED: {}", r.name, r.language, err);
+            println!("{:<15} {:>8} FAILED: {}", r.name, r.language, err);
             failed += 1;
         } else {
             let resolved = r.relationships.total();
             println!(
-                "{:<20} {:>8} {:>8} {:>10} {:>10} {:>10} {:>9.1}%",
+                "{:<15} {:>8} {:>8} {:>10} {:>10} {:>9.1}% {:>9.2}",
                 r.name,
                 r.language,
                 r.entity_count,
                 resolved,
-                r.pending_resolvable,
-                r.pending_external,
-                r.resolution_rate
+                r.external_count,
+                r.internal_resolution_rate,
+                r.relationship_density
             );
             total_entities += r.entity_count;
             total_resolved += resolved;
-            total_pending += r.pending_resolvable;
-            total_external += r.pending_external;
+            total_external += r.external_count;
         }
     }
 
-    println!("{:-<90}", "");
+    println!("{:-<100}", "");
 
-    let overall_rate = if total_resolved + total_pending > 0 {
-        (total_resolved as f64 / (total_resolved + total_pending) as f64) * 100.0
+    let overall_rate = if total_resolved + total_external > 0 {
+        (total_resolved as f64 / (total_resolved + total_external) as f64) * 100.0
     } else {
         100.0
     };
+    let overall_density = if total_entities > 0 {
+        total_resolved as f64 / total_entities as f64
+    } else {
+        0.0
+    };
 
     println!(
-        "{:<20} {:>8} {:>8} {:>10} {:>10} {:>10} {:>9.1}%",
-        "TOTAL", "", total_entities, total_resolved, total_pending, total_external, overall_rate
+        "{:<15} {:>8} {:>8} {:>10} {:>10} {:>9.1}% {:>9.2}",
+        "TOTAL", "", total_entities, total_resolved, total_external, overall_rate, overall_density
     );
     println!(
-        "\nNote: 'Pending' = resolvable within codebase, 'External' = references to external code"
+        "\nNote: 'External' = unresolved external references (External stub nodes in Neo4j)"
     );
+    println!("      'Rate' = resolved / (resolved + external) * 100");
+    println!("      'Density' = relationships per entity");
 
-    // Detailed breakdown
+    // Detailed breakdown - now includes all relationship types
     println!("\n\nRELATIONSHIP BREAKDOWN BY CODEBASE");
-    println!("{:-<80}", "");
+    println!("{:-<110}", "");
     println!(
-        "{:<25} {:>10} {:>10} {:>10} {:>10} {:>10}",
-        "Codebase", "CONTAINS", "IMPLEMENTS", "CALLS", "IMPORTS", "USES"
+        "{:<15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10} {:>8} {:>10}",
+        "Codebase", "CONTAINS", "IMPLS", "CALLS", "IMPORTS", "USES", "INHERITS", "ASSOC", "EXT_IFACE"
     );
-    println!("{:-<80}", "");
+    println!("{:-<110}", "");
 
     for r in results {
         if r.error.is_none() {
             println!(
-                "{:<25} {:>10} {:>10} {:>10} {:>10} {:>10}",
+                "{:<15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10} {:>8} {:>10}",
                 r.name,
                 r.relationships.contains,
                 r.relationships.implements,
                 r.relationships.calls,
                 r.relationships.imports,
-                r.relationships.uses
+                r.relationships.uses,
+                r.relationships.inherits,
+                r.relationships.associates,
+                r.relationships.extends_interface
             );
         }
     }
@@ -444,25 +354,18 @@ fn print_report(results: &[CodebaseResult]) {
     }
 
     // Summary
-    println!("\n\n{}", "=".repeat(90));
+    println!("\n\n{}", "=".repeat(100));
     println!("SUMMARY");
-    println!("{}", "=".repeat(90));
+    println!("{}", "=".repeat(100));
     println!("  Codebases tested: {}", results.len());
     println!("  Successful: {}", results.len() - failed);
     println!("  Failed: {}", failed);
     println!("  Total entities extracted: {}", total_entities);
     println!("  Total relationships resolved: {}", total_resolved);
-    println!("  Internal relationships pending: {}", total_pending);
-    println!("  External references (not resolvable): {}", total_external);
-    println!(
-        "  Internal resolution rate: {:.1}%",
-        if total_resolved + total_pending > 0 {
-            (total_resolved as f64 / (total_resolved + total_pending) as f64) * 100.0
-        } else {
-            100.0
-        }
-    );
-    println!("{}\n", "=".repeat(90));
+    println!("  External references (unresolved): {}", total_external);
+    println!("  Internal resolution rate: {:.1}%", overall_rate);
+    println!("  Relationship density: {:.2} rels/entity", overall_density);
+    println!("{}\n", "=".repeat(100));
 }
 
 #[tokio::test]
@@ -523,13 +426,13 @@ async fn resolution_benchmark() -> Result<()> {
         .await,
     );
 
-    // TypeScript: p-limit
-    println!("Benchmarking p-limit (TypeScript)...");
+    // TypeScript: jotai
+    println!("Benchmarking jotai (TypeScript)...");
     results.push(
         benchmark_codebase(
-            "p-limit",
+            "jotai",
             "TypeScript",
-            real_typescript_project,
+            real_jotai_project,
             &qdrant,
             &postgres,
             &neo4j,
@@ -537,13 +440,13 @@ async fn resolution_benchmark() -> Result<()> {
         .await,
     );
 
-    // JavaScript: eventemitter3
-    println!("Benchmarking eventemitter3 (JavaScript)...");
+    // JavaScript: Express
+    println!("Benchmarking express (JavaScript)...");
     results.push(
         benchmark_codebase(
-            "eventemitter3",
+            "express",
             "JavaScript",
-            real_javascript_project,
+            real_express_project,
             &qdrant,
             &postgres,
             &neo4j,

@@ -4,7 +4,7 @@ use crate::common::{
     import_map::{get_ast_root, parse_file_imports, resolve_reference},
     node_to_text, require_capture_node,
 };
-use crate::javascript::utils::extract_jsdoc_comments;
+use crate::javascript::{module_path::derive_module_path, utils::extract_jsdoc_comments};
 use crate::typescript::utils::{extract_type_references, is_ts_primitive};
 use codesearch_core::{
     entities::{
@@ -42,9 +42,12 @@ pub fn handle_class_impl(
     // Get the class node to extract implements clause
     let class_node = require_capture_node(query_match, query, "class")?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map for interface resolution
     let root = get_ast_root(class_node);
-    let import_map = parse_file_imports(root, source, Language::TypeScript);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
     // Build parent_scope for reference resolution
     let scope_result =
@@ -55,11 +58,12 @@ pub fn handle_class_impl(
         Some(scope_result.parent_scope.as_str())
     };
 
-    // Extract and resolve implements clause (TypeScript-specific)
-    let implements_resolved = extract_implements_types(class_node, source)?
-        .into_iter()
-        .map(|type_name| resolve_reference(&type_name, &import_map, parent_scope, "."))
-        .collect::<Vec<_>>();
+    // Extract implements clause (TypeScript-specific)
+    let implements_raw = extract_implements_types(class_node, source)?;
+    let implements_resolved: Vec<String> = implements_raw
+        .iter()
+        .map(|type_name| resolve_reference(type_name, &import_map, parent_scope, "."))
+        .collect();
 
     // Extract type references used in the class body
     let type_refs = extract_type_references(class_node, source, &import_map, parent_scope);
@@ -68,13 +72,20 @@ pub fn handle_class_impl(
     for entity in &mut entities {
         entity.language = Language::TypeScript;
 
-        // Add implements_resolved if any interfaces are implemented
-        if !implements_resolved.is_empty() {
+        // Add implements_trait (raw) and implements_resolved (resolved) if any interfaces are implemented
+        if !implements_raw.is_empty() {
+            // Store raw interface names (comma-separated for single value compatibility)
+            entity
+                .metadata
+                .attributes
+                .insert("implements_trait".to_string(), implements_raw.join(", "));
+
+            // Store resolved interface names as JSON array
             if let Ok(json) = serde_json::to_string(&implements_resolved) {
                 entity
                     .metadata
                     .attributes
-                    .insert("implements_resolved".to_string(), json);
+                    .insert("implements_trait_resolved".to_string(), json);
             }
         }
 
@@ -154,9 +165,12 @@ pub fn handle_interface_impl(
     // Extract extended interfaces (raw names)
     let extends = extract_extends_clause(interface_node, source)?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map for type resolution
     let root = get_ast_root(interface_node);
-    let import_map = parse_file_imports(root, source, Language::TypeScript);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
     // Extract type references used in the interface body
     let type_refs = extract_type_references(
@@ -291,9 +305,12 @@ pub fn handle_type_alias_impl(
     // Extract type value from the node itself
     let type_value = extract_type_value(type_alias_node, source)?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map for type resolution
     let root = get_ast_root(type_alias_node);
-    let import_map = parse_file_imports(root, source, Language::TypeScript);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
     // Extract type references used in the type alias
     let type_refs = extract_type_references(

@@ -5,6 +5,7 @@ use crate::common::{
     import_map::{get_ast_root, parse_file_imports},
     node_to_text,
 };
+use crate::javascript::module_path::derive_module_path;
 use crate::typescript::utils::extract_type_references;
 use codesearch_core::{entities::Language, error::Result, CodeEntity};
 use std::path::Path;
@@ -32,9 +33,12 @@ pub fn handle_function_impl(
         source_root,
     )?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
-        enhance_with_type_annotations(entity, query_match, query, source)?;
+        enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -62,9 +66,12 @@ pub fn handle_arrow_function_impl(
         source_root,
     )?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
-        enhance_with_type_annotations(entity, query_match, query, source)?;
+        enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -77,6 +84,7 @@ fn enhance_with_type_annotations(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
+    module_path: Option<&str>,
 ) -> Result<()> {
     if let Some(function_node) = find_capture_node(query_match, query, "function")
         .or_else(|| find_capture_node(query_match, query, "arrow_function"))
@@ -94,7 +102,7 @@ fn enhance_with_type_annotations(
 
         // Build import map for type reference resolution
         let root = get_ast_root(function_node);
-        let import_map = parse_file_imports(root, source, Language::TypeScript);
+        let import_map = parse_file_imports(root, source, Language::TypeScript, module_path);
 
         // Extract type references from TypeScript type annotations
         let ts_type_refs = extract_type_references(

@@ -593,7 +593,9 @@ fn get_file_import_map(node: Node, source: &str) -> ImportMap {
     }
 
     // Parse imports from the root
-    parse_file_imports(current, source, Language::Rust)
+    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
+    // so no module_path resolution is needed
+    parse_file_imports(current, source, Language::Rust, None)
 }
 
 /// Extract and resolve field types for USES relationships

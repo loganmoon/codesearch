@@ -45,6 +45,10 @@ define_language_extractor! {
         method => {
             query: queries::METHOD_QUERY,
             handler: handler_impls::handle_method_impl
+        },
+        module => {
+            query: queries::MODULE_QUERY,
+            handler: handler_impls::handle_module_impl
         }
     }
 }

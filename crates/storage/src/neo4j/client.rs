@@ -393,6 +393,7 @@ impl Neo4jClient {
     /// Uses MERGE to create or update nodes, avoiding duplicates.
     pub async fn batch_create_external_nodes(
         &self,
+        repository_id: &str,
         external_refs: &[(String, String, Option<String>)],
     ) -> Result<()> {
         if external_refs.is_empty() {
@@ -408,6 +409,10 @@ impl Neo4jClient {
                 let mut map = std::collections::HashMap::new();
                 map.insert("id".to_string(), entity_id.clone().into());
                 map.insert("qualified_name".to_string(), qualified_name.clone().into());
+                map.insert(
+                    "repository_id".to_string(),
+                    repository_id.to_string().into(),
+                );
                 // Extract simple name from qualified name
                 let name = qualified_name
                     .rsplit("::")
@@ -424,11 +429,13 @@ impl Neo4jClient {
             .collect();
 
         // MERGE on id to avoid duplicates, update properties if exists
+        // Include repository_id for proper isolation between repositories
         let query_str = "UNWIND $refs AS ref
              MERGE (n:External {id: ref.id})
              SET n.qualified_name = ref.qualified_name,
                  n.name = ref.name,
-                 n.package = ref.package";
+                 n.package = ref.package,
+                 n.repository_id = ref.repository_id";
 
         let query = Query::new(query_str.to_string()).param("refs", ref_maps);
 
@@ -759,10 +766,11 @@ impl Neo4jClient {
                 .collect();
 
             // UNWIND query: processes entire list in single network call
-            // IMPORTANT: Include :Entity label to enable index usage on (n:Entity).id
+            // Match nodes by id without label constraint to support both Entity and External nodes
+            // For relationships TO External nodes (external stdlib/library references)
             let query_str = format!(
                 "UNWIND $relationships AS rel
-                 MATCH (from:Entity {{id: rel.from_id}}), (to:Entity {{id: rel.to_id}})
+                 MATCH (from {{id: rel.from_id}}), (to {{id: rel.to_id}})
                  MERGE (from)-[:{rel_type}]->(to)"
             );
 
@@ -1101,9 +1109,10 @@ impl Neo4jClientTrait for Neo4jClient {
 
     async fn batch_create_external_nodes(
         &self,
+        repository_id: &str,
         external_refs: &[(String, String, Option<String>)],
     ) -> Result<()> {
-        Self::batch_create_external_nodes(self, external_refs).await
+        Self::batch_create_external_nodes(self, repository_id, external_refs).await
     }
 
     async fn delete_entity_node(&self, entity_id: &str) -> Result<()> {

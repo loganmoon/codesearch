@@ -64,6 +64,10 @@ define_language_extractor! {
         r#enum => {
             query: queries::ENUM_QUERY,
             handler: handler_impls::handle_enum_impl
+        },
+        module => {
+            query: queries::MODULE_QUERY,
+            handler: handler_impls::handle_module_impl
         }
     }
 }

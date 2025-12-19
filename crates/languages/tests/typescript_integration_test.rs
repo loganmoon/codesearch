@@ -1,7 +1,19 @@
 //! Integration tests for TypeScript language support
 
+use codesearch_core::entities::EntityType;
 use codesearch_languages::create_extractor;
 use std::path::Path;
+
+/// Helper to filter entities by type (excludes Module entities used for IMPORTS tracking)
+fn filter_by_type(
+    entities: &[codesearch_core::CodeEntity],
+    entity_type: EntityType,
+) -> Vec<&codesearch_core::CodeEntity> {
+    entities
+        .iter()
+        .filter(|e| e.entity_type == entity_type)
+        .collect()
+}
 
 #[test]
 fn test_typescript_extractor_creation() {
@@ -38,8 +50,9 @@ fn test_extract_typed_function() {
 
     eprintln!("Extracted entities: {entities:#?}");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
     assert_eq!(
@@ -75,14 +88,12 @@ fn test_extract_interface() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let interfaces = filter_by_type(&entities, EntityType::Interface);
+    assert_eq!(interfaces.len(), 1);
+    let entity = interfaces[0];
 
     assert_eq!(entity.name, "User");
-    assert_eq!(
-        entity.entity_type,
-        codesearch_core::entities::EntityType::Interface
-    );
+    assert_eq!(entity.entity_type, EntityType::Interface);
 }
 
 #[test]
@@ -101,8 +112,9 @@ fn test_extract_generic_interface() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let interfaces = filter_by_type(&entities, EntityType::Interface);
+    assert_eq!(interfaces.len(), 1);
+    let entity = interfaces[0];
 
     assert_eq!(entity.name, "Container");
     assert!(entity.signature.is_some());
@@ -129,14 +141,12 @@ fn test_extract_type_alias() {
 
     eprintln!("Extracted entities: {entities:#?}");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let type_aliases = filter_by_type(&entities, EntityType::TypeAlias);
+    assert_eq!(type_aliases.len(), 1);
+    let entity = type_aliases[0];
 
     assert_eq!(entity.name, "ID");
-    assert_eq!(
-        entity.entity_type,
-        codesearch_core::entities::EntityType::TypeAlias
-    );
+    assert_eq!(entity.entity_type, EntityType::TypeAlias);
 }
 
 #[test]
@@ -157,14 +167,12 @@ fn test_extract_enum() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let enums = filter_by_type(&entities, EntityType::Enum);
+    assert_eq!(enums.len(), 1);
+    let entity = enums[0];
 
     assert_eq!(entity.name, "Color");
-    assert_eq!(
-        entity.entity_type,
-        codesearch_core::entities::EntityType::Enum
-    );
+    assert_eq!(entity.entity_type, EntityType::Enum);
 }
 
 #[test]
@@ -184,8 +192,9 @@ fn test_extract_async_function() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "fetchData");
     assert!(entity.metadata.is_async);
@@ -250,8 +259,9 @@ fn test_extract_interface_with_jsdoc() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let interfaces = filter_by_type(&entities, EntityType::Interface);
+    assert_eq!(interfaces.len(), 1);
+    let entity = interfaces[0];
 
     assert_eq!(entity.name, "User");
     assert!(entity.documentation_summary.is_some());
@@ -274,8 +284,9 @@ fn test_extract_arrow_function() {
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "multiply");
     assert_eq!(

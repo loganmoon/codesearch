@@ -105,6 +105,7 @@ pub trait Neo4jClientTrait: Send + Sync {
     /// Uses MERGE to avoid creating duplicates.
     ///
     /// # Arguments
+    /// * `repository_id` - UUID of the repository these external refs belong to
     /// * `external_refs` - Slice of (entity_id, qualified_name, package) tuples where:
     ///   - entity_id: Unique identifier for the external reference
     ///   - qualified_name: Full qualified name (e.g., "std::collections::HashMap")
@@ -114,6 +115,7 @@ pub trait Neo4jClientTrait: Send + Sync {
     /// * `Result<()>` - Success or error
     async fn batch_create_external_nodes(
         &self,
+        repository_id: &str,
         external_refs: &[(String, String, Option<String>)],
     ) -> Result<()>;
 

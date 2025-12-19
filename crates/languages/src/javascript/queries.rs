@@ -31,3 +31,8 @@ pub const METHOD_QUERY: &str = r#"
   body: (statement_block) @body
 ) @method
 "#;
+
+/// Query for the root program node (used for Module entity extraction)
+pub const MODULE_QUERY: &str = r#"
+(program) @module
+"#;

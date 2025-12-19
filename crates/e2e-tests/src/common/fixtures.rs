@@ -477,28 +477,28 @@ pub async fn real_python_package() -> Result<TempDir> {
     git_clone("https://github.com/theskumar/python-dotenv", "v1.0.0").await
 }
 
-/// Clone a small TypeScript project for testing
+/// Clone the Express.js framework for testing (JavaScript)
 ///
-/// p-limit is a concurrency limiter with:
-/// - Clean TypeScript types
-/// - ES module exports
-/// - Async/Promise patterns
+/// Express is the most popular Node.js web framework with:
+/// - Multiple routers and middleware
+/// - Large API surface with many functions and methods
+/// - Complex module/require patterns
 ///
-/// Expected: ~10-20 entities
-pub async fn real_typescript_project() -> Result<TempDir> {
-    git_clone("https://github.com/sindresorhus/p-limit", "v4.0.0").await
+/// Expected: 200+ entities with rich call/import relationships
+pub async fn real_express_project() -> Result<TempDir> {
+    git_clone("https://github.com/expressjs/express", "4.21.2").await
 }
 
-/// Clone a JavaScript project for testing
+/// Clone the jotai library for testing (TypeScript)
 ///
-/// eventemitter3 is a high-performance event emitter with:
-/// - EventEmitter class with multiple methods (on, off, emit, once, etc.)
-/// - Clean class/method structure ideal for testing CONTAINS relationships
-/// - No dependencies, small codebase
+/// jotai is a primitive and flexible state management library with:
+/// - Clean TypeScript types
+/// - Multiple utility modules
+/// - Good variety of classes and functions
 ///
-/// Expected: ~10-20 entities with proper class/method nesting
-pub async fn real_javascript_project() -> Result<TempDir> {
-    git_clone("https://github.com/primus/eventemitter3", "5.0.1").await
+/// Expected: 150-300 entities with inter-module relationships
+pub async fn real_jotai_project() -> Result<TempDir> {
+    git_clone("https://github.com/pmndrs/jotai", "v2.9.3").await
 }
 
 #[cfg(test)]

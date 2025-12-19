@@ -6,10 +6,13 @@ use crate::common::{
     import_map::{get_ast_root, parse_file_imports, resolve_reference},
     node_to_text, require_capture_node,
 };
-use crate::python::utils::{
-    extract_base_classes, extract_decorators, extract_docstring, extract_function_calls,
-    extract_python_parameters, extract_return_type, extract_type_references, filter_self_parameter,
-    is_async_function, is_python_primitive,
+use crate::python::{
+    module_path::derive_module_path,
+    utils::{
+        extract_base_classes, extract_decorators, extract_docstring, extract_function_calls,
+        extract_python_parameters, extract_return_type, extract_type_references,
+        filter_self_parameter, is_async_function, is_python_primitive,
+    },
 };
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
@@ -53,9 +56,12 @@ pub fn handle_class_impl(
     // Extract decorators
     let decorators = extract_decorators(class_node, source);
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map for base class resolution
     let root = get_ast_root(class_node);
-    let import_map = parse_file_imports(root, source, Language::Python);
+    let import_map = parse_file_imports(root, source, Language::Python, module_path.as_deref());
 
     // Build metadata
     let mut metadata = EntityMetadata {
@@ -149,9 +155,12 @@ pub fn handle_method_impl(
     // Extract decorators
     let decorators = extract_decorators(method_node, source);
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map from file's imports for qualified name resolution
     let root = get_ast_root(method_node);
-    let import_map = parse_file_imports(root, source, Language::Python);
+    let import_map = parse_file_imports(root, source, Language::Python, module_path.as_deref());
 
     // Extract function calls from the method body with qualified name resolution
     let calls = extract_function_calls(

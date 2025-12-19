@@ -443,6 +443,8 @@ pub async fn get_neo4j_graph_stats(
     repository_id: &str,
 ) -> Result<Neo4jGraphStats> {
     let node_count = query_neo4j_node_count(neo4j, repository_id).await?;
+    // Count edges TO External nodes (not External nodes themselves, as they don't have repository_id)
+    let external_edge_count = query_neo4j_external_edge_count(neo4j, repository_id).await.unwrap_or(0);
 
     let contains = query_neo4j_relationship_count(neo4j, repository_id, "CONTAINS").await.unwrap_or(0);
     let implements = query_neo4j_relationship_count(neo4j, repository_id, "IMPLEMENTS").await.unwrap_or(0);
@@ -450,122 +452,204 @@ pub async fn get_neo4j_graph_stats(
     let imports = query_neo4j_relationship_count(neo4j, repository_id, "IMPORTS").await.unwrap_or(0);
     let uses = query_neo4j_relationship_count(neo4j, repository_id, "USES").await.unwrap_or(0);
     let inherits = query_neo4j_relationship_count(neo4j, repository_id, "INHERITS_FROM").await.unwrap_or(0);
+    let associates = query_neo4j_relationship_count(neo4j, repository_id, "ASSOCIATES").await.unwrap_or(0);
+    let extends_interface = query_neo4j_relationship_count(neo4j, repository_id, "EXTENDS_INTERFACE").await.unwrap_or(0);
 
     Ok(Neo4jGraphStats {
         node_count,
+        external_edge_count,
         contains_count: contains,
         implements_count: implements,
         calls_count: calls,
         imports_count: imports,
         uses_count: uses,
         inherits_count: inherits,
+        associates_count: associates,
+        extends_interface_count: extends_interface,
     })
+}
+
+/// Query the count of relationships TO External nodes from entities in this repository
+///
+/// External nodes don't have repository_id (they're shared across repos), so we count
+/// edges from this repository's entities to External nodes instead.
+pub async fn query_neo4j_external_edge_count(
+    neo4j: &Arc<TestNeo4j>,
+    repository_id: &str,
+) -> Result<usize> {
+    let url = format!(
+        "{}/db/{}/tx/commit",
+        neo4j.http_url(),
+        NEO4J_DEFAULT_DATABASE
+    );
+
+    let client = reqwest::Client::new();
+    // Count relationships from entities in this repo to External nodes
+    let body = serde_json::json!({
+        "statements": [{
+            "statement": "MATCH (e:Entity {repository_id: $repo_id})-[r]->(ext:External) RETURN count(r) AS count",
+            "parameters": {
+                "repo_id": repository_id
+            }
+        }]
+    });
+
+    let response = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .context("Failed to query Neo4j for External edges")?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Neo4j query failed: {text}"));
+    }
+
+    let result: Neo4jTransactionResult = response
+        .json()
+        .await
+        .context("Failed to parse Neo4j response")?;
+
+    let count = result
+        .results
+        .first()
+        .and_then(|r| r.data.first())
+        .and_then(|d| d.row.first())
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    Ok(count)
 }
 
 /// Summary statistics for a Neo4j graph
 #[derive(Debug, Clone)]
 pub struct Neo4jGraphStats {
     pub node_count: usize,
+    /// Count of edges TO External nodes (unresolved external references)
+    pub external_edge_count: usize,
     pub contains_count: usize,
     pub implements_count: usize,
     pub calls_count: usize,
     pub imports_count: usize,
     pub uses_count: usize,
     pub inherits_count: usize,
+    pub associates_count: usize,
+    pub extends_interface_count: usize,
 }
 
 impl Neo4jGraphStats {
-    /// Get total relationship count
-    pub fn total_relationships(&self) -> usize {
+    /// Get total internal relationship count (edges between Entity nodes)
+    pub fn total_internal_relationships(&self) -> usize {
         self.contains_count
             + self.implements_count
             + self.calls_count
             + self.imports_count
             + self.uses_count
             + self.inherits_count
+            + self.associates_count
+            + self.extends_interface_count
+    }
+
+    /// Get total relationship count including external edges
+    pub fn total_relationships(&self) -> usize {
+        self.total_internal_relationships() + self.external_edge_count
+    }
+
+    /// Calculate internal resolution rate
+    ///
+    /// Returns the percentage of edges that point to internal entities
+    /// vs External stub nodes.
+    /// Formula: internal_edges / (internal_edges + external_edges) * 100
+    pub fn internal_resolution_rate(&self) -> f64 {
+        let internal = self.total_internal_relationships();
+        let total = internal + self.external_edge_count;
+        if total == 0 {
+            100.0
+        } else {
+            (internal as f64 / total as f64) * 100.0
+        }
+    }
+
+    /// Calculate relationship density (relationships per entity)
+    pub fn relationship_density(&self) -> f64 {
+        if self.node_count == 0 {
+            0.0
+        } else {
+            self.total_internal_relationships() as f64 / self.node_count as f64
+        }
     }
 
     /// Print a human-readable summary
     pub fn print_summary(&self) {
         println!("\n=== Neo4j Graph Statistics ===");
         println!("Entity nodes: {}", self.node_count);
+        println!("External edges: {}", self.external_edge_count);
         println!("CONTAINS relationships: {}", self.contains_count);
         println!("IMPLEMENTS relationships: {}", self.implements_count);
         println!("CALLS relationships: {}", self.calls_count);
         println!("IMPORTS relationships: {}", self.imports_count);
         println!("USES relationships: {}", self.uses_count);
         println!("INHERITS_FROM relationships: {}", self.inherits_count);
-        println!("Total relationships: {}", self.total_relationships());
+        println!("ASSOCIATES relationships: {}", self.associates_count);
+        println!("EXTENDS_INTERFACE relationships: {}", self.extends_interface_count);
+        println!("Total internal relationships: {}", self.total_internal_relationships());
+        println!("Internal resolution rate: {:.1}%", self.internal_resolution_rate());
+        println!("Relationship density: {:.2}", self.relationship_density());
     }
 }
 
 // =============================================================================
-// Resolution Metrics
+// Resolution Metrics (Deprecated - use Neo4jGraphStats methods instead)
 // =============================================================================
 
 use super::containers::TestPostgres;
 
-/// Resolution metrics showing pending vs resolved relationships
+/// Resolution metrics showing resolved relationships
+///
+/// DEPRECATED: Use `Neo4jGraphStats::internal_resolution_rate()` and
+/// `Neo4jGraphStats::relationship_density()` instead, which provide more
+/// accurate metrics based on External stub node counts.
 #[derive(Debug, Clone)]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use Neo4jGraphStats methods instead: internal_resolution_rate(), relationship_density()"
+)]
 pub struct ResolutionMetrics {
-    /// Number of relationships still pending resolution
-    pub pending_count: usize,
     /// Number of relationships successfully resolved (in Neo4j)
     pub resolved_count: usize,
-    /// Breakdown of pending by relationship type
-    pub pending_by_type: std::collections::HashMap<String, usize>,
 }
 
+#[allow(deprecated)]
 impl ResolutionMetrics {
-    /// Calculate resolution percentage
-    pub fn resolution_percentage(&self) -> f64 {
-        let total = self.pending_count + self.resolved_count;
-        if total == 0 {
-            100.0
-        } else {
-            (self.resolved_count as f64 / total as f64) * 100.0
-        }
-    }
-
     /// Print a human-readable summary
     pub fn print_summary(&self) {
         println!("\n=== Resolution Metrics ===");
         println!("Resolved relationships: {}", self.resolved_count);
-        println!("Pending relationships: {}", self.pending_count);
-        println!(
-            "Resolution rate: {:.1}%",
-            self.resolution_percentage()
-        );
-        if !self.pending_by_type.is_empty() {
-            println!("Pending by type:");
-            for (rel_type, count) in &self.pending_by_type {
-                println!("  {}: {}", rel_type, count);
-            }
-        }
     }
 }
 
 /// Get resolution metrics for a repository
 ///
-/// NOTE: The pending_relationships table has been eliminated. All resolution
-/// now happens through dedicated resolvers querying entity_metadata directly.
-/// This function now only returns resolved counts from Neo4j with pending always 0.
+/// DEPRECATED: Use `get_neo4j_graph_stats()` instead, which returns a
+/// `Neo4jGraphStats` with comprehensive metrics including external node
+/// counts and resolution rates.
 #[allow(unused_variables)]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use get_neo4j_graph_stats() instead for comprehensive metrics"
+)]
+#[allow(deprecated)]
 pub async fn get_resolution_metrics(
     postgres: &Arc<TestPostgres>,
     neo4j: &Arc<TestNeo4j>,
     db_name: &str,
     repository_id: &str,
 ) -> Result<ResolutionMetrics> {
-    // Get resolved count from Neo4j (total relationships)
     let stats = get_neo4j_graph_stats(neo4j, repository_id).await?;
     let resolved_count = stats.total_relationships();
 
-    Ok(ResolutionMetrics {
-        pending_count: 0, // pending_relationships table no longer used
-        resolved_count,
-        pending_by_type: std::collections::HashMap::new(),
-    })
+    Ok(ResolutionMetrics { resolved_count })
 }
 
 /// Assert that a specific relationship exists between two entities

@@ -397,7 +397,8 @@ class User(BaseModel):
 
     let bases_resolved: Vec<String> =
         serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
-    assert!(bases_resolved.contains(&"models.BaseModel".to_string()));
+    // Absolute imports are marked with external. prefix
+    assert!(bases_resolved.contains(&"external.models.BaseModel".to_string()));
 }
 
 #[test]
@@ -450,8 +451,9 @@ class MultiInherit(BaseA, BaseB):
     let bases_resolved: Vec<String> =
         serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
     assert_eq!(bases_resolved.len(), 2);
-    assert!(bases_resolved.contains(&"base_a.BaseA".to_string()));
-    assert!(bases_resolved.contains(&"base_b.BaseB".to_string()));
+    // Absolute imports are marked with external. prefix
+    assert!(bases_resolved.contains(&"external.base_a.BaseA".to_string()));
+    assert!(bases_resolved.contains(&"external.base_b.BaseB".to_string()));
 }
 
 // ============================================================================

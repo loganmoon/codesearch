@@ -1,7 +1,19 @@
 //! Integration tests for JavaScript language support
 
+use codesearch_core::entities::EntityType;
 use codesearch_languages::create_extractor;
 use std::path::Path;
+
+/// Helper to filter entities by type (excludes Module entities used for IMPORTS tracking)
+fn filter_by_type(
+    entities: &[codesearch_core::CodeEntity],
+    entity_type: EntityType,
+) -> Vec<&codesearch_core::CodeEntity> {
+    entities
+        .iter()
+        .filter(|e| e.entity_type == entity_type)
+        .collect()
+}
 
 #[test]
 fn test_javascript_extractor_creation() {
@@ -33,8 +45,9 @@ fn test_extract_simple_function() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "greet");
     assert_eq!(
@@ -69,8 +82,9 @@ fn test_extract_arrow_function() {
         eprintln!("Entity {}: {} ({})", i, entity.name, entity.entity_type);
     }
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
     assert_eq!(
@@ -104,8 +118,9 @@ fn test_extract_async_function() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "fetchData");
     assert!(entity.metadata.is_async);
@@ -171,8 +186,9 @@ fn test_extract_function_with_jsdoc() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
     assert!(entity.documentation_summary.is_some());

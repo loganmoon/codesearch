@@ -90,11 +90,13 @@ pub fn handle_module_impl(
         if has_body { "true" } else { "false" }.to_string(),
     );
 
-    // Store imports if any exist
+    // Store imports as JSON array (expected by ImportsResolver)
     if !imports.is_empty() {
-        metadata
-            .attributes
-            .insert("imports".to_string(), imports.join(","));
+        if let Ok(imports_json) = serde_json::to_string(&imports) {
+            metadata
+                .attributes
+                .insert("imports".to_string(), imports_json);
+        }
     }
 
     // Build the entity using the shared helper

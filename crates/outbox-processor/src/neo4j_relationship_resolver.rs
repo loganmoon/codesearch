@@ -257,9 +257,26 @@ impl RelationshipResolver for InheritanceResolver {
 
         let mut relationships = Vec::new();
 
-        for class_entity in classes {
-            if let Some(extends) = class_entity.metadata.attributes.get("extends") {
-                let parent_name = extends.split('<').next().unwrap_or(extends).trim();
+        for class_entity in &classes {
+            // Check both 'extends' (JS/TS) and 'bases' (Python) attributes
+            let parent_names: Vec<String> =
+                if let Some(extends) = class_entity.metadata.attributes.get("extends") {
+                    // JS/TS: single parent class name
+                    vec![extends
+                        .split('<')
+                        .next()
+                        .unwrap_or(extends)
+                        .trim()
+                        .to_string()]
+                } else if let Some(bases_json) = class_entity.metadata.attributes.get("bases") {
+                    // Python: JSON array of base class names
+                    serde_json::from_str::<Vec<String>>(bases_json).unwrap_or_default()
+                } else {
+                    continue;
+                };
+
+            for parent_name in parent_names {
+                let parent_name = parent_name.split('<').next().unwrap_or(&parent_name).trim();
 
                 if let Some(parent_id) = class_map.get(parent_name) {
                     // Forward edge: child -> parent
@@ -453,6 +470,59 @@ impl RelationshipResolver for CallGraphResolver {
 /// Resolver for imports (IMPORTS relationships)
 pub struct ImportsResolver;
 
+/// Resolve a relative import path to a qualified name
+///
+/// Given an importer's qualified_name and a relative import path,
+/// returns the resolved qualified_name of the imported module.
+///
+/// Examples:
+/// - importer: "utils.helpers", import: "./store" -> "utils.store"
+/// - importer: "utils.helpers", import: "../core" -> "core"
+/// - importer: "a.b.c", import: "../../x" -> "x"
+fn resolve_import_path(importer_qname: &str, import_path: &str) -> Option<String> {
+    // Non-relative imports (bare specifiers like "react") return None
+    // They're typically external packages
+    if !import_path.starts_with('.') {
+        return None;
+    }
+
+    // Split importer qualified name into parts
+    // e.g., "utils.helpers" -> ["utils", "helpers"]
+    let mut parts: Vec<&str> = importer_qname.split('.').collect();
+
+    // Remove the importer's own name (last segment) to get the directory
+    // e.g., ["utils", "helpers"] -> ["utils"]
+    if !parts.is_empty() {
+        parts.pop();
+    }
+
+    // Process import path segments
+    for segment in import_path.split('/') {
+        match segment {
+            "." | "" => {
+                // Current directory, no change
+            }
+            ".." => {
+                // Go up one level
+                if !parts.is_empty() {
+                    parts.pop();
+                }
+            }
+            _ => {
+                // Add this segment (strip file extension if present)
+                let name = segment.rsplit('.').next_back().unwrap_or(segment);
+                parts.push(name);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("."))
+    }
+}
+
 #[async_trait]
 impl RelationshipResolver for ImportsResolver {
     fn name(&self) -> &'static str {
@@ -472,27 +542,46 @@ impl RelationshipResolver for ImportsResolver {
             .await
             .context("Failed to get modules")?;
 
+        // Build lookup maps for module resolution
+        // 1. By qualified_name (e.g., "utils.helpers")
+        // 2. By simple name (e.g., "helpers") for bare imports within the same package
         let module_map: HashMap<String, String> = modules
             .iter()
             .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
             .collect();
 
+        let simple_name_map: HashMap<String, String> = modules
+            .iter()
+            .map(|m| (m.name.clone(), m.entity_id.clone()))
+            .collect();
+
         let mut relationships = Vec::new();
 
-        for module_entity in modules {
+        for module_entity in &modules {
             if let Some(imports_json) = module_entity.metadata.attributes.get("imports") {
                 if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_json) {
                     for import_path in imports {
-                        if let Some(imported_module_id) = module_map.get(&import_path) {
+                        // Try to resolve the import
+                        let imported_module_id = if import_path.starts_with('.') {
+                            // Relative import: resolve based on importer's location
+                            resolve_import_path(&module_entity.qualified_name, &import_path)
+                                .and_then(|resolved| module_map.get(&resolved))
+                        } else {
+                            // Bare import: try simple name match (internal package import)
+                            // External packages (react, lodash, etc.) won't match
+                            simple_name_map.get(&import_path)
+                        };
+
+                        if let Some(imported_id) = imported_module_id {
                             // Forward edge: module -> imported_module
                             relationships.push((
                                 module_entity.entity_id.clone(),
-                                imported_module_id.clone(),
+                                imported_id.clone(),
                                 "IMPORTS".to_string(),
                             ));
                             // Reciprocal edge: imported_module -> module
                             relationships.push((
-                                imported_module_id.clone(),
+                                imported_id.clone(),
                                 module_entity.entity_id.clone(),
                                 "IMPORTED_BY".to_string(),
                             ));
@@ -731,7 +820,7 @@ pub async fn resolve_external_references(
         .collect();
 
     neo4j
-        .batch_create_external_nodes(&ext_nodes)
+        .batch_create_external_nodes(&repository_id.to_string(), &ext_nodes)
         .await
         .context("Failed to create external nodes")?;
 
@@ -759,7 +848,7 @@ fn is_external_ref(
     name_to_qname: &std::collections::HashMap<&str, &str>,
 ) -> bool {
     // Explicit external prefix
-    if ref_name.starts_with("external::") {
+    if ref_name.starts_with("external::") || ref_name.starts_with("external.") {
         return true;
     }
 
@@ -768,15 +857,29 @@ fn is_external_ref(
         return false;
     }
 
-    // Check if the simple name (last segment) matches any known name
-    let simple_name = ref_name.rsplit("::").next().unwrap_or(ref_name);
-    if name_to_qname.contains_key(simple_name) {
+    // Strip generics before further checks
+    let without_generics = ref_name.split('<').next().unwrap_or(ref_name);
+    if known_names.contains(without_generics) {
         return false;
     }
 
-    // Also check if it could be resolved by stripping generics
-    let without_generics = ref_name.split('<').next().unwrap_or(ref_name);
-    if known_names.contains(without_generics) {
+    // Extract simple name using language-appropriate separator
+    // Rust uses "::", JS/TS/Python use "."
+    let simple_name = if without_generics.contains("::") {
+        without_generics
+            .rsplit("::")
+            .next()
+            .unwrap_or(without_generics)
+    } else if without_generics.contains('.') {
+        without_generics
+            .rsplit('.')
+            .next()
+            .unwrap_or(without_generics)
+    } else {
+        without_generics
+    };
+
+    if name_to_qname.contains_key(simple_name) {
         return false;
     }
 
@@ -797,5 +900,132 @@ fn normalize_external_ref(ref_name: &str) -> String {
         cleaned.to_string()
     } else {
         format!("external::{cleaned}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_import_path_current_dir() {
+        // ./store relative to utils.helpers -> utils.store
+        assert_eq!(
+            resolve_import_path("utils.helpers", "./store"),
+            Some("utils.store".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_path_parent_dir() {
+        // ../core relative to utils.helpers -> core
+        assert_eq!(
+            resolve_import_path("utils.helpers", "../core"),
+            Some("core".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_path_multiple_parents() {
+        // ../../x relative to a.b.c -> x
+        assert_eq!(
+            resolve_import_path("a.b.c", "../../x"),
+            Some("x".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_path_nested() {
+        // ./sub/module relative to utils.helpers -> utils.sub.module
+        assert_eq!(
+            resolve_import_path("utils.helpers", "./sub/module"),
+            Some("utils.sub.module".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_path_bare_specifier() {
+        // Bare specifiers (external packages) return None
+        assert_eq!(resolve_import_path("utils.helpers", "react"), None);
+        assert_eq!(resolve_import_path("utils.helpers", "lodash"), None);
+    }
+
+    #[test]
+    fn test_resolve_import_path_with_extension() {
+        // Extensions should be stripped
+        assert_eq!(
+            resolve_import_path("utils.helpers", "./store.js"),
+            Some("utils.store".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_import_path_root_level() {
+        // Single segment module
+        assert_eq!(
+            resolve_import_path("index", "./utils"),
+            Some("utils".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_external_ref_with_dot_separator() {
+        let mut known_names = std::collections::HashSet::new();
+        known_names.insert("utils.helpers");
+        known_names.insert("core.module");
+
+        let mut name_to_qname = std::collections::HashMap::new();
+        name_to_qname.insert("helpers", "utils.helpers");
+        name_to_qname.insert("module", "core.module");
+
+        // Full qualified name match
+        assert!(!is_external_ref(
+            "utils.helpers",
+            &known_names,
+            &name_to_qname
+        ));
+
+        // Simple name match (via name_to_qname)
+        assert!(!is_external_ref("helpers", &known_names, &name_to_qname));
+
+        // Unknown reference is external
+        assert!(is_external_ref(
+            "unknown.thing",
+            &known_names,
+            &name_to_qname
+        ));
+
+        // Explicit external prefix
+        assert!(is_external_ref(
+            "external.react",
+            &known_names,
+            &name_to_qname
+        ));
+    }
+
+    #[test]
+    fn test_is_external_ref_with_rust_separator() {
+        let mut known_names = std::collections::HashSet::new();
+        known_names.insert("crate::utils::helpers");
+
+        let mut name_to_qname = std::collections::HashMap::new();
+        name_to_qname.insert("helpers", "crate::utils::helpers");
+
+        // Full qualified name match
+        assert!(!is_external_ref(
+            "crate::utils::helpers",
+            &known_names,
+            &name_to_qname
+        ));
+
+        // Simple name match
+        assert!(!is_external_ref("helpers", &known_names, &name_to_qname));
+
+        // Explicit external prefix
+        assert!(is_external_ref(
+            "external::std::collections",
+            &known_names,
+            &name_to_qname
+        ));
     }
 }

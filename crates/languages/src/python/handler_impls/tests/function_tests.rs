@@ -268,8 +268,8 @@ def process():
 
     let calls: Vec<String> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
-    // Should resolve through import
-    assert!(calls.contains(&"utils.helper".to_string()));
+    // Should resolve through import - absolute imports are marked with external. prefix
+    assert!(calls.contains(&"external.utils.helper".to_string()));
 }
 
 // ============================================================================

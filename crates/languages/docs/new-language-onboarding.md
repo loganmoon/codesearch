@@ -413,19 +413,34 @@ The import map enables resolving references to qualified names.
 // crates/languages/src/common/import_map.rs
 
 /// Parse imports from a file's AST root
-pub fn parse_file_imports(root: Node, source: &str, language: Language) -> ImportMap {
+///
+/// The `current_module_path` parameter enables resolution of relative imports:
+/// - For JS/TS: `./utils` resolves to `myapp.utils` if current file is `myapp.main.ts`
+/// - For Python: `.models` resolves to `myapp.models` if current file is `myapp/__init__.py`
+///
+/// If `current_module_path` is None, relative imports are stored as-is.
+pub fn parse_file_imports(
+    root: Node,
+    source: &str,
+    language: Language,
+    current_module_path: Option<&str>,  // Required for relative import resolution
+) -> ImportMap {
     match language {
         Language::Rust => parse_rust_imports(root, source),
-        Language::JavaScript => parse_js_imports(root, source),
-        Language::TypeScript => parse_ts_imports(root, source),
-        Language::Python => parse_python_imports(root, source),
-        Language::NewLang => parse_newlang_imports(root, source),  // Add your language
+        Language::JavaScript => parse_js_imports(root, source, current_module_path),
+        Language::TypeScript => parse_ts_imports(root, source, current_module_path),
+        Language::Python => parse_python_imports(root, source, current_module_path),
+        Language::NewLang => parse_newlang_imports(root, source, current_module_path),
         _ => ImportMap::new("."),
     }
 }
 
 /// Parse imports for your language
-fn parse_newlang_imports(root: Node, source: &str) -> ImportMap {
+fn parse_newlang_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut map = ImportMap::new("::");  // Use appropriate separator
 
     // Walk AST to find import statements
@@ -433,6 +448,7 @@ fn parse_newlang_imports(root: Node, source: &str) -> ImportMap {
     for node in root.children(&mut cursor) {
         if node.kind() == "import_statement" {
             // Extract imported name and source path
+            // Resolve relative imports using current_module_path if needed
             // Add to map: map.add("LocalName", "module.path.LocalName");
         }
     }
@@ -445,20 +461,52 @@ fn parse_newlang_imports(root: Node, source: &str) -> ImportMap {
 
 ```rust
 use crate::common::import_map::{parse_file_imports, resolve_reference};
+use crate::javascript::module_path::derive_module_path;
 
-// In a handler:
-let import_map = parse_file_imports(file_root, source, Language::Rust);
+// In a handler, derive the current module path first:
+let module_path = derive_module_path(file_path, source_root);
 
-// Resolve a reference like "HashMap" to "std::collections::HashMap"
-let resolved = resolve_reference(
-    "HashMap",           // Name to resolve
-    &import_map,         // Import map
-    Some("my_module"),   // Parent scope (for local resolution)
-    "::"                 // Namespace separator
+// Parse imports with module path for relative import resolution
+let import_map = parse_file_imports(
+    file_root,
+    source,
+    Language::JavaScript,
+    module_path.as_deref(),  // Pass the module path
 );
-// Returns: "std::collections::HashMap" if imported, or "my_module::HashMap" if local,
-// or "external::HashMap" if unresolved
+
+// Resolve a reference like "Config" to its qualified name
+let resolved = resolve_reference(
+    "Config",            // Name to resolve
+    &import_map,         // Import map
+    Some("myapp.main"),  // Parent scope (for local resolution)
+    "."                  // Namespace separator (JS/Python use ".", Rust uses "::")
+);
+// Returns:
+// - "myapp.config.Config" if imported from ./config
+// - "myapp.main.Config" if defined locally
+// - "external.Config" if unresolved (external dependency)
 ```
+
+### 4.3 Relative Import Resolution
+
+For languages with relative imports (JS/TS, Python), the `current_module_path` is used
+to convert relative paths to absolute qualified names at extraction time:
+
+```rust
+// JS/TS: resolve_relative_import converts "./core" based on importer location
+// If current file is "vanilla/atom.ts" (module_path = "vanilla.atom"):
+//   "./core" → "vanilla.core"
+//   "../utils" → "utils"
+
+// Python: resolve_python_relative_import handles "." and ".." syntax
+// If current file is "myapp/models/__init__.py" (module_path = "myapp.models"):
+//   ".base" → "myapp.models.base"
+//   "..utils" → "myapp.utils"
+```
+
+This ensures that references stored in entity attributes (e.g., `calls`, `uses_types`,
+`extends_resolved`) match the `qualified_name` format used by entity definitions,
+enabling proper relationship resolution in Neo4j.
 
 ---
 
@@ -668,10 +716,16 @@ fn test_function_extracts_uses_types() {
 | Language | Extraction | Resolution | Notes |
 |----------|-----------|------------|-------|
 | **Rust** | Full | Full | Canonical implementation |
-| **JavaScript** | Partial | Partial | Missing `calls`, `extends_resolved` |
-| **TypeScript** | Partial | Partial | Missing `calls`, `uses_types`, `*_resolved` |
-| **Python** | Partial | Partial | Missing `calls`, `uses_types`, `bases_resolved` |
+| **JavaScript** | Full | Full | Complete with `calls`, `uses_types`, `extends_resolved` |
+| **TypeScript** | Full | Full | Complete with `calls`, `uses_types`, `extends_resolved`, `implements_trait_resolved` |
+| **Python** | Full | Full | Complete with `calls`, `uses_types`, `bases_resolved` |
 | **Go** | Infrastructure | None | Grammar exists, handlers not implemented |
+
+All languages (except Go) now support:
+- Relative import resolution at extraction time
+- `calls` attribute for function/method calls
+- `uses_types` attribute for type references
+- `*_resolved` attributes for inheritance/implementation
 
 ---
 

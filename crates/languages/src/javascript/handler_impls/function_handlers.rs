@@ -6,9 +6,12 @@ use crate::common::{
     import_map::{get_ast_root, parse_file_imports},
     node_to_text, require_capture_node,
 };
-use crate::javascript::utils::{
-    extract_function_calls, extract_jsdoc_comments, extract_parameters,
-    extract_type_references_from_jsdoc,
+use crate::javascript::{
+    module_path::derive_module_path,
+    utils::{
+        extract_function_calls, extract_jsdoc_comments, extract_parameters,
+        extract_type_references_from_jsdoc,
+    },
 };
 use codesearch_core::{
     entities::{
@@ -60,9 +63,12 @@ pub fn handle_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(function_node, source);
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map from file's imports for qualified name resolution
     let root = get_ast_root(function_node);
-    let import_map = parse_file_imports(root, source, Language::JavaScript);
+    let import_map = parse_file_imports(root, source, Language::JavaScript, module_path.as_deref());
 
     // Extract function calls from the function body with qualified name resolution
     let calls = extract_function_calls(
@@ -169,9 +175,12 @@ pub fn handle_arrow_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(arrow_function_node, source);
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Build import map from file's imports for qualified name resolution
     let root = get_ast_root(arrow_function_node);
-    let import_map = parse_file_imports(root, source, Language::JavaScript);
+    let import_map = parse_file_imports(root, source, Language::JavaScript, module_path.as_deref());
 
     // Extract function calls from the function body with qualified name resolution
     let calls = extract_function_calls(

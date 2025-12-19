@@ -72,21 +72,13 @@ pub fn handle_class_impl(
     for entity in &mut entities {
         entity.language = Language::TypeScript;
 
-        // Add implements_trait (raw) and implements_resolved (resolved) if any interfaces are implemented
-        if !implements_raw.is_empty() {
-            // Store raw interface names (comma-separated for single value compatibility)
-            entity
-                .metadata
-                .attributes
-                .insert("implements_trait".to_string(), implements_raw.join(", "));
-
-            // Store resolved interface names as JSON array
-            if let Ok(json) = serde_json::to_string(&implements_resolved) {
-                entity
-                    .metadata
-                    .attributes
-                    .insert("implements_trait_resolved".to_string(), json);
-            }
+        // Add implements_trait with resolved qualified names for relationship resolution
+        if !implements_resolved.is_empty() {
+            // Store resolved interface names (comma-separated for single value compatibility)
+            entity.metadata.attributes.insert(
+                "implements_trait".to_string(),
+                implements_resolved.join(", "),
+            );
         }
 
         // Add type references for USES relationships
@@ -189,12 +181,8 @@ pub fn handle_interface_impl(
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
-    if let Some(ref extends_text) = extends {
-        metadata
-            .attributes
-            .insert("extends".to_string(), extends_text.clone());
-
-        // Resolve extended interfaces through import map
+    if extends.is_some() {
+        // Resolve extended interfaces through import map and store directly in 'extends'
         let extends_resolved = extract_extends_types(interface_node, source)?
             .into_iter()
             .map(|type_name| {
@@ -212,11 +200,10 @@ pub fn handle_interface_impl(
             .collect::<Vec<_>>();
 
         if !extends_resolved.is_empty() {
-            if let Ok(json) = serde_json::to_string(&extends_resolved) {
-                metadata
-                    .attributes
-                    .insert("extends_resolved".to_string(), json);
-            }
+            // Store resolved names as comma-separated for relationship resolution
+            metadata
+                .attributes
+                .insert("extends".to_string(), extends_resolved.join(", "));
         }
     }
 

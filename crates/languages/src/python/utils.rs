@@ -4,8 +4,65 @@ use crate::common::import_map::{resolve_reference, ImportMap};
 use crate::common::node_to_text;
 use codesearch_core::error::Result;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
+
+// ============================================================================
+// Cached Tree-Sitter Queries
+// ============================================================================
+
+/// Query source for extracting function calls
+const PYTHON_FUNCTION_CALLS_QUERY_SOURCE: &str = r#"
+    (call
+      function: (identifier) @bare_callee)
+
+    (call
+      function: (attribute
+        object: (identifier) @receiver
+        attribute: (identifier) @method))
+"#;
+
+/// Query source for extracting type references
+const PYTHON_TYPE_REFS_QUERY_SOURCE: &str = r#"
+    ; Type identifiers in annotations
+    (type (identifier) @type_ref)
+
+    ; Subscript types like List[T], Dict[K, V]
+    (type (subscript
+      value: (identifier) @subscript_type))
+
+    ; Attribute types like typing.Optional
+    (type (attribute
+      object: (identifier) @module
+      attribute: (identifier) @attr_type))
+"#;
+
+/// Cached tree-sitter query for function call extraction
+static PYTHON_FUNCTION_CALLS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+/// Cached tree-sitter query for type reference extraction
+static PYTHON_TYPE_REFS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+/// Get or initialize the cached function calls query
+fn python_function_calls_query() -> Option<&'static Query> {
+    PYTHON_FUNCTION_CALLS_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_python::LANGUAGE.into();
+            Query::new(&language, PYTHON_FUNCTION_CALLS_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
+
+/// Get or initialize the cached type references query
+fn python_type_refs_query() -> Option<&'static Query> {
+    PYTHON_TYPE_REFS_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_python::LANGUAGE.into();
+            Query::new(&language, PYTHON_TYPE_REFS_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
 
 /// Extract parameters from a Python parameters node
 ///
@@ -222,27 +279,15 @@ pub fn extract_function_calls(
     import_map: &ImportMap,
     parent_scope: Option<&str>,
 ) -> Vec<String> {
-    let query_source = r#"
-        (call
-          function: (identifier) @bare_callee)
-
-        (call
-          function: (attribute
-            object: (identifier) @receiver
-            attribute: (identifier) @method))
-    "#;
-
-    let language = tree_sitter_python::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return Vec::new(),
+    let Some(query) = python_function_calls_query() else {
+        return Vec::new();
     };
 
     let mut cursor = QueryCursor::new();
     let mut calls = Vec::new();
     let mut seen = HashSet::new();
 
-    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    let mut matches = cursor.matches(query, function_node, source.as_bytes());
     while let Some(query_match) = matches.next() {
         let captures: Vec<_> = query_match.captures.iter().collect();
 
@@ -304,31 +349,15 @@ pub fn extract_type_references(
     import_map: &ImportMap,
     parent_scope: Option<&str>,
 ) -> Vec<String> {
-    let query_source = r#"
-        ; Type identifiers in annotations
-        (type (identifier) @type_ref)
-
-        ; Subscript types like List[T], Dict[K, V]
-        (type (subscript
-          value: (identifier) @subscript_type))
-
-        ; Attribute types like typing.Optional
-        (type (attribute
-          object: (identifier) @module
-          attribute: (identifier) @attr_type))
-    "#;
-
-    let language = tree_sitter_python::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return Vec::new(),
+    let Some(query) = python_type_refs_query() else {
+        return Vec::new();
     };
 
     let mut cursor = QueryCursor::new();
     let mut type_refs = Vec::new();
     let mut seen = HashSet::new();
 
-    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    let mut matches = cursor.matches(query, function_node, source.as_bytes());
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
             let capture_name = query

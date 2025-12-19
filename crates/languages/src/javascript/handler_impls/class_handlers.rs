@@ -73,12 +73,9 @@ pub fn handle_class_impl(
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
-    if let Some(ref extends_text) = extends {
-        metadata
-            .attributes
-            .insert("extends".to_string(), extends_text.clone());
-
+    if extends.is_some() {
         // Resolve extends to qualified name using extracted class name
+        // Store the resolved name directly in 'extends' for relationship resolution
         if let Some(ref class_name) = extends_class_name {
             let extends_resolved = resolve_reference(
                 class_name,
@@ -88,7 +85,7 @@ pub fn handle_class_impl(
             );
             metadata
                 .attributes
-                .insert("extends_resolved".to_string(), extends_resolved);
+                .insert("extends".to_string(), extends_resolved);
         }
     }
 

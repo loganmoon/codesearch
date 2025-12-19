@@ -505,7 +505,7 @@ to convert relative paths to absolute qualified names at extraction time:
 ```
 
 This ensures that references stored in entity attributes (e.g., `calls`, `uses_types`,
-`extends_resolved`) match the `qualified_name` format used by entity definitions,
+`extends`, `bases`, `implements_trait`) match the `qualified_name` format used by entity definitions,
 enabling proper relationship resolution in Neo4j.
 
 ---
@@ -619,24 +619,24 @@ Neo4j edges from entity metadata.
 
 ### 6.2 Adding Metadata for Resolution
 
-Handlers must populate specific metadata attributes for resolvers to work:
+Handlers must populate specific metadata attributes for resolvers to work.
+**Important:** Store qualified names (resolved through imports) directly in the base attributes.
 
 ```rust
 // In impl_handlers.rs - for TraitImplResolver
-metadata.attributes.insert("implements_trait".to_string(), trait_name.clone());
-metadata.attributes.insert(
-    "implements_trait_resolved".to_string(),
-    resolve_reference(&trait_name, &import_map, None, "::")
-);
+// Store RESOLVED trait name directly (resolvers look up by qualified_name)
+let trait_name_resolved = resolve_reference(&trait_name, &import_map, None, "::");
+metadata.attributes.insert("implements_trait".to_string(), trait_name_resolved);
 metadata.attributes.insert("for_type".to_string(), for_type.clone());
 
 // In type_handlers.rs - for TypeUsageResolver (fields)
 metadata.attributes.insert("fields".to_string(), serde_json::to_string(&fields)?);
 
 // In function_handlers.rs - for TypeUsageResolver (signatures)
+// uses_types should contain resolved/qualified type names
 metadata.attributes.insert("uses_types".to_string(), serde_json::to_string(&type_refs)?);
 
-// For CallGraphResolver
+// For CallGraphResolver - call_names should be resolved/qualified
 metadata.attributes.insert("calls".to_string(), serde_json::to_string(&call_names)?);
 ```
 
@@ -697,18 +697,18 @@ fn test_function_extracts_uses_types() {
 
 ### Relationship Attributes
 
+All relationship attributes store **qualified names** (resolved through imports) for correct relationship resolution.
+
 | Attribute | Format | Used By | Example |
 |-----------|--------|---------|---------|
-| `implements_trait` | String | TraitImplResolver | `"Display"` |
-| `implements_trait_resolved` | String | TraitImplResolver | `"std::fmt::Display"` |
+| `implements_trait` | String | TraitImplResolver | `"std::fmt::Display"` (qualified) |
 | `for_type` | String | TraitImplResolver | `"MyStruct"` |
-| `extends` | String | InheritanceResolver | `"BaseClass"` |
-| `extends_resolved` | String | InheritanceResolver | `"module.BaseClass"` |
-| `bases` | String (comma-sep) | InheritanceResolver | `"Base1, Base2"` |
-| `bases_resolved` | JSON array | InheritanceResolver | `["mod.Base1", "mod.Base2"]` |
+| `implements` | String | TraitImplResolver | `"crate::module::MyStruct"` (qualified) |
+| `extends` | String | InheritanceResolver | `"module.BaseClass"` (qualified) |
+| `bases` | JSON array | InheritanceResolver | `["mod.Base1", "mod.Base2"]` (qualified) |
 | `fields` | JSON array | TypeUsageResolver | `[{"name": "x", "field_type": "i32"}]` |
-| `uses_types` | JSON array | TypeUsageResolver | `["Config", "Result"]` |
-| `calls` | JSON array | CallGraphResolver | `["process", "validate"]` |
+| `uses_types` | JSON array | TypeUsageResolver | `["module.Config", "module.Result"]` (qualified) |
+| `calls` | JSON array | CallGraphResolver | `["module.process", "module.validate"]` (qualified) |
 | `imports` | JSON array | ImportsResolver | `["std::io", "crate::utils"]` |
 
 ### Current Language Support Status
@@ -716,16 +716,16 @@ fn test_function_extracts_uses_types() {
 | Language | Extraction | Resolution | Notes |
 |----------|-----------|------------|-------|
 | **Rust** | Full | Full | Canonical implementation |
-| **JavaScript** | Full | Full | Complete with `calls`, `uses_types`, `extends_resolved` |
-| **TypeScript** | Full | Full | Complete with `calls`, `uses_types`, `extends_resolved`, `implements_trait_resolved` |
-| **Python** | Full | Full | Complete with `calls`, `uses_types`, `bases_resolved` |
+| **JavaScript** | Full | Full | Complete with `calls`, `uses_types`, `extends` (qualified) |
+| **TypeScript** | Full | Full | Complete with `calls`, `uses_types`, `extends`, `implements_trait` (qualified) |
+| **Python** | Full | Full | Complete with `calls`, `uses_types`, `bases` (qualified) |
 | **Go** | Infrastructure | None | Grammar exists, handlers not implemented |
 
 All languages (except Go) now support:
 - Relative import resolution at extraction time
-- `calls` attribute for function/method calls
-- `uses_types` attribute for type references
-- `*_resolved` attributes for inheritance/implementation
+- `calls` attribute for function/method calls (qualified names)
+- `uses_types` attribute for type references (qualified names)
+- Qualified names in relationship attributes for correct Neo4j resolution
 
 ---
 

@@ -70,11 +70,7 @@ pub fn handle_class_impl(
     };
 
     if !base_classes.is_empty() {
-        metadata
-            .attributes
-            .insert("bases".to_string(), base_classes.join(", "));
-
-        // Resolve base classes through import map
+        // Resolve base classes through import map and store directly in 'bases'
         let bases_resolved: Vec<String> = base_classes
             .iter()
             .filter(|base| !is_python_primitive(base))
@@ -85,9 +81,7 @@ pub fn handle_class_impl(
 
         if !bases_resolved.is_empty() {
             if let Ok(json) = serde_json::to_string(&bases_resolved) {
-                metadata
-                    .attributes
-                    .insert("bases_resolved".to_string(), json);
+                metadata.attributes.insert("bases".to_string(), json);
             }
         }
     }

@@ -8,8 +8,37 @@ use crate::common::import_map::{resolve_reference, ImportMap};
 use crate::common::node_to_text;
 use codesearch_core::error::Result;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
+
+// ============================================================================
+// Cached Tree-Sitter Queries
+// ============================================================================
+
+/// Query source for extracting function calls
+const JS_FUNCTION_CALLS_QUERY_SOURCE: &str = r#"
+    (call_expression
+      function: (identifier) @bare_callee)
+
+    (call_expression
+      function: (member_expression
+        object: (identifier) @receiver
+        property: (property_identifier) @method))
+"#;
+
+/// Cached tree-sitter query for function call extraction
+static JS_FUNCTION_CALLS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+/// Get or initialize the cached function calls query
+fn js_function_calls_query() -> Option<&'static Query> {
+    JS_FUNCTION_CALLS_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_javascript::LANGUAGE.into();
+            Query::new(&language, JS_FUNCTION_CALLS_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
 
 /// Extract parameters from a formal_parameters node (JavaScript-style)
 ///
@@ -111,27 +140,15 @@ pub fn extract_function_calls(
     import_map: &ImportMap,
     parent_scope: Option<&str>,
 ) -> Vec<String> {
-    let query_source = r#"
-        (call_expression
-          function: (identifier) @bare_callee)
-
-        (call_expression
-          function: (member_expression
-            object: (identifier) @receiver
-            property: (property_identifier) @method))
-    "#;
-
-    let language = tree_sitter_javascript::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return Vec::new(),
+    let Some(query) = js_function_calls_query() else {
+        return Vec::new();
     };
 
     let mut cursor = QueryCursor::new();
     let mut calls = Vec::new();
     let mut seen = HashSet::new();
 
-    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    let mut matches = cursor.matches(query, function_node, source.as_bytes());
     while let Some(query_match) = matches.next() {
         let captures: Vec<_> = query_match.captures.iter().collect();
 
@@ -284,22 +301,19 @@ fn extract_types_from_jsdoc_string(
 
 /// Check if a type name is a JavaScript primitive type
 pub fn is_js_primitive(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "string"
-            | "number"
-            | "boolean"
-            | "object"
-            | "any"
-            | "void"
-            | "null"
-            | "undefined"
-            | "symbol"
-            | "bigint"
-            | "never"
-            | "array"
-            | "function"
-            | "promise"
-            | "*"
-    )
+    name.eq_ignore_ascii_case("string")
+        || name.eq_ignore_ascii_case("number")
+        || name.eq_ignore_ascii_case("boolean")
+        || name.eq_ignore_ascii_case("object")
+        || name.eq_ignore_ascii_case("any")
+        || name.eq_ignore_ascii_case("void")
+        || name.eq_ignore_ascii_case("null")
+        || name.eq_ignore_ascii_case("undefined")
+        || name.eq_ignore_ascii_case("symbol")
+        || name.eq_ignore_ascii_case("bigint")
+        || name.eq_ignore_ascii_case("never")
+        || name.eq_ignore_ascii_case("array")
+        || name.eq_ignore_ascii_case("function")
+        || name.eq_ignore_ascii_case("promise")
+        || name == "*"
 }

@@ -254,16 +254,13 @@ class MyClass extends BaseClass {
     let entity = &entities[0];
     assert_eq!(entity.name, "MyClass");
 
-    // Should have extends attribute
-    assert!(entity.metadata.attributes.contains_key("extends"));
-
-    // Should have extends_resolved attribute
-    let extends_resolved = entity
+    // Should have extends attribute with resolved qualified name
+    let extends = entity
         .metadata
         .attributes
-        .get("extends_resolved")
-        .expect("Should have extends_resolved");
-    assert_eq!(extends_resolved, "./base.BaseClass");
+        .get("extends")
+        .expect("Should have extends");
+    assert_eq!(extends, "./base.BaseClass");
 }
 
 #[test]
@@ -282,13 +279,13 @@ class MyClass extends SomeBaseClass {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    // Should have extends_resolved with external prefix for unresolved references
-    let extends_resolved = entity
+    // Should have extends attribute with external prefix for unresolved references
+    let extends = entity
         .metadata
         .attributes
-        .get("extends_resolved")
-        .expect("Should have extends_resolved");
-    assert_eq!(extends_resolved, "external.SomeBaseClass");
+        .get("extends")
+        .expect("Should have extends");
+    assert_eq!(extends, "external.SomeBaseClass");
 }
 
 // ============================================================================

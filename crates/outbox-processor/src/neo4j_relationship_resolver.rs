@@ -144,23 +144,27 @@ impl RelationshipResolver for TraitImplResolver {
         let enums = enums_result.context("Failed to get enums")?;
         let interfaces = interfaces_result.context("Failed to get interfaces")?;
 
-        // Build lookup maps
+        // Build lookup maps using qualified_name for correct resolution
         let trait_map: HashMap<String, String> = traits
             .iter()
-            .map(|t| (t.name.clone(), t.entity_id.clone()))
+            .map(|t| (t.qualified_name.clone(), t.entity_id.clone()))
             .collect();
 
         let mut type_map: HashMap<String, String> = HashMap::new();
         type_map.extend(
             structs
                 .iter()
-                .map(|s| (s.name.clone(), s.entity_id.clone())),
+                .map(|s| (s.qualified_name.clone(), s.entity_id.clone())),
         );
-        type_map.extend(enums.iter().map(|e| (e.name.clone(), e.entity_id.clone())));
+        type_map.extend(
+            enums
+                .iter()
+                .map(|e| (e.qualified_name.clone(), e.entity_id.clone())),
+        );
 
         let interface_map: HashMap<String, String> = interfaces
             .iter()
-            .map(|i| (i.name.clone(), i.entity_id.clone()))
+            .map(|i| (i.qualified_name.clone(), i.entity_id.clone()))
             .collect();
 
         // Extract relationships
@@ -250,9 +254,10 @@ impl RelationshipResolver for InheritanceResolver {
             .await
             .context("Failed to get classes")?;
 
+        // Build lookup map using qualified_name for correct resolution
         let class_map: HashMap<String, String> = classes
             .iter()
-            .map(|c| (c.name.clone(), c.entity_id.clone()))
+            .map(|c| (c.qualified_name.clone(), c.entity_id.clone()))
             .collect();
 
         let mut relationships = Vec::new();
@@ -333,10 +338,10 @@ impl RelationshipResolver for TypeUsageResolver {
         let methods = methods_result.context("Failed to get methods")?;
         let all_types = all_types_result.context("Failed to get type entities")?;
 
-        // Build type lookup map (name -> entity_id)
+        // Build type lookup map (qualified_name -> entity_id) for correct resolution
         let type_map: HashMap<String, String> = all_types
             .iter()
-            .map(|t| (t.name.clone(), t.entity_id.clone()))
+            .map(|t| (t.qualified_name.clone(), t.entity_id.clone()))
             .collect();
 
         let mut relationships = Vec::new();

@@ -385,20 +385,16 @@ class User(BaseModel):
     let entity = &entities[0];
     assert_eq!(entity.name, "User");
 
-    // Should have bases attribute
-    assert!(entity.metadata.attributes.contains_key("bases"));
-
-    // Should have bases_resolved attribute
-    let bases_resolved_attr = entity
+    // Should have bases attribute with resolved qualified names (JSON array)
+    let bases_attr = entity
         .metadata
         .attributes
-        .get("bases_resolved")
-        .expect("Should have bases_resolved");
+        .get("bases")
+        .expect("Should have bases");
 
-    let bases_resolved: Vec<String> =
-        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
+    let bases: Vec<String> = serde_json::from_str(bases_attr).expect("Should parse bases JSON");
     // Absolute imports are marked with external. prefix
-    assert!(bases_resolved.contains(&"external.models.BaseModel".to_string()));
+    assert!(bases.contains(&"external.models.BaseModel".to_string()));
 }
 
 #[test]
@@ -414,16 +410,15 @@ class MyClass(ExternalBase):
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    let bases_resolved_attr = entity
+    let bases_attr = entity
         .metadata
         .attributes
-        .get("bases_resolved")
-        .expect("Should have bases_resolved");
+        .get("bases")
+        .expect("Should have bases");
 
-    let bases_resolved: Vec<String> =
-        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
+    let bases: Vec<String> = serde_json::from_str(bases_attr).expect("Should parse bases JSON");
     // Should have external prefix for unresolved references
-    assert!(bases_resolved.contains(&"external.ExternalBase".to_string()));
+    assert!(bases.contains(&"external.ExternalBase".to_string()));
 }
 
 #[test]
@@ -442,18 +437,17 @@ class MultiInherit(BaseA, BaseB):
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    let bases_resolved_attr = entity
+    let bases_attr = entity
         .metadata
         .attributes
-        .get("bases_resolved")
-        .expect("Should have bases_resolved");
+        .get("bases")
+        .expect("Should have bases");
 
-    let bases_resolved: Vec<String> =
-        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
-    assert_eq!(bases_resolved.len(), 2);
+    let bases: Vec<String> = serde_json::from_str(bases_attr).expect("Should parse bases JSON");
+    assert_eq!(bases.len(), 2);
     // Absolute imports are marked with external. prefix
-    assert!(bases_resolved.contains(&"external.base_a.BaseA".to_string()));
-    assert!(bases_resolved.contains(&"external.base_b.BaseB".to_string()));
+    assert!(bases.contains(&"external.base_a.BaseA".to_string()));
+    assert!(bases.contains(&"external.base_b.BaseB".to_string()));
 }
 
 // ============================================================================

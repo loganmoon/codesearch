@@ -219,3 +219,108 @@ def variadic_function(*args, **kwargs):
     let sig = entity.signature.as_ref().expect("Should have signature");
     assert_eq!(sig.parameters.len(), 2);
 }
+
+// ============================================================================
+// Tests for function calls extraction
+// ============================================================================
+
+#[test]
+fn test_function_extracts_calls() {
+    let source = r#"
+def process():
+    helper()
+    print("done")
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let calls_attr = entity.metadata.attributes.get("calls");
+    assert!(calls_attr.is_some(), "Should have calls attribute");
+
+    let calls: Vec<String> =
+        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Should extract both function calls
+    assert!(calls.iter().any(|c| c.contains("helper")));
+    assert!(calls.iter().any(|c| c.contains("print")));
+}
+
+#[test]
+fn test_function_with_import_resolves_calls() {
+    let source = r#"
+from utils import helper
+
+def process():
+    helper()
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let calls_attr = entity.metadata.attributes.get("calls");
+    assert!(calls_attr.is_some(), "Should have calls attribute");
+
+    let calls: Vec<String> =
+        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Should resolve through import
+    assert!(calls.contains(&"utils.helper".to_string()));
+}
+
+// ============================================================================
+// Tests for type reference extraction from type hints
+// ============================================================================
+
+#[test]
+fn test_function_extracts_uses_types_from_hints() {
+    let source = r#"
+def process_user(user: User, request: Request) -> Response:
+    return Response()
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let uses_types_attr = entity.metadata.attributes.get("uses_types");
+    assert!(
+        uses_types_attr.is_some(),
+        "Should have uses_types attribute"
+    );
+
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_attr.unwrap()).expect("Should parse uses_types JSON");
+
+    // Should extract non-primitive types from type hints
+    assert!(uses_types.iter().any(|t| t.contains("User")));
+    assert!(uses_types.iter().any(|t| t.contains("Request")));
+    assert!(uses_types.iter().any(|t| t.contains("Response")));
+}
+
+#[test]
+fn test_function_type_hints_filters_primitives() {
+    let source = r#"
+def add(a: int, b: str) -> bool:
+    return True
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Should NOT have uses_types since all types are primitives
+    let uses_types_attr = entity.metadata.attributes.get("uses_types");
+    assert!(
+        uses_types_attr.is_none(),
+        "Should not have uses_types for primitives only"
+    );
+}

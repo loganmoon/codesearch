@@ -364,3 +364,120 @@ class MyClass:
     assert_eq!(sig.parameters.len(), 2);
     assert!(!sig.parameters.iter().any(|(name, _)| name == "self"));
 }
+
+// ============================================================================
+// Tests for bases_resolved extraction
+// ============================================================================
+
+#[test]
+fn test_class_bases_resolved() {
+    let source = r#"
+from models import BaseModel
+
+class User(BaseModel):
+    name: str
+"#;
+
+    let entities = extract_with_handler(source, queries::CLASS_QUERY, handle_class_impl)
+        .expect("Failed to extract class");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+    assert_eq!(entity.name, "User");
+
+    // Should have bases attribute
+    assert!(entity.metadata.attributes.contains_key("bases"));
+
+    // Should have bases_resolved attribute
+    let bases_resolved_attr = entity
+        .metadata
+        .attributes
+        .get("bases_resolved")
+        .expect("Should have bases_resolved");
+
+    let bases_resolved: Vec<String> =
+        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
+    assert!(bases_resolved.contains(&"models.BaseModel".to_string()));
+}
+
+#[test]
+fn test_class_bases_resolved_external() {
+    let source = r#"
+class MyClass(ExternalBase):
+    pass
+"#;
+
+    let entities = extract_with_handler(source, queries::CLASS_QUERY, handle_class_impl)
+        .expect("Failed to extract class");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let bases_resolved_attr = entity
+        .metadata
+        .attributes
+        .get("bases_resolved")
+        .expect("Should have bases_resolved");
+
+    let bases_resolved: Vec<String> =
+        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
+    // Should have external prefix for unresolved references
+    assert!(bases_resolved.contains(&"external.ExternalBase".to_string()));
+}
+
+#[test]
+fn test_class_multiple_bases_resolved() {
+    let source = r#"
+from base_a import BaseA
+from base_b import BaseB
+
+class MultiInherit(BaseA, BaseB):
+    pass
+"#;
+
+    let entities = extract_with_handler(source, queries::CLASS_QUERY, handle_class_impl)
+        .expect("Failed to extract class");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let bases_resolved_attr = entity
+        .metadata
+        .attributes
+        .get("bases_resolved")
+        .expect("Should have bases_resolved");
+
+    let bases_resolved: Vec<String> =
+        serde_json::from_str(bases_resolved_attr).expect("Should parse bases_resolved JSON");
+    assert_eq!(bases_resolved.len(), 2);
+    assert!(bases_resolved.contains(&"base_a.BaseA".to_string()));
+    assert!(bases_resolved.contains(&"base_b.BaseB".to_string()));
+}
+
+// ============================================================================
+// Tests for method calls extraction
+// ============================================================================
+
+#[test]
+fn test_method_extracts_calls() {
+    let source = r#"
+class MyService:
+    def process(self):
+        self.helper()
+        print("done")
+"#;
+
+    let entities = extract_with_handler(source, queries::METHOD_QUERY, handle_method_impl)
+        .expect("Failed to extract method");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let calls_attr = entity.metadata.attributes.get("calls");
+    assert!(calls_attr.is_some(), "Should have calls attribute");
+
+    let calls: Vec<String> =
+        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Should capture the print call
+    assert!(calls.iter().any(|c| c.contains("print")));
+}

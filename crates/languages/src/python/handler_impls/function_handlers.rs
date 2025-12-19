@@ -2,11 +2,13 @@
 
 use crate::common::{
     entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node, node_to_text, require_capture_node,
+    find_capture_node,
+    import_map::{get_ast_root, parse_file_imports},
+    node_to_text, require_capture_node,
 };
 use crate::python::utils::{
-    extract_decorators, extract_docstring, extract_python_parameters, extract_return_type,
-    is_async_function,
+    extract_decorators, extract_docstring, extract_function_calls, extract_python_parameters,
+    extract_return_type, extract_type_references, is_async_function,
 };
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
@@ -60,6 +62,47 @@ pub fn handle_function_impl(
     // Extract decorators
     let decorators = extract_decorators(function_node, source);
 
+    // Build import map from file's imports for qualified name resolution
+    let root = get_ast_root(function_node);
+    let import_map = parse_file_imports(root, source, Language::Python);
+
+    // Extract function calls from the function body with qualified name resolution
+    let calls = extract_function_calls(
+        function_node,
+        source,
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
+    // Extract type references from type hints for USES relationships
+    let type_refs = extract_type_references(
+        function_node,
+        source,
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
+    // Build metadata
+    let mut metadata = EntityMetadata {
+        is_async,
+        decorators,
+        ..EntityMetadata::default()
+    };
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
     // Build entity using shared helper
     let entity = build_entity(
         components,
@@ -69,11 +112,7 @@ pub fn handle_function_impl(
             visibility: Visibility::Public, // Python doesn't have visibility keywords
             documentation,
             content: node_to_text(function_node, source).ok(),
-            metadata: EntityMetadata {
-                is_async,
-                decorators,
-                ..EntityMetadata::default()
-            },
+            metadata,
             signature: Some(FunctionSignature {
                 parameters,
                 return_type,

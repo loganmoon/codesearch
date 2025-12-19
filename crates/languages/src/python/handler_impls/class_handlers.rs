@@ -2,11 +2,14 @@
 
 use crate::common::{
     entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node, node_to_text, require_capture_node,
+    find_capture_node,
+    import_map::{get_ast_root, parse_file_imports, resolve_reference},
+    node_to_text, require_capture_node,
 };
 use crate::python::utils::{
-    extract_base_classes, extract_decorators, extract_docstring, extract_python_parameters,
-    extract_return_type, filter_self_parameter, is_async_function,
+    extract_base_classes, extract_decorators, extract_docstring, extract_function_calls,
+    extract_python_parameters, extract_return_type, extract_type_references, filter_self_parameter,
+    is_async_function, is_python_primitive,
 };
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
@@ -50,6 +53,10 @@ pub fn handle_class_impl(
     // Extract decorators
     let decorators = extract_decorators(class_node, source);
 
+    // Build import map for base class resolution
+    let root = get_ast_root(class_node);
+    let import_map = parse_file_imports(root, source, Language::Python);
+
     // Build metadata
     let mut metadata = EntityMetadata {
         decorators,
@@ -60,6 +67,23 @@ pub fn handle_class_impl(
         metadata
             .attributes
             .insert("bases".to_string(), base_classes.join(", "));
+
+        // Resolve base classes through import map
+        let bases_resolved: Vec<String> = base_classes
+            .iter()
+            .filter(|base| !is_python_primitive(base))
+            .map(|base| {
+                resolve_reference(base, &import_map, components.parent_scope.as_deref(), ".")
+            })
+            .collect();
+
+        if !bases_resolved.is_empty() {
+            if let Ok(json) = serde_json::to_string(&bases_resolved) {
+                metadata
+                    .attributes
+                    .insert("bases_resolved".to_string(), json);
+            }
+        }
     }
 
     // Build entity using shared helper
@@ -125,6 +149,26 @@ pub fn handle_method_impl(
     // Extract decorators
     let decorators = extract_decorators(method_node, source);
 
+    // Build import map from file's imports for qualified name resolution
+    let root = get_ast_root(method_node);
+    let import_map = parse_file_imports(root, source, Language::Python);
+
+    // Extract function calls from the method body with qualified name resolution
+    let calls = extract_function_calls(
+        method_node,
+        source,
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
+    // Extract type references from type hints for USES relationships
+    let type_refs = extract_type_references(
+        method_node,
+        source,
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
     // Determine if this is a static method, class method, or property
     let mut is_static = false;
     let mut is_classmethod = false;
@@ -160,6 +204,20 @@ pub fn handle_method_impl(
         metadata
             .attributes
             .insert("property".to_string(), "true".to_string());
+    }
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
     }
 
     let entity = build_entity(

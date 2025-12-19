@@ -1,8 +1,11 @@
 //! Python-specific shared utilities for entity extraction
 
+use crate::common::import_map::{resolve_reference, ImportMap};
 use crate::common::node_to_text;
 use codesearch_core::error::Result;
-use tree_sitter::Node;
+use std::collections::HashSet;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Node, Query, QueryCursor};
 
 /// Extract parameters from a Python parameters node
 ///
@@ -200,6 +203,211 @@ pub fn filter_self_parameter(
         .into_iter()
         .filter(|(name, _)| name != "self" && name != "cls")
         .collect()
+}
+
+// ============================================================================
+// Function Call Extraction
+// ============================================================================
+
+/// Extract function calls from a function body using tree-sitter queries
+///
+/// This extracts:
+/// - Bare function calls: `foo()`
+/// - Attribute calls: `obj.method()`
+///
+/// Returns a list of resolved qualified names.
+pub fn extract_function_calls(
+    function_node: Node,
+    source: &str,
+    import_map: &ImportMap,
+    parent_scope: Option<&str>,
+) -> Vec<String> {
+    let query_source = r#"
+        (call
+          function: (identifier) @bare_callee)
+
+        (call
+          function: (attribute
+            object: (identifier) @receiver
+            attribute: (identifier) @method))
+    "#;
+
+    let language = tree_sitter_python::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cursor = QueryCursor::new();
+    let mut calls = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        let captures: Vec<_> = query_match.captures.iter().collect();
+
+        // Check for bare callee (identifier)
+        let bare_callee = captures
+            .iter()
+            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("bare_callee"));
+
+        // Check for method call (receiver.method())
+        let receiver = captures
+            .iter()
+            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("receiver"));
+        let method = captures
+            .iter()
+            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("method"));
+
+        if let Some(bare_cap) = bare_callee {
+            // Bare identifier call like `foo()`
+            if let Ok(name) = node_to_text(bare_cap.node, source) {
+                let resolved = resolve_reference(&name, import_map, parent_scope, ".");
+                if seen.insert(resolved.clone()) {
+                    calls.push(resolved);
+                }
+            }
+        } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
+            // Method call like `obj.method()`
+            if let (Ok(recv_name), Ok(method_name)) = (
+                node_to_text(recv_cap.node, source),
+                node_to_text(method_cap.node, source),
+            ) {
+                // Try to resolve receiver through imports (e.g., imported module)
+                let resolved_recv = resolve_reference(&recv_name, import_map, parent_scope, ".");
+                let call_ref = format!("{resolved_recv}.{method_name}");
+                if seen.insert(call_ref.clone()) {
+                    calls.push(call_ref);
+                }
+            }
+        }
+    }
+
+    calls
+}
+
+// ============================================================================
+// Type Reference Extraction from Type Hints
+// ============================================================================
+
+/// Extract type references from Python type hints
+///
+/// This extracts type identifiers from:
+/// - Parameter type annotations
+/// - Return type annotations
+/// - Variable annotations
+///
+/// Returns a list of resolved qualified names.
+pub fn extract_type_references(
+    function_node: Node,
+    source: &str,
+    import_map: &ImportMap,
+    parent_scope: Option<&str>,
+) -> Vec<String> {
+    let query_source = r#"
+        ; Type identifiers in annotations
+        (type (identifier) @type_ref)
+
+        ; Subscript types like List[T], Dict[K, V]
+        (type (subscript
+          value: (identifier) @subscript_type))
+
+        ; Attribute types like typing.Optional
+        (type (attribute
+          object: (identifier) @module
+          attribute: (identifier) @attr_type))
+    "#;
+
+    let language = tree_sitter_python::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cursor = QueryCursor::new();
+    let mut type_refs = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
+
+            match capture_name {
+                "type_ref" | "subscript_type" => {
+                    if let Ok(type_name) = node_to_text(capture.node, source) {
+                        // Skip Python primitive types
+                        if is_python_primitive(&type_name) {
+                            continue;
+                        }
+                        // Resolve through imports
+                        let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
+                        if seen.insert(resolved.clone()) {
+                            type_refs.push(resolved);
+                        }
+                    }
+                }
+                "attr_type" => {
+                    // For attribute types like typing.Optional, we might want the full path
+                    // But for now, just extract the attribute name
+                    if let Ok(type_name) = node_to_text(capture.node, source) {
+                        if !is_python_primitive(&type_name) {
+                            let resolved =
+                                resolve_reference(&type_name, import_map, parent_scope, ".");
+                            if seen.insert(resolved.clone()) {
+                                type_refs.push(resolved);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    type_refs
+}
+
+/// Check if a type name is a Python primitive/builtin type
+pub fn is_python_primitive(name: &str) -> bool {
+    matches!(
+        name,
+        "str"
+            | "int"
+            | "float"
+            | "bool"
+            | "bytes"
+            | "None"
+            | "list"
+            | "dict"
+            | "tuple"
+            | "set"
+            | "frozenset"
+            | "type"
+            | "Any"
+            | "object"
+            | "List"
+            | "Dict"
+            | "Tuple"
+            | "Set"
+            | "FrozenSet"
+            | "Optional"
+            | "Union"
+            | "Callable"
+            | "Type"
+            | "Sequence"
+            | "Mapping"
+            | "Iterable"
+            | "Iterator"
+            | "Generator"
+            | "Coroutine"
+            | "AsyncIterator"
+            | "AsyncGenerator"
+    )
 }
 
 #[cfg(test)]

@@ -230,3 +230,93 @@ class Calculator {
     let doc = entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("Adds two numbers"));
 }
+
+// ============================================================================
+// Tests for extends_resolved extraction
+// ============================================================================
+
+#[test]
+fn test_class_extends_resolved() {
+    let source = r#"
+import { BaseClass } from './base';
+
+class MyClass extends BaseClass {
+    constructor() {
+        super();
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::CLASS_QUERY, handle_class_impl)
+        .expect("Failed to extract class");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+    assert_eq!(entity.name, "MyClass");
+
+    // Should have extends attribute
+    assert!(entity.metadata.attributes.contains_key("extends"));
+
+    // Should have extends_resolved attribute
+    let extends_resolved = entity
+        .metadata
+        .attributes
+        .get("extends_resolved")
+        .expect("Should have extends_resolved");
+    assert_eq!(extends_resolved, "./base.BaseClass");
+}
+
+#[test]
+fn test_class_extends_resolved_external() {
+    let source = r#"
+class MyClass extends SomeBaseClass {
+    constructor() {
+        super();
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::CLASS_QUERY, handle_class_impl)
+        .expect("Failed to extract class");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Should have extends_resolved with external prefix for unresolved references
+    let extends_resolved = entity
+        .metadata
+        .attributes
+        .get("extends_resolved")
+        .expect("Should have extends_resolved");
+    assert_eq!(extends_resolved, "external.SomeBaseClass");
+}
+
+// ============================================================================
+// Tests for method calls extraction
+// ============================================================================
+
+#[test]
+fn test_method_extracts_calls() {
+    let source = r#"
+class MyService {
+    process() {
+        this.helper();
+        console.log("done");
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::METHOD_QUERY, handle_method_impl)
+        .expect("Failed to extract method");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    let calls_attr = entity.metadata.attributes.get("calls");
+    assert!(calls_attr.is_some(), "Should have calls attribute");
+
+    let calls: Vec<String> =
+        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Should capture the console.log call
+    assert!(calls.iter().any(|c| c.contains("console.log")));
+}

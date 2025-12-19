@@ -2,11 +2,18 @@
 
 use crate::common::{
     entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node, node_to_text, require_capture_node,
+    find_capture_node,
+    import_map::{get_ast_root, parse_file_imports},
+    node_to_text, require_capture_node,
 };
-use crate::javascript::utils::{extract_jsdoc_comments, extract_parameters};
+use crate::javascript::utils::{
+    extract_function_calls, extract_jsdoc_comments, extract_parameters,
+    extract_type_references_from_jsdoc,
+};
 use codesearch_core::{
-    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
+    entities::{
+        EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+    },
     error::Result,
     CodeEntity,
 };
@@ -53,6 +60,45 @@ pub fn handle_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(function_node, source);
 
+    // Build import map from file's imports for qualified name resolution
+    let root = get_ast_root(function_node);
+    let import_map = parse_file_imports(root, source, Language::JavaScript);
+
+    // Extract function calls from the function body with qualified name resolution
+    let calls = extract_function_calls(
+        function_node,
+        source,
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
+    // Extract type references from JSDoc for USES relationships
+    let type_refs = extract_type_references_from_jsdoc(
+        documentation.as_deref(),
+        &import_map,
+        components.parent_scope.as_deref(),
+    );
+
+    // Build metadata
+    let mut metadata = EntityMetadata {
+        is_async,
+        ..EntityMetadata::default()
+    };
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
     // Build entity using shared helper
     let entity = build_entity(
         components,
@@ -62,10 +108,7 @@ pub fn handle_function_impl(
             visibility: Visibility::Public,
             documentation,
             content: node_to_text(function_node, source).ok(),
-            metadata: EntityMetadata {
-                is_async,
-                ..EntityMetadata::default()
-            },
+            metadata,
             signature: Some(FunctionSignature {
                 parameters,
                 return_type: None,
@@ -90,7 +133,6 @@ pub fn handle_arrow_function_impl(
     source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
     use crate::common::entity_building::CommonEntityComponents;
-    use codesearch_core::entities::SourceLocation;
 
     let arrow_function_node = require_capture_node(query_match, query, "arrow_function")?;
 
@@ -127,6 +169,53 @@ pub fn handle_arrow_function_impl(
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(arrow_function_node, source);
 
+    // Build import map from file's imports for qualified name resolution
+    let root = get_ast_root(arrow_function_node);
+    let import_map = parse_file_imports(root, source, Language::JavaScript);
+
+    // Extract function calls from the function body with qualified name resolution
+    let calls = extract_function_calls(
+        arrow_function_node,
+        source,
+        &import_map,
+        if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope.as_str())
+        },
+    );
+
+    // Extract type references from JSDoc for USES relationships
+    let type_refs = extract_type_references_from_jsdoc(
+        documentation.as_deref(),
+        &import_map,
+        if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope.as_str())
+        },
+    );
+
+    // Build metadata
+    let mut metadata = EntityMetadata {
+        is_async,
+        ..EntityMetadata::default()
+    };
+
+    // Store function calls if any exist
+    if !calls.is_empty() {
+        if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("calls".to_string(), json);
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
     // Generate entity_id
     let file_path_str = file_path
         .to_str()
@@ -160,10 +249,7 @@ pub fn handle_arrow_function_impl(
             visibility: Visibility::Public,
             documentation,
             content: node_to_text(arrow_function_node, source).ok(),
-            metadata: EntityMetadata {
-                is_async,
-                ..EntityMetadata::default()
-            },
+            metadata,
             signature: Some(FunctionSignature {
                 parameters,
                 return_type: None,

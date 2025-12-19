@@ -422,8 +422,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         10,
         3,
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200,  // max_cached_collections
-        true, // enable_per_batch_resolution
+        200, // max_cached_collections
     );
 
     // Run one batch

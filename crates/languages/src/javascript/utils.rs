@@ -3,7 +3,7 @@
 //! This module contains functions shared between JavaScript and TypeScript
 //! entity extraction, including parameter extraction and JSDoc parsing.
 
-use super::node_to_text;
+use crate::common::node_to_text;
 use codesearch_core::error::Result;
 use tree_sitter::Node;
 

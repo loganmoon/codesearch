@@ -1,6 +1,7 @@
 //! TypeScript type entity handler implementations
 
-use crate::common::{js_ts_common::extract_jsdoc_comments, node_to_text, require_capture_node};
+use crate::common::{node_to_text, require_capture_node};
+use crate::javascript::utils::extract_jsdoc_comments;
 use codesearch_core::{
     entities::{
         CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,

@@ -1,6 +1,6 @@
 //! Python-specific shared utilities for entity extraction
 
-use super::node_to_text;
+use crate::common::node_to_text;
 use codesearch_core::error::Result;
 use tree_sitter::Node;
 

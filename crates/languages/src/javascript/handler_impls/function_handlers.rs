@@ -2,10 +2,9 @@
 
 use crate::common::{
     entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node,
-    js_ts_common::{extract_jsdoc_comments, extract_parameters},
-    node_to_text, require_capture_node,
+    find_capture_node, node_to_text, require_capture_node,
 };
+use crate::javascript::utils::{extract_jsdoc_comments, extract_parameters};
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
     error::Result,

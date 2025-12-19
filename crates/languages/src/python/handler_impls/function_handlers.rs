@@ -2,12 +2,11 @@
 
 use crate::common::{
     entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node, node_to_text,
-    python_common::{
-        extract_decorators, extract_docstring, extract_python_parameters, extract_return_type,
-        is_async_function,
-    },
-    require_capture_node,
+    find_capture_node, node_to_text, require_capture_node,
+};
+use crate::python::utils::{
+    extract_decorators, extract_docstring, extract_python_parameters, extract_return_type,
+    is_async_function,
 };
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},

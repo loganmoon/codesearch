@@ -94,12 +94,18 @@ crates/languages/src/
 │       ├── macro_handlers.rs       # Macro extraction
 │       └── tests/                  # Handler unit tests
 │
-├── common/                         # Shared utilities
+├── common/                         # Shared utilities (language-agnostic)
 │   ├── mod.rs
 │   ├── import_map.rs               # Import resolution (per-language parsers)
-│   ├── entity_building.rs          # Common entity construction helpers
-│   ├── js_ts_common.rs             # JS/TS shared utilities
-│   └── python_common.rs            # Python-specific utilities
+│   └── entity_building.rs          # Common entity construction helpers
+│
+├── javascript/
+│   ├── ...
+│   └── utils.rs                    # JS/TS shared utilities (imported by TypeScript)
+│
+├── python/
+│   ├── ...
+│   └── utils.rs                    # Python-specific utilities
 │
 └── tsg/                            # Tree-sitter-graph rules
     ├── rust.tsg                    # Rust definition/import/reference extraction

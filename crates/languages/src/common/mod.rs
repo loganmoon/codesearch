@@ -4,8 +4,6 @@
 
 pub mod entity_building;
 pub mod import_map;
-pub mod js_ts_common;
-pub mod python_common;
 
 use codesearch_core::error::{Error, Result};
 use tree_sitter::{Node, Query, QueryMatch};

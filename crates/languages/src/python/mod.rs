@@ -3,6 +3,7 @@
 pub(crate) mod handler_impls;
 pub mod module_path;
 pub(crate) mod queries;
+pub mod utils;
 
 use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;

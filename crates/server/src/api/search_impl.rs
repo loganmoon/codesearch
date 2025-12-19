@@ -28,17 +28,6 @@ impl SearchApi for SearchApiImpl {
         crate::api::semantic_search::search_semantic(request, &self.clients, &self.config).await
     }
 
-    async fn search_fulltext(
-        &self,
-        request: FulltextSearchRequest,
-    ) -> Result<FulltextSearchResponse> {
-        crate::api::fulltext_search::search_fulltext(request, &self.clients.postgres).await
-    }
-
-    async fn search_unified(&self, request: UnifiedSearchRequest) -> Result<UnifiedSearchResponse> {
-        crate::api::unified_search::search_unified(request, &self.clients, &self.config).await
-    }
-
     async fn query_graph(&self, request: GraphQueryRequest) -> Result<GraphQueryResponse> {
         let neo4j_client = self
             .clients

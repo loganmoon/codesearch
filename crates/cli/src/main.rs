@@ -333,8 +333,6 @@ async fn mcp(config_path: Option<&Path>) -> Result<()> {
     let search_config = std::sync::Arc::new(codesearch_server::api::SearchConfig {
         hybrid_search: config.hybrid_search.clone(),
         reranking: config.reranking.clone(),
-        query_preprocessing: config.query_preprocessing.clone(),
-        specificity: config.specificity.clone(),
         sparse_embeddings: config.sparse_embeddings.clone(),
         default_bge_instruction: config.embeddings.default_bge_instruction.clone(),
         max_batch_size: config.storage.max_entities_per_db_operation,

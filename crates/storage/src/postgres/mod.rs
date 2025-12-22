@@ -376,6 +376,12 @@ pub trait PostgresClientTrait: Send + Sync {
     /// This is used during USES relationship resolution.
     async fn get_all_type_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>>;
 
+    /// Get all entities in a repository
+    ///
+    /// Returns all non-deleted entities. Used for containment relationship resolution
+    /// where we need to build a qualified_name -> entity_id map.
+    async fn get_all_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>>;
+
     /// Mark entities as deleted and create outbox entries in a single transaction
     ///
     /// Maximum batch size is 1000 entity IDs.
@@ -519,68 +525,4 @@ pub trait PostgresClientTrait: Send + Sync {
         repository_id: Uuid,
         qualified_names: &[String],
     ) -> Result<std::collections::HashMap<String, CodeEntity>>;
-
-    // ========================================================================
-    // Pending Relationship Methods
-    // ========================================================================
-
-    /// Insert pending relationships for later resolution
-    ///
-    /// Stores relationships where the target entity doesn't exist yet.
-    /// These will be resolved later when the target entity is indexed.
-    /// Uses ON CONFLICT DO NOTHING to avoid duplicates.
-    ///
-    /// # Parameters
-    ///
-    /// * `repository_id` - The repository UUID
-    /// * `relationships` - Slice of (source_entity_id, relationship_type, target_qualified_name)
-    ///
-    /// # Returns
-    ///
-    /// Number of rows inserted (excludes duplicates)
-    async fn insert_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        relationships: &[(String, String, String)],
-    ) -> Result<u64>;
-
-    /// Resolve pending relationships using efficient JOIN
-    ///
-    /// Finds pending relationships where the target entity now exists by joining
-    /// against the entities table on qualified_name. Returns resolvable relationships
-    /// along with the target entity_id.
-    ///
-    /// # Parameters
-    ///
-    /// * `repository_id` - The repository UUID
-    /// * `limit` - Maximum number of relationships to resolve in this batch
-    ///
-    /// # Returns
-    ///
-    /// Vec of (pending_id, source_entity_id, target_entity_id, relationship_type)
-    async fn resolve_pending_relationships(
-        &self,
-        repository_id: Uuid,
-        limit: i64,
-    ) -> Result<Vec<(i64, String, String, String)>>;
-
-    /// Delete resolved pending relationships by ID
-    ///
-    /// Call this after successfully creating the relationship edges in Neo4j.
-    ///
-    /// # Parameters
-    ///
-    /// * `pending_ids` - IDs of pending_relationships rows to delete
-    async fn delete_pending_relationships(&self, pending_ids: &[i64]) -> Result<()>;
-
-    /// Count pending relationships for a repository
-    ///
-    /// # Parameters
-    ///
-    /// * `repository_id` - The repository UUID
-    ///
-    /// # Returns
-    ///
-    /// Total count of pending relationships
-    async fn count_pending_relationships(&self, repository_id: Uuid) -> Result<i64>;
 }

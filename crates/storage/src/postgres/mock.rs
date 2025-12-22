@@ -588,6 +588,24 @@ impl PostgresClientTrait for MockPostgresClient {
         Ok(entities)
     }
 
+    async fn get_all_entities(&self, repository_id: Uuid) -> Result<Vec<CodeEntity>> {
+        let data = self.data.lock().unwrap();
+
+        let entities: Vec<CodeEntity> = data
+            .entities
+            .iter()
+            .filter_map(|((repo_id, _entity_id), metadata)| {
+                if *repo_id == repository_id && metadata.deleted_at.is_none() {
+                    Some(metadata.entity.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
     async fn mark_entities_deleted_with_outbox(
         &self,
         repository_id: Uuid,
@@ -951,34 +969,6 @@ impl PostgresClientTrait for MockPostgresClient {
         }
 
         Ok(result)
-    }
-
-    async fn insert_pending_relationships(
-        &self,
-        _repository_id: Uuid,
-        _relationships: &[(String, String, String)],
-    ) -> Result<u64> {
-        // Mock - not implemented (would need additional mock data structure)
-        Ok(0)
-    }
-
-    async fn resolve_pending_relationships(
-        &self,
-        _repository_id: Uuid,
-        _limit: i64,
-    ) -> Result<Vec<(i64, String, String, String)>> {
-        // Mock - return empty (no pending relationships in mock)
-        Ok(Vec::new())
-    }
-
-    async fn delete_pending_relationships(&self, _pending_ids: &[i64]) -> Result<()> {
-        // Mock - no-op
-        Ok(())
-    }
-
-    async fn count_pending_relationships(&self, _repository_id: Uuid) -> Result<i64> {
-        // Mock - return 0
-        Ok(0)
     }
 }
 

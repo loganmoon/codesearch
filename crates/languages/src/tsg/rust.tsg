@@ -123,10 +123,33 @@
   }
 }
 
-; Type alias definitions
-(type_item
-  (visibility_modifier)? @vis
-  name: (type_identifier) @name) @def
+; Type alias definitions - only match at module level, not inside impl blocks
+; Associated types (type Err = Error inside impl FromStr) are NOT extracted
+; because they don't introduce top-level names that should be resolved.
+
+; Top-level type alias
+(source_file
+  (type_item
+    (visibility_modifier)? @vis
+    name: (type_identifier) @name) @def)
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+  if some @vis {
+    attr (@def.node) visibility = (source-text @vis)
+  }
+}
+
+; Type alias inside inline module (mod foo { type Bar = ...; })
+(mod_item
+  body: (declaration_list
+    (type_item
+      (visibility_modifier)? @vis
+      name: (type_identifier) @name) @def))
 {
   node @def.node
   attr (@def.node) type = "Definition"

@@ -1,0 +1,318 @@
+; Tree-sitter-graph rules for extracting resolution nodes from Python source code
+;
+; This file extracts four node types:
+;   - Definition: function, class
+;   - Export: re-exports (not common in Python)
+;   - Import: import and from-import statements
+;   - Reference: identifier usages (calls, types, inheritance)
+
+; ============================================================
+; DEFINITIONS - Items that introduce new names
+; ============================================================
+
+; Function definitions: def foo():
+(function_definition
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Class definitions: class Foo:
+(class_definition
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Decorated function definitions: @decorator def foo():
+; The outer node is decorated_definition, we extract the inner function name
+(decorated_definition
+  definition: (function_definition
+    name: (identifier) @name)) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Decorated class definitions: @decorator class Foo:
+(decorated_definition
+  definition: (class_definition
+    name: (identifier) @name)) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Type alias definitions: TypeName = Union[...], TypeName = Optional[...]
+; Captures module-level assignments where RHS is a generic type (subscript)
+(module
+  (expression_statement
+    (assignment
+      left: (identifier) @name
+      right: (subscript))) @def)
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; ============================================================
+; IMPORTS - Import statements
+; ============================================================
+
+; Simple import: import os
+(import_statement
+  name: (dotted_name) @path) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @path)
+  attr (@import.node) path = (source-text @path)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+}
+
+; Aliased import: import os.path as osp
+(import_statement
+  name: (aliased_import
+    name: (dotted_name) @path
+    alias: (identifier) @alias)) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @alias)
+  attr (@import.node) path = (source-text @path)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+}
+
+; From-import with identifier: from os.path import join
+; Note: @import binds to the name to handle multiple imports like `from x import a, b`
+(import_from_statement
+  module_name: (dotted_name) @module
+  name: (dotted_name) @import) @_stmt
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @import)
+  attr (@import.node) module = (source-text @module)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @_stmt)
+  attr (@import.node) end_row = (end-row @_stmt)
+}
+
+; From-import with aliased name: from os.path import join as j
+(import_from_statement
+  module_name: (dotted_name) @module
+  name: (aliased_import
+    name: (dotted_name) @original
+    alias: (identifier) @import)) @_stmt
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @import)
+  attr (@import.node) module = (source-text @module)
+  attr (@import.node) original_name = (source-text @original)
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @_stmt)
+  attr (@import.node) end_row = (end-row @_stmt)
+}
+
+; From-import glob: from os.path import *
+(import_from_statement
+  module_name: (dotted_name) @module
+  (wildcard_import)) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = "*"
+  attr (@import.node) module = (source-text @module)
+  attr (@import.node) is_glob = "true"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+}
+
+; Relative from-import: from . import foo or from .. import bar
+; relative_import contains import_prefix (dots) and optional dotted_name
+(import_from_statement
+  module_name: (relative_import
+    (import_prefix) @prefix
+    (dotted_name)? @submodule)
+  name: (dotted_name) @import) @_stmt
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @import)
+  attr (@import.node) relative_prefix = (source-text @prefix)
+  attr (@import.node) is_relative = "true"
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @_stmt)
+  attr (@import.node) end_row = (end-row @_stmt)
+  if some @submodule {
+    attr (@import.node) module = (source-text @submodule)
+  }
+}
+
+; Relative from-import with alias: from .utils import helper as h
+(import_from_statement
+  module_name: (relative_import
+    (import_prefix) @prefix
+    (dotted_name)? @submodule)
+  name: (aliased_import
+    name: (dotted_name) @original
+    alias: (identifier) @import)) @_stmt
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = (source-text @import)
+  attr (@import.node) original_name = (source-text @original)
+  attr (@import.node) relative_prefix = (source-text @prefix)
+  attr (@import.node) is_relative = "true"
+  attr (@import.node) is_glob = "false"
+  attr (@import.node) start_row = (start-row @_stmt)
+  attr (@import.node) end_row = (end-row @_stmt)
+  if some @submodule {
+    attr (@import.node) module = (source-text @submodule)
+  }
+}
+
+; Relative from-import glob: from . import *
+(import_from_statement
+  module_name: (relative_import
+    (import_prefix) @prefix
+    (dotted_name)? @submodule)
+  (wildcard_import)) @import
+{
+  node @import.node
+  attr (@import.node) type = "Import"
+  attr (@import.node) name = "*"
+  attr (@import.node) relative_prefix = (source-text @prefix)
+  attr (@import.node) is_relative = "true"
+  attr (@import.node) is_glob = "true"
+  attr (@import.node) start_row = (start-row @import)
+  attr (@import.node) end_row = (end-row @import)
+  if some @submodule {
+    attr (@import.node) module = (source-text @submodule)
+  }
+}
+
+; ============================================================
+; REFERENCES - Identifier usages
+; ============================================================
+
+; Function call with bare identifier: foo()
+(call
+  function: (identifier) @ref) @_call
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "call"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Method call: obj.method()
+; Capture the attribute (method name) being called
+(call
+  function: (attribute
+    attribute: (identifier) @ref)) @_call
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "method_call"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Type annotation in function parameter: def foo(x: SomeType):
+(function_definition
+  parameters: (parameters
+    (typed_parameter
+      type: (type) @ref)))
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "type"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Type annotation in typed default parameter: def foo(x: SomeType = val):
+(function_definition
+  parameters: (parameters
+    (typed_default_parameter
+      type: (type) @ref)))
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "type"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Return type annotation: def foo() -> ReturnType:
+(function_definition
+  return_type: (type) @ref)
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "type"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Base class in class definition: class Foo(BaseClass):
+; superclasses is an argument_list containing base class names
+(class_definition
+  superclasses: (argument_list
+    (identifier) @ref))
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "inheritance"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Base class with attribute access: class Foo(module.BaseClass):
+(class_definition
+  superclasses: (argument_list
+    (attribute
+      attribute: (identifier) @ref)))
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "inheritance"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}

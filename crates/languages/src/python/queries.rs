@@ -43,3 +43,9 @@ pub const METHOD_QUERY: &str = r#"
   )
 ) @class
 "#;
+
+/// Query for the root module node (used for Module entity extraction)
+/// Python's tree-sitter uses "module" as the root node type
+pub const MODULE_QUERY: &str = r#"
+(module) @module
+"#;

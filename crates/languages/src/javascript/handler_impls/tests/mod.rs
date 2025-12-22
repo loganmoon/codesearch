@@ -2,6 +2,7 @@
 
 mod class_tests;
 mod function_tests;
+mod utils_tests;
 
 use crate::javascript::queries;
 use codesearch_core::{error::Result, CodeEntity};

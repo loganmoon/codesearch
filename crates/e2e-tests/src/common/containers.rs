@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Once, OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -18,22 +18,41 @@ static SHARED_QDRANT: OnceLock<TokioMutex<Weak<TestQdrant>>> = OnceLock::new();
 /// Global shared Postgres instance (drops when last Arc is dropped)
 static SHARED_POSTGRES: OnceLock<TokioMutex<Weak<TestPostgres>>> = OnceLock::new();
 
-/// Ensures the outbox_processor Docker image is built before tests run
-/// This prevents race conditions when multiple tests try to build it concurrently
-static BUILD_OUTBOX_IMAGE: Once = Once::new();
+/// Global shared Neo4j instance (drops when last Arc is dropped)
+static SHARED_NEO4J: OnceLock<TokioMutex<Weak<TestNeo4j>>> = OnceLock::new();
+
+/// Stores the result of building the outbox image (success or error message)
+/// Using OnceLock<Result> avoids poisoning that happens with Once + panic
+static BUILD_OUTBOX_IMAGE_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Build the outbox_processor Docker image if it doesn't exist
 ///
 /// This is called automatically by TestOutboxProcessor::start()
+/// Uses OnceLock<Result> pattern to avoid poisoning on failure.
 fn ensure_outbox_image_built() -> Result<()> {
-    BUILD_OUTBOX_IMAGE.call_once(|| {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::current_dir().expect("Failed to get current dir"));
+    let result = BUILD_OUTBOX_IMAGE_RESULT.get_or_init(|| {
+        // Use env!() for compile-time resolution (runtime env var may not be set)
+        // CARGO_MANIFEST_DIR = crates/e2e-tests
+        // parent = crates/
+        // parent.parent = workspace root
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
 
         let workspace_root = manifest_dir
             .parent()
-            .expect("Failed to find workspace root");
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "e2e-tests crate should be in crates/ directory".to_string())?;
+
+        let dockerfile_path = workspace_root.join("Dockerfile.outbox-processor");
+
+        // Verify Dockerfile exists before trying to build
+        if !dockerfile_path.exists() {
+            return Err(format!(
+                "Dockerfile.outbox-processor not found at: {}\nWorkspace root: {}\nManifest dir: {}",
+                dockerfile_path.display(),
+                workspace_root.display(),
+                manifest_dir.display()
+            ));
+        }
 
         let output = Command::new("docker")
             .args([
@@ -46,15 +65,20 @@ fn ensure_outbox_image_built() -> Result<()> {
             ])
             .current_dir(workspace_root)
             .output()
-            .expect("Failed to build outbox-processor image");
+            .map_err(|e| format!("Failed to execute docker build: {e}"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!("Failed to build outbox-processor Docker image: {stderr}");
+            return Err(format!("Docker build failed: {stderr}"));
         }
+
+        Ok(())
     });
 
-    Ok(())
+    result
+        .as_ref()
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// Test Postgres container using testcontainers-rs
@@ -149,22 +173,40 @@ pub async fn get_shared_postgres() -> Result<Arc<TestPostgres>> {
     }
 }
 
-/// Create an isolated test database in the shared Postgres instance
+/// Create an isolated test database in the shared Postgres instance and run migrations
 ///
 /// Each test gets its own database to maintain isolation while sharing the container.
 /// The database name includes a UUID to ensure uniqueness.
+/// Migrations are run automatically after database creation.
 pub async fn create_test_database(postgres: &Arc<TestPostgres>) -> Result<String> {
     let db_name = format!("test_db_{}", Uuid::new_v4().simple());
-    let connection_url = format!(
+
+    // Connect to default database to create new test database
+    let admin_url = format!(
         "postgresql://codesearch:codesearch@localhost:{}/codesearch",
         postgres.port()
     );
 
-    let pool = sqlx::PgPool::connect(&connection_url).await?;
+    let admin_pool = sqlx::PgPool::connect(&admin_url).await?;
     sqlx::query(&format!("CREATE DATABASE {db_name}"))
-        .execute(&pool)
+        .execute(&admin_pool)
         .await?;
-    pool.close().await;
+    admin_pool.close().await;
+
+    // Connect to the new test database and run migrations
+    let test_db_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
+        postgres.port()
+    );
+    let test_pool = sqlx::PgPool::connect(&test_db_url).await?;
+
+    // Run migrations (path relative to crates/e2e-tests/Cargo.toml)
+    sqlx::migrate!("../../migrations")
+        .run(&test_pool)
+        .await
+        .context("Failed to run migrations on test database")?;
+
+    test_pool.close().await;
 
     Ok(db_name)
 }
@@ -257,6 +299,89 @@ impl TestQdrant {
     }
 }
 
+/// Test Neo4j container using testcontainers-rs
+pub struct TestNeo4j {
+    #[allow(dead_code)]
+    container: ContainerAsync<GenericImage>,
+    bolt_port: u16,
+    http_port: u16,
+}
+
+impl TestNeo4j {
+    /// Start a new Neo4j instance
+    ///
+    /// Uses Neo4j Community Edition with authentication disabled for testing.
+    pub async fn start() -> Result<Self> {
+        // Note: with_wait_for must come before with_env_var since the latter
+        // converts GenericImage to ContainerRequest<GenericImage>
+        let container = GenericImage::new("neo4j", "5-community")
+            .with_exposed_port(ContainerPort::Tcp(7687)) // Bolt protocol
+            .with_exposed_port(ContainerPort::Tcp(7474)) // HTTP API
+            .with_wait_for(WaitFor::message_on_stdout("Started."))
+            .with_env_var("NEO4J_AUTH", "none") // Disable auth for tests
+            .with_startup_timeout(Duration::from_secs(90))
+            .start()
+            .await
+            .context("Failed to start Neo4j container")?;
+
+        let bolt_port = container
+            .get_host_port_ipv4(7687)
+            .await
+            .context("Failed to get Neo4j Bolt port")?;
+
+        let http_port = container
+            .get_host_port_ipv4(7474)
+            .await
+            .context("Failed to get Neo4j HTTP port")?;
+
+        Ok(Self {
+            container,
+            bolt_port,
+            http_port,
+        })
+    }
+
+    /// Get the Bolt protocol port
+    pub fn bolt_port(&self) -> u16 {
+        self.bolt_port
+    }
+
+    /// Get the HTTP API port
+    pub fn http_port(&self) -> u16 {
+        self.http_port
+    }
+
+    /// Get the Bolt connection URL
+    pub fn bolt_url(&self) -> String {
+        format!("bolt://localhost:{}", self.bolt_port)
+    }
+
+    /// Get the HTTP API URL
+    pub fn http_url(&self) -> String {
+        format!("http://localhost:{}", self.http_port)
+    }
+}
+
+/// Get or create the shared Neo4j instance
+///
+/// Returns an Arc to a global shared Neo4j container that is created once
+/// and reused across all tests. Tests maintain isolation by using unique database names.
+pub async fn get_shared_neo4j() -> Result<Arc<TestNeo4j>> {
+    let lock = SHARED_NEO4J.get_or_init(|| TokioMutex::new(Weak::new()));
+    let mut guard = lock.lock().await;
+
+    if let Some(neo4j) = guard.upgrade() {
+        // Reuse existing container
+        Ok(neo4j)
+    } else {
+        // Create new container
+        eprintln!("Starting shared Neo4j instance for all tests...");
+        let neo4j = Arc::new(TestNeo4j::start().await?);
+        *guard = Arc::downgrade(&neo4j);
+        Ok(neo4j)
+    }
+}
+
 /// Test Outbox Processor instance running as a container
 pub struct TestOutboxProcessor {
     container_id: String,
@@ -273,6 +398,21 @@ impl TestOutboxProcessor {
     pub fn start(
         postgres: &Arc<TestPostgres>,
         qdrant: &Arc<TestQdrant>,
+        db_name: &str,
+    ) -> Result<Self> {
+        Self::start_with_neo4j(postgres, qdrant, None, db_name)
+    }
+
+    /// Start a new outbox processor instance with Neo4j support
+    ///
+    /// Connects to the provided Postgres, Qdrant, and optionally Neo4j instances.
+    ///
+    /// This uses a Docker container built from Dockerfile.outbox-processor
+    /// Collection names are read from the database (entity_outbox.collection_name column)
+    pub fn start_with_neo4j(
+        postgres: &Arc<TestPostgres>,
+        qdrant: &Arc<TestQdrant>,
+        neo4j: Option<&Arc<TestNeo4j>>,
         db_name: &str,
     ) -> Result<Self> {
         // Ensure the Docker image is built (thread-safe, happens only once)
@@ -309,8 +449,23 @@ impl TestOutboxProcessor {
             .arg("-e")
             .arg(format!("QDRANT_PORT={}", qdrant.port()))
             .arg("-e")
-            .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()))
-            .arg("-e")
+            .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()));
+
+        // Add Neo4j configuration if provided
+        if let Some(neo4j) = neo4j {
+            cmd.arg("-e")
+                .arg(format!("NEO4J_HOST={host}"))
+                .arg("-e")
+                .arg(format!("NEO4J_BOLT_PORT={}", neo4j.bolt_port()))
+                .arg("-e")
+                .arg(format!("NEO4J_HTTP_PORT={}", neo4j.http_port()))
+                .arg("-e")
+                .arg("NEO4J_USER=neo4j")
+                .arg("-e")
+                .arg("NEO4J_PASSWORD=");
+        }
+
+        cmd.arg("-e")
             .arg("RUST_LOG=debug")
             .arg("codesearch-outbox:test");
 
@@ -485,6 +640,77 @@ pub async fn start_and_wait_for_outbox_sync_with_db(
     Ok(processor)
 }
 
+/// Start an outbox processor with full infrastructure including Neo4j
+///
+/// This variant includes Neo4j for full E2E testing with graph resolution.
+/// Uses a longer timeout (30s) to account for Neo4j node creation and relationship resolution.
+pub async fn start_and_wait_for_full_sync(
+    postgres: &Arc<TestPostgres>,
+    qdrant: &Arc<TestQdrant>,
+    neo4j: &Arc<TestNeo4j>,
+    db_name: &str,
+) -> Result<TestOutboxProcessor> {
+    let processor = TestOutboxProcessor::start_with_neo4j(postgres, qdrant, Some(neo4j), db_name)?;
+
+    // Wait for outbox to be empty with longer timeout for Neo4j operations
+    wait_for_outbox_empty_with_processor(
+        postgres,
+        db_name,
+        Duration::from_secs(30),
+        Some(&processor),
+    )
+    .await?;
+
+    Ok(processor)
+}
+
+/// Wait for graph to be marked ready for a repository
+///
+/// After outbox processing completes, the graph needs relationship resolution.
+/// This polls the `graph_ready` flag in the repositories table until it's true.
+pub async fn wait_for_graph_ready(
+    postgres: &Arc<TestPostgres>,
+    db_name: &str,
+    timeout: Duration,
+) -> Result<()> {
+    use sqlx::PgPool;
+
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
+        postgres.port()
+    );
+
+    let pool = PgPool::connect(&connection_url)
+        .await
+        .context("Failed to connect to Postgres for graph_ready polling")?;
+
+    let start = std::time::Instant::now();
+
+    loop {
+        // Check if any repository has graph_ready = false
+        let not_ready_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM repositories WHERE graph_ready = false",
+        )
+        .fetch_one(&pool)
+        .await
+        .context("Failed to query repositories table")?;
+
+        if not_ready_count == 0 {
+            pool.close().await;
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            pool.close().await;
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for graph_ready. {not_ready_count} repositories still pending after {timeout:?}"
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 impl Drop for TestOutboxProcessor {
     fn drop(&mut self) {
         self.cleanup();
@@ -520,6 +746,19 @@ mod tests {
         );
         let pool = sqlx::PgPool::connect(&connection_string).await?;
         sqlx::query("SELECT 1").execute(&pool).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires Docker
+    async fn test_neo4j_starts_and_is_healthy() -> Result<()> {
+        let neo4j = TestNeo4j::start().await?;
+
+        // Verify we can connect to Neo4j HTTP API
+        let health_url = format!("{}/", neo4j.http_url());
+        let response = reqwest::get(&health_url).await?;
+        assert!(response.status().is_success());
 
         Ok(())
     }

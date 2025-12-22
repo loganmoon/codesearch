@@ -2,6 +2,17 @@
 //!
 //! This module provides language-agnostic import resolution functionality
 //! to convert bare identifiers to fully qualified names.
+//!
+//! ## Qualified Name Resolution
+//!
+//! When extracting entities, references to other entities (function calls, type
+//! usage, inheritance) must be stored in a format that matches the `qualified_name`
+//! of the target entity. This module handles this resolution by:
+//!
+//! 1. Building an import map from the file's import statements
+//! 2. Converting relative import paths (e.g., `./utils`) to absolute module paths
+//!    (e.g., `mypackage.utils`) based on the current file's module path
+//! 3. Resolving bare identifiers through the import map or parent scope
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]
@@ -98,15 +109,98 @@ pub fn resolve_reference(
     format!("external{separator}{name}")
 }
 
+/// Resolve a relative import path to an absolute module path
+///
+/// Given the current module's path and a relative import path (starting with `.` or `..`),
+/// computes the absolute module path that matches how entity qualified_names are built.
+///
+/// # Arguments
+/// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
+/// * `import_path` - The import path (e.g., "./core", "../utils", "lodash")
+///
+/// # Returns
+/// * `Some(absolute_path)` - The resolved absolute module path (e.g., "vanilla.core")
+/// * `None` - If the import is not relative (bare specifier like "lodash")
+///
+/// # Examples
+/// ```text
+/// current_module: "vanilla.atom"
+/// import: "./core" -> "vanilla.core"
+/// import: "../utils" -> "utils"
+/// import: "lodash" -> None (not a relative import)
+/// ```
+pub fn resolve_relative_import(current_module_path: &str, import_path: &str) -> Option<String> {
+    // Only handle relative imports (starting with . or ..)
+    if !import_path.starts_with('.') {
+        return None;
+    }
+
+    // Split current module into parts
+    let mut parts: Vec<&str> = current_module_path.split('.').collect();
+
+    // Pop the current module name to get parent directory
+    if !parts.is_empty() {
+        parts.pop();
+    }
+
+    // Process the import path
+    for segment in import_path.split('/') {
+        match segment {
+            "." | "" => {
+                // Current directory, no change
+            }
+            ".." => {
+                // Parent directory
+                if !parts.is_empty() {
+                    parts.pop();
+                }
+            }
+            _ => {
+                // Module name - strip file extension if present
+                let name = segment
+                    .rsplit_once('.')
+                    .map(|(base, ext)| {
+                        // Only strip known JS/TS extensions
+                        if matches!(ext, "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs") {
+                            base
+                        } else {
+                            segment
+                        }
+                    })
+                    .unwrap_or(segment);
+                parts.push(name);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("."))
+    }
+}
+
 /// Parse imports from a file's AST root
 ///
 /// This function dispatches to language-specific parsing based on the language parameter.
-pub fn parse_file_imports(root: Node, source: &str, language: Language) -> ImportMap {
+///
+/// # Arguments
+/// * `root` - The AST root node
+/// * `source` - The source code
+/// * `language` - The programming language
+/// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom").
+///   Used to resolve relative imports to absolute qualified names that match entity qualified_names.
+pub fn parse_file_imports(
+    root: Node,
+    source: &str,
+    language: Language,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     match language {
         Language::Rust => parse_rust_imports(root, source),
-        Language::JavaScript => parse_js_imports(root, source),
-        Language::TypeScript => parse_ts_imports(root, source),
-        Language::Python => parse_python_imports(root, source),
+        Language::JavaScript => parse_js_imports(root, source, current_module_path),
+        Language::TypeScript => parse_ts_imports(root, source, current_module_path),
+        Language::Python => parse_python_imports(root, source, current_module_path),
         Language::Go => ImportMap::new("."), // Go not fully implemented
         Language::Java => ImportMap::new("."), // Java not implemented
         Language::CSharp => ImportMap::new("."), // C# not implemented
@@ -271,11 +365,17 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
 /// Parse JavaScript import declarations
 ///
 /// Handles:
-/// - `import { foo } from './bar';` → ("foo", "./bar.foo")
-/// - `import { foo as bar } from './baz';` → ("bar", "./baz.foo")
-/// - `import foo from './bar';` → ("foo", "./bar.default")
-/// - `import * as foo from './bar';` → ("foo", "./bar")
-pub fn parse_js_imports(root: Node, source: &str) -> ImportMap {
+/// - `import { foo } from './bar';` → ("foo", "module.bar.foo") when current module is "module.file"
+/// - `import { foo as bar } from './baz';` → ("bar", "module.baz.foo")
+/// - `import foo from './bar';` → ("foo", "module.bar.default")
+/// - `import * as foo from './bar';` → ("foo", "module.bar")
+/// - `import foo from 'lodash';` → ("foo", "external.lodash.default") for bare specifiers
+///
+/// # Arguments
+/// * `root` - The AST root node
+/// * `source` - The source code
+/// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
+pub fn parse_js_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -294,13 +394,27 @@ pub fn parse_js_imports(root: Node, source: &str) -> ImportMap {
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
-            if let Ok(source_path) = capture.node.utf8_text(source.as_bytes()) {
+            if let Ok(raw_source_path) = capture.node.utf8_text(source.as_bytes()) {
                 // Remove quotes from source path
-                let source_path = source_path.trim_matches(|c| c == '"' || c == '\'');
+                let raw_source_path = raw_source_path.trim_matches(|c| c == '"' || c == '\'');
+
+                // Resolve relative imports to absolute module paths
+                let resolved_path = if let Some(module_path) = current_module_path {
+                    resolve_relative_import(module_path, raw_source_path)
+                        .unwrap_or_else(|| format!("external.{raw_source_path}"))
+                } else {
+                    // No module path available, use raw path (will be treated as external)
+                    raw_source_path.to_string()
+                };
 
                 // Get the parent import_statement to extract specifiers
                 if let Some(import_stmt) = capture.node.parent() {
-                    parse_js_import_specifiers(import_stmt, source, source_path, &mut import_map);
+                    parse_js_import_specifiers(
+                        import_stmt,
+                        source,
+                        &resolved_path,
+                        &mut import_map,
+                    );
                 }
             }
         }
@@ -399,7 +513,12 @@ fn parse_js_import_specifier(
 }
 
 /// Parse TypeScript import declarations (same as JavaScript)
-pub fn parse_ts_imports(root: Node, source: &str) -> ImportMap {
+///
+/// # Arguments
+/// * `root` - The AST root node
+/// * `source` - The source code
+/// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
+pub fn parse_ts_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -418,11 +537,24 @@ pub fn parse_ts_imports(root: Node, source: &str) -> ImportMap {
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
-            if let Ok(source_path) = capture.node.utf8_text(source.as_bytes()) {
-                let source_path = source_path.trim_matches(|c| c == '"' || c == '\'');
+            if let Ok(raw_source_path) = capture.node.utf8_text(source.as_bytes()) {
+                let raw_source_path = raw_source_path.trim_matches(|c| c == '"' || c == '\'');
+
+                // Resolve relative imports to absolute module paths
+                let resolved_path = if let Some(module_path) = current_module_path {
+                    resolve_relative_import(module_path, raw_source_path)
+                        .unwrap_or_else(|| format!("external.{raw_source_path}"))
+                } else {
+                    raw_source_path.to_string()
+                };
 
                 if let Some(import_stmt) = capture.node.parent() {
-                    parse_js_import_specifiers(import_stmt, source, source_path, &mut import_map);
+                    parse_js_import_specifiers(
+                        import_stmt,
+                        source,
+                        &resolved_path,
+                        &mut import_map,
+                    );
                 }
             }
         }
@@ -431,30 +563,114 @@ pub fn parse_ts_imports(root: Node, source: &str) -> ImportMap {
     import_map
 }
 
+/// Resolve a Python-style relative import to an absolute module path
+///
+/// Python relative imports use leading dots:
+/// - `.` means current package
+/// - `..` means parent package
+/// - `.module` means sibling module
+///
+/// # Arguments
+/// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
+/// * `relative_text` - The relative import text (e.g., ".", ".helpers", "..")
+/// * `import_name` - The name being imported (e.g., "foo", "bar")
+///
+/// # Returns
+/// The fully resolved qualified name
+fn resolve_python_relative_import(
+    current_module_path: &str,
+    relative_text: &str,
+    import_name: &str,
+) -> String {
+    // Count leading dots
+    let dot_count = relative_text.chars().take_while(|c| *c == '.').count();
+
+    // Get the module part after the dots (if any)
+    let module_suffix = relative_text.trim_start_matches('.');
+
+    // Split current module into parts
+    let mut parts: Vec<&str> = current_module_path.split('.').collect();
+
+    // Pop current module name and one additional level for each extra dot
+    // One dot = same package (pop current module)
+    // Two dots = parent package (pop current module and parent)
+    for _ in 0..dot_count {
+        if !parts.is_empty() {
+            parts.pop();
+        }
+    }
+
+    // Add the module suffix if present
+    if !module_suffix.is_empty() {
+        for segment in module_suffix.split('.') {
+            if !segment.is_empty() {
+                parts.push(segment);
+            }
+        }
+    }
+
+    // Add the imported name
+    parts.push(import_name);
+
+    parts.join(".")
+}
+
 /// Parse Python import statements
 ///
-/// Handles:
-/// - `from os.path import join` → ("join", "os.path.join")
-/// - `from os.path import join as j` → ("j", "os.path.join")
-/// - `import os.path` → ("os", "os")
-/// - `import os.path as osp` → ("osp", "os.path")
-pub fn parse_python_imports(root: Node, source: &str) -> ImportMap {
+/// Handles absolute imports:
+/// - `from os.path import join` → ("join", "external.os.path.join") - stdlib
+/// - `from os.path import join as j` → ("j", "external.os.path.join")
+/// - `import os.path` → ("os", "external.os")
+/// - `import os.path as osp` → ("osp", "external.os.path")
+///
+/// Handles relative imports when current_module_path is provided:
+/// - `from . import foo` in `mypackage.utils` → ("foo", "mypackage.foo")
+/// - `from .helpers import bar` in `mypackage.utils` → ("bar", "mypackage.helpers.bar")
+/// - `from ..core import baz` in `mypackage.sub.utils` → ("baz", "mypackage.core.baz")
+///
+/// # Arguments
+/// * `root` - The AST root node
+/// * `source` - The source code
+/// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
+pub fn parse_python_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
+    // Query for various Python import patterns
+    // Note: relative_import captures imports like `from . import foo` or `from ..utils import bar`
     let query_source = r#"
+        ; Absolute imports: from module import name
         (import_from_statement
           module_name: (dotted_name) @module
           name: (dotted_name) @name)
 
+        ; Absolute imports with alias: from module import name as alias
         (import_from_statement
           module_name: (dotted_name) @from_module
           (aliased_import
             name: (dotted_name) @aliased_name
             alias: (identifier) @alias))
 
+        ; Relative imports: from . import name OR from .module import name
+        (import_from_statement
+          module_name: (relative_import) @relative_module
+          name: (dotted_name) @rel_name)
+
+        ; Relative imports with alias
+        (import_from_statement
+          module_name: (relative_import) @rel_from_module
+          (aliased_import
+            name: (dotted_name) @rel_aliased_name
+            alias: (identifier) @rel_alias))
+
+        ; import module
         (import_statement
           name: (dotted_name) @import_name)
 
+        ; import module as alias
         (import_statement
           (aliased_import
             name: (dotted_name) @import_aliased_name
@@ -473,71 +689,99 @@ pub fn parse_python_imports(root: Node, source: &str) -> ImportMap {
     while let Some(query_match) = matches.next() {
         let captures: Vec<_> = query_match.captures.iter().collect();
 
-        // Process based on which captures are present
-        let module = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("module"));
-        let name = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("name"));
-        let from_module = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("from_module"));
-        let aliased_name = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("aliased_name"));
-        let alias = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("alias"));
-        let import_name = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("import_name"));
-        let import_aliased_name = captures.iter().find(|c| {
-            query.capture_names().get(c.index as usize).copied() == Some("import_aliased_name")
-        });
-        let import_alias = captures
-            .iter()
-            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("import_alias"));
+        // Helper to find a capture by name
+        let find_capture = |cap_name: &str| {
+            captures
+                .iter()
+                .find(|c| query.capture_names().get(c.index as usize).copied() == Some(cap_name))
+        };
 
-        // from module import name
-        if let (Some(m), Some(n)) = (module, name) {
+        // Absolute imports: from module import name
+        if let (Some(m), Some(n)) = (find_capture("module"), find_capture("name")) {
             if let (Ok(mod_text), Ok(name_text)) = (
                 m.node.utf8_text(source.as_bytes()),
                 n.node.utf8_text(source.as_bytes()),
             ) {
-                let full_path = format!("{mod_text}.{name_text}");
+                // External/stdlib import - prefix with external
+                let full_path = format!("external.{mod_text}.{name_text}");
                 import_map.add(name_text, &full_path);
             }
         }
 
-        // from module import name as alias
-        if let (Some(m), Some(n), Some(a)) = (from_module, aliased_name, alias) {
+        // Absolute imports with alias: from module import name as alias
+        if let (Some(m), Some(n), Some(a)) = (
+            find_capture("from_module"),
+            find_capture("aliased_name"),
+            find_capture("alias"),
+        ) {
             if let (Ok(mod_text), Ok(name_text), Ok(alias_text)) = (
                 m.node.utf8_text(source.as_bytes()),
                 n.node.utf8_text(source.as_bytes()),
                 a.node.utf8_text(source.as_bytes()),
             ) {
-                let full_path = format!("{mod_text}.{name_text}");
+                let full_path = format!("external.{mod_text}.{name_text}");
                 import_map.add(alias_text, &full_path);
             }
         }
 
-        // import module
-        if let Some(n) = import_name {
-            if let Ok(name_text) = n.node.utf8_text(source.as_bytes()) {
-                // For `import os.path`, the local name is just `os`
-                let local_name = name_text.split('.').next().unwrap_or(name_text);
-                import_map.add(local_name, local_name);
+        // Relative imports: from . import name OR from .module import name
+        if let (Some(rel_mod), Some(n)) =
+            (find_capture("relative_module"), find_capture("rel_name"))
+        {
+            if let (Ok(rel_text), Ok(name_text)) = (
+                rel_mod.node.utf8_text(source.as_bytes()),
+                n.node.utf8_text(source.as_bytes()),
+            ) {
+                if let Some(module_path) = current_module_path {
+                    let resolved = resolve_python_relative_import(module_path, rel_text, name_text);
+                    import_map.add(name_text, &resolved);
+                } else {
+                    // No module path, use as-is
+                    import_map.add(name_text, &format!("{rel_text}.{name_text}"));
+                }
             }
         }
 
-        // import module as alias
-        if let (Some(n), Some(a)) = (import_aliased_name, import_alias) {
+        // Relative imports with alias
+        if let (Some(rel_mod), Some(n), Some(a)) = (
+            find_capture("rel_from_module"),
+            find_capture("rel_aliased_name"),
+            find_capture("rel_alias"),
+        ) {
+            if let (Ok(rel_text), Ok(name_text), Ok(alias_text)) = (
+                rel_mod.node.utf8_text(source.as_bytes()),
+                n.node.utf8_text(source.as_bytes()),
+                a.node.utf8_text(source.as_bytes()),
+            ) {
+                if let Some(module_path) = current_module_path {
+                    let resolved = resolve_python_relative_import(module_path, rel_text, name_text);
+                    import_map.add(alias_text, &resolved);
+                } else {
+                    import_map.add(alias_text, &format!("{rel_text}.{name_text}"));
+                }
+            }
+        }
+
+        // import module (absolute)
+        if let Some(n) = find_capture("import_name") {
+            if let Ok(name_text) = n.node.utf8_text(source.as_bytes()) {
+                // For `import os.path`, the local name is just `os`
+                let local_name = name_text.split('.').next().unwrap_or(name_text);
+                // External import
+                import_map.add(local_name, &format!("external.{local_name}"));
+            }
+        }
+
+        // import module as alias (absolute)
+        if let (Some(n), Some(a)) = (
+            find_capture("import_aliased_name"),
+            find_capture("import_alias"),
+        ) {
             if let (Ok(name_text), Ok(alias_text)) = (
                 n.node.utf8_text(source.as_bytes()),
                 a.node.utf8_text(source.as_bytes()),
             ) {
-                import_map.add(alias_text, name_text);
+                import_map.add(alias_text, &format!("external.{name_text}"));
             }
         }
     }
@@ -649,9 +893,10 @@ mod tests {
             .ok();
         let tree = parser.parse(source, None).unwrap();
 
-        let import_map = parse_python_imports(tree.root_node(), source);
+        let import_map = parse_python_imports(tree.root_node(), source, None);
 
-        assert_eq!(import_map.resolve("join"), Some("os.path.join"));
+        // Absolute imports are marked as external
+        assert_eq!(import_map.resolve("join"), Some("external.os.path.join"));
     }
 
     #[test]
@@ -663,9 +908,10 @@ mod tests {
             .ok();
         let tree = parser.parse(source, None).unwrap();
 
-        let import_map = parse_python_imports(tree.root_node(), source);
+        let import_map = parse_python_imports(tree.root_node(), source, None);
 
-        assert_eq!(import_map.resolve("j"), Some("os.path.join"));
+        // Absolute imports are marked as external
+        assert_eq!(import_map.resolve("j"), Some("external.os.path.join"));
         assert_eq!(import_map.resolve("join"), None);
     }
 
@@ -686,7 +932,7 @@ fn example() {
         parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
         let tree = parser.parse(source, None).unwrap();
 
-        let import_map = parse_file_imports(tree.root_node(), source, Language::Rust);
+        let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
 
         // Verify imports are parsed
         assert_eq!(import_map.resolve("Read"), Some("std::io::Read"));
@@ -754,5 +1000,128 @@ fn example() {
 
         // 4. External fallback when nothing else matches
         assert_eq!(resolve_reference("Baz", &map, None, "::"), "external::Baz");
+    }
+
+    // ========================================================================
+    // Tests for relative import resolution
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_relative_import_sibling() {
+        // In "vanilla.atom", import "./core" -> "vanilla.core"
+        let result = resolve_relative_import("vanilla.atom", "./core");
+        assert_eq!(result, Some("vanilla.core".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_relative_import_parent() {
+        // In "vanilla.utils.helpers", import "../core" -> "vanilla.core"
+        let result = resolve_relative_import("vanilla.utils.helpers", "../core");
+        assert_eq!(result, Some("vanilla.core".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_relative_import_current_dir() {
+        // In "vanilla.atom", import "." -> "vanilla"
+        let result = resolve_relative_import("vanilla.atom", ".");
+        assert_eq!(result, Some("vanilla".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_relative_import_bare_specifier() {
+        // Bare specifiers like "lodash" are not relative imports
+        let result = resolve_relative_import("vanilla.atom", "lodash");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_relative_import_deep_path() {
+        // In "a.b.c", import "./d/e" -> "a.b.d.e"
+        let result = resolve_relative_import("a.b.c", "./d/e");
+        assert_eq!(result, Some("a.b.d.e".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_relative_import_strip_extension() {
+        // Import paths with .js/.ts extensions should have them stripped
+        let result = resolve_relative_import("vanilla.atom", "./core.js");
+        assert_eq!(result, Some("vanilla.core".to_string()));
+
+        let result = resolve_relative_import("vanilla.atom", "./core.ts");
+        assert_eq!(result, Some("vanilla.core".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_python_relative_single_dot() {
+        // from . import foo in mypackage.utils -> mypackage.foo
+        let result = resolve_python_relative_import("mypackage.utils", ".", "foo");
+        assert_eq!(result, "mypackage.foo");
+    }
+
+    #[test]
+    fn test_resolve_python_relative_double_dot() {
+        // from .. import foo in mypackage.sub.utils -> mypackage.foo
+        let result = resolve_python_relative_import("mypackage.sub.utils", "..", "foo");
+        assert_eq!(result, "mypackage.foo");
+    }
+
+    #[test]
+    fn test_resolve_python_relative_with_module() {
+        // from .helpers import bar in mypackage.utils -> mypackage.helpers.bar
+        let result = resolve_python_relative_import("mypackage.utils", ".helpers", "bar");
+        assert_eq!(result, "mypackage.helpers.bar");
+    }
+
+    #[test]
+    fn test_resolve_python_relative_parent_with_module() {
+        // from ..core import baz in mypackage.sub.utils -> mypackage.core.baz
+        let result = resolve_python_relative_import("mypackage.sub.utils", "..core", "baz");
+        assert_eq!(result, "mypackage.core.baz");
+    }
+
+    #[test]
+    fn test_js_imports_with_module_path() {
+        // Test that JS imports are correctly resolved when module_path is provided
+        let source = r#"
+import { foo } from './bar';
+import baz from '../utils';
+import lodash from 'lodash';
+"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        // With module_path "components.Button"
+        let import_map = parse_js_imports(tree.root_node(), source, Some("components.Button"));
+
+        // Relative import ./bar -> components.bar.foo
+        assert_eq!(import_map.resolve("foo"), Some("components.bar.foo"));
+
+        // Relative import ../utils -> utils.default
+        assert_eq!(import_map.resolve("baz"), Some("utils.default"));
+
+        // Bare specifier lodash -> external.lodash.default
+        assert_eq!(
+            import_map.resolve("lodash"),
+            Some("external.lodash.default")
+        );
+    }
+
+    #[test]
+    fn test_js_imports_without_module_path() {
+        // Test that JS imports work without module_path (should use raw paths)
+        let source = r#"import { foo } from './bar';"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_js_imports(tree.root_node(), source, None);
+
+        // Without module_path, relative import becomes raw path
+        assert_eq!(import_map.resolve("foo"), Some("./bar.foo"));
     }
 }

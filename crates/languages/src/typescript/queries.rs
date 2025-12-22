@@ -47,3 +47,8 @@ pub const ENUM_QUERY: &str = r#"
   name: (identifier) @name
 ) @enum
 "#;
+
+/// Query for the root program node (used for Module entity extraction)
+pub const MODULE_QUERY: &str = r#"
+(program) @module
+"#;

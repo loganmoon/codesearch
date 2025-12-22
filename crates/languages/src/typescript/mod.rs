@@ -2,6 +2,7 @@
 
 pub(crate) mod handler_impls;
 pub(crate) mod queries;
+pub(crate) mod utils;
 
 use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
@@ -63,6 +64,10 @@ define_language_extractor! {
         r#enum => {
             query: queries::ENUM_QUERY,
             handler: handler_impls::handle_enum_impl
+        },
+        module => {
+            query: queries::MODULE_QUERY,
+            handler: handler_impls::handle_module_impl
         }
     }
 }

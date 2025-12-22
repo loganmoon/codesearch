@@ -258,18 +258,14 @@ pub fn handle_impl_trait_impl(
     metadata
         .attributes
         .insert("for_type".to_string(), for_type.clone());
-    metadata
-        .attributes
-        .insert("implements_trait".to_string(), trait_name.clone());
 
-    // Store the resolved names for relationship resolution
+    // Store the resolved names directly for relationship resolution
     metadata
         .attributes
         .insert("implements".to_string(), for_type_resolved.clone());
-    metadata.attributes.insert(
-        "implements_trait_resolved".to_string(),
-        trait_name_resolved.clone(),
-    );
+    metadata
+        .attributes
+        .insert("implements_trait".to_string(), trait_name_resolved.clone());
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -731,5 +727,7 @@ fn get_file_import_map(node: Node, source: &str) -> ImportMap {
     }
 
     // Parse imports from the root
-    parse_file_imports(current, source, Language::Rust)
+    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
+    // so no module_path resolution is needed
+    parse_file_imports(current, source, Language::Rust, None)
 }

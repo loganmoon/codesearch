@@ -1,7 +1,19 @@
 //! Integration tests for JavaScript language support
 
+use codesearch_core::entities::EntityType;
 use codesearch_languages::create_extractor;
 use std::path::Path;
+
+/// Helper to filter entities by type (excludes Module entities used for IMPORTS tracking)
+fn filter_by_type(
+    entities: &[codesearch_core::CodeEntity],
+    entity_type: EntityType,
+) -> Vec<&codesearch_core::CodeEntity> {
+    entities
+        .iter()
+        .filter(|e| e.entity_type == entity_type)
+        .collect()
+}
 
 #[test]
 fn test_javascript_extractor_creation() {
@@ -33,8 +45,9 @@ fn test_extract_simple_function() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "greet");
     assert_eq!(
@@ -69,8 +82,9 @@ fn test_extract_arrow_function() {
         eprintln!("Entity {}: {} ({})", i, entity.name, entity.entity_type);
     }
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
     assert_eq!(
@@ -104,8 +118,9 @@ fn test_extract_async_function() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "fetchData");
     assert!(entity.metadata.is_async);
@@ -171,8 +186,9 @@ fn test_extract_function_with_jsdoc() {
         .extract(source, Path::new("test.js"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
     assert!(entity.documentation_summary.is_some());
@@ -206,4 +222,89 @@ fn test_extract_multiple_entities() {
     assert!(names.contains(&"foo"));
     assert!(names.contains(&"bar"));
     assert!(names.contains(&"Baz"));
+}
+
+#[test]
+fn test_extract_plimit_structure() {
+    // Test extraction of p-limit style code (export default function with nested arrows)
+    let source = r#"
+import Queue from 'yocto-queue';
+
+export default function pLimit(concurrency) {
+    const queue = new Queue();
+    let activeCount = 0;
+
+    const next = () => {
+        activeCount--;
+        if (queue.size > 0) {
+            queue.dequeue()();
+        }
+    };
+
+    const run = async (fn, resolve, args) => {
+        activeCount++;
+        const result = (async () => fn(...args))();
+        resolve(result);
+        try {
+            await result;
+        } catch {}
+        next();
+    };
+
+    const enqueue = (fn, resolve, args) => {
+        queue.enqueue(run.bind(undefined, fn, resolve, args));
+    };
+
+    const generator = (fn, ...args) => new Promise(resolve => {
+        enqueue(fn, resolve, args);
+    });
+
+    return generator;
+}
+"#;
+
+    let extractor = create_extractor(Path::new("index.js"), "test-repo", None, None)
+        .expect("Failed to create extractor")
+        .expect("No extractor for .js");
+
+    let entities = extractor
+        .extract(source, Path::new("index.js"))
+        .expect("Failed to extract entities");
+
+    // Print all extracted entities for debugging
+    eprintln!(
+        "\nExtracted {} entities from p-limit structure:",
+        entities.len()
+    );
+    for entity in &entities {
+        eprintln!(
+            "  - {} ({:?}) parent_scope={:?}",
+            entity.name, entity.entity_type, entity.parent_scope
+        );
+    }
+
+    // Should extract pLimit function
+    let plimit = entities.iter().find(|e| e.name == "pLimit");
+    assert!(plimit.is_some(), "Should extract pLimit function");
+    assert!(
+        plimit.unwrap().parent_scope.is_none(),
+        "pLimit should have no parent"
+    );
+
+    // Should extract nested arrow functions with parent_scope
+    let next = entities.iter().find(|e| e.name == "next");
+    assert!(next.is_some(), "Should extract 'next' arrow function");
+    assert_eq!(
+        next.unwrap().parent_scope.as_deref(),
+        Some("pLimit"),
+        "'next' should have pLimit as parent"
+    );
+
+    let run = entities.iter().find(|e| e.name == "run");
+    assert!(run.is_some(), "Should extract 'run' arrow function");
+    assert_eq!(
+        run.unwrap().parent_scope.as_deref(),
+        Some("pLimit"),
+        "'run' should have pLimit as parent"
+    );
 }

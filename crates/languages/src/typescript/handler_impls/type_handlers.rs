@@ -1,6 +1,11 @@
 //! TypeScript type entity handler implementations
 
-use crate::common::{js_ts_common::extract_jsdoc_comments, node_to_text, require_capture_node};
+use crate::common::{
+    import_map::{get_ast_root, parse_file_imports, resolve_reference},
+    node_to_text, require_capture_node,
+};
+use crate::javascript::{module_path::derive_module_path, utils::extract_jsdoc_comments};
+use crate::typescript::utils::{extract_type_references, is_ts_primitive};
 use codesearch_core::{
     entities::{
         CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
@@ -23,7 +28,7 @@ pub fn handle_class_impl(
     package_name: Option<&str>,
     source_root: Option<&Path>,
 ) -> Result<Vec<CodeEntity>> {
-    // Reuse JavaScript class handler
+    // Reuse JavaScript class handler (includes extends_resolved)
     let mut entities = crate::javascript::handler_impls::handle_class_impl(
         query_match,
         query,
@@ -34,9 +39,57 @@ pub fn handle_class_impl(
         source_root,
     )?;
 
-    // Update language to TypeScript
+    // Get the class node to extract implements clause
+    let class_node = require_capture_node(query_match, query, "class")?;
+
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
+    // Build import map for interface resolution
+    let root = get_ast_root(class_node);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
+
+    // Build parent_scope for reference resolution
+    let scope_result =
+        crate::qualified_name::build_qualified_name_from_ast(class_node, source, "typescript");
+    let parent_scope = if scope_result.parent_scope.is_empty() {
+        None
+    } else {
+        Some(scope_result.parent_scope.as_str())
+    };
+
+    // Extract implements clause (TypeScript-specific)
+    let implements_raw = extract_implements_types(class_node, source)?;
+    let implements_resolved: Vec<String> = implements_raw
+        .iter()
+        .map(|type_name| resolve_reference(type_name, &import_map, parent_scope, "."))
+        .collect();
+
+    // Extract type references used in the class body
+    let type_refs = extract_type_references(class_node, source, &import_map, parent_scope);
+
+    // Update language and add TypeScript-specific metadata
     for entity in &mut entities {
         entity.language = Language::TypeScript;
+
+        // Add implements_trait with resolved qualified names for relationship resolution
+        if !implements_resolved.is_empty() {
+            // Store resolved interface names (comma-separated for single value compatibility)
+            entity.metadata.attributes.insert(
+                "implements_trait".to_string(),
+                implements_resolved.join(", "),
+            );
+        }
+
+        // Add type references for USES relationships
+        if !type_refs.is_empty() {
+            if let Ok(json) = serde_json::to_string(&type_refs) {
+                entity
+                    .metadata
+                    .attributes
+                    .insert("uses_types".to_string(), json);
+            }
+        }
     }
 
     Ok(entities)
@@ -101,18 +154,64 @@ pub fn handle_interface_impl(
     // Extract generics (type_parameters)
     let generics = extract_generics(interface_node, source)?;
 
-    // Extract extended interfaces
+    // Extract extended interfaces (raw names)
     let extends = extract_extends_clause(interface_node, source)?;
+
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
+    // Build import map for type resolution
+    let root = get_ast_root(interface_node);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
+
+    // Extract type references used in the interface body
+    let type_refs = extract_type_references(
+        interface_node,
+        source,
+        &import_map,
+        if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope.as_str())
+        },
+    );
 
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(interface_node, source);
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
-    if let Some(extends_text) = extends {
-        metadata
-            .attributes
-            .insert("extends".to_string(), extends_text);
+    if extends.is_some() {
+        // Resolve extended interfaces through import map and store directly in 'extends'
+        let extends_resolved = extract_extends_types(interface_node, source)?
+            .into_iter()
+            .map(|type_name| {
+                resolve_reference(
+                    &type_name,
+                    &import_map,
+                    if parent_scope.is_empty() {
+                        None
+                    } else {
+                        Some(parent_scope.as_str())
+                    },
+                    ".",
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if !extends_resolved.is_empty() {
+            // Store resolved names as comma-separated for relationship resolution
+            metadata
+                .attributes
+                .insert("extends".to_string(), extends_resolved.join(", "));
+        }
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
     }
 
     // Generate entity_id
@@ -193,6 +292,25 @@ pub fn handle_type_alias_impl(
     // Extract type value from the node itself
     let type_value = extract_type_value(type_alias_node, source)?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
+    // Build import map for type resolution
+    let root = get_ast_root(type_alias_node);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
+
+    // Extract type references used in the type alias
+    let type_refs = extract_type_references(
+        type_alias_node,
+        source,
+        &import_map,
+        if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope.as_str())
+        },
+    );
+
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(type_alias_node, source);
 
@@ -202,6 +320,13 @@ pub fn handle_type_alias_impl(
         metadata
             .attributes
             .insert("type_value".to_string(), type_text);
+    }
+
+    // Store type references for USES relationships
+    if !type_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&type_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
     }
 
     // Generate entity_id
@@ -344,7 +469,7 @@ fn extract_generics(node: Node, source: &str) -> Result<Vec<String>> {
     Ok(generics)
 }
 
-/// Extract extends clause from a node
+/// Extract extends clause from a node (returns the full text)
 fn extract_extends_clause(node: Node, source: &str) -> Result<Option<String>> {
     for child in node.children(&mut node.walk()) {
         if child.kind() == "extends_clause" || child.kind() == "class_heritage" {
@@ -352,6 +477,85 @@ fn extract_extends_clause(node: Node, source: &str) -> Result<Option<String>> {
         }
     }
     Ok(None)
+}
+
+/// Extract individual type names from extends clause
+///
+/// For interfaces: `interface Foo extends Bar, Baz` -> ["Bar", "Baz"]
+/// For classes: `class Foo extends Bar` -> ["Bar"]
+fn extract_extends_types(node: Node, source: &str) -> Result<Vec<String>> {
+    let mut types = Vec::new();
+
+    for child in node.children(&mut node.walk()) {
+        if child.kind() == "extends_clause" || child.kind() == "extends_type_clause" {
+            // Look for type identifiers within the extends clause
+            for type_child in child.named_children(&mut child.walk()) {
+                match type_child.kind() {
+                    "type_identifier" => {
+                        let type_name = node_to_text(type_child, source)?;
+                        if !is_ts_primitive(&type_name) {
+                            types.push(type_name);
+                        }
+                    }
+                    "generic_type" => {
+                        // Extract base type from generic like `Array<T>`
+                        if let Some(base) = type_child.child_by_field_name("name") {
+                            let type_name = node_to_text(base, source)?;
+                            if !is_ts_primitive(&type_name) {
+                                types.push(type_name);
+                            }
+                        }
+                    }
+                    "nested_type_identifier" => {
+                        // Qualified type like `Namespace.Type`
+                        types.push(node_to_text(type_child, source)?);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(types)
+}
+
+/// Extract individual type names from implements clause (TypeScript classes)
+///
+/// For classes: `class Foo implements IBar, IBaz` -> ["IBar", "IBaz"]
+fn extract_implements_types(node: Node, source: &str) -> Result<Vec<String>> {
+    let mut types = Vec::new();
+
+    for child in node.children(&mut node.walk()) {
+        // In TypeScript AST, implements clause might be in class_heritage
+        if child.kind() == "implements_clause" || child.kind() == "class_heritage" {
+            for type_child in child.named_children(&mut child.walk()) {
+                match type_child.kind() {
+                    "type_identifier" => {
+                        let type_name = node_to_text(type_child, source)?;
+                        if !is_ts_primitive(&type_name) {
+                            types.push(type_name);
+                        }
+                    }
+                    "generic_type" => {
+                        // Extract base type from generic like `IHandler<T>`
+                        if let Some(base) = type_child.child_by_field_name("name") {
+                            let type_name = node_to_text(base, source)?;
+                            if !is_ts_primitive(&type_name) {
+                                types.push(type_name);
+                            }
+                        }
+                    }
+                    "nested_type_identifier" => {
+                        // Qualified type like `Namespace.IType`
+                        types.push(node_to_text(type_child, source)?);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(types)
 }
 
 /// Extract type value from type alias node

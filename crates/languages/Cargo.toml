@@ -25,9 +25,11 @@ im = { version = "15.1", features = ["serde"] }
 streaming-iterator = "0.1"
 inventory = "0.3"
 uuid = { workspace = true }
+walkdir = "2.5"
 
 [dev-dependencies]
 tokio = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = { workspace = true }
-walkdir = "2.5"
+git2 = "0.19"
+tempfile = "3.14"

@@ -15,9 +15,9 @@ use tracing::{error, info};
 
 // Re-export for ease of use
 pub use neo4j_relationship_resolver::{
-    resolve_pending_from_postgres, resolve_relationships_generic, CallGraphResolver,
-    ImportsResolver, InheritanceResolver, RelationshipResolver, TraitImplResolver,
-    TypeUsageResolver,
+    resolve_external_references, resolve_relationships_generic, CallGraphResolver,
+    ContainsResolver, ImportsResolver, InheritanceResolver, RelationshipResolver,
+    TraitImplResolver, TypeUsageResolver,
 };
 pub use processor::OutboxProcessor;
 
@@ -60,7 +60,6 @@ pub async fn start_outbox_processor(
         config.max_retries,
         config.max_embedding_dim,
         config.max_cached_collections as u64,
-        true, // Enable per-batch resolution for serve mode (incremental updates)
     );
 
     info!(
@@ -140,7 +139,6 @@ pub async fn start_outbox_processor_with_drain(
         config.max_retries,
         config.max_embedding_dim,
         config.max_cached_collections as u64,
-        false, // Defer resolution until outbox drains (bulk indexing optimization)
     );
 
     info!(

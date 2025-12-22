@@ -1,7 +1,13 @@
 //! TypeScript function handler implementations
 
-use crate::common::{find_capture_node, node_to_text};
-use codesearch_core::{error::Result, CodeEntity};
+use crate::common::{
+    find_capture_node,
+    import_map::{get_ast_root, parse_file_imports},
+    node_to_text,
+};
+use crate::javascript::module_path::derive_module_path;
+use crate::typescript::utils::extract_type_references;
+use codesearch_core::{entities::Language, error::Result, CodeEntity};
 use std::path::Path;
 use tracing::debug;
 use tree_sitter::{Node, Query, QueryMatch};
@@ -27,9 +33,12 @@ pub fn handle_function_impl(
         source_root,
     )?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
-        enhance_with_type_annotations(entity, query_match, query, source)?;
+        enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -57,9 +66,12 @@ pub fn handle_arrow_function_impl(
         source_root,
     )?;
 
+    // Derive module path for qualified name resolution
+    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
-        enhance_with_type_annotations(entity, query_match, query, source)?;
+        enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
     }
 
@@ -72,6 +84,7 @@ fn enhance_with_type_annotations(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
+    module_path: Option<&str>,
 ) -> Result<()> {
     if let Some(function_node) = find_capture_node(query_match, query, "function")
         .or_else(|| find_capture_node(query_match, query, "arrow_function"))
@@ -86,6 +99,45 @@ fn enhance_with_type_annotations(
         } else {
             Vec::new()
         };
+
+        // Build import map for type reference resolution
+        let root = get_ast_root(function_node);
+        let import_map = parse_file_imports(root, source, Language::TypeScript, module_path);
+
+        // Extract type references from TypeScript type annotations
+        let ts_type_refs = extract_type_references(
+            function_node,
+            source,
+            &import_map,
+            entity.parent_scope.as_deref(),
+        );
+
+        // Merge TypeScript type references with any existing JSDoc type references
+        if !ts_type_refs.is_empty() {
+            // Get existing uses_types from JSDoc (if any)
+            let mut all_type_refs: Vec<String> = entity
+                .metadata
+                .attributes
+                .get("uses_types")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
+
+            // Add TypeScript type references (deduplicating)
+            let mut seen: std::collections::HashSet<_> = all_type_refs.iter().cloned().collect();
+            for type_ref in ts_type_refs {
+                if seen.insert(type_ref.clone()) {
+                    all_type_refs.push(type_ref);
+                }
+            }
+
+            // Store combined type references
+            if let Ok(json) = serde_json::to_string(&all_type_refs) {
+                entity
+                    .metadata
+                    .attributes
+                    .insert("uses_types".to_string(), json);
+            }
+        }
 
         // Check for async
         let is_async = entity

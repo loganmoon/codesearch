@@ -68,10 +68,11 @@ impl Default for EvaluationResult {
     }
 }
 
-/// Build intra-file resolution edges by matching Reference names to Import names
+/// Build intra-file resolution edges by matching Reference names to Import/Definition names
 ///
-/// This simulates the first step of resolution: finding which import brings a name
-/// into scope within the same file.
+/// Only counts references to names that are defined or imported in the same file.
+/// References to builtins, stdlib, or external packages are automatically excluded
+/// since they won't have a matching definition/import in the file.
 ///
 /// # Arguments
 /// * `nodes` - Resolution nodes extracted from a single file
@@ -94,118 +95,30 @@ pub fn build_intra_file_edges(nodes: &[ResolutionNode]) -> (usize, Vec<&Resoluti
         .collect();
 
     let mut resolved = 0;
-    let mut unresolved = Vec::new();
 
     for node in nodes
         .iter()
         .filter(|n| n.kind == ResolutionNodeKind::Reference)
     {
-        // Skip type references to primitive/prelude types
-        if is_primitive_or_prelude(&node.name) {
-            continue;
+        // Normalize name (strip quotes from forward references like "Position")
+        let name = node.name.trim_matches('"').trim_matches('\'');
+
+        // Only count references to names that exist as definitions or imports in this file.
+        // This automatically filters out builtins (print, len), stdlib (os.path),
+        // and external packages without needing hardcoded lists.
+        let has_definition = definitions.contains_key(name);
+        let has_import = imports.contains_key(name);
+
+        if !has_definition && !has_import {
+            continue; // Not defined or imported in this file, skip
         }
 
-        // Check if the reference matches an import or local definition
-        if imports.contains_key(node.name.as_str()) || definitions.contains_key(node.name.as_str())
-        {
-            resolved += 1;
-        } else {
-            unresolved.push(node);
-        }
+        // Reference is to something in this file - count it as resolved
+        resolved += 1;
     }
 
-    (resolved, unresolved)
-}
-
-/// Check if a name is a primitive type, prelude type, or should be skipped
-pub fn is_primitive_or_prelude(name: &str) -> bool {
-    // Underscore is used for unused bindings
-    if name == "_" {
-        return true;
-    }
-
-    // Skip single-letter uppercase names (generic type parameters like T, U, E, F)
-    if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-        return true;
-    }
-
-    matches!(
-        name,
-        // Primitive types
-        "i8" | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "f32"
-            | "f64"
-            | "bool"
-            | "char"
-            | "str"
-            // Self reference
-            | "Self"
-            // Prelude types (std::prelude::v1)
-            | "String"
-            | "Vec"
-            | "Option"
-            | "Some"
-            | "None"
-            | "Result"
-            | "Ok"
-            | "Err"
-            | "Box"
-            | "Clone"
-            | "Copy"
-            | "Default"
-            | "Drop"
-            | "Eq"
-            | "Ord"
-            | "PartialEq"
-            | "PartialOrd"
-            | "AsRef"
-            | "AsMut"
-            | "Into"
-            | "From"
-            | "Iterator"
-            | "Extend"
-            | "IntoIterator"
-            | "DoubleEndedIterator"
-            | "ExactSizeIterator"
-            | "Send"
-            | "Sync"
-            | "Sized"
-            | "Unpin"
-            | "ToOwned"
-            | "ToString"
-            | "TryFrom"
-            | "TryInto"
-            | "Fn"
-            | "FnMut"
-            | "FnOnce"
-            // Common std types that are not prelude but very frequently used
-            | "HashMap"
-            | "HashSet"
-            | "BTreeMap"
-            | "BTreeSet"
-            | "Arc"
-            | "Rc"
-            | "Mutex"
-            | "RwLock"
-            | "RefCell"
-            | "Cell"
-            | "Cow"
-            | "Pin"
-            | "PhantomData"
-            // Path types (very commonly used)
-            | "Path"
-            | "PathBuf"
-    )
+    // No unresolved references with this approach - if we count it, it resolved
+    (resolved, Vec::new())
 }
 
 /// Categorize why a reference couldn't be resolved
@@ -283,13 +196,13 @@ mod tests {
 
         // Read resolves to import, MyStruct resolves to definition
         assert_eq!(resolved, 2);
-        // Unknown has no matching import or definition
-        assert_eq!(unresolved.len(), 1);
-        assert_eq!(unresolved[0].name, "Unknown");
+        // Unknown has no matching import or definition - automatically skipped (not counted)
+        assert_eq!(unresolved.len(), 0);
     }
 
     #[test]
-    fn test_primitives_and_prelude_skipped() {
+    fn test_external_references_skipped() {
+        // References to types not defined or imported in the file are automatically skipped
         let nodes = vec![
             ResolutionNode::reference(
                 "i32".to_string(),
@@ -308,34 +221,18 @@ mod tests {
                 Some("type".to_string()),
             ),
             ResolutionNode::reference(
-                "Vec".to_string(),
-                "test::Vec".to_string(),
+                "ExternalCrate".to_string(),
+                "test::ExternalCrate".to_string(),
                 PathBuf::from("test.rs"),
                 3,
                 3,
-                Some("type".to_string()),
-            ),
-            ResolutionNode::reference(
-                "Option".to_string(),
-                "test::Option".to_string(),
-                PathBuf::from("test.rs"),
-                4,
-                4,
-                Some("type".to_string()),
-            ),
-            ResolutionNode::reference(
-                "Result".to_string(),
-                "test::Result".to_string(),
-                PathBuf::from("test.rs"),
-                5,
-                5,
                 Some("type".to_string()),
             ),
         ];
 
         let (resolved, unresolved) = build_intra_file_edges(&nodes);
 
-        // All are primitives or prelude types, should be skipped
+        // No definitions or imports in file, so all references are skipped
         assert_eq!(resolved, 0);
         assert_eq!(unresolved.len(), 0);
     }

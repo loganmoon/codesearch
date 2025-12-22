@@ -1,19 +1,40 @@
 //! Cross-file resolution evaluation (in-memory simulation)
 //!
 //! This module simulates cross-file resolution without Neo4j by building
-//! in-memory lookup tables. This is useful for evaluation and testing.
+//! in-memory lookup tables. This is useful for quick TSG extraction quality
+//! evaluation during development.
+//!
+//! ## Note on Test Fidelity
+//!
+//! This in-memory simulation provides an approximation of resolution behavior.
+//! For comprehensive, high-fidelity resolution testing that exercises the
+//! complete pipeline (AST parsing → qualified name resolution → Neo4j graph
+//! creation → relationship resolution), use the E2E tests in:
+//!
+//! ```text
+//! crates/e2e-tests/tests/test_resolution_e2e.rs
+//! ```
+//!
+//! The E2E tests use real codebases and verify actual Neo4j graph structure.
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use super::evaluation::is_primitive_or_prelude;
 use super::executor::TsgExecutor;
 use super::graph_types::{ResolutionNode, ResolutionNodeKind};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use walkdir::WalkDir;
+
+/// Configuration for cross-file resolution evaluation
+pub struct CrossFileEvalConfig<'a> {
+    /// File extension to process (e.g., "rs", "js", "ts", "py")
+    pub extension: &'a str,
+    /// Directories to skip during traversal
+    pub skip_dirs: &'a [&'a str],
+}
 
 /// Statistics from cross-file resolution evaluation
 #[derive(Debug, Clone, Default)]
@@ -44,14 +65,12 @@ pub struct CrossFileEvalStats {
 
 impl CrossFileEvalStats {
     /// Calculate overall resolution rate (references that can reach a definition)
+    /// Only counts internal references (excludes references to external dependencies)
     pub fn resolution_rate(&self) -> f64 {
         if self.total_references == 0 {
             return 0.0;
         }
-        let resolved = self.resolved_via_local_definition
-            + self
-                .resolved_via_import
-                .min(self.imports_resolved_cross_file);
+        let resolved = self.resolved_via_local_definition + self.resolved_via_import;
         resolved as f64 / self.total_references as f64
     }
 
@@ -77,9 +96,12 @@ impl CrossFileEvalStats {
         println!("\n=== Cross-File Resolution Evaluation ===\n");
         println!("Files processed: {}", self.total_files);
         println!("Definitions extracted: {}", self.total_definitions);
-        println!("Imports extracted: {}", self.total_imports);
         println!(
-            "References extracted (excluding primitives): {}",
+            "Internal imports: {} (external imports excluded)",
+            self.total_imports
+        );
+        println!(
+            "Internal references: {} (references to external deps excluded)",
             self.total_references
         );
         println!();
@@ -90,7 +112,7 @@ impl CrossFileEvalStats {
             Self::percent_of(self.resolved_via_local_definition, self.total_references)
         );
         println!(
-            "  Via import: {} ({:.1}%)",
+            "  Via internal import: {} ({:.1}%)",
             self.resolved_via_import,
             Self::percent_of(self.resolved_via_import, self.total_references)
         );
@@ -100,33 +122,47 @@ impl CrossFileEvalStats {
             Self::percent_of(self.references_unresolved, self.total_references)
         );
         println!();
-        println!("Import resolution:");
-        println!(
-            "  Cross-file resolved: {} ({:.1}%)",
-            self.imports_resolved_cross_file,
-            self.import_resolution_rate() * 100.0
-        );
-        println!(
-            "  Unresolved: {} ({:.1}%)",
-            self.imports_unresolved,
-            Self::percent_of(self.imports_unresolved, self.total_imports)
-        );
-        println!();
         println!(
             "Overall resolution rate: {:.1}%",
             self.resolution_rate() * 100.0
         );
+
+        // Print top unresolved references
+        if !self.unresolved_reference_names.is_empty() {
+            println!("\nTop unresolved reference names:");
+            let mut sorted: Vec<_> = self.unresolved_reference_names.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in sorted.iter().take(10) {
+                println!("  {name}: {count}");
+            }
+        }
     }
 }
 
-/// Evaluate cross-file resolution on a codebase
+/// Evaluate cross-file resolution on a Rust codebase
+///
+/// This is a convenience wrapper around `evaluate_cross_file_resolution_with_config`
+/// that uses Rust-specific settings.
+pub fn evaluate_cross_file_resolution(codebase_path: &Path) -> Result<CrossFileEvalStats> {
+    let executor = TsgExecutor::new_rust()?;
+    let config = CrossFileEvalConfig {
+        extension: "rs",
+        skip_dirs: &["target", ".git"],
+    };
+    evaluate_cross_file_resolution_with_config(codebase_path, executor, &config)
+}
+
+/// Evaluate cross-file resolution on a codebase with the given executor and config
 ///
 /// This builds lookup tables in-memory to simulate what Neo4j would do:
 /// 1. Extract all nodes from all files
 /// 2. Build definition lookup by qualified_name
 /// 3. For each file, try to resolve references through imports
-pub fn evaluate_cross_file_resolution(codebase_path: &Path) -> Result<CrossFileEvalStats> {
-    let mut executor = TsgExecutor::new_rust()?;
+pub fn evaluate_cross_file_resolution_with_config(
+    codebase_path: &Path,
+    mut executor: TsgExecutor,
+    config: &CrossFileEvalConfig,
+) -> Result<CrossFileEvalStats> {
     let mut stats = CrossFileEvalStats::default();
 
     // Phase 1: Extract all nodes from all files
@@ -137,8 +173,15 @@ pub fn evaluate_cross_file_resolution(codebase_path: &Path) -> Result<CrossFileE
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.path().extension().is_some_and(|ext| ext == "rs")
-                && !e.path().to_string_lossy().contains("/target/")
+            let path = e.path();
+            // Check extension
+            let has_ext = path.extension().is_some_and(|ext| ext == config.extension);
+            // Check skip dirs
+            let in_skip_dir = config.skip_dirs.iter().any(|skip| {
+                path.components()
+                    .any(|c| c.as_os_str().to_string_lossy().contains(skip))
+            });
+            has_ext && !in_skip_dir
         })
     {
         let file_path = entry.path();
@@ -183,59 +226,68 @@ pub fn evaluate_cross_file_resolution(codebase_path: &Path) -> Result<CrossFileE
             .map(|n| n.name.as_str())
             .collect();
 
-        let local_imports: HashMap<&str, &ResolutionNode> = nodes
-            .iter()
-            .filter(|n| n.kind == ResolutionNodeKind::Import)
-            .map(|n| (n.name.as_str(), n))
-            .collect();
+        // Classify imports as internal or external
+        // Internal: relative paths (./foo, ../foo) or can be resolved to definitions
+        // External: npm packages, node:* builtins, @scope/packages
+        let mut internal_imports: HashSet<&str> = HashSet::new();
+        let mut external_imports: HashSet<&str> = HashSet::new();
 
-        // Count imports
         for node in nodes
             .iter()
             .filter(|n| n.kind == ResolutionNodeKind::Import)
         {
-            stats.total_imports += 1;
-
-            // Try to resolve import to a definition
             if let Some(import_path) = &node.import_path {
-                // Try exact qualified_name match or simple name match (for crate-internal imports)
-                let resolved = definitions_by_qname.contains_key(import_path.as_str())
+                let clean_path = import_path.trim_matches(|c| c == '"' || c == '\'');
+
+                // Check if this is an internal import
+                let is_relative = clean_path.starts_with('.') || clean_path.starts_with('/');
+                let resolves_to_definition = definitions_by_qname
+                    .contains_key(import_path.as_str())
+                    || definitions_by_qname.contains_key(clean_path)
                     || definitions_by_name.contains_key(node.name.as_str());
 
-                if resolved {
+                if is_relative || resolves_to_definition {
+                    internal_imports.insert(node.name.as_str());
+                    stats.total_imports += 1;
                     stats.imports_resolved_cross_file += 1;
                 } else {
-                    stats.imports_unresolved += 1;
-                    *stats
-                        .unresolved_import_paths
-                        .entry(import_path.clone())
-                        .or_insert(0) += 1;
+                    // External import - don't count in totals
+                    external_imports.insert(node.name.as_str());
                 }
             }
         }
 
-        // Count references and resolution
+        // Count references - only those to names that exist as definitions in the codebase
+        // This automatically excludes builtins, stdlib, and external packages without needing
+        // a massive hardcoded list. If a name isn't defined anywhere, we don't try to resolve it.
         for node in nodes
             .iter()
             .filter(|n| n.kind == ResolutionNodeKind::Reference)
         {
-            // Skip primitives and prelude
-            if is_primitive_or_prelude(&node.name) {
+            // Normalize the name (strip quotes from forward references like "Position")
+            let name = node.name.trim_matches('"').trim_matches('\'');
+
+            // Only count references to names that exist somewhere in the codebase.
+            // This filters out builtins (print, len, str), stdlib (os.path.join),
+            // and external packages without needing hardcoded lists.
+            if !definitions_by_name.contains_key(name) {
                 continue;
             }
 
             stats.total_references += 1;
 
-            // Try to resolve: first local definitions, then imports
-            if local_definitions.contains(node.name.as_str()) {
+            // Try to resolve: local definition first, then via import chain
+            if local_definitions.contains(name) {
                 stats.resolved_via_local_definition += 1;
-            } else if local_imports.contains_key(node.name.as_str()) {
+            } else if internal_imports.contains(name) {
                 stats.resolved_via_import += 1;
             } else {
+                // Name exists in codebase but not accessible from this file
+                // (missing import or not in scope)
                 stats.references_unresolved += 1;
                 *stats
                     .unresolved_reference_names
-                    .entry(node.name.clone())
+                    .entry(name.to_string())
                     .or_insert(0) += 1;
             }
         }
@@ -259,8 +311,7 @@ mod tests {
             ..Default::default()
         };
 
-        // With 50 resolved via import but only 40 imports resolved cross-file,
-        // effective resolution = 30 (local) + 40 (import that resolved) = 70%
-        assert!((stats.resolution_rate() - 0.70).abs() < 0.001);
+        // Resolution rate = (local + import) / total = (30 + 50) / 100 = 80%
+        assert!((stats.resolution_rate() - 0.80).abs() < 0.001);
     }
 }

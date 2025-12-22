@@ -1,7 +1,19 @@
 //! Integration tests for Python language support
 
+use codesearch_core::entities::EntityType;
 use codesearch_languages::create_extractor;
 use std::path::Path;
+
+/// Helper to filter entities by type (excludes Module entities used for IMPORTS tracking)
+fn filter_by_type(
+    entities: &[codesearch_core::CodeEntity],
+    entity_type: EntityType,
+) -> Vec<&codesearch_core::CodeEntity> {
+    entities
+        .iter()
+        .filter(|e| e.entity_type == entity_type)
+        .collect()
+}
 
 #[test]
 fn test_python_extractor_creation() {
@@ -32,8 +44,9 @@ def greet(name):
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "greet");
     assert_eq!(entity.language, codesearch_core::entities::Language::Python);
@@ -61,8 +74,9 @@ def add(a: int, b: int) -> int:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "add");
 
@@ -95,8 +109,9 @@ async def fetch_data(url: str) -> dict:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "fetch_data");
     assert!(entity.metadata.is_async);
@@ -127,8 +142,9 @@ def calculate_sum(a: int, b: int) -> int:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "calculate_sum");
     assert!(entity.documentation_summary.is_some());
@@ -154,8 +170,9 @@ def cached_computation(x: int) -> int:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     assert_eq!(entity.name, "cached_computation");
     assert!(!entity.metadata.decorators.is_empty());
@@ -403,8 +420,9 @@ def variadic_func(*args, **kwargs) -> None:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     if let Some(signature) = &entity.signature {
         assert_eq!(signature.parameters.len(), 2);
@@ -430,8 +448,9 @@ def greet(name: str, greeting: str = "Hello") -> str:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     if let Some(signature) = &entity.signature {
         assert_eq!(signature.parameters.len(), 2);
@@ -546,8 +565,9 @@ def 计算(数值: int) -> int:
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    assert_eq!(entities[0].name, "计算");
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    assert_eq!(functions[0].name, "计算");
 }
 
 #[test]
@@ -618,8 +638,9 @@ def func(a, b, /, c, d):
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     if let Some(signature) = &entity.signature {
         // Should have: a, b, /, c, d
@@ -650,8 +671,9 @@ def func(a, *, b, c):
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     if let Some(signature) = &entity.signature {
         // Should have: a, *, b, c
@@ -681,8 +703,9 @@ def func(pos_only, /, standard, *, kw_only):
         .extract(source, Path::new("test.py"))
         .expect("Failed to extract entities");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let functions = filter_by_type(&entities, EntityType::Function);
+    assert_eq!(functions.len(), 1);
+    let entity = functions[0];
 
     if let Some(signature) = &entity.signature {
         // Should have: pos_only, /, standard, *, kw_only

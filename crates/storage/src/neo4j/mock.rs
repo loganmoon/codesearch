@@ -147,6 +147,15 @@ impl Neo4jClientTrait for MockNeo4jClient {
         Ok(node_ids)
     }
 
+    async fn batch_create_external_nodes(
+        &self,
+        _repository_id: &str,
+        _external_refs: &[(String, String, Option<String>)],
+    ) -> Result<()> {
+        // Mock implementation - external nodes are not tracked in mock
+        Ok(())
+    }
+
     async fn delete_entity_node(&self, entity_id: &str) -> Result<()> {
         let mut data = self.data.lock().unwrap();
         data.nodes.remove(entity_id);

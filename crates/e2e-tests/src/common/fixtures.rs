@@ -415,6 +415,92 @@ pub fn health_check() -> &'static str {
         .await
 }
 
+// =============================================================================
+// Real Codebase Fixtures
+// =============================================================================
+
+/// Clone a git repository at a specific tag/branch to a temp directory
+///
+/// This provides real-world codebases for comprehensive E2E testing.
+pub async fn git_clone(url: &str, tag: &str) -> Result<TempDir> {
+    let temp_dir = TempDir::new().context("Failed to create temp directory for clone")?;
+
+    let output = std::process::Command::new("git")
+        .args(["clone", "--depth", "1", "--branch", tag, url])
+        .arg(temp_dir.path())
+        .output()
+        .context("Failed to execute git clone")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "Failed to clone {url} at {tag}: {stderr}"
+        ));
+    }
+
+    Ok(temp_dir)
+}
+
+/// Clone the `anyhow` Rust crate for testing
+///
+/// anyhow is a small, well-structured error handling crate with:
+/// - Clear trait implementations
+/// - Good module organization
+/// - Comprehensive documentation
+///
+/// Expected: ~20-30 entities including structs, traits, impls, and functions
+pub async fn real_rust_crate_anyhow() -> Result<TempDir> {
+    git_clone("https://github.com/dtolnay/anyhow", "1.0.75").await
+}
+
+/// Clone the `thiserror` Rust crate for testing
+///
+/// thiserror is a derive macro crate with:
+/// - Procedural macro implementations
+/// - Trait definitions
+/// - Clean module structure
+///
+/// Expected: ~15-25 entities
+pub async fn real_rust_crate_thiserror() -> Result<TempDir> {
+    git_clone("https://github.com/dtolnay/thiserror", "1.0.50").await
+}
+
+/// Clone the `python-dotenv` Python package for testing
+///
+/// python-dotenv is a small Python package with:
+/// - Clear module structure
+/// - IPython integration
+/// - CLI interface
+///
+/// Expected: ~30-50 entities including classes, functions, and methods
+pub async fn real_python_package() -> Result<TempDir> {
+    git_clone("https://github.com/theskumar/python-dotenv", "v1.0.0").await
+}
+
+/// Clone the Express.js framework for testing (JavaScript)
+///
+/// Express is the most popular Node.js web framework with:
+/// - Multiple routers and middleware
+/// - Large API surface with many functions and methods
+/// - Complex module/require patterns
+///
+/// Expected: 200+ entities with rich call/import relationships
+pub async fn real_express_project() -> Result<TempDir> {
+    git_clone("https://github.com/expressjs/express", "4.21.2").await
+}
+
+/// Clone the jotai library for testing (TypeScript)
+///
+/// jotai is a primitive and flexible state management library with:
+/// - Clean TypeScript types
+/// - Multiple utility modules
+/// - Good variety of classes and functions
+///
+/// Expected: 150-300 entities with inter-module relationships
+pub async fn real_jotai_project() -> Result<TempDir> {
+    git_clone("https://github.com/pmndrs/jotai", "v2.9.3").await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,484 @@
+; Tree-sitter-graph rules for extracting resolution nodes from TypeScript source code
+;
+; This file extracts four node types:
+;   - Definition: function, class, method, interface, type_alias, enum, arrow function
+;   - Export: re-exports handled as Import with is_public="true"
+;   - Import: ES6 import declarations (named, default, namespace)
+;   - Reference: identifier usages (calls, constructor calls, type references)
+;
+; Note: TypeScript uses `type_identifier` for class names and type references,
+; unlike JavaScript which uses `identifier` for class names.
+
+; ============================================================
+; DEFINITIONS - Items that introduce new names
+; ============================================================
+
+; Function declarations: `function foo() {}`
+(function_declaration
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported function declarations: `export function foo() {}`
+(export_statement
+  declaration: (function_declaration
+    name: (identifier) @name) @_fdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Default exported function declarations: `export default function foo() {}`
+(export_statement
+  "default" @_default
+  declaration: (function_declaration
+    name: (identifier) @name) @_fdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export default"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Class declarations: `class Foo {}` (TypeScript uses type_identifier for class names)
+(class_declaration
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported class declarations: `export class Foo {}`
+(export_statement
+  declaration: (class_declaration
+    name: (type_identifier) @name) @_cdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Default exported class declarations: `export default class Foo {}`
+(export_statement
+  "default" @_default
+  declaration: (class_declaration
+    name: (type_identifier) @name) @_cdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export default"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Abstract class declarations: `abstract class Foo {}`
+(abstract_class_declaration
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported abstract class declarations: `export abstract class Foo {}`
+(export_statement
+  declaration: (abstract_class_declaration
+    name: (type_identifier) @name) @_acdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "class"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Interface declarations: `interface Foo {}`
+(interface_declaration
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "interface"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported interface declarations: `export interface Foo {}`
+(export_statement
+  declaration: (interface_declaration
+    name: (type_identifier) @name) @_idecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "interface"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Type alias declarations: `type Foo = {}`
+(type_alias_declaration
+  name: (type_identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported type alias declarations: `export type Foo = {}`
+(export_statement
+  declaration: (type_alias_declaration
+    name: (type_identifier) @name) @_tadecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "type_alias"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Enum declarations: `enum Foo {}`
+(enum_declaration
+  name: (identifier) @name) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "enum"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported enum declarations: `export enum Foo {}`
+(export_statement
+  declaration: (enum_declaration
+    name: (identifier) @name) @_edecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "enum"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Method definitions: `class Foo { bar() {} }`
+(class_declaration
+  body: (class_body
+    (method_definition
+      name: (property_identifier) @name) @method)) @_class
+{
+  node @method.node
+  attr (@method.node) type = "Definition"
+  attr (@method.node) kind = "method"
+  attr (@method.node) name = (source-text @name)
+  attr (@method.node) start_row = (start-row @method)
+  attr (@method.node) end_row = (end-row @method)
+}
+
+; Abstract class method definitions
+(abstract_class_declaration
+  body: (class_body
+    (method_definition
+      name: (property_identifier) @name) @method)) @_class
+{
+  node @method.node
+  attr (@method.node) type = "Definition"
+  attr (@method.node) kind = "method"
+  attr (@method.node) name = (source-text @name)
+  attr (@method.node) start_row = (start-row @method)
+  attr (@method.node) end_row = (end-row @method)
+}
+
+; Arrow function assigned to const: `const foo = () => {}`
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (arrow_function) @_arrow) @_decl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported arrow function: `export const foo = () => {}`
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (arrow_function) @_arrow) @_decl) @_lexdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Function expression assigned to const: `const foo = function() {}`
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (function_expression) @_func) @_decl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; Exported function expression: `export const foo = function() {}`
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (function_expression) @_func) @_decl) @_lexdecl) @def
+{
+  node @def.node
+  attr (@def.node) type = "Definition"
+  attr (@def.node) kind = "function"
+  attr (@def.node) name = (source-text @name)
+  attr (@def.node) visibility = "export"
+  attr (@def.node) start_row = (start-row @def)
+  attr (@def.node) end_row = (end-row @def)
+}
+
+; ============================================================
+; IMPORTS - ES6 import declarations
+; ============================================================
+
+; Named imports: `import { foo } from './mod'`
+(import_statement
+  (import_clause
+    (named_imports
+      (import_specifier
+        name: (identifier) @name))) @_clause
+  source: (string) @source) @import
+{
+  node @name.node
+  attr (@name.node) type = "Import"
+  attr (@name.node) name = (source-text @name)
+  attr (@name.node) path = (source-text @source)
+  attr (@name.node) is_glob = "false"
+  attr (@name.node) is_public = "false"
+  attr (@name.node) start_row = (start-row @import)
+  attr (@name.node) end_row = (end-row @import)
+}
+
+; Named imports with alias: `import { foo as bar } from './mod'`
+(import_statement
+  (import_clause
+    (named_imports
+      (import_specifier
+        name: (identifier) @_original
+        alias: (identifier) @alias))) @_clause
+  source: (string) @source) @import
+{
+  node @alias.node
+  attr (@alias.node) type = "Import"
+  attr (@alias.node) name = (source-text @alias)
+  attr (@alias.node) path = (source-text @source)
+  attr (@alias.node) is_glob = "false"
+  attr (@alias.node) is_public = "false"
+  attr (@alias.node) start_row = (start-row @import)
+  attr (@alias.node) end_row = (end-row @import)
+}
+
+; Default import: `import foo from './bar'`
+(import_statement
+  (import_clause
+    (identifier) @name) @_clause
+  source: (string) @source) @import
+{
+  node @name.node
+  attr (@name.node) type = "Import"
+  attr (@name.node) name = (source-text @name)
+  attr (@name.node) path = (source-text @source)
+  attr (@name.node) is_glob = "false"
+  attr (@name.node) is_public = "false"
+  attr (@name.node) start_row = (start-row @import)
+  attr (@name.node) end_row = (end-row @import)
+}
+
+; Namespace import: `import * as foo from './bar'`
+(import_statement
+  (import_clause
+    (namespace_import
+      (identifier) @name)) @_clause
+  source: (string) @source) @import
+{
+  node @name.node
+  attr (@name.node) type = "Import"
+  attr (@name.node) name = (source-text @name)
+  attr (@name.node) path = (source-text @source)
+  attr (@name.node) is_glob = "true"
+  attr (@name.node) is_public = "false"
+  attr (@name.node) start_row = (start-row @import)
+  attr (@name.node) end_row = (end-row @import)
+}
+
+; ============================================================
+; RE-EXPORTS - Public exports from other modules
+; ============================================================
+
+; Named re-export: `export { foo } from './bar'`
+(export_statement
+  (export_clause
+    (export_specifier
+      name: (identifier) @name)) @_clause
+  source: (string) @source) @export
+{
+  node @name.node
+  attr (@name.node) type = "Import"
+  attr (@name.node) name = (source-text @name)
+  attr (@name.node) path = (source-text @source)
+  attr (@name.node) is_glob = "false"
+  attr (@name.node) is_public = "true"
+  attr (@name.node) start_row = (start-row @export)
+  attr (@name.node) end_row = (end-row @export)
+}
+
+; Named re-export with alias: `export { foo as bar } from './baz'`
+(export_statement
+  (export_clause
+    (export_specifier
+      name: (identifier) @_original
+      alias: (identifier) @alias)) @_clause
+  source: (string) @source) @export
+{
+  node @alias.node
+  attr (@alias.node) type = "Import"
+  attr (@alias.node) name = (source-text @alias)
+  attr (@alias.node) path = (source-text @source)
+  attr (@alias.node) is_glob = "false"
+  attr (@alias.node) is_public = "true"
+  attr (@alias.node) start_row = (start-row @export)
+  attr (@alias.node) end_row = (end-row @export)
+}
+
+; Glob re-export: `export * from './bar'`
+(export_statement
+  (namespace_export) @_ns
+  source: (string) @source) @export
+{
+  node @export.node
+  attr (@export.node) type = "Import"
+  attr (@export.node) name = "*"
+  attr (@export.node) path = (source-text @source)
+  attr (@export.node) is_glob = "true"
+  attr (@export.node) is_public = "true"
+  attr (@export.node) start_row = (start-row @export)
+  attr (@export.node) end_row = (end-row @export)
+}
+
+; Glob re-export with alias: `export * as foo from './bar'`
+(export_statement
+  (namespace_export
+    (identifier) @name) @_ns
+  source: (string) @source) @export
+{
+  node @name.node
+  attr (@name.node) type = "Import"
+  attr (@name.node) name = (source-text @name)
+  attr (@name.node) path = (source-text @source)
+  attr (@name.node) is_glob = "true"
+  attr (@name.node) is_public = "true"
+  attr (@name.node) start_row = (start-row @export)
+  attr (@name.node) end_row = (end-row @export)
+}
+
+; ============================================================
+; REFERENCES - Identifier usages
+; ============================================================
+
+; Function call with bare identifier: `foo()`
+(call_expression
+  function: (identifier) @ref) @_call
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "call"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Method call: `obj.method()`
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @ref)) @_call
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "call"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Constructor call: `new Foo()`
+(new_expression
+  constructor: (identifier) @ref) @_new
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "constructor"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}
+
+; Type references: TypeScript uses type_identifier for type positions
+(type_identifier) @ref
+{
+  node @ref.node
+  attr (@ref.node) type = "Reference"
+  attr (@ref.node) name = (source-text @ref)
+  attr (@ref.node) context = "type"
+  attr (@ref.node) start_row = (start-row @ref)
+  attr (@ref.node) end_row = (end-row @ref)
+}

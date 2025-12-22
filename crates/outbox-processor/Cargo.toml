@@ -9,6 +9,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0"
 codesearch-core = { path = "../core" }
+codesearch-languages = { path = "../languages" }
 codesearch-storage = { path = "../storage" }
 codesearch-embeddings = { path = "../embeddings" }
 codesearch-indexer = { path = "../indexer" }

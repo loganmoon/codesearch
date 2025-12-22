@@ -9,6 +9,7 @@
 
 use crate::common::{
     entity_building::{build_entity, CommonEntityComponents, EntityDetails},
+    module_utils::{derive_module_name, derive_qualified_name},
     node_to_text, require_capture_node,
 };
 use codesearch_core::{
@@ -18,27 +19,37 @@ use codesearch_core::{
     CodeEntity,
 };
 use std::path::Path;
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
+// Cached tree-sitter query for import extraction
+static TS_IMPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+const TS_IMPORT_QUERY_SOURCE: &str = r#"
+    (import_statement
+      source: (string) @source)
+"#;
+
+/// Get or initialize the cached import query
+fn ts_import_query() -> Option<&'static Query> {
+    TS_IMPORT_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, TS_IMPORT_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
+
 /// Extract import source paths from a TypeScript program node
 fn extract_import_sources(program_node: Node, source: &str) -> Vec<String> {
-    let mut imports = Vec::new();
-
-    // Query for import statements
-    let query_source = r#"
-        (import_statement
-          source: (string) @source)
-    "#;
-
-    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return imports,
+    let Some(query) = ts_import_query() else {
+        return Vec::new();
     };
 
+    let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, program_node, source.as_bytes());
+    let mut matches = cursor.matches(query, program_node, source.as_bytes());
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
@@ -53,42 +64,6 @@ fn extract_import_sources(program_node: Node, source: &str) -> Vec<String> {
     }
 
     imports
-}
-
-/// Derive module name from file path
-fn derive_module_name(file_path: &Path) -> String {
-    file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string()
-}
-
-/// Derive qualified name for the module
-fn derive_qualified_name(file_path: &Path, source_root: Option<&Path>, separator: &str) -> String {
-    let relative = source_root
-        .and_then(|root| file_path.strip_prefix(root).ok())
-        .unwrap_or(file_path);
-
-    let mut parts: Vec<&str> = Vec::new();
-
-    for component in relative.components() {
-        if let std::path::Component::Normal(s) = component {
-            if let Some(s) = s.to_str() {
-                // Skip file extension for the last component
-                let name = if relative.extension().is_some()
-                    && relative.file_name() == Some(std::ffi::OsStr::new(s))
-                {
-                    s.rsplit('.').next_back().unwrap_or(s)
-                } else {
-                    s
-                };
-                parts.push(name);
-            }
-        }
-    }
-
-    parts.join(separator)
 }
 
 /// Handle TypeScript program node as a Module entity

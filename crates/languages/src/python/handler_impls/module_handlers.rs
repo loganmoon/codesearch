@@ -9,6 +9,7 @@
 
 use crate::common::{
     entity_building::{build_entity, CommonEntityComponents, EntityDetails},
+    module_utils::{derive_module_name, derive_qualified_name},
     node_to_text, require_capture_node,
 };
 use codesearch_core::{
@@ -18,8 +19,33 @@ use codesearch_core::{
     CodeEntity,
 };
 use std::path::Path;
+use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
+
+// Cached tree-sitter query for import extraction
+static PYTHON_IMPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+const PYTHON_IMPORT_QUERY_SOURCE: &str = r#"
+    (import_statement
+      name: (dotted_name) @import_name)
+
+    (import_from_statement
+      module_name: (dotted_name) @from_module)
+
+    (import_from_statement
+      module_name: (relative_import) @relative_module)
+"#;
+
+/// Get or initialize the cached import query
+fn python_import_query() -> Option<&'static Query> {
+    PYTHON_IMPORT_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_python::LANGUAGE.into();
+            Query::new(&language, PYTHON_IMPORT_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
 
 /// Extract import module paths from a Python module node
 ///
@@ -29,28 +55,13 @@ use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 /// - `from os import path` -> "os"
 /// - `from os.path import join` -> "os.path"
 fn extract_import_sources(module_node: Node, source: &str) -> Vec<String> {
-    let mut imports = Vec::new();
-
-    // Query for import statements
-    let query_source = r#"
-        (import_statement
-          name: (dotted_name) @import_name)
-
-        (import_from_statement
-          module_name: (dotted_name) @from_module)
-
-        (import_from_statement
-          module_name: (relative_import) @relative_module)
-    "#;
-
-    let language = tree_sitter_python::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return imports,
+    let Some(query) = python_import_query() else {
+        return Vec::new();
     };
 
+    let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, module_node, source.as_bytes());
+    let mut matches = cursor.matches(query, module_node, source.as_bytes());
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
@@ -64,42 +75,6 @@ fn extract_import_sources(module_node: Node, source: &str) -> Vec<String> {
     }
 
     imports
-}
-
-/// Derive module name from file path
-fn derive_module_name(file_path: &Path) -> String {
-    file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string()
-}
-
-/// Derive qualified name for the module
-fn derive_qualified_name(file_path: &Path, source_root: Option<&Path>, separator: &str) -> String {
-    let relative = source_root
-        .and_then(|root| file_path.strip_prefix(root).ok())
-        .unwrap_or(file_path);
-
-    let mut parts: Vec<&str> = Vec::new();
-
-    for component in relative.components() {
-        if let std::path::Component::Normal(s) = component {
-            if let Some(s) = s.to_str() {
-                // Skip file extension for the last component
-                let name = if relative.extension().is_some()
-                    && relative.file_name() == Some(std::ffi::OsStr::new(s))
-                {
-                    s.rsplit('.').next_back().unwrap_or(s)
-                } else {
-                    s
-                };
-                parts.push(name);
-            }
-        }
-    }
-
-    parts.join(separator)
 }
 
 /// Handle Python module node as a Module entity

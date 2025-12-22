@@ -457,5 +457,39 @@ async fn resolution_benchmark() -> Result<()> {
     // Print final report
     print_report(&results);
 
+    // Assert minimum quality thresholds
+    let mut failures = Vec::new();
+    for result in &results {
+        if result.error.is_some() {
+            continue;
+        }
+
+        // Each successful codebase should have at least some entities
+        if result.entity_count == 0 {
+            failures.push(format!("{}: No entities extracted", result.name));
+        }
+
+        // Each codebase should have at least some relationships
+        if result.relationships.total() == 0 {
+            failures.push(format!("{}: No relationships resolved", result.name));
+        }
+
+        // Internal resolution rate should be reasonable (at least 50%)
+        // This threshold is intentionally lenient since external dependencies are common
+        if result.internal_resolution_rate < 50.0 && result.relationships.total() > 0 {
+            failures.push(format!(
+                "{}: Low resolution rate {:.1}% (expected >= 50%)",
+                result.name, result.internal_resolution_rate
+            ));
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "Resolution benchmark quality checks failed:\n  - {}",
+            failures.join("\n  - ")
+        );
+    }
+
     Ok(())
 }

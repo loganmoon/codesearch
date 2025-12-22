@@ -423,7 +423,7 @@ pub fn parse_file_imports(
     root: Node,
     source: &str,
     language: Language,
-    current_module_path: Option<&str>,  // Required for relative import resolution
+    current_module_path: Option<&str>,  // Enables relative import resolution when provided
 ) -> ImportMap {
     match language {
         Language::Rust => parse_rust_imports(root, source),

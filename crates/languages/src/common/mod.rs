@@ -4,6 +4,7 @@
 
 pub mod entity_building;
 pub mod import_map;
+pub mod module_utils;
 
 use codesearch_core::error::{Error, Result};
 use tree_sitter::{Node, Query, QueryMatch};

@@ -4,6 +4,9 @@ mod function_handlers;
 mod module_handlers;
 mod type_handlers;
 
+#[cfg(test)]
+mod tests;
+
 pub use function_handlers::{handle_arrow_function_impl, handle_function_impl};
 pub use module_handlers::handle_module_impl;
 pub use type_handlers::{

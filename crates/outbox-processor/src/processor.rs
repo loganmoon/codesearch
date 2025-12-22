@@ -1072,8 +1072,8 @@ impl OutboxProcessor {
     /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
         use crate::neo4j_relationship_resolver::{
-            resolve_relationships_generic, CallGraphResolver, ContainsResolver, ImportsResolver,
-            InheritanceResolver, TraitImplResolver, TypeUsageResolver,
+            resolve_relationships_generic, CallGraphResolver, ContainsResolver, EntityCache,
+            ImportsResolver, InheritanceResolver, TraitImplResolver, TypeUsageResolver,
         };
 
         // Get repositories that need resolution
@@ -1131,15 +1131,27 @@ impl OutboxProcessor {
 
             neo4j_client.use_database(&db_name).await?;
 
-            // Run all resolvers
+            // Create entity cache once for all resolvers (eliminates duplicate DB queries)
+            let cache = match EntityCache::new(&self.postgres_client, repository_id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!(
+                        "Failed to create entity cache for repository {}: {}",
+                        repository_id, e
+                    );
+                    continue;
+                }
+            };
+
+            info!(
+                "Loaded {} entities into cache for relationship resolution",
+                cache.all().len()
+            );
+
+            // Run all resolvers using cached entity data
             for resolver in resolvers {
-                if let Err(e) = resolve_relationships_generic(
-                    &self.postgres_client,
-                    neo4j_client.as_ref(),
-                    repository_id,
-                    *resolver,
-                )
-                .await
+                if let Err(e) =
+                    resolve_relationships_generic(&cache, neo4j_client.as_ref(), *resolver).await
                 {
                     warn!(
                         "Failed to resolve {} relationships for repository {}: {}",
@@ -1153,7 +1165,7 @@ impl OutboxProcessor {
 
             // Resolve external references (creates External stub nodes)
             if let Err(e) = crate::neo4j_relationship_resolver::resolve_external_references(
-                &self.postgres_client,
+                &cache,
                 neo4j_client.as_ref(),
                 repository_id,
             )

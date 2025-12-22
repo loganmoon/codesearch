@@ -30,37 +30,129 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
+use codesearch_core::entities::{CodeEntity, EntityType};
 use codesearch_core::error::Result;
+use codesearch_languages::common::import_map::resolve_relative_import;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
-use tracing::info;
+use std::collections::HashMap;
+use tracing::{info, warn};
 use uuid::Uuid;
+
+// ============================================================================
+// Entity Cache
+// ============================================================================
+
+/// Cache for entity data during relationship resolution
+///
+/// Fetches all entities once at the start of resolution and provides
+/// typed accessors for filtering by entity type. This eliminates
+/// redundant database queries across multiple resolvers.
+pub struct EntityCache {
+    /// All entities for the repository
+    entities: Vec<CodeEntity>,
+    /// Pre-built lookup: qualified_name -> entity_id
+    qname_to_id: HashMap<String, String>,
+    /// Pre-built lookup: (name, qualified_name) -> entity_id for simple name fallback
+    name_to_id: HashMap<String, String>,
+}
+
+impl EntityCache {
+    /// Create a new cache by fetching all entities from PostgreSQL
+    pub async fn new(
+        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
+        repository_id: Uuid,
+    ) -> Result<Self> {
+        let entities = postgres
+            .get_all_entities(repository_id)
+            .await
+            .context("Failed to fetch entities for cache")?;
+
+        let qname_to_id: HashMap<String, String> = entities
+            .iter()
+            .map(|e| (e.qualified_name.clone(), e.entity_id.clone()))
+            .collect();
+
+        let name_to_id: HashMap<String, String> = entities
+            .iter()
+            .map(|e| (e.name.clone(), e.entity_id.clone()))
+            .collect();
+
+        Ok(Self {
+            entities,
+            qname_to_id,
+            name_to_id,
+        })
+    }
+
+    /// Get all entities
+    pub fn all(&self) -> &[CodeEntity] {
+        &self.entities
+    }
+
+    /// Get entities filtered by type
+    pub fn by_type(&self, entity_type: EntityType) -> Vec<&CodeEntity> {
+        self.entities
+            .iter()
+            .filter(|e| e.entity_type == entity_type)
+            .collect()
+    }
+
+    /// Get all type entities (Struct, Enum, Class, Interface, Trait, TypeAlias)
+    pub fn all_types(&self) -> Vec<&CodeEntity> {
+        self.entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.entity_type,
+                    EntityType::Struct
+                        | EntityType::Enum
+                        | EntityType::Class
+                        | EntityType::Interface
+                        | EntityType::Trait
+                        | EntityType::TypeAlias
+                )
+            })
+            .collect()
+    }
+
+    /// Get qualified_name -> entity_id lookup map
+    pub fn qname_map(&self) -> &HashMap<String, String> {
+        &self.qname_to_id
+    }
+
+    /// Get simple name -> entity_id lookup map (use with caution - collisions possible)
+    pub fn name_map(&self) -> &HashMap<String, String> {
+        &self.name_to_id
+    }
+
+    /// Check if cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+}
 
 /// Trait for resolving specific relationship types between entities
 ///
-/// Each implementation fetches relevant entities from PostgreSQL, builds lookup maps,
-/// and extracts relationships based on entity metadata attributes.
+/// Each implementation uses the pre-populated EntityCache to build lookup maps
+/// and extract relationships based on entity metadata attributes.
 ///
-/// Implementors provide the complete logic for fetching entities and extracting relationships.
-/// The generic `resolve_relationships_generic` function handles database setup, batch creation, and logging.
+/// The cache is populated once at the start of resolution, eliminating
+/// redundant database queries across resolvers.
 #[async_trait]
 pub trait RelationshipResolver: Send + Sync {
     /// Name of this resolver (for logging)
     fn name(&self) -> &'static str;
 
-    /// Fetch entities and extract relationships
+    /// Extract relationships using cached entity data
     ///
     /// Returns Vec<(from_id, to_id, relationship_type)>
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>>;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>>;
 }
 
 /// Generic function to resolve relationships using a resolver implementation
 ///
 /// This function provides the common infrastructure for all relationship resolvers:
-/// 1. Calls the resolver's `resolve()` method to extract relationships
+/// 1. Calls the resolver's `resolve()` method to extract relationships from cache
 /// 2. Batch creates all relationships in Neo4j
 /// 3. Logs progress and results
 ///
@@ -70,28 +162,27 @@ pub trait RelationshipResolver: Send + Sync {
 /// `resolve_pending_relationships()`.
 ///
 /// # Arguments
-/// * `postgres` - PostgreSQL client for fetching entity data
+/// * `cache` - Pre-populated entity cache for the repository
 /// * `neo4j` - Neo4j client for creating relationships (must have database already selected)
-/// * `repository_id` - UUID of the repository to resolve relationships for
 /// * `resolver` - Implementation of the RelationshipResolver trait
 ///
 /// # Example
 /// ```ignore
-/// // Caller must select database first
+/// // Caller must select database and create cache first
 /// neo4j.use_database(&db_name).await?;
+/// let cache = EntityCache::new(&postgres, repository_id).await?;
 /// let resolver = TraitImplResolver;
-/// resolve_relationships_generic(&postgres, &neo4j, repository_id, &resolver).await?;
+/// resolve_relationships_generic(&cache, &neo4j, &resolver).await?;
 /// ```
 pub async fn resolve_relationships_generic(
-    postgres: &std::sync::Arc<dyn PostgresClientTrait>,
+    cache: &EntityCache,
     neo4j: &dyn Neo4jClientTrait,
-    repository_id: Uuid,
     resolver: &dyn RelationshipResolver,
 ) -> Result<()> {
     info!("Resolving {} relationships...", resolver.name());
 
-    // Resolve relationships
-    let relationships = resolver.resolve(postgres, repository_id).await?;
+    // Resolve relationships using cached entity data
+    let relationships = resolver.resolve(cache).await?;
 
     // Batch create all relationships
     neo4j
@@ -121,28 +212,13 @@ impl RelationshipResolver for TraitImplResolver {
         "trait implementations"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use codesearch_core::entities::EntityType;
-        use std::collections::HashMap;
-
-        // Fetch all entity types in parallel for better performance
-        let (impls_result, traits_result, structs_result, enums_result, interfaces_result) = tokio::join!(
-            postgres.get_entities_by_type(repository_id, EntityType::Impl),
-            postgres.get_entities_by_type(repository_id, EntityType::Trait),
-            postgres.get_entities_by_type(repository_id, EntityType::Struct),
-            postgres.get_entities_by_type(repository_id, EntityType::Enum),
-            postgres.get_entities_by_type(repository_id, EntityType::Interface),
-        );
-
-        let impls = impls_result.context("Failed to get impl blocks")?;
-        let traits = traits_result.context("Failed to get traits")?;
-        let structs = structs_result.context("Failed to get structs")?;
-        let enums = enums_result.context("Failed to get enums")?;
-        let interfaces = interfaces_result.context("Failed to get interfaces")?;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        // Get entities from cache
+        let impls = cache.by_type(EntityType::Impl);
+        let traits = cache.by_type(EntityType::Trait);
+        let structs = cache.by_type(EntityType::Struct);
+        let enums = cache.by_type(EntityType::Enum);
+        let interfaces = cache.by_type(EntityType::Interface);
 
         // Build lookup maps using qualified_name for correct resolution
         let trait_map: HashMap<String, String> = traits
@@ -241,18 +317,8 @@ impl RelationshipResolver for InheritanceResolver {
         "class inheritance"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use codesearch_core::entities::EntityType;
-        use std::collections::HashMap;
-
-        let classes = postgres
-            .get_entities_by_type(repository_id, EntityType::Class)
-            .await
-            .context("Failed to get classes")?;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        let classes = cache.by_type(EntityType::Class);
 
         // Build lookup map using qualified_name for correct resolution
         let class_map: HashMap<String, String> = classes
@@ -275,7 +341,16 @@ impl RelationshipResolver for InheritanceResolver {
                         .to_string()]
                 } else if let Some(bases_json) = class_entity.metadata.attributes.get("bases") {
                     // Python: JSON array of base class names
-                    serde_json::from_str::<Vec<String>>(bases_json).unwrap_or_default()
+                    match serde_json::from_str::<Vec<String>>(bases_json) {
+                        Ok(bases) => bases,
+                        Err(e) => {
+                            warn!(
+                                "Failed to parse 'bases' JSON for entity {}: {}",
+                                class_entity.entity_id, e
+                            );
+                            continue;
+                        }
+                    }
                 } else {
                     continue;
                 };
@@ -317,26 +392,11 @@ impl RelationshipResolver for TypeUsageResolver {
         "type usage"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use codesearch_core::entities::EntityType;
-        use std::collections::HashMap;
-
-        // Fetch entity types in parallel
-        let (structs_result, functions_result, methods_result, all_types_result) = tokio::join!(
-            postgres.get_entities_by_type(repository_id, EntityType::Struct),
-            postgres.get_entities_by_type(repository_id, EntityType::Function),
-            postgres.get_entities_by_type(repository_id, EntityType::Method),
-            postgres.get_all_type_entities(repository_id),
-        );
-
-        let structs = structs_result.context("Failed to get structs")?;
-        let functions = functions_result.context("Failed to get functions")?;
-        let methods = methods_result.context("Failed to get methods")?;
-        let all_types = all_types_result.context("Failed to get type entities")?;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        let structs = cache.by_type(EntityType::Struct);
+        let functions = cache.by_type(EntityType::Function);
+        let methods = cache.by_type(EntityType::Method);
+        let all_types = cache.all_types();
 
         // Build type lookup map (qualified_name -> entity_id) for correct resolution
         let type_map: HashMap<String, String> = all_types
@@ -349,27 +409,35 @@ impl RelationshipResolver for TypeUsageResolver {
         // Process struct field types
         for struct_entity in structs {
             if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
-                if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
-                    for field in fields {
-                        if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
-                            if field.get("name").and_then(|v| v.as_str()).is_some() {
-                                let type_name =
-                                    field_type.split('<').next().unwrap_or(field_type).trim();
+                let fields = match serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'fields' JSON for entity {}: {}",
+                            struct_entity.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for field in fields {
+                    if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
+                        if field.get("name").and_then(|v| v.as_str()).is_some() {
+                            let type_name =
+                                field_type.split('<').next().unwrap_or(field_type).trim();
 
-                                if let Some(type_id) = type_map.get(type_name) {
-                                    // Forward edge: struct -> type
-                                    relationships.push((
-                                        struct_entity.entity_id.clone(),
-                                        type_id.clone(),
-                                        "USES".to_string(),
-                                    ));
-                                    // Reciprocal edge: type -> struct
-                                    relationships.push((
-                                        type_id.clone(),
-                                        struct_entity.entity_id.clone(),
-                                        "USED_BY".to_string(),
-                                    ));
-                                }
+                            if let Some(type_id) = type_map.get(type_name) {
+                                // Forward edge: struct -> type
+                                relationships.push((
+                                    struct_entity.entity_id.clone(),
+                                    type_id.clone(),
+                                    "USES".to_string(),
+                                ));
+                                // Reciprocal edge: type -> struct
+                                relationships.push((
+                                    type_id.clone(),
+                                    struct_entity.entity_id.clone(),
+                                    "USED_BY".to_string(),
+                                ));
                             }
                         }
                     }
@@ -381,25 +449,33 @@ impl RelationshipResolver for TypeUsageResolver {
         let callables: Vec<_> = functions.into_iter().chain(methods).collect();
         for callable in callables {
             if let Some(uses_types_json) = callable.metadata.attributes.get("uses_types") {
-                if let Ok(types) = serde_json::from_str::<Vec<String>>(uses_types_json) {
-                    for type_ref in types {
-                        // Strip generics and get the base type name
-                        let type_name = type_ref.split('<').next().unwrap_or(&type_ref).trim();
+                let types = match serde_json::from_str::<Vec<String>>(uses_types_json) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'uses_types' JSON for entity {}: {}",
+                            callable.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for type_ref in types {
+                    // Strip generics and get the base type name
+                    let type_name = type_ref.split('<').next().unwrap_or(&type_ref).trim();
 
-                        if let Some(type_id) = type_map.get(type_name) {
-                            // Forward edge: function/method -> type
-                            relationships.push((
-                                callable.entity_id.clone(),
-                                type_id.clone(),
-                                "USES".to_string(),
-                            ));
-                            // Reciprocal edge: type -> function/method
-                            relationships.push((
-                                type_id.clone(),
-                                callable.entity_id.clone(),
-                                "USED_BY".to_string(),
-                            ));
-                        }
+                    if let Some(type_id) = type_map.get(type_name) {
+                        // Forward edge: function/method -> type
+                        relationships.push((
+                            callable.entity_id.clone(),
+                            type_id.clone(),
+                            "USES".to_string(),
+                        ));
+                        // Reciprocal edge: type -> function/method
+                        relationships.push((
+                            type_id.clone(),
+                            callable.entity_id.clone(),
+                            "USED_BY".to_string(),
+                        ));
                     }
                 }
             }
@@ -418,51 +494,48 @@ impl RelationshipResolver for CallGraphResolver {
         "call graph"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use codesearch_core::entities::EntityType;
-        use std::collections::HashMap;
-
-        // Fetch entity types in parallel
-        let (functions_result, methods_result) = tokio::join!(
-            postgres.get_entities_by_type(repository_id, EntityType::Function),
-            postgres.get_entities_by_type(repository_id, EntityType::Method),
-        );
-
-        let functions = functions_result.context("Failed to get functions")?;
-        let methods = methods_result.context("Failed to get methods")?;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        let functions = cache.by_type(EntityType::Function);
+        let methods = cache.by_type(EntityType::Method);
 
         let all_callables: Vec<_> = functions.into_iter().chain(methods).collect();
 
-        let mut callable_map: HashMap<String, String> = HashMap::new();
-        for callable in &all_callables {
-            callable_map.insert(callable.name.clone(), callable.entity_id.clone());
-            callable_map.insert(callable.qualified_name.clone(), callable.entity_id.clone());
-        }
+        // Build lookup map using only qualified_name for correct resolution
+        // Using simple name would cause collisions between functions with the same name
+        // in different modules
+        let callable_map: HashMap<String, String> = all_callables
+            .iter()
+            .map(|c| (c.qualified_name.clone(), c.entity_id.clone()))
+            .collect();
 
         let mut relationships = Vec::new();
 
         for caller in all_callables {
             if let Some(calls_json) = caller.metadata.attributes.get("calls") {
-                if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
-                    for callee_name in calls {
-                        if let Some(callee_id) = callable_map.get(&callee_name) {
-                            // Forward edge: caller -> callee
-                            relationships.push((
-                                caller.entity_id.clone(),
-                                callee_id.clone(),
-                                "CALLS".to_string(),
-                            ));
-                            // Reciprocal edge: callee -> caller
-                            relationships.push((
-                                callee_id.clone(),
-                                caller.entity_id.clone(),
-                                "CALLED_BY".to_string(),
-                            ));
-                        }
+                let calls = match serde_json::from_str::<Vec<String>>(calls_json) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'calls' JSON for entity {}: {}",
+                            caller.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for callee_name in calls {
+                    if let Some(callee_id) = callable_map.get(&callee_name) {
+                        // Forward edge: caller -> callee
+                        relationships.push((
+                            caller.entity_id.clone(),
+                            callee_id.clone(),
+                            "CALLS".to_string(),
+                        ));
+                        // Reciprocal edge: callee -> caller
+                        relationships.push((
+                            callee_id.clone(),
+                            caller.entity_id.clone(),
+                            "CALLED_BY".to_string(),
+                        ));
                     }
                 }
             }
@@ -475,77 +548,14 @@ impl RelationshipResolver for CallGraphResolver {
 /// Resolver for imports (IMPORTS relationships)
 pub struct ImportsResolver;
 
-/// Resolve a relative import path to a qualified name
-///
-/// Given an importer's qualified_name and a relative import path,
-/// returns the resolved qualified_name of the imported module.
-///
-/// Examples:
-/// - importer: "utils.helpers", import: "./store" -> "utils.store"
-/// - importer: "utils.helpers", import: "../core" -> "core"
-/// - importer: "a.b.c", import: "../../x" -> "x"
-fn resolve_import_path(importer_qname: &str, import_path: &str) -> Option<String> {
-    // Non-relative imports (bare specifiers like "react") return None
-    // They're typically external packages
-    if !import_path.starts_with('.') {
-        return None;
-    }
-
-    // Split importer qualified name into parts
-    // e.g., "utils.helpers" -> ["utils", "helpers"]
-    let mut parts: Vec<&str> = importer_qname.split('.').collect();
-
-    // Remove the importer's own name (last segment) to get the directory
-    // e.g., ["utils", "helpers"] -> ["utils"]
-    if !parts.is_empty() {
-        parts.pop();
-    }
-
-    // Process import path segments
-    for segment in import_path.split('/') {
-        match segment {
-            "." | "" => {
-                // Current directory, no change
-            }
-            ".." => {
-                // Go up one level
-                if !parts.is_empty() {
-                    parts.pop();
-                }
-            }
-            _ => {
-                // Add this segment (strip file extension if present)
-                let name = segment.rsplit('.').next_back().unwrap_or(segment);
-                parts.push(name);
-            }
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("."))
-    }
-}
-
 #[async_trait]
 impl RelationshipResolver for ImportsResolver {
     fn name(&self) -> &'static str {
         "imports"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use codesearch_core::entities::EntityType;
-        use std::collections::HashMap;
-
-        let modules = postgres
-            .get_entities_by_type(repository_id, EntityType::Module)
-            .await
-            .context("Failed to get modules")?;
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        let modules = cache.by_type(EntityType::Module);
 
         // Build lookup maps for module resolution
         // 1. By qualified_name (e.g., "utils.helpers")
@@ -564,33 +574,41 @@ impl RelationshipResolver for ImportsResolver {
 
         for module_entity in &modules {
             if let Some(imports_json) = module_entity.metadata.attributes.get("imports") {
-                if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_json) {
-                    for import_path in imports {
-                        // Try to resolve the import
-                        let imported_module_id = if import_path.starts_with('.') {
-                            // Relative import: resolve based on importer's location
-                            resolve_import_path(&module_entity.qualified_name, &import_path)
-                                .and_then(|resolved| module_map.get(&resolved))
-                        } else {
-                            // Bare import: try simple name match (internal package import)
-                            // External packages (react, lodash, etc.) won't match
-                            simple_name_map.get(&import_path)
-                        };
+                let imports = match serde_json::from_str::<Vec<String>>(imports_json) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'imports' JSON for entity {}: {}",
+                            module_entity.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for import_path in imports {
+                    // Try to resolve the import using the shared function
+                    let imported_module_id = if import_path.starts_with('.') {
+                        // Relative import: resolve based on importer's location
+                        resolve_relative_import(&module_entity.qualified_name, &import_path)
+                            .and_then(|resolved| module_map.get(&resolved))
+                    } else {
+                        // Bare import: try simple name match (internal package import)
+                        // External packages (react, lodash, etc.) won't match
+                        simple_name_map.get(&import_path)
+                    };
 
-                        if let Some(imported_id) = imported_module_id {
-                            // Forward edge: module -> imported_module
-                            relationships.push((
-                                module_entity.entity_id.clone(),
-                                imported_id.clone(),
-                                "IMPORTS".to_string(),
-                            ));
-                            // Reciprocal edge: imported_module -> module
-                            relationships.push((
-                                imported_id.clone(),
-                                module_entity.entity_id.clone(),
-                                "IMPORTED_BY".to_string(),
-                            ));
-                        }
+                    if let Some(imported_id) = imported_module_id {
+                        // Forward edge: module -> imported_module
+                        relationships.push((
+                            module_entity.entity_id.clone(),
+                            imported_id.clone(),
+                            "IMPORTS".to_string(),
+                        ));
+                        // Reciprocal edge: imported_module -> module
+                        relationships.push((
+                            imported_id.clone(),
+                            module_entity.entity_id.clone(),
+                            "IMPORTED_BY".to_string(),
+                        ));
                     }
                 }
             }
@@ -603,7 +621,7 @@ impl RelationshipResolver for ImportsResolver {
 /// Resolver for containment (CONTAINS relationships)
 ///
 /// Creates parent-child relationships based on entity.parent_scope.
-/// Queries entity_metadata directly to build qualified_name -> entity_id map.
+/// Uses pre-built qualified_name -> entity_id map from cache.
 pub struct ContainsResolver;
 
 #[async_trait]
@@ -612,34 +630,19 @@ impl RelationshipResolver for ContainsResolver {
         "containment"
     }
 
-    async fn resolve(
-        &self,
-        postgres: &std::sync::Arc<dyn PostgresClientTrait>,
-        repository_id: Uuid,
-    ) -> Result<Vec<(String, String, String)>> {
-        use std::collections::HashMap;
-
-        // Get all entities for this repository
-        let entities = postgres
-            .get_all_entities(repository_id)
-            .await
-            .context("Failed to get all entities")?;
-
-        // Build qualified_name -> entity_id map for parent lookup
-        let qname_to_id: HashMap<&str, &str> = entities
-            .iter()
-            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
-            .collect();
+    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+        let entities = cache.all();
+        let qname_to_id = cache.qname_map();
 
         let mut relationships = Vec::new();
 
-        for entity in &entities {
+        for entity in entities {
             if let Some(parent_scope) = &entity.parent_scope {
                 // Look up parent by qualified_name
-                if let Some(&parent_id) = qname_to_id.get(parent_scope.as_str()) {
+                if let Some(parent_id) = qname_to_id.get(parent_scope) {
                     // Forward edge: parent CONTAINS child
                     relationships.push((
-                        parent_id.to_string(),
+                        parent_id.clone(),
                         entity.entity_id.clone(),
                         "CONTAINS".to_string(),
                     ));
@@ -700,38 +703,35 @@ impl ExternalRef {
 /// - explicit "external::" prefix in resolved attributes
 /// - references in implements_trait, extends, uses_types that don't match any entity
 pub async fn resolve_external_references(
-    postgres: &std::sync::Arc<dyn PostgresClientTrait>,
+    cache: &EntityCache,
     neo4j: &dyn Neo4jClientTrait,
     repository_id: Uuid,
 ) -> Result<()> {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     info!("Resolving external references...");
 
-    // Get all entities for this repository
-    let entities = postgres
-        .get_all_entities(repository_id)
-        .await
-        .context("Failed to get all entities")?;
-
-    if entities.is_empty() {
+    if cache.is_empty() {
         return Ok(());
     }
 
-    // Build set of known qualified names
-    let known_names: HashSet<&str> = entities.iter().map(|e| e.qualified_name.as_str()).collect();
+    let entities = cache.all();
 
-    // Also build a name -> qualified_name map for simple name lookups
-    let name_to_qname: HashMap<&str, &str> = entities
+    // Build set of known qualified names from cache's pre-built map
+    let known_names: HashSet<&str> = cache.qname_map().keys().map(|s| s.as_str()).collect();
+
+    // Use cache's name map for simple name lookups
+    let name_to_qname: HashMap<&str, &str> = cache
+        .name_map()
         .iter()
-        .map(|e| (e.name.as_str(), e.qualified_name.as_str()))
+        .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
     // Collect all external references with their source relationships
     let mut external_refs: HashSet<ExternalRef> = HashSet::new();
     let mut relationships: Vec<(String, String, String)> = Vec::new();
 
-    for entity in &entities {
+    for entity in entities {
         // Check implements_trait
         if let Some(trait_ref) = entity.metadata.attributes.get("implements_trait") {
             if is_external_ref(trait_ref, &known_names, &name_to_qname) {
@@ -912,66 +912,8 @@ fn normalize_external_ref(ref_name: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_resolve_import_path_current_dir() {
-        // ./store relative to utils.helpers -> utils.store
-        assert_eq!(
-            resolve_import_path("utils.helpers", "./store"),
-            Some("utils.store".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_import_path_parent_dir() {
-        // ../core relative to utils.helpers -> core
-        assert_eq!(
-            resolve_import_path("utils.helpers", "../core"),
-            Some("core".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_import_path_multiple_parents() {
-        // ../../x relative to a.b.c -> x
-        assert_eq!(
-            resolve_import_path("a.b.c", "../../x"),
-            Some("x".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_import_path_nested() {
-        // ./sub/module relative to utils.helpers -> utils.sub.module
-        assert_eq!(
-            resolve_import_path("utils.helpers", "./sub/module"),
-            Some("utils.sub.module".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_import_path_bare_specifier() {
-        // Bare specifiers (external packages) return None
-        assert_eq!(resolve_import_path("utils.helpers", "react"), None);
-        assert_eq!(resolve_import_path("utils.helpers", "lodash"), None);
-    }
-
-    #[test]
-    fn test_resolve_import_path_with_extension() {
-        // Extensions should be stripped
-        assert_eq!(
-            resolve_import_path("utils.helpers", "./store.js"),
-            Some("utils.store".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_import_path_root_level() {
-        // Single segment module
-        assert_eq!(
-            resolve_import_path("index", "./utils"),
-            Some("utils".to_string())
-        );
-    }
+    // Note: resolve_relative_import tests are in codesearch_languages::common::import_map
+    // These tests verify the external reference detection logic
 
     #[test]
     fn test_is_external_ref_with_dot_separator() {

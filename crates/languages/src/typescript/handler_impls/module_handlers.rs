@@ -130,16 +130,20 @@ pub fn handle_module_impl(
     // Extract imports
     let imports = extract_import_sources(program_node, source);
 
+    // Only create a Module entity if there are imports to track
+    // Module entities exist to establish IMPORTS relationships
+    if imports.is_empty() {
+        return Ok(vec![]);
+    }
+
     // Build metadata
     let mut metadata = EntityMetadata::default();
 
     // Store imports as JSON array (expected by ImportsResolver)
-    if !imports.is_empty() {
-        if let Ok(imports_json) = serde_json::to_string(&imports) {
-            metadata
-                .attributes
-                .insert("imports".to_string(), imports_json);
-        }
+    if let Ok(imports_json) = serde_json::to_string(&imports) {
+        metadata
+            .attributes
+            .insert("imports".to_string(), imports_json);
     }
 
     // Build the entity

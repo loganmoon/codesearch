@@ -620,23 +620,25 @@ Neo4j edges from entity metadata.
 ### 6.2 Adding Metadata for Resolution
 
 Handlers must populate specific metadata attributes for resolvers to work.
-**Important:** Store qualified names (resolved through imports) directly in the base attributes.
+
+**Important:** The resolvers use the base attribute names shown in section 6.1 (e.g., `implements_trait`, `uses_types`, `calls`). Store qualified/resolved names directly in these attributes at extraction time. There is no `*_resolved` suffix pattern.
 
 ```rust
 // In impl_handlers.rs - for TraitImplResolver
-// Store RESOLVED trait name directly (resolvers look up by qualified_name)
-let trait_name_resolved = resolve_reference(&trait_name, &import_map, None, "::");
-metadata.attributes.insert("implements_trait".to_string(), trait_name_resolved);
+// Resolve the trait name through imports, then store in base attribute
+let resolved_trait = resolve_reference(&trait_name, &import_map, None, "::");
+metadata.attributes.insert("implements_trait".to_string(), resolved_trait);
 metadata.attributes.insert("for_type".to_string(), for_type.clone());
 
 // In type_handlers.rs - for TypeUsageResolver (fields)
+// Store as JSON array of resolved type names
 metadata.attributes.insert("fields".to_string(), serde_json::to_string(&fields)?);
 
 // In function_handlers.rs - for TypeUsageResolver (signatures)
-// uses_types should contain resolved/qualified type names
+// uses_types: JSON array of resolved/qualified type names from parameters and return types
 metadata.attributes.insert("uses_types".to_string(), serde_json::to_string(&type_refs)?);
 
-// For CallGraphResolver - call_names should be resolved/qualified
+// For CallGraphResolver - JSON array of resolved/qualified function names
 metadata.attributes.insert("calls".to_string(), serde_json::to_string(&call_names)?);
 ```
 

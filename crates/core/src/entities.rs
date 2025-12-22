@@ -53,6 +53,38 @@ impl SourceLocation {
     }
 }
 
+/// Type of reference to another entity
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceType {
+    /// Function or method call
+    Call,
+    /// Type annotation or usage
+    TypeUsage,
+    /// Import statement
+    Import,
+    /// extends/implements relationship
+    Extends,
+    /// General usage (field types, etc.)
+    Uses,
+}
+
+/// A reference to another entity with source location
+///
+/// This captures where in the source code a reference occurs (call site,
+/// type annotation, import, etc.) along with the resolved target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SourceReference {
+    /// Resolved qualified name of the target (may be unresolved/external)
+    pub target: String,
+    /// Location of the reference in source (line/column)
+    pub location: SourceLocation,
+    /// Type of reference
+    pub ref_type: ReferenceType,
+}
+
 /// Visibility modifiers for entities
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -106,8 +138,16 @@ pub struct CodeEntity {
     /// Simple name of the entity
     pub name: String,
 
-    /// Full qualified name of the entity (e.g., "module.class.method")
+    /// Full qualified name of the entity (semantic, package-relative)
+    /// e.g., "jotai.utils.helpers.formatNumber" or "codesearch_core::entities::CodeEntity"
+    /// Used for LSP validation, graph edge resolution, and semantic lookups.
     pub qualified_name: String,
+
+    /// File-path-based identifier for import resolution
+    /// e.g., "website.src.pages.index" or "crates.core.src.entities"
+    /// Used for resolving relative imports and file-based lookups.
+    #[builder(default = "None")]
+    pub path_entity_identifier: Option<String>,
 
     /// Parent scope of this entity (e.g., containing class or module)
     #[builder(default = "None")]

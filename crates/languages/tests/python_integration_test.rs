@@ -17,14 +17,26 @@ fn filter_by_type(
 
 #[test]
 fn test_python_extractor_creation() {
-    let result = create_extractor(Path::new("test.py"), "test-repo", None, None);
+    let result = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    );
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
 
 #[test]
 fn test_pyi_extractor_creation() {
-    let result = create_extractor(Path::new("stubs.pyi"), "test-repo", None, None);
+    let result = create_extractor(
+        Path::new("stubs.pyi"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    );
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -36,9 +48,15 @@ def greet(name):
     return f"Hello, {name}!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -66,9 +84,15 @@ def add(a: int, b: int) -> int:
     return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -101,9 +125,15 @@ async def fetch_data(url: str) -> dict:
             return await response.json()
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -134,9 +164,15 @@ def calculate_sum(a: int, b: int) -> int:
     return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -162,9 +198,15 @@ def cached_computation(x: int) -> int:
     return x * 2
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -197,9 +239,15 @@ class Person:
         return f"Hello, I'm {self.name}"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -246,9 +294,15 @@ class Dog(Animal):
         return "Woof!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -278,9 +332,15 @@ class Point:
     y: float
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -308,9 +368,15 @@ class Calculator:
         return a + b
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -345,9 +411,15 @@ class Factory:
         return cls(name)
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -381,9 +453,15 @@ class Circle:
         return self._radius
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -412,9 +490,15 @@ def variadic_func(*args, **kwargs) -> None:
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -440,9 +524,15 @@ def greet(name: str, greeting: str = "Hello") -> str:
     return f"{greeting}, {name}!"
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -475,9 +565,15 @@ async def baz():
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -501,9 +597,15 @@ class Example:
         return x
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -532,9 +634,15 @@ class Outer:
             pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -557,9 +665,15 @@ def 计算(数值: int) -> int:
     return 数值 * 2
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -574,9 +688,15 @@ def 计算(数值: int) -> int:
 fn test_extract_empty_source() {
     let source = "";
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -589,9 +709,15 @@ fn test_extract_empty_source() {
 fn test_extract_whitespace_only_source() {
     let source = "   \n\n  \t  \n";
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -610,9 +736,15 @@ Module docstring
 """
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -630,9 +762,15 @@ def func(a, b, /, c, d):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -663,9 +801,15 @@ def func(a, *, b, c):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -695,9 +839,15 @@ def func(pos_only, /, standard, *, kw_only):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -728,9 +878,15 @@ class Client:
         pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))
@@ -755,9 +911,15 @@ class Child(Parent1, Parent2, Parent3):
     pass
     "#;
 
-    let extractor = create_extractor(Path::new("test.py"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .py");
+    let extractor = create_extractor(
+        Path::new("test.py"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .py");
 
     let entities = extractor
         .extract(source, Path::new("test.py"))

@@ -1286,7 +1286,7 @@ impl PostgresClient {
         // Build bulk insert for entity_metadata
         let mut entity_query: QueryBuilder<Postgres> = QueryBuilder::new(
             "INSERT INTO entity_metadata (
-                entity_id, repository_id, qualified_name, name, parent_scope,
+                entity_id, repository_id, qualified_name, path_entity_identifier, name, parent_scope,
                 entity_type, language, file_path, visibility,
                 entity_data, git_commit_hash, qdrant_point_id, embedding_id, bm25_token_count, content
             ) ",
@@ -1310,6 +1310,7 @@ impl PostgresClient {
                 b.push_bind(&entity.entity_id)
                     .push_bind(repository_id)
                     .push_bind(&entity.qualified_name)
+                    .push_bind(&entity.path_entity_identifier)
                     .push_bind(&entity.name)
                     .push_bind(&entity.parent_scope)
                     .push_bind(entity.entity_type.to_string())
@@ -1329,6 +1330,7 @@ impl PostgresClient {
             " ON CONFLICT (repository_id, entity_id)
             DO UPDATE SET
                 qualified_name = EXCLUDED.qualified_name,
+                path_entity_identifier = EXCLUDED.path_entity_identifier,
                 name = EXCLUDED.name,
                 parent_scope = EXCLUDED.parent_scope,
                 entity_type = EXCLUDED.entity_type,

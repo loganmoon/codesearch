@@ -67,6 +67,7 @@ fn extract_import_sources(program_node: Node, source: &str) -> Vec<String> {
 }
 
 /// Handle TypeScript program node as a Module entity
+#[allow(clippy::too_many_arguments)]
 pub fn handle_module_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -75,6 +76,7 @@ pub fn handle_module_impl(
     repository_id: &str,
     _package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let program_node = require_capture_node(query_match, query, "module")?;
 
@@ -82,7 +84,11 @@ pub fn handle_module_impl(
     let name = derive_module_name(file_path);
 
     // Build qualified name from file path
-    let qualified_name = derive_qualified_name(file_path, source_root, ".");
+    let qualified_name = derive_qualified_name(file_path, source_root, repo_root, ".");
+
+    // Build path_entity_identifier (repo-relative path for import resolution)
+    let path_entity_identifier =
+        crate::common::module_utils::derive_path_entity_identifier(file_path, repo_root, ".");
 
     // Generate entity ID
     let file_path_str = file_path.to_string_lossy();
@@ -97,6 +103,7 @@ pub fn handle_module_impl(
         repository_id: repository_id.to_string(),
         name,
         qualified_name,
+        path_entity_identifier: Some(path_entity_identifier),
         parent_scope: None,
         file_path: file_path.to_path_buf(),
         location,

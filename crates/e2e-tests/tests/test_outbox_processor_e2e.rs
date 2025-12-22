@@ -23,6 +23,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
         repository_id: repo_id.to_string(),
         name: name.to_string(),
         qualified_name: name.to_string(),
+        path_entity_identifier: None,
         entity_type: EntityType::Function,
         language: Language::Rust,
         file_path: PathBuf::from(file_path),

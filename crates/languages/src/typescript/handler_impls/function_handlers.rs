@@ -7,12 +7,17 @@ use crate::common::{
 };
 use crate::javascript::module_path::derive_module_path;
 use crate::typescript::utils::extract_type_references;
-use codesearch_core::{entities::Language, error::Result, CodeEntity};
+use codesearch_core::{
+    entities::{Language, SourceReference},
+    error::Result,
+    CodeEntity,
+};
 use std::path::Path;
 use tracing::debug;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Handle regular function declarations with TypeScript type annotations
+#[allow(clippy::too_many_arguments)]
 pub fn handle_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -21,6 +26,7 @@ pub fn handle_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
     let mut entities = crate::javascript::handler_impls::handle_function_impl(
@@ -31,6 +37,7 @@ pub fn handle_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     )?;
 
     // Derive module path for qualified name resolution
@@ -46,6 +53,7 @@ pub fn handle_function_impl(
 }
 
 /// Handle arrow functions with TypeScript type annotations
+#[allow(clippy::too_many_arguments)]
 pub fn handle_arrow_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -54,6 +62,7 @@ pub fn handle_arrow_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
     let mut entities = crate::javascript::handler_impls::handle_arrow_function_impl(
@@ -64,6 +73,7 @@ pub fn handle_arrow_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     )?;
 
     // Derive module path for qualified name resolution
@@ -112,26 +122,48 @@ fn enhance_with_type_annotations(
             entity.parent_scope.as_deref(),
         );
 
-        // Merge TypeScript type references with any existing JSDoc type references
+        // Merge TypeScript type references with any existing references
         if !ts_type_refs.is_empty() {
-            // Get existing uses_types from JSDoc (if any)
-            let mut all_type_refs: Vec<String> = entity
+            // Get existing references (if any)
+            let mut all_refs: Vec<SourceReference> = entity
+                .metadata
+                .attributes
+                .get("references")
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or_default();
+
+            // Add TypeScript type references (deduplicating by target)
+            let mut seen: std::collections::HashSet<String> =
+                all_refs.iter().map(|r| r.target.clone()).collect();
+            for type_ref in ts_type_refs.iter() {
+                if seen.insert(type_ref.target.clone()) {
+                    all_refs.push(type_ref.clone());
+                }
+            }
+
+            // Store combined references with locations
+            if let Ok(json) = serde_json::to_string(&all_refs) {
+                entity
+                    .metadata
+                    .attributes
+                    .insert("references".to_string(), json);
+            }
+
+            // Also store simplified uses_types list for backward compatibility
+            let mut all_type_targets: Vec<String> = entity
                 .metadata
                 .attributes
                 .get("uses_types")
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or_default();
-
-            // Add TypeScript type references (deduplicating)
-            let mut seen: std::collections::HashSet<_> = all_type_refs.iter().cloned().collect();
-            for type_ref in ts_type_refs {
-                if seen.insert(type_ref.clone()) {
-                    all_type_refs.push(type_ref);
+            let mut seen_targets: std::collections::HashSet<_> =
+                all_type_targets.iter().cloned().collect();
+            for type_ref in &ts_type_refs {
+                if seen_targets.insert(type_ref.target.clone()) {
+                    all_type_targets.push(type_ref.target.clone());
                 }
             }
-
-            // Store combined type references
-            if let Ok(json) = serde_json::to_string(&all_type_refs) {
+            if let Ok(json) = serde_json::to_string(&all_type_targets) {
                 entity
                     .metadata
                     .attributes

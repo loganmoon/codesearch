@@ -211,6 +211,7 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             let handler_impl = &entity.handler;
 
             quote! {
+                #[allow(clippy::too_many_arguments)]
                 pub fn #handler_name(
                     query_match: &tree_sitter::QueryMatch,
                     query: &tree_sitter::Query,
@@ -219,8 +220,9 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                     repository_id: &str,
                     package_name: Option<&str>,
                     source_root: Option<&std::path::Path>,
+                    repo_root: &std::path::Path,
                 ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
-                    #handler_impl(query_match, query, source, file_path, repository_id, package_name, source_root)
+                    #handler_impl(query_match, query, source, file_path, repository_id, package_name, source_root, repo_root)
                 }
             }
         })
@@ -233,6 +235,7 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             repository_id: String,
             package_name: Option<String>,
             source_root: Option<std::path::PathBuf>,
+            repo_root: std::path::PathBuf,
             config: crate::extraction_framework::LanguageConfiguration,
         }
 
@@ -243,10 +246,12 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             /// * `repository_id` - Repository identifier
             /// * `package_name` - Optional package/crate name from manifest
             /// * `source_root` - Optional source root for module path derivation
+            /// * `repo_root` - Repository root for deriving repo-relative paths
             pub fn new(
                 repository_id: String,
                 package_name: Option<String>,
                 source_root: Option<std::path::PathBuf>,
+                repo_root: std::path::PathBuf,
             ) -> codesearch_core::error::Result<Self> {
                 let language = #tree_sitter_lang.into();
 
@@ -258,6 +263,7 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                     repository_id,
                     package_name,
                     source_root,
+                    repo_root,
                     config,
                 })
             }
@@ -274,6 +280,7 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                     self.repository_id.clone(),
                     self.package_name.as_deref(),
                     self.source_root.as_deref(),
+                    &self.repo_root,
                 )?;
                 extractor.extract(source, file_path)
             }
@@ -284,10 +291,11 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             crate::LanguageDescriptor {
                 name: #language_name_lower,
                 extensions: &[#(#extensions),*],
-                factory: |repo_id, pkg_name, src_root| Ok(Box::new(#extractor_name::new(
+                factory: |repo_id, pkg_name, src_root, repo_root| Ok(Box::new(#extractor_name::new(
                     repo_id.to_string(),
                     pkg_name.map(String::from),
                     src_root.map(std::path::PathBuf::from),
+                    repo_root.to_path_buf(),
                 )?)),
             }
         }

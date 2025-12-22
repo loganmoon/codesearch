@@ -20,12 +20,10 @@ tree-sitter-javascript = { workspace = true }
 tree-sitter-typescript = { workspace = true }
 tree-sitter-rust = { workspace = true }
 tree-sitter-go = { workspace = true }
-tree-sitter-graph = "0.12"
 im = { version = "15.1", features = ["serde"] }
 streaming-iterator = "0.1"
 inventory = "0.3"
 uuid = { workspace = true }
-walkdir = "2.5"
 
 [dev-dependencies]
 tokio = { workspace = true }

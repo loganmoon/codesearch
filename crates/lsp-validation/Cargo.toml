@@ -1,0 +1,32 @@
+[package]
+name = "codesearch-lsp-validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LSP validation framework for codesearch relationship extraction"
+
+[dependencies]
+# Core codesearch crates
+codesearch-core = { path = "../core" }
+
+# LSP protocol types
+lsp-types = "0.97"
+
+# Async runtime
+tokio = { workspace = true, features = ["process", "io-util", "sync"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

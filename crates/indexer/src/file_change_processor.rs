@@ -273,6 +273,7 @@ async fn process_file_batch(
             &repo_id.to_string(),
             package_name,
             source_root,
+            repo_root,
         )
         .await
         {

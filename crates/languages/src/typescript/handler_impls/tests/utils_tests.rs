@@ -101,9 +101,9 @@ fn test_extract_type_references_parameter() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references(func_node, source, &import_map, None);
-    assert!(types.iter().any(|t| t.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
     // void is primitive, should not be included
-    assert!(!types.iter().any(|t| t.contains("void")));
+    assert!(!types.iter().any(|t| t.target.contains("void")));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn test_extract_type_references_return_type() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references(func_node, source, &import_map, None);
-    assert!(types.iter().any(|t| t.contains("UserList")));
+    assert!(types.iter().any(|t| t.target.contains("UserList")));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn test_extract_type_references_generic() {
 
     let types = extract_type_references(func_node, source, &import_map, None);
     // Promise is primitive, User is not
-    assert!(types.iter().any(|t| t.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
 }
 
 #[test]
@@ -153,9 +153,9 @@ fn test_extract_type_references_multiple() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references(func_node, source, &import_map, None);
-    assert!(types.iter().any(|t| t.contains("User")));
-    assert!(types.iter().any(|t| t.contains("Settings")));
-    assert!(types.iter().any(|t| t.contains("Result")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("Settings")));
+    assert!(types.iter().any(|t| t.target.contains("Result")));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn test_extract_type_references_dedup() {
 
     let types = extract_type_references(func_node, source, &import_map, None);
     // Should only have one entry for User
-    let user_count = types.iter().filter(|t| t.contains("User")).count();
+    let user_count = types.iter().filter(|t| t.target.contains("User")).count();
     assert_eq!(user_count, 1);
 }
 
@@ -182,5 +182,5 @@ fn test_extract_type_references_scoped() {
 
     let types = extract_type_references(func_node, source, &import_map, None);
     // Should capture the full scoped type
-    assert!(types.iter().any(|t| t.contains("Namespace.Type")));
+    assert!(types.iter().any(|t| t.target.contains("Namespace.Type")));
 }

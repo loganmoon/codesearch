@@ -550,6 +550,7 @@ mod tests {
             repository_id: "test-repo-id".to_string(),
             name: "greet".to_string(),
             qualified_name: "test::greet".to_string(),
+            path_entity_identifier: None,
             parent_scope: None,
             entity_type: EntityType::Function,
             dependencies: Vec::new(),

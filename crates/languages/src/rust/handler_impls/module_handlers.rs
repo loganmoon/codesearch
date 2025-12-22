@@ -44,6 +44,7 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
 }
 
 /// Process a module query match and extract entity data
+#[allow(clippy::too_many_arguments)]
 pub fn handle_module_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -52,6 +53,7 @@ pub fn handle_module_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Get the module node for location and content
     let module_node = require_capture_node(query_match, query, "module")?;
@@ -65,6 +67,7 @@ pub fn handle_module_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components

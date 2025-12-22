@@ -94,6 +94,61 @@ The resolution system handles different separator conventions:
 
 The `is_external_ref()` function handles both `::` and `.` separators when extracting simple names for matching.
 
+## Workspace and Package Detection
+
+For languages with package managers that support workspaces/monorepos, you MUST implement workspace detection to generate correct qualified names.
+
+### Why This Matters
+
+Without workspace detection:
+- Files in subdirectory packages get incorrect qualified names
+- LSP validation will fail (semantic names don't match our graph)
+- Graph edge resolution may not find targets
+
+For example, in an npm monorepo with a package at `packages/core/`:
+- **Correct**: `@myorg/core.utils.formatNumber` (semantic, package-relative)
+- **Wrong**: `packages.core.src.utils.formatNumber` (file-path-based)
+
+### Entity Identifier Fields
+
+Entities have two identifier fields for different lookup scenarios:
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `qualified_name` | Semantic, package-relative | `jotai.utils.formatNumber` |
+| `path_entity_identifier` | File-path-based, for import resolution | `packages.jotai.src.utils.formatNumber` |
+
+- **`qualified_name`**: Used for LSP validation, graph edge resolution, and semantic lookups. This is what IDEs and language servers use.
+- **`path_entity_identifier`**: Used for resolving relative imports where file structure matters.
+
+### Implementation Checklist
+
+1. **Detect workspace configuration files**
+   - npm/yarn: `package.json` with `workspaces` field
+   - pnpm: `pnpm-workspace.yaml`
+   - Rust: `Cargo.toml` with `[workspace]` section
+   - Python: `pyproject.toml` with workspace config (if applicable)
+
+2. **Parse member package manifests**
+   - Each workspace member gets its own source_root
+   - Package name comes from member's manifest
+
+3. **Ensure qualified_name includes package prefix**
+   - `qualified_name` = package_name + module_path + scope + entity_name
+   - Without package detection, qualified_name won't match LSP
+
+### Implemented Workspace Detection
+
+Currently implemented in `crates/core/src/project_manifest.rs`:
+
+| Package Manager | Detection Method | Supported |
+|-----------------|------------------|-----------|
+| Rust/Cargo | `[workspace.members]` in Cargo.toml | Yes |
+| npm/yarn | `workspaces` in package.json | Yes |
+| pnpm | `pnpm-workspace.yaml` | Yes |
+
+The `PackageMap` struct uses longest-prefix matching to find the correct package for any file path, essential for monorepos with nested packages.
+
 ### External References
 
 References that cannot be resolved to entities within the repository become "External" stub nodes. The system identifies external references by:
@@ -120,6 +175,7 @@ pub fn handle_class_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,  // Required for path_entity_identifier generation
 ) -> Result<Vec<CodeEntity>> {
     let class_node = require_capture_node(query_match, query, "class")?;
 
@@ -160,6 +216,7 @@ pub fn handle_module_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,  // Required for path_entity_identifier generation
 ) -> Result<Vec<CodeEntity>> {
     let program_node = require_capture_node(query_match, query, "module")?;
 
@@ -175,11 +232,15 @@ pub fn handle_module_impl(
         );
     }
 
-    // Module qualified_name should be derived from file path
-    // e.g., "src/utils/helpers.js" -> "src.utils.helpers"
-    let qualified_name = derive_qualified_name(file_path, source_root, ".");
+    // Module qualified_name is semantic, package-relative
+    // e.g., "mypackage.utils.helpers" (uses package_name + module_path)
+    let qualified_name = derive_qualified_name(file_path, source_root, repo_root, ".");
 
-    // ... build and return entity
+    // path_entity_identifier is file-path-based, always repo-relative
+    // e.g., "src.utils.helpers" (for import resolution)
+    let path_entity_identifier = derive_path_entity_identifier(file_path, repo_root, ".");
+
+    // ... build and return entity with both identifiers
 }
 ```
 

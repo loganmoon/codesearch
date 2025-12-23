@@ -4,6 +4,7 @@ use codesearch_core::{CodeEntity, EntityType, Language};
 use serde_json::json;
 use std::collections::HashMap;
 
+
 /// Relationship information for Neo4j edge creation
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -13,39 +14,6 @@ pub struct Relationship {
     pub to_id: Option<String>,
     pub to_name: Option<String>,
     pub properties: HashMap<String, String>,
-}
-
-/// Extract CONTAINS relationships from parent_scope
-#[allow(dead_code)]
-pub fn extract_contains_relationships(entities: &[CodeEntity]) -> Vec<Relationship> {
-    let mut relationships = Vec::new();
-
-    // Build qualified_name -> entity_id map
-    let name_to_id: HashMap<&str, &str> = entities
-        .iter()
-        .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
-        .collect();
-
-    for entity in entities {
-        if let Some(parent_qname) = &entity.parent_scope {
-            let from_id = if let Some(&parent_id) = name_to_id.get(parent_qname.as_str()) {
-                parent_id.to_string()
-            } else {
-                // Parent not in this batch, defer resolution
-                continue;
-            };
-
-            relationships.push(Relationship {
-                rel_type: "CONTAINS".to_string(),
-                from_id,
-                to_id: Some(entity.entity_id.clone()),
-                to_name: None,
-                properties: HashMap::new(),
-            });
-        }
-    }
-
-    relationships
 }
 
 /// Build relationship JSON for outbox payload
@@ -403,64 +371,6 @@ mod tests {
         builder.build().expect("Failed to build test entity")
     }
 
-    #[test]
-    fn test_extract_contains_relationships_with_parent() {
-        let parent = create_test_entity(
-            "parent_id",
-            "Parent",
-            "test::Parent",
-            EntityType::Module,
-            None,
-        );
-        let child = create_test_entity(
-            "child_id",
-            "Child",
-            "test::Parent::Child",
-            EntityType::Function,
-            Some("test::Parent".to_string()),
-        );
-
-        let entities = vec![parent, child];
-        let relationships = extract_contains_relationships(&entities);
-
-        assert_eq!(relationships.len(), 1);
-        assert_eq!(relationships[0].rel_type, "CONTAINS");
-        assert_eq!(relationships[0].from_id, "parent_id");
-        assert_eq!(relationships[0].to_id, Some("child_id".to_string()));
-    }
-
-    #[test]
-    fn test_extract_contains_relationships_missing_parent() {
-        let child = create_test_entity(
-            "child_id",
-            "Child",
-            "test::Parent::Child",
-            EntityType::Function,
-            Some("test::Parent".to_string()),
-        );
-
-        let entities = vec![child];
-        let relationships = extract_contains_relationships(&entities);
-
-        // Parent not in batch, so no relationship created
-        assert_eq!(relationships.len(), 0);
-    }
-
-    #[test]
-    fn test_extract_contains_relationships_no_parent() {
-        let entity = create_test_entity(
-            "entity_id",
-            "Entity",
-            "test::Entity",
-            EntityType::Function,
-            None,
-        );
-
-        let entities = vec![entity];
-        let relationships = extract_contains_relationships(&entities);
-
-        assert_eq!(relationships.len(), 0);
-    }
 
     #[test]
     fn test_build_contains_relationship_json_resolved() {

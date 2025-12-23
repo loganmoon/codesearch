@@ -86,30 +86,4 @@ impl GraniteTokenizer {
         // RoBERTa uses <pad> token with ID 1
         self.tokenizer.token_to_id("<pad>").unwrap_or(1)
     }
-
-    /// Get the vocabulary size
-    #[allow(dead_code)]
-    pub fn vocab_size(&self) -> usize {
-        self.tokenizer.get_vocab_size(true)
-    }
-
-    /// Decode token IDs back to text
-    #[allow(dead_code)]
-    pub fn decode(&self, ids: &[u32], skip_special_tokens: bool) -> Result<String> {
-        self.tokenizer
-            .decode(ids, skip_special_tokens)
-            .map_err(|e| Error::embedding(format!("Decoding failed: {e}")))
-    }
-
-    /// Get token text for a given ID
-    #[allow(dead_code)]
-    pub fn id_to_token(&self, id: u32) -> Option<String> {
-        self.tokenizer.id_to_token(id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // Tests require downloading the tokenizer, so we skip them in CI
-    // These tests serve as documentation for the expected behavior
 }

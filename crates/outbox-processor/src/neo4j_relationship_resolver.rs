@@ -50,9 +50,11 @@ use uuid::Uuid;
 pub struct EntityCache {
     /// All entities for the repository
     entities: Vec<CodeEntity>,
-    /// Pre-built lookup: qualified_name -> entity_id
+    /// Pre-built lookup: qualified_name -> entity_id (semantic, package-relative)
     qname_to_id: HashMap<String, String>,
-    /// Pre-built lookup: (name, qualified_name) -> entity_id for simple name fallback
+    /// Pre-built lookup: path_entity_identifier -> entity_id (file-path-based)
+    path_id_to_id: HashMap<String, String>,
+    /// Pre-built lookup: simple name -> entity_id (for fallback)
     name_to_id: HashMap<String, String>,
 }
 
@@ -72,6 +74,16 @@ impl EntityCache {
             .map(|e| (e.qualified_name.clone(), e.entity_id.clone()))
             .collect();
 
+        // Build path_entity_identifier map (only for entities that have it)
+        let path_id_to_id: HashMap<String, String> = entities
+            .iter()
+            .filter_map(|e| {
+                e.path_entity_identifier
+                    .as_ref()
+                    .map(|pid| (pid.clone(), e.entity_id.clone()))
+            })
+            .collect();
+
         let name_to_id: HashMap<String, String> = entities
             .iter()
             .map(|e| (e.name.clone(), e.entity_id.clone()))
@@ -80,6 +92,7 @@ impl EntityCache {
         Ok(Self {
             entities,
             qname_to_id,
+            path_id_to_id,
             name_to_id,
         })
     }
@@ -120,9 +133,42 @@ impl EntityCache {
         &self.qname_to_id
     }
 
+    /// Get path_entity_identifier -> entity_id lookup map
+    ///
+    /// For file-path-based lookups (useful for import resolution)
+    pub fn path_id_map(&self) -> &HashMap<String, String> {
+        &self.path_id_to_id
+    }
+
     /// Get simple name -> entity_id lookup map (use with caution - collisions possible)
     pub fn name_map(&self) -> &HashMap<String, String> {
         &self.name_to_id
+    }
+
+    /// Resolve a reference using multiple fallback strategies
+    ///
+    /// For import/file-based resolution:
+    /// 1. Try path_entity_identifier map first
+    /// 2. Fall back to qualified_name map
+    /// 3. Fall back to simple name map
+    pub fn resolve_path_reference(&self, reference: &str) -> Option<&String> {
+        self.path_id_to_id
+            .get(reference)
+            .or_else(|| self.qname_to_id.get(reference))
+            .or_else(|| self.name_to_id.get(reference))
+    }
+
+    /// Resolve a reference using semantic matching
+    ///
+    /// For semantic lookups (traits, types, etc.):
+    /// 1. Try qualified_name map first
+    /// 2. Fall back to path_entity_identifier map
+    /// 3. Fall back to simple name map
+    pub fn resolve_semantic_reference(&self, reference: &str) -> Option<&String> {
+        self.qname_to_id
+            .get(reference)
+            .or_else(|| self.path_id_to_id.get(reference))
+            .or_else(|| self.name_to_id.get(reference))
     }
 
     /// Check if cache is empty
@@ -558,8 +604,18 @@ impl RelationshipResolver for ImportsResolver {
         let modules = cache.by_type(EntityType::Module);
 
         // Build lookup maps for module resolution
-        // 1. By qualified_name (e.g., "utils.helpers")
-        // 2. By simple name (e.g., "helpers") for bare imports within the same package
+        // 1. By path_entity_identifier (file-path-based, best for relative imports)
+        // 2. By qualified_name (semantic, package-relative)
+        // 3. By simple name (for bare imports within the same package)
+        let path_id_map: HashMap<String, String> = modules
+            .iter()
+            .filter_map(|m| {
+                m.path_entity_identifier
+                    .as_ref()
+                    .map(|pid| (pid.clone(), m.entity_id.clone()))
+            })
+            .collect();
+
         let module_map: HashMap<String, String> = modules
             .iter()
             .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
@@ -585,11 +641,27 @@ impl RelationshipResolver for ImportsResolver {
                     }
                 };
                 for import_path in imports {
-                    // Try to resolve the import using the shared function
+                    // Try to resolve the import using multiple fallback strategies
                     let imported_module_id = if import_path.starts_with('.') {
                         // Relative import: resolve based on importer's location
-                        resolve_relative_import(&module_entity.qualified_name, &import_path)
-                            .and_then(|resolved| module_map.get(&resolved))
+                        // First try using path_entity_identifier (more accurate for file-based resolution)
+                        let base_path = module_entity
+                            .path_entity_identifier
+                            .as_ref()
+                            .unwrap_or(&module_entity.qualified_name);
+
+                        resolve_relative_import(base_path, &import_path)
+                            .and_then(|resolved| {
+                                // Try path_entity_identifier first, then qualified_name
+                                path_id_map
+                                    .get(&resolved)
+                                    .or_else(|| module_map.get(&resolved))
+                            })
+                            .or_else(|| {
+                                // Fall back to qualified_name-based resolution
+                                resolve_relative_import(&module_entity.qualified_name, &import_path)
+                                    .and_then(|resolved| module_map.get(&resolved))
+                            })
                     } else {
                         // Bare import: try simple name match (internal package import)
                         // External packages (react, lodash, etc.) won't match

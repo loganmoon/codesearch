@@ -78,6 +78,14 @@ impl PackageMap {
     pub fn len(&self) -> usize {
         self.packages.len()
     }
+
+    /// Check if a package exists at exactly the given directory
+    ///
+    /// This differs from `find_package_for_file` which uses prefix matching.
+    /// This checks for exact directory match.
+    pub fn has_package_at(&self, dir: &Path) -> bool {
+        self.packages.iter().any(|(pkg_dir, _)| pkg_dir == dir)
+    }
 }
 
 /// Detect and parse project manifest in repository root
@@ -307,6 +315,8 @@ fn try_parse_pyproject(repo_root: &Path) -> Result<Option<ProjectManifest>> {
 /// - yarn workspaces (array): `"workspaces": ["packages/*"]`
 /// - yarn workspaces (object): `"workspaces": { "packages": ["packages/*"] }`
 /// - pnpm workspaces: `pnpm-workspace.yaml` file
+/// - lerna.json: `"packages": ["packages/*"]`
+/// - All subdirectories with package.json containing a "name" field
 fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     let package_json_path = repo_root.join("package.json");
     if !package_json_path.exists() {
@@ -332,12 +342,14 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
         .and_then(|n| n.as_str())
         .map(String::from);
 
-    // Check for workspace patterns (npm/yarn/pnpm)
+    let mut packages = PackageMap::new();
+    let mut is_workspace = false;
+
+    // Check for workspace patterns (npm/yarn/pnpm/lerna)
     let workspace_patterns = get_workspace_patterns(&package, repo_root)?;
 
     if !workspace_patterns.is_empty() {
-        // This is a workspace/monorepo
-        let mut packages = PackageMap::new();
+        is_workspace = true;
 
         for pattern in workspace_patterns {
             let full_pattern = repo_root.join(&pattern);
@@ -357,37 +369,92 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
                 }
             }
         }
-
-        // Also add the root package if it has a name and is not private-only
-        if let Some(name) = root_name {
-            let source_root = determine_node_source_root(repo_root);
-            packages.add(repo_root.to_path_buf(), PackageInfo { name, source_root });
-        }
-
-        if packages.is_empty() {
-            return Ok(None);
-        }
-
-        return Ok(Some(ProjectManifest {
-            project_type: ProjectType::NodeWorkspace,
-            packages,
-        }));
     }
 
-    // Single package (not a workspace)
-    let name = match root_name {
-        Some(n) => n,
-        None => return Ok(None),
+    // IMPORTANT: Also scan ALL subdirectories for package.json files
+    // This catches packages not declared in workspaces (like jotai's website/)
+    scan_for_all_packages(repo_root, &mut packages)?;
+
+    // Also add the root package if it has a name
+    if let Some(name) = root_name {
+        let source_root = determine_node_source_root(repo_root);
+        packages.add(repo_root.to_path_buf(), PackageInfo { name, source_root });
+    }
+
+    if packages.is_empty() {
+        return Ok(None);
+    }
+
+    let project_type = if is_workspace || packages.len() > 1 {
+        ProjectType::NodeWorkspace
+    } else {
+        ProjectType::NodePackage
     };
 
-    let mut packages = PackageMap::new();
-    let source_root = determine_node_source_root(repo_root);
-    packages.add(repo_root.to_path_buf(), PackageInfo { name, source_root });
-
     Ok(Some(ProjectManifest {
-        project_type: ProjectType::NodePackage,
+        project_type,
         packages,
     }))
+}
+
+/// Scan all subdirectories for package.json files with a "name" field
+///
+/// This catches packages that aren't declared in workspace configurations,
+/// like companion apps (website, docs) or examples.
+fn scan_for_all_packages(repo_root: &Path, packages: &mut PackageMap) -> Result<()> {
+    // Directories to skip
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".nuxt",
+        "coverage",
+        "__pycache__",
+    ];
+
+    fn scan_recursive(dir: &Path, packages: &mut PackageMap) -> Result<()> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return Ok(()), // Skip unreadable directories
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            // Skip excluded directories
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if SKIP_DIRS.contains(&name) || name.starts_with('.') {
+                    continue;
+                }
+            }
+
+            // Check if this directory has a package.json with a name
+            let package_json = path.join("package.json");
+            if package_json.exists() {
+                if let Ok(Some(pkg_info)) = parse_member_package_json(&path) {
+                    // Don't add if we already have this exact directory as a package
+                    // (Note: we use exact path match, not prefix match, so child dirs can be packages)
+                    if !packages.has_package_at(&path) {
+                        packages.add(path.clone(), pkg_info);
+                    }
+                }
+            }
+
+            // Continue scanning subdirectories
+            scan_recursive(&path, packages)?;
+        }
+
+        Ok(())
+    }
+
+    scan_recursive(repo_root, packages)
 }
 
 /// Get workspace patterns from package.json or pnpm-workspace.yaml
@@ -416,7 +483,165 @@ fn get_workspace_patterns(package: &serde_json::Value, repo_root: &Path) -> Resu
     // Check for pnpm-workspace.yaml
     let pnpm_workspace_path = repo_root.join("pnpm-workspace.yaml");
     if pnpm_workspace_path.exists() {
-        return parse_pnpm_workspace_yaml(&pnpm_workspace_path);
+        let patterns = parse_pnpm_workspace_yaml(&pnpm_workspace_path)?;
+        if !patterns.is_empty() {
+            return Ok(patterns);
+        }
+    }
+
+    // Check for lerna.json
+    let lerna_path = repo_root.join("lerna.json");
+    if lerna_path.exists() {
+        let patterns = parse_lerna_json(&lerna_path)?;
+        if !patterns.is_empty() {
+            return Ok(patterns);
+        }
+    }
+
+    // Check for tsconfig.json with project references
+    let tsconfig_path = repo_root.join("tsconfig.json");
+    if tsconfig_path.exists() {
+        let patterns = parse_tsconfig_references(&tsconfig_path)?;
+        if !patterns.is_empty() {
+            return Ok(patterns);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+/// Parse tsconfig.json for project references
+///
+/// TypeScript project references define package boundaries via the `references` field.
+/// Each reference points to a directory containing another tsconfig.json.
+fn parse_tsconfig_references(path: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        Error::config(format!(
+            "Failed to read tsconfig.json at {}: {e}",
+            path.display()
+        ))
+    })?;
+
+    // tsconfig.json may have comments, so we need to strip them
+    let content = strip_json_comments(&content);
+
+    let tsconfig: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        Error::config(format!(
+            "Failed to parse tsconfig.json at {}: {e}",
+            path.display()
+        ))
+    })?;
+
+    // tsconfig.json format: { "references": [{ "path": "./packages/core" }, ...] }
+    if let Some(references) = tsconfig.get("references").and_then(|r| r.as_array()) {
+        let patterns: Vec<String> = references
+            .iter()
+            .filter_map(|r| r.get("path").and_then(|p| p.as_str()))
+            .map(|p| {
+                // Normalize path (remove leading ./ and trailing /)
+                let p = p.trim_start_matches("./").trim_end_matches('/');
+                p.to_string()
+            })
+            .collect();
+
+        if !patterns.is_empty() {
+            return Ok(patterns);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+/// Strip JSON comments (single-line // and multi-line /* */)
+///
+/// tsconfig.json and other JSON5-like files often contain comments
+fn strip_json_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.chars().peekable();
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    while let Some(c) = chars.next() {
+        if escape_next {
+            result.push(c);
+            escape_next = false;
+            continue;
+        }
+
+        if c == '\\' && in_string {
+            result.push(c);
+            escape_next = true;
+            continue;
+        }
+
+        if c == '"' {
+            in_string = !in_string;
+            result.push(c);
+            continue;
+        }
+
+        if in_string {
+            result.push(c);
+            continue;
+        }
+
+        // Check for comments
+        if c == '/' {
+            if let Some(&next) = chars.peek() {
+                if next == '/' {
+                    // Single-line comment - skip to end of line
+                    chars.next(); // consume the second /
+                    while let Some(&nc) = chars.peek() {
+                        if nc == '\n' {
+                            break;
+                        }
+                        chars.next();
+                    }
+                    continue;
+                } else if next == '*' {
+                    // Multi-line comment - skip to */
+                    chars.next(); // consume the *
+                    while let Some(nc) = chars.next() {
+                        if nc == '*' {
+                            if let Some(&'/' ) = chars.peek() {
+                                chars.next(); // consume the /
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+
+        result.push(c);
+    }
+
+    result
+}
+
+/// Parse lerna.json file for workspace packages
+fn parse_lerna_json(path: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        Error::config(format!(
+            "Failed to read lerna.json at {}: {e}",
+            path.display()
+        ))
+    })?;
+
+    let lerna: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        Error::config(format!(
+            "Failed to parse lerna.json at {}: {e}",
+            path.display()
+        ))
+    })?;
+
+    // lerna.json format: { "packages": ["packages/*", "libs/*"] }
+    if let Some(packages) = lerna.get("packages").and_then(|p| p.as_array()) {
+        return Ok(packages
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect());
     }
 
     Ok(Vec::new())
@@ -949,5 +1174,214 @@ packages:
         let pkg = manifest.packages.find_package_for_file(&outer_file);
         assert!(pkg.is_some());
         assert_eq!(pkg.map(|p| p.name.as_str()), Some("outer"));
+    }
+
+    #[test]
+    fn test_parse_lerna_json() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create root package.json (no workspaces)
+        fs::write(
+            root.join("package.json"),
+            r#"
+{
+  "name": "lerna-monorepo",
+  "private": true
+}
+"#,
+        )
+        .unwrap();
+
+        // Create lerna.json
+        fs::write(
+            root.join("lerna.json"),
+            r#"
+{
+  "version": "independent",
+  "packages": ["packages/*"]
+}
+"#,
+        )
+        .unwrap();
+
+        // Create member package
+        fs::create_dir_all(root.join("packages/core/src")).unwrap();
+        fs::write(
+            root.join("packages/core/package.json"),
+            r#"{"name": "@lerna/core", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let manifest = detect_manifest(root).unwrap();
+        assert!(manifest.is_some());
+        let manifest = manifest.unwrap();
+
+        assert_eq!(manifest.project_type, ProjectType::NodeWorkspace);
+
+        // Check core package
+        let core_file = root.join("packages/core/src/index.ts");
+        let pkg = manifest.packages.find_package_for_file(&core_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("@lerna/core"));
+    }
+
+    #[test]
+    fn test_detect_packages_outside_workspace() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create root package.json with pnpm workspace containing only root
+        fs::write(
+            root.join("package.json"),
+            r#"
+{
+  "name": "jotai",
+  "private": true
+}
+"#,
+        )
+        .unwrap();
+
+        // Create pnpm-workspace.yaml with only root (like jotai)
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - .\n").unwrap();
+
+        // Create website package (NOT in workspace, but has package.json)
+        fs::create_dir_all(root.join("website/src")).unwrap();
+        fs::write(
+            root.join("website/package.json"),
+            r#"{"name": "jotai-website", "version": "0.0.0"}"#,
+        )
+        .unwrap();
+
+        // Create examples package
+        fs::create_dir_all(root.join("examples/todos/src")).unwrap();
+        fs::write(
+            root.join("examples/todos/package.json"),
+            r#"{"name": "example-todos", "version": "0.0.0"}"#,
+        )
+        .unwrap();
+
+        let manifest = detect_manifest(root).unwrap();
+        assert!(manifest.is_some());
+        let manifest = manifest.unwrap();
+
+        assert_eq!(manifest.project_type, ProjectType::NodeWorkspace);
+
+        // Check root package
+        let root_file = root.join("src/index.ts");
+        let pkg = manifest.packages.find_package_for_file(&root_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("jotai"));
+
+        // Check website package (detected via scan_for_all_packages)
+        let website_file = root.join("website/src/pages/index.tsx");
+        let pkg = manifest.packages.find_package_for_file(&website_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("jotai-website"));
+
+        // Check examples package (detected via scan_for_all_packages)
+        let example_file = root.join("examples/todos/src/App.tsx");
+        let pkg = manifest.packages.find_package_for_file(&example_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("example-todos"));
+    }
+
+    #[test]
+    fn test_parse_tsconfig_references() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create root package.json
+        fs::write(
+            root.join("package.json"),
+            r#"
+{
+  "name": "ts-monorepo",
+  "private": true
+}
+"#,
+        )
+        .unwrap();
+
+        // Create tsconfig.json with project references
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"
+{
+  // This is a comment that should be stripped
+  "compilerOptions": {
+    "composite": true
+  },
+  /* Multi-line
+     comment */
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/utils" }
+  ]
+}
+"#,
+        )
+        .unwrap();
+
+        // Create core package
+        fs::create_dir_all(root.join("packages/core/src")).unwrap();
+        fs::write(
+            root.join("packages/core/package.json"),
+            r#"{"name": "@ts/core", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("packages/core/tsconfig.json"),
+            r#"{"compilerOptions": {"composite": true}}"#,
+        )
+        .unwrap();
+
+        // Create utils package
+        fs::create_dir_all(root.join("packages/utils/src")).unwrap();
+        fs::write(
+            root.join("packages/utils/package.json"),
+            r#"{"name": "@ts/utils", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        let manifest = detect_manifest(root).unwrap();
+        assert!(manifest.is_some());
+        let manifest = manifest.unwrap();
+
+        assert_eq!(manifest.project_type, ProjectType::NodeWorkspace);
+
+        // Check core package
+        let core_file = root.join("packages/core/src/index.ts");
+        let pkg = manifest.packages.find_package_for_file(&core_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("@ts/core"));
+
+        // Check utils package
+        let utils_file = root.join("packages/utils/src/helpers.ts");
+        let pkg = manifest.packages.find_package_for_file(&utils_file);
+        assert!(pkg.is_some());
+        assert_eq!(pkg.map(|p| p.name.as_str()), Some("@ts/utils"));
+    }
+
+    #[test]
+    fn test_strip_json_comments() {
+        let input = r#"
+{
+  // Single line comment
+  "key": "value", // trailing comment
+  /* Multi-line
+     comment */
+  "url": "https://example.com/path",
+  "nested": {
+    "inner": "value"
+  }
+}
+"#;
+        let stripped = strip_json_comments(input);
+        let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+        assert_eq!(parsed["key"], "value");
+        assert_eq!(parsed["url"], "https://example.com/path");
+        assert_eq!(parsed["nested"]["inner"], "value");
     }
 }

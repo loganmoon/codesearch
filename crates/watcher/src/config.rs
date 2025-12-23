@@ -195,7 +195,6 @@ impl WatcherConfigBuilder {
     }
 }
 
-
 /// Recovery configuration for error handling
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryConfig {
@@ -244,7 +243,6 @@ mod tests {
         assert!(config.follow_symlinks);
         assert!(config.ignore_patterns.contains(&"*.test".to_string()));
     }
-
 
     #[test]
     fn test_config_durations() {

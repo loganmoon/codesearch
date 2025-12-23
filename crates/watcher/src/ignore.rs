@@ -217,8 +217,6 @@ impl IgnoreFilterBuilder {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,8 +268,6 @@ mod tests {
         assert!(filter.should_ignore(Path::new("target")));
         assert!(!filter.should_ignore(Path::new("src")));
     }
-
-
 
     #[test]
     fn test_ignore_filter_with_base_path() {

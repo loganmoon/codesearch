@@ -4,7 +4,6 @@ use codesearch_core::{CodeEntity, EntityType, Language};
 use serde_json::json;
 use std::collections::HashMap;
 
-
 /// Relationship information for Neo4j edge creation
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -370,7 +369,6 @@ mod tests {
             .parent_scope(parent_scope);
         builder.build().expect("Failed to build test entity")
     }
-
 
     #[test]
     fn test_build_contains_relationship_json_resolved() {

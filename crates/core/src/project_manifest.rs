@@ -603,7 +603,7 @@ fn strip_json_comments(content: &str) -> String {
                     chars.next(); // consume the *
                     while let Some(nc) = chars.next() {
                         if nc == '*' {
-                            if let Some(&'/' ) = chars.peek() {
+                            if let Some(&'/') = chars.peek() {
                                 chars.next(); // consume the /
                                 break;
                             }

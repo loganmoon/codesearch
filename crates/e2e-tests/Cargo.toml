@@ -21,7 +21,6 @@ codesearch-embeddings = { path = "../embeddings" }
 codesearch-reranking = { path = "../reranking" }
 codesearch-watcher = { path = "../watcher" }
 codesearch-outbox-processor = { path = "../outbox-processor" }
-codesearch-lsp-validation = { path = "../lsp-validation" }
 
 # Test dependencies (explicit versions since not in workspace)
 tokio = { version = "1.42", features = ["full"] }

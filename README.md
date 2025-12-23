@@ -30,7 +30,7 @@ codesearch serve
 ```bash
 curl -X POST http://localhost:3000/api/v1/search/semantic \
   -H "Content-Type: application/json" \
-  -d '{"repository_id": "...", "query": {"text": "authentication handler"}, "limit": 10}'
+  -d '{"repository_ids": ["..."], "query": {"text": "authentication handler"}, "limit": 10}'
 ```
 
 ## Configuration
@@ -78,11 +78,16 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 
 **Crates:**
 - `core` - Foundation types, configuration, error handling
-- `languages` - AST parsing (Rust, TypeScript, Python, Go)
+- `languages` - AST parsing (Rust, TypeScript, Python)
+- `languages-macros` - Procedural macros for language trait implementation
 - `embeddings` - Vector embedding providers (Jina, vLLM/OpenAI API)
+- `reranking` - Cross-encoder result reranking
 - `indexer` - Repository indexing with Git integration
+- `outbox-processor` - Reliable event processing and consistency
 - `watcher` - Real-time file system monitoring
 - `storage` - Postgres, Qdrant, Neo4j persistence
+- `agentic-search` - Multi-agent query orchestration
+- `mcp-server` - Model Context Protocol implementation
 - `server` - REST API server
 - `cli` - Command-line interface
 
@@ -100,6 +105,12 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 POST /api/v1/search/semantic
 ```
 Hybrid search combining dense embeddings + sparse retrieval (Granite/BM25) with RRF fusion.
+
+**Agentic Search**:
+```
+POST /api/v1/search/agentic
+```
+Multi-agent orchestration using LLMs to answer complex queries by traversing the code graph and aggregating results.
 
 **Graph Query**:
 ```
@@ -141,7 +152,7 @@ cargo run -- serve
 
 ## Infrastructure Management
 
-Infrastructure auto-starts on first `codesearch index`. To manage manually:
+The CLI automatically manages infrastructure in `~/.codesearch/infrastructure` (starts on first `codesearch index`). To manage manually:
 
 ```bash
 # Check status

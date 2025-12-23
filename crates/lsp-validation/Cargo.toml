@@ -28,5 +28,8 @@ thiserror = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# Time/date for debug log filenames
+chrono = "0.4"
+
 [dev-dependencies]
 tempfile = { workspace = true }

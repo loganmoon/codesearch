@@ -26,12 +26,8 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-pub mod lsp_client;
 pub mod metrics;
 pub mod report;
-pub mod validation;
 
-pub use lsp_client::{LspClient, LspServer};
 pub use metrics::RelationshipMetrics;
 pub use report::{Discrepancy, ValidationReport};
-pub use validation::{Neo4jEdge, ValidationEngine, ValidationResult};

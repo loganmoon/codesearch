@@ -9,6 +9,7 @@
 //! - `/` = namespace/module
 //! - `#` = type (struct, enum, trait)
 //! - `.` = term (function, method, const)
+//! - `!` = macro
 //! - `()` = callable signature
 //! - `[]` = type parameters
 

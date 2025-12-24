@@ -156,7 +156,14 @@ fn try_parse_cargo(repo_root: &Path) -> Result<Option<ProjectManifest>> {
                 let glob_results = glob::glob(&pattern_str)
                     .map_err(|e| Error::config(format!("Invalid glob pattern '{pattern}': {e}")))?;
 
-                for entry in glob_results.flatten() {
+                for entry in glob_results {
+                    let entry = match entry {
+                        Ok(path) => path,
+                        Err(e) => {
+                            debug!("Glob error while scanning workspace members: {e}");
+                            continue;
+                        }
+                    };
                     if let Some(pkg_info) = parse_member_cargo_toml(&entry)? {
                         // Use crate directory as map key (for file matching)
                         // pkg_info.source_root contains the actual source root
@@ -359,7 +366,14 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
             let glob_results = glob::glob(&pattern_str)
                 .map_err(|e| Error::config(format!("Invalid glob pattern '{pattern}': {e}")))?;
 
-            for entry in glob_results.flatten() {
+            for entry in glob_results {
+                let entry = match entry {
+                    Ok(path) => path,
+                    Err(e) => {
+                        debug!("Glob error while scanning workspace packages: {e}");
+                        continue;
+                    }
+                };
                 if entry.is_dir() {
                     if let Some(pkg_info) = parse_member_package_json(&entry)? {
                         // Use package directory as map key (for file matching)
@@ -371,8 +385,7 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
         }
     }
 
-    // IMPORTANT: Also scan ALL subdirectories for package.json files
-    // This catches packages not declared in workspaces (like jotai's website/)
+    // Also scan subdirectories for package.json files not declared in workspaces
     scan_for_all_packages(repo_root, &mut packages)?;
 
     // Also add the root package if it has a name
@@ -418,7 +431,10 @@ fn scan_for_all_packages(repo_root: &Path, packages: &mut PackageMap) -> Result<
     fn scan_recursive(dir: &Path, packages: &mut PackageMap) -> Result<()> {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
-            Err(_) => return Ok(()), // Skip unreadable directories
+            Err(e) => {
+                debug!("Skipping unreadable directory {}: {e}", dir.display());
+                return Ok(());
+            }
         };
 
         for entry in entries.flatten() {
@@ -438,11 +454,19 @@ fn scan_for_all_packages(repo_root: &Path, packages: &mut PackageMap) -> Result<
             // Check if this directory has a package.json with a name
             let package_json = path.join("package.json");
             if package_json.exists() {
-                if let Ok(Some(pkg_info)) = parse_member_package_json(&path) {
-                    // Don't add if we already have this exact directory as a package
-                    // (Note: we use exact path match, not prefix match, so child dirs can be packages)
-                    if !packages.has_package_at(&path) {
-                        packages.add(path.clone(), pkg_info);
+                match parse_member_package_json(&path) {
+                    Ok(Some(pkg_info)) => {
+                        // Don't add if we already have this exact directory as a package
+                        // (Note: we use exact path match, not prefix match, so child dirs can be packages)
+                        if !packages.has_package_at(&path) {
+                            packages.add(path.clone(), pkg_info);
+                        }
+                    }
+                    Ok(None) => {
+                        // No name field - expected for packages without explicit names
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to parse package.json in {}: {e}", path.display());
                     }
                 }
             }

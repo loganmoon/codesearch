@@ -29,7 +29,7 @@ pub enum EntityType {
 }
 
 /// Source location information
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceLocation {
     pub start_line: usize,
@@ -70,19 +70,37 @@ pub enum ReferenceType {
     Uses,
 }
 
-/// A reference to another entity with source location
+/// A reference from one entity to another at a specific source location.
 ///
-/// This captures where in the source code a reference occurs (call site,
-/// type annotation, import, etc.) along with the resolved target.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Captures call sites, type annotations, imports, etc. The `target` field
+/// contains the best-effort qualified name, which may be:
+/// - Fully resolved for internal references (e.g., "crate::module::function")
+/// - Partially resolved or external for cross-crate references
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceReference {
-    /// Resolved qualified name of the target (may be unresolved/external)
+    /// Qualified name of the target entity.
+    /// May be fully resolved (internal) or partial/external (cross-crate).
     pub target: String,
     /// Location of the reference in source (line/column)
     pub location: SourceLocation,
     /// Type of reference
     pub ref_type: ReferenceType,
+}
+
+impl SourceReference {
+    /// Create a new SourceReference.
+    pub fn new(
+        target: impl Into<String>,
+        location: SourceLocation,
+        ref_type: ReferenceType,
+    ) -> Self {
+        Self {
+            target: target.into(),
+            location,
+            ref_type,
+        }
+    }
 }
 
 /// Visibility modifiers for entities

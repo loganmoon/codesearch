@@ -101,7 +101,10 @@ pub async fn query_all_relationships(
         .context("Failed to query Neo4j for relationships")?;
 
     if !response.status().is_success() {
-        let text = response.text().await.unwrap_or_default();
+        let text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| String::from("<failed to read body>"));
         anyhow::bail!("Neo4j query failed: {text}");
     }
 
@@ -115,11 +118,14 @@ pub async fn query_all_relationships(
     }
 
     let mut relationships = Vec::new();
+    let mut skipped_malformed = 0usize;
+    let mut skipped_unknown_rel = 0usize;
 
     for statement_result in &result.results {
         for row_data in &statement_result.data {
             let row = &row_data.row;
             if row.len() < 3 {
+                skipped_malformed += 1;
                 continue;
             }
 
@@ -129,6 +135,7 @@ pub async fn query_all_relationships(
 
             // Skip empty values
             if source_qname.is_empty() || target_qname.is_empty() {
+                skipped_malformed += 1;
                 continue;
             }
 
@@ -143,8 +150,16 @@ pub async fn query_all_relationships(
                 let source = EntityRef::new(source_qname);
                 let target = EntityRef::new(target_qname);
                 relationships.push(Relationship::new(source, target, rel_type));
+            } else {
+                skipped_unknown_rel += 1;
             }
         }
+    }
+
+    if skipped_malformed > 0 || skipped_unknown_rel > 0 {
+        tracing::debug!(
+            "Skipped Neo4j rows: {skipped_malformed} malformed, {skipped_unknown_rel} unknown relationship types"
+        );
     }
 
     Ok(relationships)
@@ -190,7 +205,10 @@ pub async fn query_all_relationships_including_external(
         .context("Failed to query Neo4j for relationships")?;
 
     if !response.status().is_success() {
-        let text = response.text().await.unwrap_or_default();
+        let text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| String::from("<failed to read body>"));
         anyhow::bail!("Neo4j query failed: {text}");
     }
 
@@ -204,11 +222,14 @@ pub async fn query_all_relationships_including_external(
     }
 
     let mut relationships = Vec::new();
+    let mut skipped_malformed = 0usize;
+    let mut skipped_unknown_rel = 0usize;
 
     for statement_result in &result.results {
         for row_data in &statement_result.data {
             let row = &row_data.row;
             if row.len() < 3 {
+                skipped_malformed += 1;
                 continue;
             }
 
@@ -217,6 +238,7 @@ pub async fn query_all_relationships_including_external(
             let target_qname = row[2].as_str().unwrap_or_default();
 
             if source_qname.is_empty() || target_qname.is_empty() {
+                skipped_malformed += 1;
                 continue;
             }
 
@@ -224,8 +246,16 @@ pub async fn query_all_relationships_including_external(
                 let source = EntityRef::new(source_qname);
                 let target = EntityRef::new(target_qname);
                 relationships.push(Relationship::new(source, target, rel_type));
+            } else {
+                skipped_unknown_rel += 1;
             }
         }
+    }
+
+    if skipped_malformed > 0 || skipped_unknown_rel > 0 {
+        tracing::debug!(
+            "Skipped Neo4j rows (including external): {skipped_malformed} malformed, {skipped_unknown_rel} unknown relationship types"
+        );
     }
 
     Ok(relationships)
@@ -247,4 +277,44 @@ struct Neo4jStatementResult {
 #[derive(Debug, serde::Deserialize)]
 struct Neo4jDataRow {
     row: Vec<serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_impl_block_entity_inherent() {
+        // Inherent impl patterns
+        assert!(is_impl_block_entity("impl Error"));
+        assert!(is_impl_block_entity("impl crate::Error"));
+        assert!(is_impl_block_entity("impl anyhow::Error"));
+
+        // Should NOT match - not an impl block
+        assert!(!is_impl_block_entity("implement_foo"));
+        assert!(!is_impl_block_entity("implementation"));
+    }
+
+    #[test]
+    fn test_is_impl_block_entity_trait_impl() {
+        // Trait impl blocks (the impl itself, not methods)
+        assert!(is_impl_block_entity("<Error as Display>"));
+        assert!(is_impl_block_entity("<crate::Error as std::fmt::Display>"));
+        assert!(is_impl_block_entity("<anyhow::Error as core::fmt::Debug>"));
+
+        // Methods on trait impls are NOT impl blocks
+        assert!(!is_impl_block_entity("<Error as Display>::fmt"));
+        assert!(!is_impl_block_entity("<crate::Error as std::fmt::Display>::fmt"));
+    }
+
+    #[test]
+    fn test_is_impl_block_entity_negative() {
+        // Regular qualified names
+        assert!(!is_impl_block_entity("Error::new"));
+        assert!(!is_impl_block_entity("anyhow::Error"));
+        assert!(!is_impl_block_entity("std::fmt::Display"));
+        assert!(!is_impl_block_entity(""));
+        assert!(!is_impl_block_entity("MyStruct"));
+        assert!(!is_impl_block_entity("crate::module::function"));
+    }
 }

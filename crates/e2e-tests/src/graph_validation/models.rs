@@ -253,3 +253,47 @@ impl ComparisonResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics_calculate_all_zeros() {
+        let m = Metrics::calculate(0, 0, 0);
+        assert_eq!(m.precision, 0.0);
+        assert_eq!(m.recall, 0.0);
+        assert_eq!(m.f1_score, 0.0);
+        assert_eq!(m.true_positive_count, 0);
+        assert_eq!(m.false_positive_count, 0);
+        assert_eq!(m.false_negative_count, 0);
+    }
+
+    #[test]
+    fn test_metrics_calculate_perfect_precision() {
+        // All extracted are correct, but we missed some
+        let m = Metrics::calculate(10, 0, 5);
+        assert_eq!(m.precision, 1.0);
+        assert!((m.recall - 0.666).abs() < 0.01);
+        assert_eq!(m.true_positive_count, 10);
+        assert_eq!(m.false_positive_count, 0);
+        assert_eq!(m.false_negative_count, 5);
+    }
+
+    #[test]
+    fn test_metrics_calculate_perfect_recall() {
+        // We found everything, but also some extra
+        let m = Metrics::calculate(10, 5, 0);
+        assert!((m.precision - 0.666).abs() < 0.01);
+        assert_eq!(m.recall, 1.0);
+    }
+
+    #[test]
+    fn test_metrics_calculate_perfect_f1() {
+        // Perfect precision and recall
+        let m = Metrics::calculate(10, 0, 0);
+        assert_eq!(m.precision, 1.0);
+        assert_eq!(m.recall, 1.0);
+        assert_eq!(m.f1_score, 1.0);
+    }
+}

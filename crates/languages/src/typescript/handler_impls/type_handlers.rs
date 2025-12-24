@@ -19,6 +19,7 @@ use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Handle class declarations (reuse JavaScript with type enhancement)
+#[allow(clippy::too_many_arguments)]
 pub fn handle_class_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -27,6 +28,7 @@ pub fn handle_class_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript class handler (includes extends_resolved)
     let mut entities = crate::javascript::handler_impls::handle_class_impl(
@@ -37,6 +39,7 @@ pub fn handle_class_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     )?;
 
     // Get the class node to extract implements clause
@@ -96,6 +99,7 @@ pub fn handle_class_impl(
 }
 
 /// Handle method declarations (reuse JavaScript with type enhancement)
+#[allow(clippy::too_many_arguments)]
 pub fn handle_method_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -104,6 +108,7 @@ pub fn handle_method_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript method handler
     let mut entities = crate::javascript::handler_impls::handle_method_impl(
@@ -114,6 +119,7 @@ pub fn handle_method_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     )?;
 
     // Update language to TypeScript
@@ -126,6 +132,7 @@ pub fn handle_method_impl(
 
 /// Handle interface declarations
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_interface_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -134,6 +141,7 @@ pub fn handle_interface_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    _repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let interface_node = require_capture_node(query_match, query, "interface")?;
 
@@ -261,6 +269,7 @@ pub fn handle_interface_impl(
 
 /// Handle type alias declarations
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_type_alias_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -269,6 +278,7 @@ pub fn handle_type_alias_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    _repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let type_alias_node = require_capture_node(query_match, query, "type_alias")?;
 
@@ -376,6 +386,7 @@ pub fn handle_type_alias_impl(
 
 /// Handle enum declarations
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_enum_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -384,6 +395,7 @@ pub fn handle_enum_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    _repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let enum_node = require_capture_node(query_match, query, "enum")?;
 

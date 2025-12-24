@@ -135,6 +135,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         entity_type: EntityType::Function,
         name: "calculate_sum".to_string(),
         qualified_name: "math::calculate_sum".to_string(),
+        path_entity_identifier: None,
         file_path: PathBuf::from("/test/path.rs"),
         location: SourceLocation {
             start_line: 10,
@@ -190,6 +191,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         entity_type: EntityType::Struct,
         name: "Point".to_string(),
         qualified_name: "Point".to_string(),
+        path_entity_identifier: None,
         file_path: PathBuf::from("/test/minimal.rs"),
         location: SourceLocation {
             start_line: 1,

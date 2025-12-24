@@ -18,7 +18,6 @@ mod test_language;
 // Public modules
 pub mod common;
 pub mod qualified_name;
-pub mod tsg;
 
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {
@@ -32,7 +31,9 @@ pub trait Extractor: Send + Sync {
 /// - `repository_id` - Repository identifier
 /// - `package_name` - Optional package/crate name from manifest
 /// - `source_root` - Optional source root for module path derivation
-pub type ExtractorFactory = fn(&str, Option<&str>, Option<&Path>) -> Result<Box<dyn Extractor>>;
+/// - `repo_root` - Repository root for deriving repo-relative paths
+pub type ExtractorFactory =
+    fn(&str, Option<&str>, Option<&Path>, &Path) -> Result<Box<dyn Extractor>>;
 
 /// Language descriptor for automatic registration
 pub struct LanguageDescriptor {
@@ -58,6 +59,7 @@ pub fn create_extractor(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Option<Box<dyn Extractor>>> {
     let Some(extension) = file_path.extension().and_then(|e| e.to_str()) else {
         return Ok(None);
@@ -72,6 +74,7 @@ pub fn create_extractor(
                 repository_id,
                 package_name,
                 source_root,
+                repo_root,
             )?));
         }
     }

@@ -24,6 +24,7 @@ use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Handle regular function declarations
+#[allow(clippy::too_many_arguments)]
 pub fn handle_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -32,6 +33,7 @@ pub fn handle_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
@@ -43,6 +45,7 @@ pub fn handle_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components (name, qualified_name, entity_id, location)
@@ -91,9 +94,14 @@ pub fn handle_function_impl(
         ..EntityMetadata::default()
     };
 
-    // Store function calls if any exist
+    // Store function calls with locations as SourceReference objects
     if !calls.is_empty() {
         if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("references".to_string(), json);
+        }
+        // Also store simplified calls list for backward compatibility with relationship resolution
+        let call_targets: Vec<&str> = calls.iter().map(|r| r.target.as_str()).collect();
+        if let Ok(json) = serde_json::to_string(&call_targets) {
             metadata.attributes.insert("calls".to_string(), json);
         }
     }
@@ -129,6 +137,7 @@ pub fn handle_function_impl(
 
 /// Handle arrow functions assigned to variables
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_arrow_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -137,6 +146,7 @@ pub fn handle_arrow_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     use crate::common::entity_building::CommonEntityComponents;
 
@@ -211,9 +221,14 @@ pub fn handle_arrow_function_impl(
         ..EntityMetadata::default()
     };
 
-    // Store function calls if any exist
+    // Store function calls with locations as SourceReference objects
     if !calls.is_empty() {
         if let Ok(json) = serde_json::to_string(&calls) {
+            metadata.attributes.insert("references".to_string(), json);
+        }
+        // Also store simplified calls list for backward compatibility with relationship resolution
+        let call_targets: Vec<&str> = calls.iter().map(|r| r.target.as_str()).collect();
+        if let Ok(json) = serde_json::to_string(&call_targets) {
             metadata.attributes.insert("calls".to_string(), json);
         }
     }
@@ -235,12 +250,22 @@ pub fn handle_arrow_function_impl(
         &full_qualified_name,
     );
 
+    // Generate path_entity_identifier (repo-relative path for import resolution)
+    let path_module =
+        crate::common::module_utils::derive_path_entity_identifier(file_path, repo_root, ".");
+    let path_entity_identifier = if parent_scope.is_empty() {
+        format!("{path_module}.{name}")
+    } else {
+        format!("{path_module}.{parent_scope}.{name}")
+    };
+
     // Build entity using shared helper (with manually constructed components)
     let components = CommonEntityComponents {
         entity_id,
         repository_id: repository_id.to_string(),
         name,
         qualified_name: full_qualified_name,
+        path_entity_identifier: Some(path_entity_identifier),
         parent_scope: if parent_scope.is_empty() {
             None
         } else {

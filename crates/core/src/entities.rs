@@ -29,7 +29,7 @@ pub enum EntityType {
 }
 
 /// Source location information
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceLocation {
     pub start_line: usize,
@@ -49,6 +49,64 @@ impl SourceLocation {
             end_line: end.row + 1,
             start_column: start.column,
             end_column: end.column,
+        }
+    }
+}
+
+/// Type of reference to another entity
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceType {
+    /// Function or method call
+    Call,
+    /// Type annotation or usage
+    TypeUsage,
+    /// Import statement
+    Import,
+    /// extends/implements relationship
+    Extends,
+    /// General usage (field types, etc.)
+    Uses,
+}
+
+/// A reference from one entity to another at a specific source location.
+///
+/// Captures call sites, type annotations, imports, etc. The `target` field
+/// contains the best-effort qualified name, which may be:
+/// - Fully resolved for internal references (e.g., "crate::module::function")
+/// - Partially resolved or external for cross-crate references
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SourceReference {
+    /// Qualified name of the target entity.
+    /// May be fully resolved (internal) or partial/external (cross-crate).
+    pub target: String,
+    /// Location of the reference in source (line/column)
+    pub location: SourceLocation,
+    /// Type of reference
+    pub ref_type: ReferenceType,
+}
+
+impl SourceReference {
+    /// Create a new SourceReference.
+    ///
+    /// # Panics
+    /// Panics if `target` is empty after trimming whitespace.
+    pub fn new(
+        target: impl Into<String>,
+        location: SourceLocation,
+        ref_type: ReferenceType,
+    ) -> Self {
+        let target = target.into();
+        assert!(
+            !target.trim().is_empty(),
+            "SourceReference target must be non-empty"
+        );
+        Self {
+            target,
+            location,
+            ref_type,
         }
     }
 }
@@ -106,8 +164,16 @@ pub struct CodeEntity {
     /// Simple name of the entity
     pub name: String,
 
-    /// Full qualified name of the entity (e.g., "module.class.method")
+    /// Full qualified name of the entity (semantic, package-relative)
+    /// e.g., "jotai.utils.helpers.formatNumber" or "codesearch_core::entities::CodeEntity"
+    /// Used for LSP validation, graph edge resolution, and semantic lookups.
     pub qualified_name: String,
+
+    /// File-path-based identifier for import resolution
+    /// e.g., "website.src.pages.index" or "crates.core.src.entities"
+    /// Used for resolving relative imports and file-based lookups.
+    #[builder(default = "None")]
+    pub path_entity_identifier: Option<String>,
 
     /// Parent scope of this entity (e.g., containing class or module)
     #[builder(default = "None")]

@@ -1,5 +1,7 @@
 {
   "dependencies": {
-    "@google/gemini-cli": "^0.18.0"
+    "@google/gemini-cli": "",
+    "typescript": "^5.9.3",
+    "typescript-language-server": "^5.1.3"
   }
 }

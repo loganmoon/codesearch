@@ -7,15 +7,16 @@ Neo4j graph creation.
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Directory Structure](#directory-structure)
-3. [Step 1: Language Module Setup](#step-1-language-module-setup)
-4. [Step 2: Tree-Sitter Queries](#step-2-tree-sitter-queries)
-5. [Step 3: Handler Implementations](#step-3-handler-implementations)
-6. [Step 4: Import Map Support](#step-4-import-map-support)
-7. [Step 5: TSG Rules for Cross-File Resolution](#step-5-tsg-rules-for-cross-file-resolution)
-8. [Step 6: Relationship Resolution](#step-6-relationship-resolution)
-9. [Testing](#testing)
-10. [Metadata Attributes Reference](#metadata-attributes-reference)
+2. [Entity Identifiers](#entity-identifiers)
+3. [Directory Structure](#directory-structure)
+4. [Step 1: Language Module Setup](#step-1-language-module-setup)
+5. [Step 2: Tree-Sitter Queries](#step-2-tree-sitter-queries)
+6. [Step 3: Handler Implementations](#step-3-handler-implementations)
+7. [Step 4: Import Map Support](#step-4-import-map-support)
+8. [Step 5: TSG Rules for Cross-File Resolution](#step-5-tsg-rules-for-cross-file-resolution)
+9. [Step 6: Relationship Resolution](#step-6-relationship-resolution)
+10. [Testing](#testing)
+11. [Metadata Attributes Reference](#metadata-attributes-reference)
 
 ---
 
@@ -68,6 +69,46 @@ The relationship extraction pipeline has two stages:
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Entity Identifiers
+
+Each entity has two identifier fields for different lookup scenarios:
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `qualified_name` | Semantic, package-relative | `mypackage.utils.formatNumber` |
+| `path_entity_identifier` | File-path-based, always repo-relative | `packages.mypackage.src.utils.formatNumber` |
+
+### qualified_name (Semantic)
+
+This is the primary identifier used for:
+- LSP validation (matching IDE go-to-definition results)
+- Graph edge resolution (CALLS, USES, IMPLEMENTS, etc.)
+- Semantic lookups across the codebase
+
+Format: `package_name + module_path + scope + entity_name`
+
+Example: In an npm package called `jotai`, a function in `src/utils/helpers.ts`:
+- `qualified_name`: `jotai.utils.helpers.formatNumber`
+
+### path_entity_identifier (File-based)
+
+This is used for:
+- Resolving relative imports (`./utils`, `../core`)
+- File-based lookups where structure matters
+
+Format: Always repo-relative: `repo_relative_path + scope + entity_name`
+
+Example: Same function as above:
+- `path_entity_identifier`: `packages.jotai.src.utils.helpers.formatNumber`
+
+### Why Two Identifiers?
+
+The semantic `qualified_name` matches what language servers and IDEs use (e.g., "go to definition"). However, relative import resolution needs to understand file structure, which is why `path_entity_identifier` exists.
+
+Without workspace detection (Phase 1), `qualified_name` would incorrectly use file paths, causing mismatches with LSP results.
 
 ---
 
@@ -283,7 +324,8 @@ pub fn handle_function_impl(
     file_path: &Path,                   // File being processed
     repository_id: &str,                // Repository UUID
     package_name: Option<&str>,         // Package/crate name
-    source_root: Option<&Path>,         // Source root for relative paths
+    source_root: Option<&Path>,         // Source root for relative paths (package-specific)
+    repo_root: &Path,                   // Repository root for path_entity_identifier
 ) -> Result<Vec<CodeEntity>>
 ```
 
@@ -311,6 +353,7 @@ pub fn handle_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Get required captures
     let function_node = require_capture_node(query_match, query, "function")?;
@@ -325,6 +368,7 @@ pub fn handle_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,  // Required for generating path_entity_identifier
     };
 
     // Extract common components (name, qualified_name, parent_scope, etc.)

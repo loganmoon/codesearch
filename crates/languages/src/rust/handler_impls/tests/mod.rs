@@ -29,6 +29,7 @@ where
         &str,
         Option<&str>,
         Option<&Path>,
+        &Path,
     ) -> Result<Vec<CodeEntity>>,
 {
     let mut parser = Parser::new();
@@ -44,11 +45,20 @@ where
 
     let path = Path::new("test.rs");
     let repository_id = "test-repo-id";
+    let repo_root = Path::new("/test-repo");
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = matches_iter.next() {
-        if let Ok(entities) = handler(query_match, &query, source, path, repository_id, None, None)
-        {
+        if let Ok(entities) = handler(
+            query_match,
+            &query,
+            source,
+            path,
+            repository_id,
+            None,
+            None,
+            repo_root,
+        ) {
             all_entities.extend(entities);
         }
     }

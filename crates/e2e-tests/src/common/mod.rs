@@ -8,7 +8,6 @@
 pub mod assertions;
 pub mod cleanup;
 pub mod containers;
-pub mod fixtures;
 pub mod logging;
 
 use anyhow::{Context, Result};
@@ -21,7 +20,6 @@ use std::time::Duration;
 // Re-export key types and utilities
 pub use assertions::*;
 pub use containers::*;
-pub use fixtures::*;
 pub use logging::*;
 
 /// Wrap a test future with a timeout

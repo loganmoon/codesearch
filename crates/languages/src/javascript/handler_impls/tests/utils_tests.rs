@@ -268,8 +268,8 @@ function foo() {
     let import_map = ImportMap::new(".");
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
-    assert!(calls.iter().any(|c| c.contains("bar")));
-    assert!(calls.iter().any(|c| c.contains("baz")));
+    assert!(calls.iter().any(|c| c.target.contains("bar")));
+    assert!(calls.iter().any(|c| c.target.contains("baz")));
 }
 
 #[test]
@@ -286,8 +286,8 @@ function foo() {
     let import_map = ImportMap::new(".");
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
-    assert!(calls.iter().any(|c| c.contains("method")));
-    assert!(calls.iter().any(|c| c.contains("log")));
+    assert!(calls.iter().any(|c| c.target.contains("method")));
+    assert!(calls.iter().any(|c| c.target.contains("log")));
 }
 
 #[test]
@@ -306,6 +306,6 @@ function foo() {
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
     // Should only have one entry for bar
-    let bar_count = calls.iter().filter(|c| c.contains("bar")).count();
+    let bar_count = calls.iter().filter(|c| c.target.contains("bar")).count();
     assert_eq!(bar_count, 1);
 }

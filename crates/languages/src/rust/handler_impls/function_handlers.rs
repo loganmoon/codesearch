@@ -25,6 +25,7 @@ use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Process a function query match and extract entity data
+#[allow(clippy::too_many_arguments)]
 pub fn handle_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -33,6 +34,7 @@ pub fn handle_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Get the function node for location and content
     let function_node = require_capture_node(query_match, query, capture_names::FUNCTION)?;
@@ -58,6 +60,7 @@ pub fn handle_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components

@@ -22,6 +22,7 @@ use tree_sitter::{Language, Parser, Query, QueryCursor, QueryMatch};
 /// - `repository_id` - Repository identifier
 /// - `package_name` - Optional package/crate name from manifest
 /// - `source_root` - Optional source root for module path derivation
+/// - `repo_root` - Repository root for deriving repo-relative paths
 pub type EntityHandler = Box<
     dyn Fn(
             &QueryMatch,
@@ -31,6 +32,7 @@ pub type EntityHandler = Box<
             &str,
             Option<&str>,
             Option<&Path>,
+            &Path,
         ) -> Result<Vec<CodeEntity>>
         + Send
         + Sync,
@@ -171,6 +173,9 @@ pub struct GenericExtractor<'a> {
 
     /// Source root for module path derivation (e.g., "/project/src")
     source_root: Option<PathBuf>,
+
+    /// Repository root for deriving repo-relative paths
+    repo_root: PathBuf,
 }
 
 impl<'a> GenericExtractor<'a> {
@@ -180,6 +185,7 @@ impl<'a> GenericExtractor<'a> {
         repository_id: String,
         package_name: Option<&str>,
         source_root: Option<&Path>,
+        repo_root: &Path,
     ) -> Result<Self> {
         let mut parser = Parser::new();
         parser
@@ -192,6 +198,7 @@ impl<'a> GenericExtractor<'a> {
             repository_id,
             package_name: package_name.map(String::from),
             source_root: source_root.map(PathBuf::from),
+            repo_root: repo_root.to_path_buf(),
         })
     }
 
@@ -249,6 +256,7 @@ impl<'a> GenericExtractor<'a> {
                             &self.repository_id,
                             self.package_name.as_deref(),
                             self.source_root.as_deref(),
+                            &self.repo_root,
                         )?;
                         all_entities.extend(entities);
                         processed = true;

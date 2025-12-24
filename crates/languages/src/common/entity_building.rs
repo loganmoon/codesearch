@@ -23,7 +23,10 @@ pub struct CommonEntityComponents {
     pub entity_id: String,
     pub repository_id: String,
     pub name: String,
+    /// Semantic, package-relative qualified name (e.g., "jotai.utils.helpers.formatNumber")
     pub qualified_name: String,
+    /// File-path-based identifier for import resolution (e.g., "website.src.pages.index.formatNumber")
+    pub path_entity_identifier: Option<String>,
     pub parent_scope: Option<String>,
     pub file_path: std::path::PathBuf,
     pub location: SourceLocation,
@@ -42,6 +45,8 @@ pub struct ExtractionContext<'a> {
     pub package_name: Option<&'a str>,
     /// Source root path for module path derivation (e.g., "/project/src")
     pub source_root: Option<&'a Path>,
+    /// Repository root path for repo-relative path generation
+    pub repo_root: &'a Path,
 }
 
 /// Entity-specific details for building a CodeEntity
@@ -119,6 +124,20 @@ pub fn extract_common_components(
         separator,
     );
 
+    // Generate path_entity_identifier using repo-relative path (for import resolution)
+    let path_module = crate::common::module_utils::derive_path_entity_identifier(
+        ctx.file_path,
+        ctx.repo_root,
+        separator,
+    );
+    let path_entity_identifier = compose_qualified_name(
+        None, // No package prefix for path-based identifier
+        Some(&path_module),
+        &ast_scope,
+        &name,
+        separator,
+    );
+
     // Generate entity_id from repository + file_path + qualified name
     let file_path_str = ctx
         .file_path
@@ -134,6 +153,7 @@ pub fn extract_common_components(
         repository_id: ctx.repository_id.to_string(),
         name,
         qualified_name,
+        path_entity_identifier: Some(path_entity_identifier),
         parent_scope: if parent_scope.is_empty() {
             None
         } else {
@@ -221,6 +241,7 @@ pub fn build_entity(
         .repository_id(components.repository_id)
         .name(components.name)
         .qualified_name(components.qualified_name)
+        .path_entity_identifier(components.path_entity_identifier)
         .parent_scope(components.parent_scope)
         .entity_type(details.entity_type)
         .location(components.location)

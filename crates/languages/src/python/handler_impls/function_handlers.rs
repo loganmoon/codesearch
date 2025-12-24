@@ -22,6 +22,7 @@ use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
 /// Handle Python function definitions (module-level functions)
+#[allow(clippy::too_many_arguments)]
 pub fn handle_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -30,6 +31,7 @@ pub fn handle_function_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let function_node = require_capture_node(query_match, query, "function")?;
 
@@ -41,6 +43,7 @@ pub fn handle_function_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components

@@ -29,7 +29,7 @@ pub use config::{
 };
 pub use entities::{
     CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,
-    RelationshipType, SourceLocation, Visibility,
+    ReferenceType, RelationshipType, SourceLocation, SourceReference, Visibility,
 };
 pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};

@@ -23,6 +23,7 @@ use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
 /// Handle Python class definitions
+#[allow(clippy::too_many_arguments)]
 pub fn handle_class_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -31,6 +32,7 @@ pub fn handle_class_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let class_node = require_capture_node(query_match, query, "class")?;
 
@@ -42,6 +44,7 @@ pub fn handle_class_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components
@@ -104,6 +107,7 @@ pub fn handle_class_impl(
 }
 
 /// Handle Python method definitions (functions inside class body)
+#[allow(clippy::too_many_arguments)]
 pub fn handle_method_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -112,6 +116,7 @@ pub fn handle_method_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let method_node = require_capture_node(query_match, query, "method")?;
 
@@ -123,6 +128,7 @@ pub fn handle_method_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Extract common components (name, qualified_name, entity_id, location)

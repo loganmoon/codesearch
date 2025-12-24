@@ -17,7 +17,13 @@ fn filter_by_type(
 
 #[test]
 fn test_typescript_extractor_creation() {
-    let result = create_extractor(Path::new("test.ts"), "test-repo", None, None);
+    let result = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    );
     if let Err(e) = &result {
         eprintln!("Error creating extractor: {e:?}");
     }
@@ -27,7 +33,13 @@ fn test_typescript_extractor_creation() {
 
 #[test]
 fn test_tsx_extractor_creation() {
-    let result = create_extractor(Path::new("Component.tsx"), "test-repo", None, None);
+    let result = create_extractor(
+        Path::new("Component.tsx"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    );
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -40,9 +52,15 @@ fn test_extract_typed_function() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -80,9 +98,15 @@ fn test_extract_interface() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -104,9 +128,15 @@ fn test_extract_generic_interface() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -131,9 +161,15 @@ fn test_extract_type_alias() {
         type ID = string | number;
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -159,9 +195,15 @@ fn test_extract_enum() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -184,9 +226,15 @@ fn test_extract_async_function() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -215,9 +263,15 @@ fn test_extract_class() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -251,9 +305,15 @@ fn test_extract_interface_with_jsdoc() {
         }
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))
@@ -276,9 +336,15 @@ fn test_extract_arrow_function() {
         const multiply = (a: number, b: number): number => a * b;
     "#;
 
-    let extractor = create_extractor(Path::new("test.ts"), "test-repo", None, None)
-        .expect("Failed to create extractor")
-        .expect("No extractor for .ts");
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
 
     let entities = extractor
         .extract(source, Path::new("test.ts"))

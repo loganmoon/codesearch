@@ -5,6 +5,7 @@
 
 use crate::common::import_map::{resolve_reference, ImportMap};
 use crate::common::node_to_text;
+use codesearch_core::entities::{ReferenceType, SourceLocation, SourceReference};
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
@@ -44,13 +45,13 @@ fn ts_type_refs_query() -> Option<&'static Query> {
 /// - Variable type annotations
 /// - Generic type arguments
 ///
-/// Returns a list of resolved qualified names.
+/// Returns a list of `SourceReference` with resolved qualified names and locations.
 pub fn extract_type_references(
     function_node: Node,
     source: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let Some(query) = ts_type_refs_query() else {
         return Vec::new();
     };
@@ -78,7 +79,11 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(resolved);
+                            type_refs.push(SourceReference {
+                                target: resolved,
+                                location: SourceLocation::from_tree_sitter_node(capture.node),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }
@@ -86,7 +91,11 @@ pub fn extract_type_references(
                     if let Ok(full_path) = node_to_text(capture.node, source) {
                         // Scoped types are already qualified
                         if seen.insert(full_path.clone()) {
-                            type_refs.push(full_path);
+                            type_refs.push(SourceReference {
+                                target: full_path,
+                                location: SourceLocation::from_tree_sitter_node(capture.node),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }

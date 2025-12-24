@@ -75,22 +75,25 @@ fn chain_delim(out_str: &mut String, text: &str) {
 /// * `repo_id` - Repository identifier
 /// * `package_name` - Optional package name from manifest (e.g., "codesearch_core")
 /// * `source_root` - Optional source root for module path derivation
+/// * `repo_root` - Repository root path for repo-relative path generation
 pub async fn extract_entities_from_file(
     file_path: &Path,
     repo_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     debug!("Extracting from file: {}", file_path.display());
 
     // Create extractor for this file with package context
-    let extractor = match create_extractor(file_path, repo_id, package_name, source_root)? {
-        Some(ext) => ext,
-        None => {
-            debug!("No extractor available for file: {}", file_path.display());
-            return Ok(Vec::new());
-        }
-    };
+    let extractor =
+        match create_extractor(file_path, repo_id, package_name, source_root, repo_root)? {
+            Some(ext) => ext,
+            None => {
+                debug!("No extractor available for file: {}", file_path.display());
+                return Ok(Vec::new());
+            }
+        };
 
     // Read file
     let content = tokio::fs::read_to_string(file_path)
@@ -691,6 +694,7 @@ mod tests {
             entity_type: EntityType::Function,
             name: "handle_request".to_string(),
             qualified_name: "my_crate::handlers::handle_request".to_string(),
+            path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],
             file_path: PathBuf::from("src/handlers.rs"),
@@ -798,6 +802,7 @@ mod tests {
             entity_type: EntityType::Struct,
             name: "Point".to_string(),
             qualified_name: "geometry::Point".to_string(),
+            path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],
             file_path: PathBuf::from("src/geometry.rs"),
@@ -841,6 +846,7 @@ mod tests {
             entity_type: EntityType::Function,
             name: "test<T>".to_string(),
             qualified_name: "crate::utils::test<T>".to_string(),
+            path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],
             file_path: PathBuf::from("src/utils.rs"),

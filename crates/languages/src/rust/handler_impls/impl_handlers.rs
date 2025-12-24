@@ -28,6 +28,7 @@ use tree_sitter::{Node, Query, QueryMatch};
 
 /// Process an inherent impl block query match and extract entities
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_impl_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -36,6 +37,7 @@ pub fn handle_impl_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    _repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL)?;
 
@@ -157,6 +159,7 @@ pub fn handle_impl_impl(
 
 /// Process a trait impl block query match and extract entities
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn handle_impl_trait_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -165,6 +168,7 @@ pub fn handle_impl_trait_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    _repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let impl_node = require_capture_node(query_match, query, capture_names::IMPL_TRAIT)?;
 

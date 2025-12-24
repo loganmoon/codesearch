@@ -38,3 +38,8 @@ testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
 chrono = "0.4"
 regex = "1.11"
+walkdir = "2.5"
+
+# SCIP parsing for graph validation
+scip = "0.6"
+protobuf = "3.7"

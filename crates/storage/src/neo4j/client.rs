@@ -264,6 +264,7 @@ impl Neo4jClient {
             "MERGE (n:{label_str} {{id: $id}})
              SET n.repository_id = $repository_id,
                  n.qualified_name = $qualified_name,
+                 n.path_entity_identifier = $path_entity_identifier,
                  n.name = $name,
                  n.language = $language,
                  n.visibility = $visibility,
@@ -279,6 +280,10 @@ impl Neo4jClient {
             .param("id", entity.entity_id.clone())
             .param("repository_id", entity.repository_id.to_string())
             .param("qualified_name", entity.qualified_name.clone())
+            .param(
+                "path_entity_identifier",
+                entity.path_entity_identifier.clone().unwrap_or_default(),
+            )
             .param("name", entity.name.clone())
             .param("language", entity.language.to_string())
             .param("visibility", entity.visibility.to_string())
@@ -345,6 +350,10 @@ impl Neo4jClient {
                             "qualified_name".to_string(),
                             e.qualified_name.clone().into(),
                         );
+                        map.insert(
+                            "path_entity_identifier".to_string(),
+                            e.path_entity_identifier.clone().unwrap_or_default().into(),
+                        );
                         map.insert("name".to_string(), e.name.clone().into());
                         map.insert("language".to_string(), e.language.to_string().into());
                         map.insert("visibility".to_string(), e.visibility.to_string().into());
@@ -363,6 +372,7 @@ impl Neo4jClient {
                  MERGE (n:{label_str} {{id: entity.id}})
                  SET n.repository_id = entity.repository_id,
                      n.qualified_name = entity.qualified_name,
+                     n.path_entity_identifier = entity.path_entity_identifier,
                      n.name = entity.name,
                      n.language = entity.language,
                      n.visibility = entity.visibility,
@@ -576,6 +586,10 @@ impl Neo4jClient {
         .await?;
         self.run_query(
             "CREATE INDEX qualified_name_idx IF NOT EXISTS FOR (n:Entity) ON (n.qualified_name)",
+        )
+        .await?;
+        self.run_query(
+            "CREATE INDEX path_entity_identifier_idx IF NOT EXISTS FOR (n:Entity) ON (n.path_entity_identifier)",
         )
         .await?;
 

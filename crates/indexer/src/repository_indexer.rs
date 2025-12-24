@@ -309,6 +309,7 @@ async fn stage_extract_entities(
     max_entity_batch_size: usize,
     file_extraction_concurrency: usize,
     package_map: Option<Arc<PackageMap>>,
+    repo_path: PathBuf,
 ) -> Result<(usize, usize)> {
     let mut total_extracted = 0;
     let mut total_failed = 0;
@@ -326,6 +327,7 @@ async fn stage_extract_entities(
         let package_map_ref = &package_map;
 
         // Process files in parallel (8 concurrent extractions), collect results
+        let repo_path_ref = &repo_path;
         let results = stream::iter(paths.into_iter())
             .map(|path| {
                 let repo_id_ref = &repo_id_str;
@@ -342,6 +344,7 @@ async fn stage_extract_entities(
                         repo_id_ref,
                         package_name,
                         source_root,
+                        repo_path_ref,
                     )
                     .await
                     {
@@ -1143,6 +1146,7 @@ impl crate::Indexer for RepositoryIndexer {
             .ok_or_else(|| Error::Other(anyhow!("Repository not found for repo_id {repo_id}")))?;
 
         // Spawn all 5 stages concurrently
+        let repo_path_for_stage2 = repo_path.clone();
         let stage1 = tokio::spawn(stage_file_discovery(
             file_tx,
             repo_path,
@@ -1159,6 +1163,7 @@ impl crate::Indexer for RepositoryIndexer {
             config.max_entity_batch_size,
             config.file_extraction_concurrency,
             package_map,
+            repo_path_for_stage2,
         ));
 
         let postgres_client_3 = self.postgres_client.clone();
@@ -1276,6 +1281,7 @@ mod tests {
             repository_id: repo_id.to_string(),
             name: name.to_string(),
             qualified_name: name.to_string(),
+            path_entity_identifier: None,
             entity_type: EntityType::Function,
             language: Language::Rust,
             file_path: PathBuf::from(file_path),

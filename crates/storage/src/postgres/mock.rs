@@ -1058,6 +1058,7 @@ mod tests {
             repository_id: "test_repo".to_string(),
             name: name.to_string(),
             qualified_name: name.to_string(),
+            path_entity_identifier: None,
             entity_type: EntityType::Function,
             language: Language::Rust,
             file_path: PathBuf::from(file_path),

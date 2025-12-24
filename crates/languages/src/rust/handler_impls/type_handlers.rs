@@ -45,6 +45,7 @@ fn extract_type_entity(
 // ============================================================================
 
 /// Process a struct query match and extract entity data
+#[allow(clippy::too_many_arguments)]
 pub fn handle_struct_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -53,6 +54,7 @@ pub fn handle_struct_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -62,6 +64,7 @@ pub fn handle_struct_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Build ImportMap from file's imports for type resolution
@@ -106,6 +109,7 @@ pub fn handle_struct_impl(
 }
 
 /// Process an enum query match and extract entity data
+#[allow(clippy::too_many_arguments)]
 pub fn handle_enum_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -114,6 +118,7 @@ pub fn handle_enum_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -123,6 +128,7 @@ pub fn handle_enum_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
 
     // Build ImportMap from file's imports for type resolution
@@ -160,6 +166,7 @@ pub fn handle_enum_impl(
 }
 
 /// Process a trait query match and extract entity data
+#[allow(clippy::too_many_arguments)]
 pub fn handle_trait_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -168,6 +175,7 @@ pub fn handle_trait_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let ctx = ExtractionContext {
         query_match,
@@ -177,6 +185,7 @@ pub fn handle_trait_impl(
         repository_id,
         package_name,
         source_root,
+        repo_root,
     };
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         let generics = extract_generics(ctx);

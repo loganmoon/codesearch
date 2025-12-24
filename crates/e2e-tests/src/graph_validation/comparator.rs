@@ -118,8 +118,8 @@ mod tests {
 
         let result = compare(&ground_truth, &extracted);
 
-        assert_eq!(result.metrics.precision, 1.0);
-        assert_eq!(result.metrics.recall, 1.0);
+        assert_eq!(result.metrics.precision(), 1.0);
+        assert_eq!(result.metrics.recall(), 1.0);
         assert_eq!(result.true_positives.len(), 1);
         assert!(result.false_positives.is_empty());
         assert!(result.false_negatives.is_empty());
@@ -154,8 +154,8 @@ mod tests {
         assert_eq!(result.true_positives.len(), 1);
         assert_eq!(result.false_positives.len(), 1);
         assert_eq!(result.false_negatives.len(), 1);
-        assert!((result.metrics.precision - 0.5).abs() < 0.01);
-        assert!((result.metrics.recall - 0.5).abs() < 0.01);
+        assert!((result.metrics.precision() - 0.5).abs() < 0.01);
+        assert!((result.metrics.recall() - 0.5).abs() < 0.01);
     }
 
     #[test]
@@ -171,8 +171,8 @@ mod tests {
 
         let result = compare(&ground_truth, &extracted);
 
-        assert_eq!(result.metrics.precision, 0.0);
-        assert_eq!(result.metrics.recall, 0.0);
+        assert_eq!(result.metrics.precision(), 0.0);
+        assert_eq!(result.metrics.recall(), 0.0);
         assert!(result.true_positives.is_empty());
         assert!(result.false_positives.is_empty());
         assert_eq!(result.false_negatives.len(), 1);

@@ -298,7 +298,7 @@ async fn test_scip_parsing_only() -> Result<()> {
     for rel in relationships.iter().take(10) {
         println!(
             "  {} --[{}]--> {}",
-            rel.source.qualified_name, rel.relationship_type, rel.target.qualified_name
+            rel.source.qualified_name(), rel.relationship_type, rel.target.qualified_name()
         );
     }
 

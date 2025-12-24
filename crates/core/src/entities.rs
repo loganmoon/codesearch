@@ -90,13 +90,21 @@ pub struct SourceReference {
 
 impl SourceReference {
     /// Create a new SourceReference.
+    ///
+    /// # Panics
+    /// Panics if `target` is empty after trimming whitespace.
     pub fn new(
         target: impl Into<String>,
         location: SourceLocation,
         ref_type: ReferenceType,
     ) -> Self {
+        let target = target.into();
+        assert!(
+            !target.trim().is_empty(),
+            "SourceReference target must be non-empty"
+        );
         Self {
-            target: target.into(),
+            target,
             location,
             ref_type,
         }

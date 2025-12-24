@@ -750,12 +750,12 @@ fn extract_contains_relationships(
                     };
 
                     // Skip if either symbol couldn't be normalized properly
-                    if parent.qualified_name.is_empty() || child.qualified_name.is_empty() {
+                    if parent.qualified_name().is_empty() || child.qualified_name().is_empty() {
                         continue;
                     }
 
                     // Skip self-references (can happen with impl blocks)
-                    if parent.qualified_name == child.qualified_name {
+                    if parent.qualified_name() == child.qualified_name() {
                         continue;
                     }
 
@@ -775,8 +775,8 @@ fn extract_contains_relationships(
         .into_iter()
         .filter(|rel| {
             // Skip if parent is just the package name and child is also just package name
-            !(rel.source.qualified_name == package_name
-                && rel.target.qualified_name == package_name)
+            !(rel.source.qualified_name() == package_name
+                && rel.target.qualified_name() == package_name)
         })
         .collect()
 }

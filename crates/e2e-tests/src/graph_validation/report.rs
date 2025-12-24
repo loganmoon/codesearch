@@ -41,9 +41,9 @@ fn write_report_content<W: Write>(
 
     // Overall metrics
     writeln!(writer, "=== Overall Metrics ===")?;
-    writeln!(writer, "Precision: {:.2}%", result.metrics.precision * 100.0)?;
-    writeln!(writer, "Recall:    {:.2}%", result.metrics.recall * 100.0)?;
-    writeln!(writer, "F1 Score:  {:.2}%", result.metrics.f1_score * 100.0)?;
+    writeln!(writer, "Precision: {:.2}%", result.metrics.precision() * 100.0)?;
+    writeln!(writer, "Recall:    {:.2}%", result.metrics.recall() * 100.0)?;
+    writeln!(writer, "F1 Score:  {:.2}%", result.metrics.f1_score() * 100.0)?;
     writeln!(writer)?;
 
     writeln!(writer, "Counts:")?;
@@ -56,20 +56,20 @@ fn write_report_content<W: Write>(
     writeln!(writer, "=== Metrics by Relationship Type ===")?;
     for rel_type in RelationshipType::all() {
         if let Some(metrics) = result.metrics_by_type.get(rel_type) {
-            let total = metrics.true_positive_count
-                + metrics.false_positive_count
-                + metrics.false_negative_count;
+            let total = metrics.true_positive_count()
+                + metrics.false_positive_count()
+                + metrics.false_negative_count();
             if total > 0 {
                 writeln!(
                     writer,
                     "{}: P={:.1}%, R={:.1}%, F1={:.1}% (TP={}, FP={}, FN={})",
                     rel_type,
-                    metrics.precision * 100.0,
-                    metrics.recall * 100.0,
-                    metrics.f1_score * 100.0,
-                    metrics.true_positive_count,
-                    metrics.false_positive_count,
-                    metrics.false_negative_count,
+                    metrics.precision() * 100.0,
+                    metrics.recall() * 100.0,
+                    metrics.f1_score() * 100.0,
+                    metrics.true_positive_count(),
+                    metrics.false_positive_count(),
+                    metrics.false_negative_count(),
                 )?;
             }
         }
@@ -86,7 +86,7 @@ fn write_report_content<W: Write>(
         writeln!(
             writer,
             "  {} --[{}]--> {}",
-            rel.source.qualified_name, rel.relationship_type, rel.target.qualified_name
+            rel.source.qualified_name(), rel.relationship_type, rel.target.qualified_name()
         )?;
     }
     writeln!(writer)?;
@@ -101,7 +101,7 @@ fn write_report_content<W: Write>(
         writeln!(
             writer,
             "  {} --[{}]--> {}",
-            rel.source.qualified_name, rel.relationship_type, rel.target.qualified_name
+            rel.source.qualified_name(), rel.relationship_type, rel.target.qualified_name()
         )?;
     }
     writeln!(writer)?;
@@ -117,7 +117,7 @@ fn write_report_content<W: Write>(
         writeln!(
             writer,
             "  {} --[{}]--> {}",
-            rel.source.qualified_name, rel.relationship_type, rel.target.qualified_name
+            rel.source.qualified_name(), rel.relationship_type, rel.target.qualified_name()
         )?;
     }
     if result.true_positives.len() > 50 {

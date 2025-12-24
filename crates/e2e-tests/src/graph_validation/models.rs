@@ -68,21 +68,42 @@ impl RelationshipType {
 /// Reference to an entity (source or target of a relationship)
 #[derive(Debug, Clone)]
 pub struct EntityRef {
-    /// Fully qualified name of the entity
-    pub qualified_name: String,
-    /// Type of the entity (function, struct, etc.)
-    pub entity_type: Option<EntityType>,
-    /// File path (optional, for additional context)
-    pub file_path: Option<String>,
+    qualified_name: String,
+    entity_type: Option<EntityType>,
+    file_path: Option<String>,
 }
 
 impl EntityRef {
+    /// Create a new EntityRef with the given qualified name.
+    ///
+    /// # Panics
+    /// Panics if `qualified_name` is empty after trimming whitespace.
     pub fn new(qualified_name: impl Into<String>) -> Self {
+        let qualified_name = qualified_name.into();
+        assert!(
+            !qualified_name.trim().is_empty(),
+            "EntityRef qualified_name must be non-empty"
+        );
         Self {
-            qualified_name: qualified_name.into(),
+            qualified_name,
             entity_type: None,
             file_path: None,
         }
+    }
+
+    /// Get the qualified name of this entity.
+    pub fn qualified_name(&self) -> &str {
+        &self.qualified_name
+    }
+
+    /// Get the entity type, if known.
+    pub fn entity_type(&self) -> Option<EntityType> {
+        self.entity_type
+    }
+
+    /// Get the file path, if known.
+    pub fn file_path(&self) -> Option<&str> {
+        self.file_path.as_deref()
     }
 
     pub fn with_entity_type(mut self, entity_type: EntityType) -> Self {
@@ -135,8 +156,8 @@ impl Relationship {
     /// Create a canonical key for hashing/comparison
     pub fn to_key(&self) -> RelationshipKey {
         RelationshipKey {
-            source_qname: self.source.qualified_name.clone(),
-            target_qname: self.target.qualified_name.clone(),
+            source_qname: self.source.qualified_name().to_owned(),
+            target_qname: self.target.qualified_name().to_owned(),
             relationship_type: self.relationship_type,
         }
     }
@@ -161,14 +182,23 @@ impl fmt::Display for RelationshipKey {
 }
 
 /// Precision/recall metrics
-#[derive(Debug, Clone, Default)]
+///
+/// Metrics can only be constructed via `Metrics::calculate()` to ensure
+/// internal consistency (e.g., f1_score matches precision/recall).
+#[derive(Debug, Clone)]
 pub struct Metrics {
-    pub precision: f64,
-    pub recall: f64,
-    pub f1_score: f64,
-    pub true_positive_count: usize,
-    pub false_positive_count: usize,
-    pub false_negative_count: usize,
+    precision: f64,
+    recall: f64,
+    f1_score: f64,
+    true_positive_count: usize,
+    false_positive_count: usize,
+    false_negative_count: usize,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::calculate(0, 0, 0)
+    }
 }
 
 impl Metrics {
@@ -201,6 +231,36 @@ impl Metrics {
             false_negative_count: fn_count,
         }
     }
+
+    /// Precision: proportion of extracted relationships that are correct
+    pub fn precision(&self) -> f64 {
+        self.precision
+    }
+
+    /// Recall: proportion of ground truth relationships that were found
+    pub fn recall(&self) -> f64 {
+        self.recall
+    }
+
+    /// F1 score: harmonic mean of precision and recall
+    pub fn f1_score(&self) -> f64 {
+        self.f1_score
+    }
+
+    /// Number of correctly extracted relationships
+    pub fn true_positive_count(&self) -> usize {
+        self.true_positive_count
+    }
+
+    /// Number of incorrectly extracted relationships (not in ground truth)
+    pub fn false_positive_count(&self) -> usize {
+        self.false_positive_count
+    }
+
+    /// Number of missed relationships (in ground truth but not extracted)
+    pub fn false_negative_count(&self) -> usize {
+        self.false_negative_count
+    }
 }
 
 /// Result of comparing two graphs
@@ -224,9 +284,9 @@ impl ComparisonResult {
         println!("=== Graph Validation Results ===");
         println!();
         println!("Overall Metrics:");
-        println!("  Precision: {:.2}%", self.metrics.precision * 100.0);
-        println!("  Recall:    {:.2}%", self.metrics.recall * 100.0);
-        println!("  F1 Score:  {:.2}%", self.metrics.f1_score * 100.0);
+        println!("  Precision: {:.2}%", self.metrics.precision() * 100.0);
+        println!("  Recall:    {:.2}%", self.metrics.recall() * 100.0);
+        println!("  F1 Score:  {:.2}%", self.metrics.f1_score() * 100.0);
         println!();
         println!("Counts:");
         println!("  True Positives:  {}", self.true_positives.len());
@@ -237,16 +297,19 @@ impl ComparisonResult {
 
         for rel_type in RelationshipType::all() {
             if let Some(metrics) = self.metrics_by_type.get(rel_type) {
-                if metrics.true_positive_count + metrics.false_positive_count + metrics.false_negative_count > 0 {
+                let total = metrics.true_positive_count()
+                    + metrics.false_positive_count()
+                    + metrics.false_negative_count();
+                if total > 0 {
                     println!(
                         "  {}: P={:.1}%, R={:.1}%, F1={:.1}% (TP={}, FP={}, FN={})",
                         rel_type,
-                        metrics.precision * 100.0,
-                        metrics.recall * 100.0,
-                        metrics.f1_score * 100.0,
-                        metrics.true_positive_count,
-                        metrics.false_positive_count,
-                        metrics.false_negative_count,
+                        metrics.precision() * 100.0,
+                        metrics.recall() * 100.0,
+                        metrics.f1_score() * 100.0,
+                        metrics.true_positive_count(),
+                        metrics.false_positive_count(),
+                        metrics.false_negative_count(),
                     );
                 }
             }
@@ -261,39 +324,39 @@ mod tests {
     #[test]
     fn test_metrics_calculate_all_zeros() {
         let m = Metrics::calculate(0, 0, 0);
-        assert_eq!(m.precision, 0.0);
-        assert_eq!(m.recall, 0.0);
-        assert_eq!(m.f1_score, 0.0);
-        assert_eq!(m.true_positive_count, 0);
-        assert_eq!(m.false_positive_count, 0);
-        assert_eq!(m.false_negative_count, 0);
+        assert_eq!(m.precision(), 0.0);
+        assert_eq!(m.recall(), 0.0);
+        assert_eq!(m.f1_score(), 0.0);
+        assert_eq!(m.true_positive_count(), 0);
+        assert_eq!(m.false_positive_count(), 0);
+        assert_eq!(m.false_negative_count(), 0);
     }
 
     #[test]
     fn test_metrics_calculate_perfect_precision() {
         // All extracted are correct, but we missed some
         let m = Metrics::calculate(10, 0, 5);
-        assert_eq!(m.precision, 1.0);
-        assert!((m.recall - 0.666).abs() < 0.01);
-        assert_eq!(m.true_positive_count, 10);
-        assert_eq!(m.false_positive_count, 0);
-        assert_eq!(m.false_negative_count, 5);
+        assert_eq!(m.precision(), 1.0);
+        assert!((m.recall() - 0.666).abs() < 0.01);
+        assert_eq!(m.true_positive_count(), 10);
+        assert_eq!(m.false_positive_count(), 0);
+        assert_eq!(m.false_negative_count(), 5);
     }
 
     #[test]
     fn test_metrics_calculate_perfect_recall() {
         // We found everything, but also some extra
         let m = Metrics::calculate(10, 5, 0);
-        assert!((m.precision - 0.666).abs() < 0.01);
-        assert_eq!(m.recall, 1.0);
+        assert!((m.precision() - 0.666).abs() < 0.01);
+        assert_eq!(m.recall(), 1.0);
     }
 
     #[test]
     fn test_metrics_calculate_perfect_f1() {
         // Perfect precision and recall
         let m = Metrics::calculate(10, 0, 0);
-        assert_eq!(m.precision, 1.0);
-        assert_eq!(m.recall, 1.0);
-        assert_eq!(m.f1_score, 1.0);
+        assert_eq!(m.precision(), 1.0);
+        assert_eq!(m.recall(), 1.0);
+        assert_eq!(m.f1_score(), 1.0);
     }
 }

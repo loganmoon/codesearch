@@ -144,7 +144,8 @@
       "WebFetch(domain:users.rust-lang.org)",
       "WebFetch(domain:ai.google.dev)",
       "WebFetch(domain:jina.ai)",
-      "WebFetch(domain:docs.jina.ai)"
+      "WebFetch(domain:docs.jina.ai)",
+      "WebFetch(domain:docs.sourcegraph.com)"
     ],
     "deny": [],
     "ask": []

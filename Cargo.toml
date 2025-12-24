@@ -15,8 +15,8 @@ members = [
     "crates/agentic-search",
     "crates/mcp-server",
 ]
-# E2E tests excluded from default builds - run explicitly with:
-#   cargo test --package codesearch-e2e-tests -- --ignored
+# Excluded from default builds - run explicitly with --manifest-path:
+#   cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
 exclude = ["crates/e2e-tests"]
 
 [workspace.metadata]

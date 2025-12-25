@@ -518,3 +518,230 @@ impl<T: Clone> Container<T> {
         new_methods[0].qualified_name, new_methods[1].qualified_name
     );
 }
+
+// =============================================================================
+// Integration tests with package_name and source_root
+// =============================================================================
+
+/// Helper to extract entities with package and source root context
+fn extract_with_context<F>(
+    source: &str,
+    query_str: &str,
+    handler: F,
+    file_path: &Path,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>>
+where
+    F: Fn(
+        &tree_sitter::QueryMatch,
+        &tree_sitter::Query,
+        &str,
+        &Path,
+        &str,
+        Option<&str>,
+        Option<&Path>,
+        &Path,
+    ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>>,
+{
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .unwrap();
+
+    let tree = parser.parse(source, None).unwrap();
+    let query = tree_sitter::Query::new(&tree_sitter_rust::LANGUAGE.into(), query_str).unwrap();
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+    let repository_id = "test-repo-id";
+    let repo_root = Path::new("/test-repo");
+
+    let mut all_entities = Vec::new();
+    while let Some(query_match) = streaming_iterator::StreamingIterator::next(&mut matches_iter) {
+        if let Ok(entities) = handler(
+            query_match,
+            &query,
+            source,
+            file_path,
+            repository_id,
+            package_name,
+            source_root,
+            repo_root,
+        ) {
+            all_entities.extend(entities);
+        }
+    }
+
+    Ok(all_entities)
+}
+
+#[test]
+fn test_impl_with_crate_path_type_resolution() {
+    let source = r#"
+use crate::types::MyStruct;
+
+impl crate::types::MyStruct {
+    fn new() -> Self {
+        Self {}
+    }
+}
+"#;
+
+    // With package_name, crate:: should resolve to the package
+    let file_path = Path::new("src/impls.rs");
+    let source_root = Path::new("src");
+
+    let entities = extract_with_context(
+        source,
+        crate::rust::queries::IMPL_QUERY,
+        handle_impl_impl,
+        file_path,
+        Some("mypackage"),
+        Some(source_root),
+    )
+    .expect("Failed to extract impl");
+
+    assert!(!entities.is_empty(), "Should extract impl block");
+
+    let impl_entity = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .expect("Should have impl entity");
+
+    // The qualified name should have the package prefix, not crate::
+    assert!(
+        impl_entity
+            .qualified_name
+            .contains("mypackage::types::MyStruct"),
+        "Impl qualified name should resolve crate:: to package name. Got: {}",
+        impl_entity.qualified_name
+    );
+    assert!(
+        !impl_entity.qualified_name.contains("crate::"),
+        "Impl qualified name should not contain 'crate::'. Got: {}",
+        impl_entity.qualified_name
+    );
+}
+
+#[test]
+fn test_trait_impl_with_self_path_resolution() {
+    let source = r#"
+impl self::traits::MyTrait for self::types::MyStruct {
+    fn do_thing(&self) {}
+}
+"#;
+
+    // With package_name and module context, self:: should resolve correctly
+    let file_path = Path::new("src/network/impls.rs");
+    let source_root = Path::new("src");
+
+    let entities = extract_with_context(
+        source,
+        crate::rust::queries::IMPL_TRAIT_QUERY,
+        handle_impl_trait_impl,
+        file_path,
+        Some("mypackage"),
+        Some(source_root),
+    )
+    .expect("Failed to extract trait impl");
+
+    assert!(!entities.is_empty(), "Should extract trait impl block");
+
+    let impl_entity = &entities[0];
+
+    // self:: should resolve to package::module::
+    assert!(
+        impl_entity.qualified_name.contains("mypackage::network"),
+        "Trait impl should resolve self:: to package::module. Got: {}",
+        impl_entity.qualified_name
+    );
+    assert!(
+        !impl_entity.qualified_name.contains("self::"),
+        "Trait impl should not contain 'self::'. Got: {}",
+        impl_entity.qualified_name
+    );
+}
+
+#[test]
+fn test_impl_includes_full_module_path_in_qualified_name() {
+    let source = r#"
+struct LocalType {
+    value: i32,
+}
+
+impl LocalType {
+    fn new(value: i32) -> Self {
+        Self { value }
+    }
+}
+"#;
+
+    // Test that module path is included in qualified names
+    let file_path = Path::new("src/utils/helpers.rs");
+    let source_root = Path::new("src");
+
+    let entities = extract_with_context(
+        source,
+        crate::rust::queries::IMPL_QUERY,
+        handle_impl_impl,
+        file_path,
+        Some("mypackage"),
+        Some(source_root),
+    )
+    .expect("Failed to extract impl");
+
+    let impl_entity = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .expect("Should have impl entity");
+
+    // The qualified name should include the full path: package::module::impl
+    assert!(
+        impl_entity
+            .qualified_name
+            .contains("mypackage::utils::helpers"),
+        "Impl should include full module path. Got: {}",
+        impl_entity.qualified_name
+    );
+}
+
+#[test]
+fn test_impl_without_context_still_works() {
+    let source = r#"
+impl SomeType {
+    fn method(&self) {}
+}
+"#;
+
+    // Without package_name/source_root, should still extract correctly
+    let file_path = Path::new("test.rs");
+
+    let entities = extract_with_context(
+        source,
+        crate::rust::queries::IMPL_QUERY,
+        handle_impl_impl,
+        file_path,
+        None, // No package
+        None, // No source root
+    )
+    .expect("Failed to extract impl");
+
+    assert!(
+        !entities.is_empty(),
+        "Should extract impl block even without context"
+    );
+
+    let impl_entity = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .expect("Should have impl entity");
+
+    // Should fall back to using the type name directly
+    assert!(
+        impl_entity.qualified_name.contains("SomeType"),
+        "Impl should still include type name. Got: {}",
+        impl_entity.qualified_name
+    );
+}

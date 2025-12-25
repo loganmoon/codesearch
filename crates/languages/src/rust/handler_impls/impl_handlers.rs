@@ -230,7 +230,6 @@ pub fn handle_impl_trait_impl(
     let import_map = get_file_import_map(impl_node, source);
 
     // Resolve for_type through imports (strip generics first for resolution)
-    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
     let for_type_base = for_type_raw
         .split('<')
         .next()
@@ -245,7 +244,6 @@ pub fn handle_impl_trait_impl(
     );
 
     // Resolve trait_name through imports (strip generics first for resolution)
-    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
     let trait_name_base = trait_name_raw
         .split('<')
         .next()
@@ -796,4 +794,69 @@ fn get_file_import_map(node: Node, source: &str) -> ImportMap {
     // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
     // so no module_path resolution is needed
     parse_file_imports(current, source, Language::Rust, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compose_full_prefix_all_components() {
+        assert_eq!(
+            compose_full_prefix(Some("pkg"), Some("mod"), "scope", "::"),
+            "pkg::mod::scope"
+        );
+    }
+
+    #[test]
+    fn test_compose_full_prefix_package_and_module() {
+        assert_eq!(
+            compose_full_prefix(Some("pkg"), Some("mod"), "", "::"),
+            "pkg::mod"
+        );
+    }
+
+    #[test]
+    fn test_compose_full_prefix_package_and_scope() {
+        assert_eq!(
+            compose_full_prefix(Some("pkg"), None, "scope", "::"),
+            "pkg::scope"
+        );
+    }
+
+    #[test]
+    fn test_compose_full_prefix_module_and_scope() {
+        assert_eq!(
+            compose_full_prefix(None, Some("mod"), "scope", "::"),
+            "mod::scope"
+        );
+    }
+
+    #[test]
+    fn test_compose_full_prefix_only_scope() {
+        assert_eq!(compose_full_prefix(None, None, "scope", "::"), "scope");
+    }
+
+    #[test]
+    fn test_compose_full_prefix_empty_strings_filtered() {
+        // Empty strings should be filtered out, not produce "::" artifacts
+        assert_eq!(
+            compose_full_prefix(Some(""), Some("mod"), "scope", "::"),
+            "mod::scope"
+        );
+        assert_eq!(
+            compose_full_prefix(Some("pkg"), Some(""), "scope", "::"),
+            "pkg::scope"
+        );
+        assert_eq!(
+            compose_full_prefix(Some("pkg"), Some("mod"), "", "::"),
+            "pkg::mod"
+        );
+    }
+
+    #[test]
+    fn test_compose_full_prefix_all_empty() {
+        assert_eq!(compose_full_prefix(None, None, "", "::"), "");
+        assert_eq!(compose_full_prefix(Some(""), Some(""), "", "::"), "");
+    }
 }

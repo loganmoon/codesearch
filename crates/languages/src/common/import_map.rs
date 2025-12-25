@@ -112,12 +112,19 @@ pub fn resolve_reference(
 /// Normalize Rust-relative paths (crate::, self::, super::) to absolute qualified names
 ///
 /// # Arguments
-/// * `path` - The path to normalize (e.g., "crate::foo::Bar", "self::utils::Helper")
-/// * `package_name` - The current crate name (e.g., "codesearch_core")
-/// * `current_module` - The current module path (e.g., "entities::error")
+/// * `path` - The path to normalize (e.g., "crate::foo::Bar", "self::utils::Helper",
+///   "super::super::other")
+/// * `package_name` - The current crate name (e.g., "codesearch_core"). If None or empty,
+///   the package prefix is omitted from the result.
+/// * `current_module` - The current module path (e.g., "entities::error"). Required for
+///   accurate self:: and super:: resolution; if None, those prefixes resolve at package root.
 ///
 /// # Returns
-/// The normalized absolute path, or the original path if not a relative path
+/// The normalized absolute path, or the original path if not a relative path.
+///
+/// # Notes
+/// - Supports chained super:: prefixes (e.g., `super::super::foo` navigates up two levels)
+/// - When context is missing, gracefully degrades to partial resolution
 pub fn normalize_rust_path(
     path: &str,
     package_name: Option<&str>,
@@ -139,28 +146,38 @@ pub fn normalize_rust_path(
             (_, Some(module)) if !module.is_empty() => format!("{module}::{rest}"),
             _ => rest.to_string(),
         }
-    } else if let Some(rest) = path.strip_prefix("super::") {
-        // super:: -> navigate up from current_module
+    } else if path.starts_with("super::") {
+        // super:: -> navigate up from current_module (supports chained super::super::)
+        let mut remaining = path;
+        let mut levels_up = 0;
+
+        // Count how many super:: prefixes we have
+        while let Some(rest) = remaining.strip_prefix("super::") {
+            levels_up += 1;
+            remaining = rest;
+        }
+
         if let Some(module) = current_module {
             let parts: Vec<&str> = module.split("::").collect();
-            if parts.len() > 1 {
-                let parent = parts[..parts.len() - 1].join("::");
+            if parts.len() > levels_up {
+                // Navigate up by levels_up
+                let parent = parts[..parts.len() - levels_up].join("::");
                 match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{parent}::{rest}"),
-                    _ => format!("{parent}::{rest}"),
+                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{parent}::{remaining}"),
+                    _ => format!("{parent}::{remaining}"),
                 }
             } else {
-                // At root level, super:: goes to package root
+                // At or beyond root level, super:: goes to package root
                 match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-                    _ => rest.to_string(),
+                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
+                    _ => remaining.to_string(),
                 }
             }
         } else {
             // No module context, return with package prefix if available
             match package_name {
-                Some(pkg) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-                _ => rest.to_string(),
+                Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
+                _ => remaining.to_string(),
             }
         }
     } else {
@@ -172,12 +189,14 @@ pub fn normalize_rust_path(
 /// Resolve a Rust reference with path normalization
 ///
 /// This extends resolve_reference() to handle crate::, self::, super:: prefixes.
+///
 /// Resolution order:
-/// 1. If path starts with crate::/self::/super::, normalize it
-/// 2. If already scoped (contains ::), use as-is
-/// 3. Try import map
-/// 4. Try parent_scope::name
-/// 5. Mark as external::name
+/// 1. If path starts with crate::/self::/super::, normalize it and return
+/// 2. Otherwise, delegate to resolve_reference() which handles:
+///    - Scoped paths (contains ::) - used as-is
+///    - Import map lookup
+///    - parent_scope::name fallback
+///    - external::name marker for unresolved references
 pub fn resolve_rust_reference(
     name: &str,
     import_map: &ImportMap,
@@ -1355,6 +1374,71 @@ import lodash from 'lodash';
                 Some("utils")
             ),
             "std::fmt::Display"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_with_parent_scope() {
+        let map = ImportMap::new("::");
+        // When not a crate::/self::/super:: path and not in imports,
+        // should fall back to parent_scope::name
+        assert_eq!(
+            resolve_rust_reference(
+                "MyType",
+                &map,
+                Some("parent::module"),
+                Some("pkg"),
+                Some("mod")
+            ),
+            "parent::module::MyType"
+        );
+    }
+
+    // ========================================================================
+    // Tests for chained super:: paths (super::super::foo)
+    // ========================================================================
+
+    #[test]
+    fn test_normalize_rust_path_double_super() {
+        // super::super::thing in mypackage::a::b::c should resolve to mypackage::a::thing
+        assert_eq!(
+            normalize_rust_path("super::super::thing", Some("mypackage"), Some("a::b::c")),
+            "mypackage::a::thing"
+        );
+    }
+
+    #[test]
+    fn test_normalize_rust_path_triple_super() {
+        // super::super::super::thing in mypackage::a::b::c::d should resolve to mypackage::a::thing
+        assert_eq!(
+            normalize_rust_path(
+                "super::super::super::thing",
+                Some("mypackage"),
+                Some("a::b::c::d")
+            ),
+            "mypackage::a::thing"
+        );
+    }
+
+    #[test]
+    fn test_normalize_rust_path_super_exceeds_depth() {
+        // super::super::super in mypackage::a::b (only 2 levels) should go to package root
+        assert_eq!(
+            normalize_rust_path(
+                "super::super::super::thing",
+                Some("mypackage"),
+                Some("a::b")
+            ),
+            "mypackage::thing"
+        );
+    }
+
+    #[test]
+    fn test_normalize_rust_path_super_exactly_matches_depth() {
+        // super::super in mypackage::a::b (exactly 2 levels) should go to package root
+        assert_eq!(
+            normalize_rust_path("super::super::thing", Some("mypackage"), Some("a::b")),
+            "mypackage::thing"
         );
     }
 }

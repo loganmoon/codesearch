@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::python::handler_impls::{handle_class_impl, handle_method_impl};
-use codesearch_core::entities::EntityType;
+use codesearch_core::entities::{EntityType, SourceReference};
 
 #[test]
 fn test_simple_class() {
@@ -472,8 +472,8 @@ class MyService:
     let calls_attr = entity.metadata.attributes.get("calls");
     assert!(calls_attr.is_some(), "Should have calls attribute");
 
-    let calls: Vec<String> =
+    let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should capture the print call
-    assert!(calls.iter().any(|c| c.contains("print")));
+    assert!(calls.iter().any(|c| c.target.contains("print")));
 }

@@ -211,11 +211,14 @@ pub fn extract_function_calls(
 ///
 /// Parses `@param {Type}`, `@returns {Type}`, `@type {Type}` patterns
 /// and extracts the type names, filtering out primitives.
+///
+/// Returns `SourceReference` with default locations since JSDoc is parsed from text,
+/// not AST nodes. The location field will have default (0,0) positions.
 pub fn extract_type_references_from_jsdoc(
     jsdoc: Option<&str>,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let Some(doc) = jsdoc else {
         return Vec::new();
     };
@@ -260,7 +263,7 @@ pub fn extract_type_references_from_jsdoc(
 /// Parse individual type names from a JSDoc type string like "Type|OtherType" or "Array<Type>"
 fn extract_types_from_jsdoc_string(
     type_str: &str,
-    type_refs: &mut Vec<String>,
+    type_refs: &mut Vec<SourceReference>,
     seen: &mut HashSet<String>,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
@@ -279,7 +282,11 @@ fn extract_types_from_jsdoc_string(
             if !is_js_primitive(base_type) && !base_type.is_empty() {
                 let resolved = resolve_reference(base_type, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    type_refs.push(resolved);
+                    type_refs.push(SourceReference {
+                        target: resolved,
+                        location: SourceLocation::default(),
+                        ref_type: ReferenceType::TypeUsage,
+                    });
                 }
             }
 
@@ -292,7 +299,11 @@ fn extract_types_from_jsdoc_string(
                         let resolved =
                             resolve_reference(generic_type, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(resolved);
+                            type_refs.push(SourceReference {
+                                target: resolved,
+                                location: SourceLocation::default(),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }
@@ -302,7 +313,11 @@ fn extract_types_from_jsdoc_string(
             if !is_js_primitive(part) {
                 let resolved = resolve_reference(part, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    type_refs.push(resolved);
+                    type_refs.push(SourceReference {
+                        target: resolved,
+                        location: SourceLocation::default(),
+                        ref_type: ReferenceType::TypeUsage,
+                    });
                 }
             }
         }

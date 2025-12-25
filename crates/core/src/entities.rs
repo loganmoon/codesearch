@@ -29,7 +29,7 @@ pub enum EntityType {
 }
 
 /// Source location information
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceLocation {
     pub start_line: usize,

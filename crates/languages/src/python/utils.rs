@@ -2,6 +2,7 @@
 
 use crate::common::import_map::{resolve_reference, ImportMap};
 use crate::common::node_to_text;
+use codesearch_core::entities::{ReferenceType, SourceLocation, SourceReference};
 use codesearch_core::error::Result;
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -272,13 +273,13 @@ pub fn filter_self_parameter(
 /// - Bare function calls: `foo()`
 /// - Attribute calls: `obj.method()`
 ///
-/// Returns a list of resolved qualified names.
+/// Returns SourceReferences with location data for disambiguation.
 pub fn extract_function_calls(
     function_node: Node,
     source: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let Some(query) = python_function_calls_query() else {
         return Vec::new();
     };
@@ -309,7 +310,11 @@ pub fn extract_function_calls(
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = resolve_reference(&name, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    calls.push(resolved);
+                    calls.push(SourceReference {
+                        target: resolved,
+                        location: SourceLocation::from_tree_sitter_node(bare_cap.node),
+                        ref_type: ReferenceType::Call,
+                    });
                 }
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
@@ -322,7 +327,11 @@ pub fn extract_function_calls(
                 let resolved_recv = resolve_reference(&recv_name, import_map, parent_scope, ".");
                 let call_ref = format!("{resolved_recv}.{method_name}");
                 if seen.insert(call_ref.clone()) {
-                    calls.push(call_ref);
+                    calls.push(SourceReference {
+                        target: call_ref,
+                        location: SourceLocation::from_tree_sitter_node(method_cap.node),
+                        ref_type: ReferenceType::Call,
+                    });
                 }
             }
         }
@@ -342,13 +351,13 @@ pub fn extract_function_calls(
 /// - Return type annotations
 /// - Variable annotations
 ///
-/// Returns a list of resolved qualified names.
+/// Returns SourceReferences with location data for disambiguation.
 pub fn extract_type_references(
     function_node: Node,
     source: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let Some(query) = python_type_refs_query() else {
         return Vec::new();
     };
@@ -376,7 +385,11 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(resolved);
+                            type_refs.push(SourceReference {
+                                target: resolved,
+                                location: SourceLocation::from_tree_sitter_node(capture.node),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }
@@ -388,7 +401,11 @@ pub fn extract_type_references(
                             let resolved =
                                 resolve_reference(&type_name, import_map, parent_scope, ".");
                             if seen.insert(resolved.clone()) {
-                                type_refs.push(resolved);
+                                type_refs.push(SourceReference {
+                                    target: resolved,
+                                    location: SourceLocation::from_tree_sitter_node(capture.node),
+                                    ref_type: ReferenceType::TypeUsage,
+                                });
                             }
                         }
                     }

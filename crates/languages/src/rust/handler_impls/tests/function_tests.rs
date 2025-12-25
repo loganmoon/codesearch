@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::rust::handler_impls::function_handlers::handle_function_impl;
-use codesearch_core::entities::{EntityType, Visibility};
+use codesearch_core::entities::{EntityType, SourceReference, Visibility};
 
 #[test]
 fn test_simple_function() {
@@ -333,14 +333,14 @@ fn process<T: Clone + Send, U>(item: T, other: U) -> T {
     // Check uses_types includes bound traits
     let uses_types_json = entity.metadata.attributes.get("uses_types");
     assert!(uses_types_json.is_some(), "Should have uses_types");
-    let uses_types: Vec<String> =
+    let uses_types: Vec<SourceReference> =
         serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
     assert!(
-        uses_types.iter().any(|t| t.contains("Clone")),
+        uses_types.iter().any(|t| t.target.contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.contains("Send")),
+        uses_types.iter().any(|t| t.target.contains("Send")),
         "uses_types should include Send"
     );
 }
@@ -391,18 +391,18 @@ where
     // Check uses_types
     let uses_types_json = entity.metadata.attributes.get("uses_types");
     assert!(uses_types_json.is_some());
-    let uses_types: Vec<String> =
+    let uses_types: Vec<SourceReference> =
         serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
     assert!(
-        uses_types.iter().any(|t| t.contains("Debug")),
+        uses_types.iter().any(|t| t.target.contains("Debug")),
         "uses_types should include Debug"
     );
     assert!(
-        uses_types.iter().any(|t| t.contains("Clone")),
+        uses_types.iter().any(|t| t.target.contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.contains("Sync")),
+        uses_types.iter().any(|t| t.target.contains("Sync")),
         "uses_types should include Sync"
     );
 }

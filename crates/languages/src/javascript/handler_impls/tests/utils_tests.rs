@@ -210,7 +210,7 @@ fn test_extract_type_references_simple() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references_from_jsdoc(Some(jsdoc), &import_map, None);
-    assert!(types.iter().any(|t| t.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
 }
 
 #[test]
@@ -219,8 +219,8 @@ fn test_extract_type_references_union() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references_from_jsdoc(Some(jsdoc), &import_map, None);
-    assert!(types.iter().any(|t| t.contains("User")));
-    assert!(types.iter().any(|t| t.contains("Admin")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("Admin")));
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn test_extract_type_references_generic() {
 
     let types = extract_type_references_from_jsdoc(Some(jsdoc), &import_map, None);
     // Array is primitive, User is not
-    assert!(types.iter().any(|t| t.contains("User")));
+    assert!(types.iter().any(|t| t.target.contains("User")));
 }
 
 #[test]

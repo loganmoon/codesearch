@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::javascript::handler_impls::{handle_arrow_function_impl, handle_function_impl};
-use codesearch_core::entities::EntityType;
+use codesearch_core::entities::{EntityType, SourceReference};
 
 #[test]
 fn test_simple_function() {
@@ -360,13 +360,13 @@ function processRequest(user, request) {
         "Should have uses_types attribute"
     );
 
-    let uses_types: Vec<String> =
+    let uses_types: Vec<SourceReference> =
         serde_json::from_str(uses_types_attr.unwrap()).expect("Should parse uses_types JSON");
 
     // Should extract non-primitive types from JSDoc
-    assert!(uses_types.iter().any(|t| t.contains("User")));
-    assert!(uses_types.iter().any(|t| t.contains("Request")));
-    assert!(uses_types.iter().any(|t| t.contains("Response")));
+    assert!(uses_types.iter().any(|t| t.target.contains("User")));
+    assert!(uses_types.iter().any(|t| t.target.contains("Request")));
+    assert!(uses_types.iter().any(|t| t.target.contains("Response")));
 }
 
 #[test]

@@ -208,6 +208,16 @@ pub struct GenericParam {
     pub bounds: Vec<String>,
 }
 
+impl GenericParam {
+    /// Returns true if this generic parameter is semantically valid.
+    ///
+    /// A valid parameter has a non-empty name and no empty bounds.
+    #[allow(dead_code)]
+    pub fn is_valid(&self) -> bool {
+        !self.name.is_empty() && self.bounds.iter().all(|b| !b.is_empty())
+    }
+}
+
 /// Combined result from parsing inline generics and where clauses
 #[derive(Debug, Clone, Default)]
 pub struct ParsedGenerics {
@@ -222,7 +232,9 @@ pub struct ParsedGenerics {
 /// Handles:
 /// - Simple params: `T` -> GenericParam { name: "T", bounds: [] }
 /// - Constrained params: `T: Clone + Send` -> GenericParam { name: "T", bounds: ["Clone", "Send"] }
-/// - Lifetime params are included with empty bounds
+/// - Lifetime params: `'a` -> included with empty bounds
+/// - Const params: `const N: usize` -> included with empty bounds
+/// - Optional/default params: `T = Default` -> GenericParam { name: "T", bounds: [] }
 pub fn extract_generics_with_bounds(
     node: Node,
     source: &str,
@@ -538,22 +550,23 @@ fn parse_where_predicate(
 /// If a type parameter already exists, its bounds are extended.
 /// New type parameters from where clause are added.
 pub fn merge_parsed_generics(base: &mut ParsedGenerics, additional: ParsedGenerics) {
-    let mut seen_traits = std::collections::HashSet::new();
+    // Build set of existing trait refs (owned strings to avoid borrow conflicts)
+    let seen_traits: std::collections::HashSet<String> =
+        base.bound_trait_refs.iter().cloned().collect();
 
-    // Track existing trait refs
-    for trait_ref in &base.bound_trait_refs {
-        seen_traits.insert(trait_ref.clone());
-    }
-
-    // Add new trait refs
+    // Add new trait refs that aren't already present
     for trait_ref in additional.bound_trait_refs {
-        if seen_traits.insert(trait_ref.clone()) {
+        if !seen_traits.contains(&trait_ref) {
             base.bound_trait_refs.push(trait_ref);
         }
     }
 
-    // Merge params
+    // Merge params - only extend existing params or add truly new type params
+    // (skip Self since it's a keyword, not a user-defined type parameter)
     for new_param in additional.params {
+        if new_param.name == "Self" {
+            continue;
+        }
         if let Some(existing) = base.params.iter_mut().find(|p| p.name == new_param.name) {
             // Extend existing param's bounds
             for bound in new_param.bounds {
@@ -562,7 +575,7 @@ pub fn merge_parsed_generics(base: &mut ParsedGenerics, additional: ParsedGeneri
                 }
             }
         } else {
-            // Add new param
+            // Add new param from where clause (e.g., `where U: Default` when U not in inline generics)
             base.params.push(new_param);
         }
     }
@@ -932,7 +945,7 @@ pub fn extract_type_references(
 }
 
 /// Check if a type name is a Rust primitive type
-fn is_primitive_type(name: &str) -> bool {
+pub(crate) fn is_primitive_type(name: &str) -> bool {
     matches!(
         name,
         "bool"
@@ -953,5 +966,6 @@ fn is_primitive_type(name: &str) -> bool {
             | "f32"
             | "f64"
             | "Self"
+            | "()"
     )
 }

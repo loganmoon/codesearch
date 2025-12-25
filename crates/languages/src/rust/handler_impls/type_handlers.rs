@@ -15,7 +15,7 @@ use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_generics_with_bounds, extract_preceding_doc_comments,
     extract_visibility, extract_where_clause_bounds, find_capture_node, format_generic_param,
-    merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
+    is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
@@ -836,30 +836,4 @@ fn is_valid_type_name(name: &str) -> bool {
             .chars()
             .next()
             .is_some_and(|c| c.is_alphabetic() || c == '_')
-}
-
-/// Check if a type name is a Rust primitive type
-fn is_primitive_type(name: &str) -> bool {
-    matches!(
-        name,
-        "bool"
-            | "char"
-            | "str"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u128"
-            | "usize"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i128"
-            | "isize"
-            | "f32"
-            | "f64"
-            | "Self"
-            | "()"
-    )
 }

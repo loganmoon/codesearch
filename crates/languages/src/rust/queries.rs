@@ -41,6 +41,7 @@ pub const TRAIT_QUERY: &str = r#"
   name: (type_identifier) @name
   type_parameters: (type_parameters)? @generics
   bounds: (trait_bounds)? @bounds
+  (where_clause)? @where
   body: (declaration_list) @trait_body
 ) @trait
 "#;

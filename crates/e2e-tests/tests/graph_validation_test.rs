@@ -23,7 +23,6 @@ const TEST_REPO_REF: &str = "1.0.100";
 const TEST_PACKAGE_NAME: &str = "anyhow";
 
 /// Clone a test repository to a temporary directory with unique suffix.
-/// Uses git2 crate instead of shelling out to git CLI for safety.
 fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
     let repo_dir = PathBuf::from(format!("/tmp/graph-validation-test-repo-{suffix}"));
 

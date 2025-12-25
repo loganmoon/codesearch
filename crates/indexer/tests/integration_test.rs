@@ -12,7 +12,6 @@ use tempfile::TempDir;
 use tokio::fs;
 
 /// Initialize a git repository in the given path with an initial commit.
-/// This uses the git2 crate instead of shelling out to the git CLI.
 fn init_git_repo(repo_path: &Path) {
     let repo = Repository::init(repo_path).unwrap();
 
@@ -466,7 +465,7 @@ pub fn test_function_{i}() -> i32 {{
             .unwrap();
     }
 
-    // Initialize Git repo using git2 (safe, doesn't affect CWD)
+    // Initialize git repository
     init_git_repo(repo_path);
 
     // Create indexer with batch_size=10
@@ -544,7 +543,7 @@ async fn test_walker_error_resilience() {
     .await
     .unwrap();
 
-    // Initialize Git repo using git2 (safe, doesn't affect CWD)
+    // Initialize git repository
     init_git_repo(repo_path);
 
     // Create indexer
@@ -620,7 +619,7 @@ async fn test_symlink_exclusion() {
         .await
         .unwrap();
 
-    // Initialize Git repo using git2 (safe, doesn't affect CWD)
+    // Initialize git repository
     init_git_repo(repo_path);
 
     // Create indexer

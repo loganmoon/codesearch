@@ -17,7 +17,6 @@ use tempfile::TempDir;
 use tokio::fs;
 
 // Helper to create a test repository directory.
-// Uses git2 crate instead of shelling out to git CLI for safety.
 async fn create_test_repo() -> Result<TempDir> {
     let temp_dir = TempDir::new()?;
     let repo_path = temp_dir.path();
@@ -259,7 +258,7 @@ async fn test_repository_registration_success() -> Result<()> {
     // Create initial commit (required for repository)
     fs::write(repo_dir.path().join("test.txt"), "test content").await?;
 
-    // Use git2 to add and commit (safe, doesn't affect CWD)
+    // Add and commit using git2
     let repo = Repository::open(repo_dir.path())?;
     let mut index = repo.index()?;
     index.add_all(["."], git2::IndexAddOption::DEFAULT, None)?;

@@ -8,7 +8,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::common::import_map::{parse_file_imports, resolve_reference, ImportMap};
+use crate::common::import_map::{parse_file_imports, resolve_rust_reference, ImportMap};
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
     extract_function_calls, extract_function_modifiers, extract_function_parameters,
@@ -26,8 +26,34 @@ use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
+/// Compose a full prefix from package, module, and AST scope components
+///
+/// Joins non-empty components with the separator. Used to build the full
+/// qualified name prefix for impl blocks.
+fn compose_full_prefix(
+    package: Option<&str>,
+    module: Option<&str>,
+    scope: &str,
+    separator: &str,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if let Some(pkg) = package {
+        if !pkg.is_empty() {
+            parts.push(pkg);
+        }
+    }
+    if let Some(mod_path) = module {
+        if !mod_path.is_empty() {
+            parts.push(mod_path);
+        }
+    }
+    if !scope.is_empty() {
+        parts.push(scope);
+    }
+    parts.join(separator)
+}
+
 /// Process an inherent impl block query match and extract entities
-#[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
 pub fn handle_impl_impl(
     query_match: &QueryMatch,
@@ -52,16 +78,27 @@ pub fn handle_impl_impl(
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
     // Build ImportMap from file's imports for qualified name resolution
     let import_map = get_file_import_map(impl_node, source);
 
     // Resolve for_type through imports (strip generics first for resolution)
+    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
     let for_type_base = for_type_raw
         .split('<')
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    let for_type_resolved = resolve_reference(for_type_base, &import_map, None, "::");
+    let for_type_resolved = resolve_rust_reference(
+        for_type_base,
+        &import_map,
+        None,
+        package_name,
+        module_path.as_deref(),
+    );
 
     // Keep original for display, but store resolved for relationships
     let for_type = for_type_raw.clone();
@@ -76,6 +113,10 @@ pub fn handle_impl_impl(
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
 
+    // Build full prefix including package, module, and AST scope
+    let full_prefix =
+        compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
+
     // Build generic bounds suffix for disambiguation
     let has_bounds = generics.iter().any(|g| g.contains(':'));
     let bounds_suffix = if has_bounds {
@@ -84,10 +125,10 @@ pub fn handle_impl_impl(
         String::new()
     };
 
-    let impl_qualified_name = if parent_scope.is_empty() {
+    let impl_qualified_name = if full_prefix.is_empty() {
         format!("impl {for_type_resolved}{bounds_suffix}")
     } else {
-        format!("{parent_scope}::impl {for_type_resolved}{bounds_suffix}")
+        format!("{full_prefix}::impl {for_type_resolved}{bounds_suffix}")
     };
 
     // Extract all methods from impl body
@@ -135,10 +176,10 @@ pub fn handle_impl_impl(
         .repository_id(repository_id.to_string())
         .name(for_type)
         .qualified_name(impl_qualified_name.clone())
-        .parent_scope(if parent_scope.is_empty() {
+        .parent_scope(if full_prefix.is_empty() {
             None
         } else {
-            Some(parent_scope)
+            Some(full_prefix)
         })
         .entity_type(EntityType::Impl)
         .location(location)
@@ -158,7 +199,6 @@ pub fn handle_impl_impl(
 }
 
 /// Process a trait impl block query match and extract entities
-#[allow(unused_variables)]
 #[allow(clippy::too_many_arguments)]
 pub fn handle_impl_trait_impl(
     query_match: &QueryMatch,
@@ -182,24 +222,42 @@ pub fn handle_impl_trait_impl(
         .and_then(|node| node_to_text(node, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
     // Build ImportMap from file's imports for qualified name resolution
     let import_map = get_file_import_map(impl_node, source);
 
     // Resolve for_type through imports (strip generics first for resolution)
+    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
     let for_type_base = for_type_raw
         .split('<')
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    let for_type_resolved = resolve_reference(for_type_base, &import_map, None, "::");
+    let for_type_resolved = resolve_rust_reference(
+        for_type_base,
+        &import_map,
+        None,
+        package_name,
+        module_path.as_deref(),
+    );
 
     // Resolve trait_name through imports (strip generics first for resolution)
+    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
     let trait_name_base = trait_name_raw
         .split('<')
         .next()
         .unwrap_or(&trait_name_raw)
         .trim();
-    let trait_name_resolved = resolve_reference(trait_name_base, &import_map, None, "::");
+    let trait_name_resolved = resolve_rust_reference(
+        trait_name_base,
+        &import_map,
+        None,
+        package_name,
+        module_path.as_deref(),
+    );
 
     // Keep original for display
     let for_type = for_type_raw.clone();
@@ -214,6 +272,10 @@ pub fn handle_impl_trait_impl(
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
 
+    // Build full prefix including package, module, and AST scope
+    let full_prefix =
+        compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
+
     // Build generic bounds suffix for disambiguation
     let has_bounds = generics.iter().any(|g| g.contains(':'));
     let bounds_suffix = if has_bounds {
@@ -222,10 +284,10 @@ pub fn handle_impl_trait_impl(
         String::new()
     };
 
-    let impl_qualified_name = if parent_scope.is_empty() {
+    let impl_qualified_name = if full_prefix.is_empty() {
         format!("<{for_type_resolved} as {trait_name_resolved}{bounds_suffix}>")
     } else {
-        format!("{parent_scope}::<{for_type_resolved} as {trait_name_resolved}{bounds_suffix}>")
+        format!("{full_prefix}::<{for_type_resolved} as {trait_name_resolved}{bounds_suffix}>")
     };
 
     // Extract all methods from impl body
@@ -276,10 +338,10 @@ pub fn handle_impl_trait_impl(
         .repository_id(repository_id.to_string())
         .name(format!("{trait_name} for {for_type}"))
         .qualified_name(impl_qualified_name.clone())
-        .parent_scope(if parent_scope.is_empty() {
+        .parent_scope(if full_prefix.is_empty() {
             None
         } else {
-            Some(parent_scope)
+            Some(full_prefix)
         })
         .entity_type(EntityType::Impl)
         .location(location)

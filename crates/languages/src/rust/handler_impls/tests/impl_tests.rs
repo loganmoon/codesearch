@@ -518,3 +518,114 @@ impl<T: Clone> Container<T> {
         new_methods[0].qualified_name, new_methods[1].qualified_name
     );
 }
+
+// ============================================================================
+// Generic Bounds Extraction Tests
+// ============================================================================
+
+#[test]
+fn test_impl_with_inline_generic_bounds() {
+    let source = r#"
+use std::clone::Clone;
+use std::marker::Send;
+
+struct Container<T> {
+    value: T,
+}
+
+impl<T: Clone + Send> Container<T> {
+    fn get(&self) -> T {
+        self.value.clone()
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::IMPL_QUERY, handle_impl_impl)
+        .expect("Failed to extract impl");
+
+    // Find the impl block
+    let impl_entity = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .expect("Should have impl block");
+
+    // Check generic_params (backward-compat raw strings)
+    assert!(impl_entity.metadata.is_generic);
+
+    // Check generic_bounds (structured)
+    let bounds = &impl_entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound"
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Send")),
+        "T should have Send bound"
+    );
+
+    // Check uses_types includes bound traits
+    let uses_types_json = impl_entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some(), "Should have uses_types");
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Send")),
+        "uses_types should include Send"
+    );
+}
+
+#[test]
+fn test_impl_trait_with_where_bounds() {
+    let source = r#"
+use std::fmt::Debug;
+use std::clone::Clone;
+
+struct Container<T> {
+    value: T,
+}
+
+impl<T, U> MyTrait<U> for Container<T>
+where
+    T: Clone + Debug,
+    U: Default,
+{
+    fn process(&self) -> U {
+        U::default()
+    }
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::IMPL_TRAIT_QUERY, handle_impl_trait_impl)
+        .expect("Failed to extract trait impl");
+
+    // Find the impl block
+    let impl_entity = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .expect("Should have impl block");
+
+    // Check generic_bounds includes where clause bounds
+    let bounds = &impl_entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound from where clause"
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Debug")),
+        "T should have Debug bound from where clause"
+    );
+    assert!(bounds.contains_key("U"), "Should have bounds for U");
+    let u_bounds = bounds.get("U").unwrap();
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Default")),
+        "U should have Default bound from where clause"
+    );
+}

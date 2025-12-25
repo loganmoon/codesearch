@@ -28,7 +28,6 @@ pub(crate) mod node_kinds {
     pub const IDENTIFIER: &str = "identifier";
     pub const TYPE_IDENTIFIER: &str = "type_identifier";
     pub const SCOPED_IDENTIFIER: &str = "scoped_identifier";
-    pub const SCOPED_TYPE_IDENTIFIER: &str = "scoped_type_identifier";
 
     // Field and variant related
     pub const FIELD_DECLARATION: &str = "field_declaration";
@@ -36,20 +35,17 @@ pub(crate) mod node_kinds {
     pub const ORDERED_FIELD_DECLARATION_LIST: &str = "ordered_field_declaration_list";
     pub const ENUM_VARIANT: &str = "enum_variant";
 
-    // Type parameters and generics
-    pub const TYPE_PARAMETER: &str = "type_parameter";
-    pub const LIFETIME_PARAMETER: &str = "lifetime_parameter";
-    pub const CONST_PARAMETER: &str = "const_parameter";
-    pub const LIFETIME: &str = "lifetime";
-    pub const CONSTRAINED_TYPE_PARAMETER: &str = "constrained_type_parameter";
-    pub const OPTIONAL_TYPE_PARAMETER: &str = "optional_type_parameter";
-
     // Trait members
     pub const ASSOCIATED_TYPE: &str = "associated_type";
 
     // Comments
     pub const LINE_COMMENT: &str = "line_comment";
     pub const BLOCK_COMMENT: &str = "block_comment";
+
+    // Doc comment markers (children of line_comment/block_comment)
+    pub const OUTER_DOC_COMMENT_MARKER: &str = "outer_doc_comment_marker";
+    pub const INNER_DOC_COMMENT_MARKER: &str = "inner_doc_comment_marker";
+    pub const DOC_COMMENT: &str = "doc_comment";
 }
 
 // ============================================================================
@@ -76,6 +72,7 @@ pub(crate) mod capture_names {
     pub const IMPL_TRAIT: &str = "impl_trait";
     pub const IMPL_BODY: &str = "impl_body";
     pub const TYPE: &str = "type";
+    pub const WHERE: &str = "where";
 }
 
 // ============================================================================
@@ -115,19 +112,6 @@ pub(crate) mod special_idents {
 }
 
 // ============================================================================
-// Documentation Comment Prefixes
-// ============================================================================
-
-/// Documentation comment prefixes
-pub(crate) mod doc_prefixes {
-    pub const LINE_OUTER: &str = "///";
-    pub const LINE_INNER: &str = "//!";
-    pub const BLOCK_OUTER_START: &str = "/**";
-    pub const BLOCK_INNER_START: &str = "/*!";
-    pub const BLOCK_END: &str = "*/";
-}
-
-// ============================================================================
 // Punctuation Tokens
 // ============================================================================
 
@@ -135,8 +119,15 @@ pub(crate) mod doc_prefixes {
 pub(crate) mod punctuation {
     pub const OPEN_PAREN: &str = "(";
     pub const CLOSE_PAREN: &str = ")";
-    pub const OPEN_ANGLE: &str = "<";
-    pub const CLOSE_ANGLE: &str = ">";
     pub const COMMA: &str = ",";
-    pub const PLUS: &str = "+";
+}
+
+// ============================================================================
+// Field Name Constants
+// ============================================================================
+
+/// Tree-sitter field names for node child access via `child_by_field_name`
+pub(crate) mod field_names {
+    pub const PATTERN: &str = "pattern";
+    pub const TYPE: &str = "type";
 }

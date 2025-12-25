@@ -147,6 +147,9 @@ pub struct EntityMetadata {
     pub is_const: bool,
     pub is_generic: bool,
     pub generic_params: Vec<String>,
+    /// Structured generic bounds: maps type parameter name to list of trait bounds.
+    /// E.g., for `<T: Clone + Send>` this would be `{"T": ["Clone", "Send"]}`.
+    pub generic_bounds: ImHashMap<String, Vec<String>>,
     pub decorators: Vec<String>,
     pub attributes: ImHashMap<String, String>,
 }

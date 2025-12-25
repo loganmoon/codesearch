@@ -12,6 +12,7 @@ pub const FUNCTION_QUERY: &str = r#"
   type_parameters: (type_parameters)? @generics
   parameters: (parameters) @params
   return_type: (_)? @return
+  (where_clause)? @where
   body: (block) @body
 ) @function
 "#;
@@ -40,6 +41,7 @@ pub const TRAIT_QUERY: &str = r#"
   name: (type_identifier) @name
   type_parameters: (type_parameters)? @generics
   bounds: (trait_bounds)? @bounds
+  (where_clause)? @where
   body: (declaration_list) @trait_body
 ) @trait
 "#;
@@ -51,6 +53,7 @@ pub const ENUM_QUERY: &str = r#"
   "enum"
   name: (type_identifier) @name
   type_parameters: (type_parameters)? @generics
+  (where_clause)? @where
   body: (enum_variant_list) @enum_body
 ) @enum
 "#;
@@ -60,6 +63,7 @@ pub const IMPL_QUERY: &str = r#"
 (impl_item
   type_parameters: (type_parameters)? @generics
   type: (_) @type
+  (where_clause)? @where
   body: (declaration_list) @impl_body
 ) @impl
 "#;
@@ -71,6 +75,7 @@ pub const IMPL_TRAIT_QUERY: &str = r#"
   trait: (_) @trait
   "for"
   type: (_) @type
+  (where_clause)? @where
   body: (declaration_list) @impl_body
 ) @impl_trait
 "#;

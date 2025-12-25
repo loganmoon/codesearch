@@ -285,14 +285,18 @@ pub fn extract_imports_relationships(entity: &CodeEntity) -> Vec<Relationship> {
 
     if entity.entity_type == EntityType::Module {
         if let Some(imports_str) = entity.metadata.attributes.get("imports") {
-            for import_path in imports_str.split(',') {
-                let import_path = import_path.trim();
+            // Parse as JSON array (format: ["import1", "import2"])
+            let imports: Vec<String> = match serde_json::from_str(imports_str) {
+                Ok(i) => i,
+                Err(_) => return relationships,
+            };
 
+            for import_path in imports {
                 relationships.push(Relationship {
                     rel_type: "IMPORTS".to_string(),
                     from_id: entity.entity_id.clone(),
                     to_id: None,
-                    to_name: Some(import_path.to_string()),
+                    to_name: Some(import_path),
                     properties: HashMap::new(),
                 });
             }
@@ -485,6 +489,89 @@ mod tests {
 
         let relationships = extract_implements_relationships(&function);
 
+        assert_eq!(relationships.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_imports_relationships() {
+        let mut metadata = EntityMetadata::default();
+        metadata.attributes.insert(
+            "imports".to_string(),
+            r#"["std::io", "std::collections::HashMap"]"#.to_string(),
+        );
+
+        let module = CodeEntityBuilder::default()
+            .entity_id("module_id".to_string())
+            .repository_id("test_repo".to_string())
+            .name("my_module".to_string())
+            .qualified_name("crate::my_module".to_string())
+            .entity_type(EntityType::Module)
+            .language(Language::Rust)
+            .file_path(PathBuf::from("src/my_module.rs"))
+            .location(SourceLocation {
+                start_line: 1,
+                start_column: 0,
+                end_line: 10,
+                end_column: 0,
+            })
+            .visibility(Visibility::Public)
+            .metadata(metadata)
+            .build()
+            .expect("Failed to build test entity");
+
+        let relationships = extract_imports_relationships(&module);
+
+        assert_eq!(relationships.len(), 2);
+        assert_eq!(relationships[0].rel_type, "IMPORTS");
+        assert_eq!(relationships[0].from_id, "module_id");
+        assert_eq!(relationships[0].to_name, Some("std::io".to_string()));
+        assert_eq!(
+            relationships[1].to_name,
+            Some("std::collections::HashMap".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_imports_relationships_empty() {
+        let module = create_test_entity(
+            "module_id",
+            "my_module",
+            "crate::my_module",
+            EntityType::Module,
+            None,
+        );
+
+        let relationships = extract_imports_relationships(&module);
+        assert_eq!(relationships.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_imports_relationships_wrong_entity_type() {
+        let mut metadata = EntityMetadata::default();
+        metadata
+            .attributes
+            .insert("imports".to_string(), r#"["std::io"]"#.to_string());
+
+        let function = CodeEntityBuilder::default()
+            .entity_id("func_id".to_string())
+            .repository_id("test_repo".to_string())
+            .name("my_function".to_string())
+            .qualified_name("crate::my_function".to_string())
+            .entity_type(EntityType::Function)
+            .language(Language::Rust)
+            .file_path(PathBuf::from("src/lib.rs"))
+            .location(SourceLocation {
+                start_line: 1,
+                start_column: 0,
+                end_line: 10,
+                end_column: 0,
+            })
+            .visibility(Visibility::Public)
+            .metadata(metadata)
+            .build()
+            .expect("Failed to build test entity");
+
+        let relationships = extract_imports_relationships(&function);
         assert_eq!(relationships.len(), 0);
     }
 }

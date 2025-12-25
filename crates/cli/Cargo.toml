@@ -75,3 +75,4 @@ accelerate = ["codesearch-embeddings/accelerate"]
 
 [dev-dependencies]
 tempfile = "3.14.0"
+git2 = { workspace = true }

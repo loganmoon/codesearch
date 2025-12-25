@@ -15,27 +15,47 @@ use std::path::Path;
 use tempfile::TempDir;
 use tokio::fs;
 
+/// Git test utilities using git2 library (worktree-safe)
+mod git_utils {
+    use git2::{Repository, Signature};
+    use std::path::Path;
+
+    /// Initialize a git repository with user config
+    pub fn init_repo(path: &Path) -> Result<Repository, git2::Error> {
+        let repo = Repository::init(path)?;
+        {
+            let mut config = repo.config()?;
+            config.set_str("user.email", "test@example.com")?;
+            config.set_str("user.name", "Test User")?;
+        }
+        Ok(repo)
+    }
+
+    /// Stage all files and create a commit
+    pub fn commit_all(repo: &Repository, message: &str) -> Result<git2::Oid, git2::Error> {
+        let mut index = repo.index()?;
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let sig = Signature::now("Test User", "test@example.com")?;
+
+        let parent_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+
+        match parent_commit {
+            Some(parent) => repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent]),
+            None => repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[]),
+        }
+    }
+}
+
 // Helper to create a test repository directory
 async fn create_test_repo() -> Result<TempDir> {
     let temp_dir = TempDir::new()?;
     let repo_path = temp_dir.path();
 
-    // Initialize git repository
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["init"])
-        .output()?;
-
-    // Configure git user
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["config", "user.email", "test@example.com"])
-        .output()?;
-
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["config", "user.name", "Test User"])
-        .output()?;
+    // Initialize git repository using git2 (worktree-safe)
+    git_utils::init_repo(repo_path)?;
 
     Ok(temp_dir)
 }
@@ -263,16 +283,10 @@ async fn test_repository_registration_success() -> Result<()> {
     let config_dir = create_config_dir().await?;
     let config_path = config_dir.path().join("codesearch.toml");
 
-    // Create initial commit (required for repository)
+    // Create initial commit (required for repository) using git2 (worktree-safe)
     fs::write(repo_dir.path().join("test.txt"), "test content").await?;
-    std::process::Command::new("git")
-        .current_dir(repo_dir.path())
-        .args(["add", "."])
-        .output()?;
-    std::process::Command::new("git")
-        .current_dir(repo_dir.path())
-        .args(["commit", "-m", "Initial commit"])
-        .output()?;
+    let repo = git2::Repository::open(repo_dir.path())?;
+    git_utils::commit_all(&repo, "Initial commit")?;
 
     // Call ensure_storage_initialized - full happy path
     let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;

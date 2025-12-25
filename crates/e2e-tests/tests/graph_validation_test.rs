@@ -6,7 +6,6 @@
 //! Run with: cargo test --manifest-path crates/e2e-tests/Cargo.toml graph_validation -- --ignored --nocapture
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +21,10 @@ const TEST_REPO_REF: &str = "1.0.100";
 const TEST_PACKAGE_NAME: &str = "anyhow";
 
 /// Clone a test repository to a temporary directory with unique suffix
+/// Uses git2 library instead of shell commands (worktree-safe)
 fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
+    use git2::{build::RepoBuilder, FetchOptions, RemoteCallbacks};
+
     let repo_dir = PathBuf::from(format!("/tmp/graph-validation-test-repo-{suffix}"));
 
     // Clean up existing directory
@@ -32,22 +34,38 @@ fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
 
     println!("Cloning test repository: {TEST_REPO_URL} @ {TEST_REPO_REF}");
 
-    let status = Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            TEST_REPO_REF,
-            TEST_REPO_URL,
-            repo_dir.to_str().unwrap(),
-        ])
-        .status()
-        .context("Failed to run git clone")?;
+    // Set up fetch options for shallow clone
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.transfer_progress(|stats| {
+        if stats.received_objects() == stats.total_objects() {
+            print!("Resolving deltas {}/{}\r", stats.indexed_deltas(), stats.total_deltas());
+        } else {
+            print!(
+                "Received {}/{} objects ({}) in {} bytes\r",
+                stats.received_objects(),
+                stats.total_objects(),
+                stats.indexed_objects(),
+                stats.received_bytes()
+            );
+        }
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        true
+    });
 
-    if !status.success() {
-        anyhow::bail!("git clone failed");
-    }
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.remote_callbacks(callbacks);
+    fetch_opts.depth(1); // Shallow clone
+
+    // Clone with specific branch/tag
+    let mut builder = RepoBuilder::new();
+    builder.fetch_options(fetch_opts);
+    builder.branch(TEST_REPO_REF);
+
+    builder
+        .clone(TEST_REPO_URL, &repo_dir)
+        .context("Failed to clone repository with git2")?;
+
+    println!(); // Newline after progress
 
     // Verify Cargo.toml exists
     if !repo_dir.join("Cargo.toml").exists() {

@@ -43,3 +43,6 @@ walkdir = "2.5"
 # SCIP parsing for graph validation
 scip = "0.6"
 protobuf = "3.7"
+
+# Git operations (use library instead of shell commands for worktree compatibility)
+git2 = "0.19"

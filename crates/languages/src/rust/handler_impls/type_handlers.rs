@@ -608,22 +608,35 @@ fn parse_enum_variant(node: Node, source: &str) -> Option<VariantInfo> {
 
 /// Extract trait bounds
 fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
-    find_capture_node(ctx.query_match, ctx.query, capture_names::BOUNDS)
-        .map(|node| {
-            let mut cursor = node.walk();
-            node.children(&mut cursor)
-                .filter_map(|child| {
-                    match child.kind() {
-                        node_kinds::TYPE_IDENTIFIER
-                        | node_kinds::SCOPED_TYPE_IDENTIFIER
-                        | node_kinds::LIFETIME => node_to_text(child, ctx.source).ok(),
-                        punctuation::PLUS => None, // Skip operators
-                        _ => None,
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(bounds_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::BOUNDS)
+    else {
+        return Vec::new();
+    };
+
+    // Query for type identifiers within trait bounds
+    let query_source = r#"
+        [(type_identifier) (scoped_type_identifier) (lifetime)] @bound
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match tree_sitter::Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut bounds = Vec::new();
+
+    let mut matches = cursor.matches(&query, bounds_node, ctx.source.as_bytes());
+    while let Some(m) = streaming_iterator::StreamingIterator::next(&mut matches) {
+        for capture in m.captures {
+            if let Ok(text) = capture.node.utf8_text(ctx.source.as_bytes()) {
+                bounds.push(text.to_string());
+            }
+        }
+    }
+
+    bounds
 }
 
 /// Extract trait members (associated types and methods)

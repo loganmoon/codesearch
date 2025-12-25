@@ -250,3 +250,66 @@ pub enum ConnectionState {
     assert!(doc.contains("state of a connection"));
     assert!(doc.contains("lifecycle"));
 }
+
+// ============================================================================
+// Generic Bounds Extraction Tests
+// ============================================================================
+
+#[test]
+fn test_enum_with_generic_bounds() {
+    let source = r#"
+use std::clone::Clone;
+use std::fmt::Debug;
+
+enum Container<T: Clone, U>
+where
+    U: Debug,
+{
+    Value(T),
+    Debug(U),
+    Empty,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
+        .expect("Failed to extract enum");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Container");
+    assert_eq!(entity.entity_type, EntityType::Enum);
+
+    // Check generic_params (backward-compat raw strings)
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check generic_bounds (structured) - T has inline, U has where clause
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound from inline generic"
+    );
+
+    assert!(bounds.contains_key("U"), "Should have bounds for U");
+    let u_bounds = bounds.get("U").unwrap();
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Debug")),
+        "U should have Debug bound from where clause"
+    );
+
+    // Check uses_types includes bound traits
+    let uses_types_json = entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some(), "Should have uses_types");
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Debug")),
+        "uses_types should include Debug"
+    );
+}

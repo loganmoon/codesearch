@@ -139,11 +139,25 @@ where
     // Check generics
     assert!(entity.metadata.is_generic);
     assert_eq!(entity.metadata.generic_params.len(), 2);
-    assert!(entity
-        .metadata
-        .generic_params
-        .contains(&"T: Clone".to_string()));
-    assert!(entity.metadata.generic_params.contains(&"U".to_string()));
+    // With bounds extraction, T has inline bound "Clone", U has where clause bound "Debug"
+    assert!(
+        entity
+            .metadata
+            .generic_params
+            .iter()
+            .any(|p| p.starts_with("T:") && p.contains("Clone")),
+        "T should have Clone bound, got: {:?}",
+        entity.metadata.generic_params
+    );
+    assert!(
+        entity
+            .metadata
+            .generic_params
+            .iter()
+            .any(|p| p.starts_with("U:") && p.contains("Debug")),
+        "U should have Debug bound from where clause, got: {:?}",
+        entity.metadata.generic_params
+    );
 
     // Check signature
     let sig = entity
@@ -273,4 +287,165 @@ pub(crate) fn crate_public() {}
     assert_eq!(entities[0].visibility, Visibility::Public);
     assert_eq!(entities[1].visibility, Visibility::Private);
     assert_eq!(entities[2].visibility, Visibility::Public); // pub(crate) is still public
+}
+
+// ============================================================================
+// Generic Bounds Extraction Tests
+// ============================================================================
+
+#[test]
+fn test_generic_function_with_inline_bounds() {
+    // Include imports so trait resolution works
+    let source = r#"
+use std::clone::Clone;
+use std::marker::Send;
+
+fn process<T: Clone + Send, U>(item: T, other: U) -> T {
+    item.clone()
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Check generic_params (backward-compat raw strings)
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check generic_bounds (structured) - traits resolved to full paths
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound"
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Send")),
+        "T should have Send bound"
+    );
+    // U has no bounds, so should not be in generic_bounds
+    assert!(!bounds.contains_key("U"));
+
+    // Check uses_types includes bound traits
+    let uses_types_json = entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some(), "Should have uses_types");
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Send")),
+        "uses_types should include Send"
+    );
+}
+
+#[test]
+fn test_generic_function_with_where_clause() {
+    let source = r#"
+use std::fmt::Debug;
+use std::clone::Clone;
+use std::marker::Sync;
+
+fn process<T, U>(item: T, other: U) -> T
+where
+    T: Debug,
+    U: Clone + Sync,
+{
+    item
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Check generic_bounds includes where clause bounds
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    assert!(bounds.contains_key("U"), "Should have bounds for U");
+
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Debug")),
+        "T should have Debug bound"
+    );
+
+    let u_bounds = bounds.get("U").unwrap();
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Clone")),
+        "U should have Clone bound"
+    );
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Sync")),
+        "U should have Sync bound"
+    );
+
+    // Check uses_types
+    let uses_types_json = entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some());
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Debug")),
+        "uses_types should include Debug"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Sync")),
+        "uses_types should include Sync"
+    );
+}
+
+#[test]
+fn test_generic_function_with_inline_and_where_clause() {
+    let source = r#"
+fn process<T: Clone>(item: T) -> T
+where
+    T: Debug,
+{
+    item.clone()
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Check generic_bounds merges inline and where clause bounds
+    let bounds = &entity.metadata.generic_bounds;
+    let t_bounds = bounds.get("T").unwrap();
+    // Bounds may be unresolved (just "Clone") or resolved (with prefix) depending on imports
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "Should have inline bound, got: {:?}",
+        t_bounds
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Debug")),
+        "Should have where clause bound, got: {:?}",
+        t_bounds
+    );
+
+    // Check generic_params reflects merged bounds
+    let t_param = entity
+        .metadata
+        .generic_params
+        .iter()
+        .find(|p| p.starts_with("T:"))
+        .expect("Should have T param with bounds");
+    assert!(t_param.contains("Clone"));
+    assert!(t_param.contains("Debug"));
 }

@@ -219,6 +219,9 @@ unsafe trait UnsafeMarker {
 #[test]
 fn test_trait_with_where_clauses() {
     let source = r#"
+use std::clone::Clone;
+use std::fmt::Debug;
+
 trait ComplexBounds<T>
 where
     T: Clone + Debug,
@@ -239,13 +242,19 @@ where
     // Check generics
     assert!(entity.metadata.is_generic);
     assert_eq!(entity.metadata.generic_params.len(), 1);
-    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
 
-    // Check where clause constraints are captured
-    let where_clause = entity.metadata.attributes.get("where_clause");
-    if let Some(where_str) = where_clause {
-        assert!(where_str.contains("Clone") || where_str.contains("Debug"));
-    }
+    // Check generic_bounds includes where clause bounds
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound from where clause"
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Debug")),
+        "T should have Debug bound from where clause"
+    );
 
     // Check methods
     let methods = entity.metadata.attributes.get("methods");
@@ -274,4 +283,61 @@ pub trait Serialize {
     let doc = entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("can be serialized"));
     assert!(doc.contains("enable serialization"));
+}
+
+// ============================================================================
+// Generic Bounds Extraction Tests
+// ============================================================================
+
+#[test]
+fn test_trait_with_generic_bounds() {
+    let source = r#"
+use std::clone::Clone;
+use std::marker::Send;
+
+trait Container<T: Clone + Send, U> {
+    fn get(&self) -> &T;
+    fn other(&self) -> U;
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
+        .expect("Failed to extract trait");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+    assert_eq!(entity.name, "Container");
+
+    // Check generic_params (backward-compat raw strings)
+    assert!(entity.metadata.is_generic);
+    assert_eq!(entity.metadata.generic_params.len(), 2);
+
+    // Check generic_bounds (structured)
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound"
+    );
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Send")),
+        "T should have Send bound"
+    );
+    // U has no bounds, so should not be in generic_bounds
+    assert!(!bounds.contains_key("U"));
+
+    // Check uses_types includes bound traits
+    let uses_types_json = entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some(), "Should have uses_types");
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone"
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Send")),
+        "uses_types should include Send"
+    );
 }

@@ -120,8 +120,25 @@ where
     // Check generics
     assert!(entity.metadata.is_generic);
     assert_eq!(entity.metadata.generic_params.len(), 2);
-    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
-    assert!(entity.metadata.generic_params.contains(&"U".to_string()));
+    // With bounds extraction, where clause bounds are merged into params
+    assert!(
+        entity
+            .metadata
+            .generic_params
+            .iter()
+            .any(|p| p.starts_with("T:") && p.contains("Clone")),
+        "T should have Clone bound from where clause, got: {:?}",
+        entity.metadata.generic_params
+    );
+    assert!(
+        entity
+            .metadata
+            .generic_params
+            .iter()
+            .any(|p| p.starts_with("U:") && p.contains("Debug")),
+        "U should have Debug bound from where clause, got: {:?}",
+        entity.metadata.generic_params
+    );
 
     // Check fields
     let fields_str = entity
@@ -295,4 +312,73 @@ pub struct MixedVisibility {
 
     let crate_field = fields.iter().find(|f| f.name == "crate_field").unwrap();
     assert_eq!(crate_field.visibility, Visibility::Public); // pub(crate) is captured as Public
+}
+
+// ============================================================================
+// Generic Bounds Extraction Tests
+// ============================================================================
+
+#[test]
+fn test_generic_struct_with_where_clause() {
+    let source = r#"
+pub struct Container<T, U>
+where
+    T: Clone,
+    U: Debug + Send,
+{
+    data: T,
+    meta: U,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
+        .expect("Failed to extract struct");
+
+    assert_eq!(entities.len(), 1);
+    let entity = &entities[0];
+
+    // Check generic_bounds includes where clause bounds
+    let bounds = &entity.metadata.generic_bounds;
+    assert!(bounds.contains_key("T"), "Should have bounds for T");
+    assert!(bounds.contains_key("U"), "Should have bounds for U");
+
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Clone")),
+        "T should have Clone bound, got: {:?}",
+        t_bounds
+    );
+
+    let u_bounds = bounds.get("U").unwrap();
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Debug")),
+        "U should have Debug bound, got: {:?}",
+        u_bounds
+    );
+    assert!(
+        u_bounds.iter().any(|b| b.contains("Send")),
+        "U should have Send bound, got: {:?}",
+        u_bounds
+    );
+
+    // Check uses_types includes bound traits
+    let uses_types_json = entity.metadata.attributes.get("uses_types");
+    assert!(uses_types_json.is_some());
+    let uses_types: Vec<String> =
+        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    assert!(
+        uses_types.iter().any(|t| t.contains("Clone")),
+        "uses_types should include Clone, got: {:?}",
+        uses_types
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Debug")),
+        "uses_types should include Debug, got: {:?}",
+        uses_types
+    );
+    assert!(
+        uses_types.iter().any(|t| t.contains("Send")),
+        "uses_types should include Send, got: {:?}",
+        uses_types
+    );
 }

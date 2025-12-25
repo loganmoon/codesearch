@@ -11,9 +11,11 @@
 use crate::common::import_map::{parse_file_imports, resolve_rust_reference, ImportMap};
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
-    extract_function_calls, extract_function_modifiers, extract_function_parameters,
-    extract_generics_from_node, extract_local_var_types, extract_preceding_doc_comments,
-    extract_type_references, find_capture_node, node_to_text, require_capture_node,
+    build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
+    extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
+    extract_local_var_types, extract_preceding_doc_comments, extract_type_references,
+    extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
+    node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -103,13 +105,7 @@ pub fn handle_impl_impl(
     // Keep original for display, but store resolved for relationships
     let for_type = for_type_raw.clone();
 
-    // Extract generics
-    let generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_from_node(node, source))
-        .unwrap_or_default();
-
-    // Build qualified name for the impl block
-    // Use "impl <TypeFQN>" with optional generic bounds to distinguish impl blocks
+    // Build qualified name context
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
 
@@ -117,6 +113,27 @@ pub fn handle_impl_impl(
     let full_prefix =
         compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
 
+    // Extract generics with parsed bounds
+    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
+        .map(|node| extract_generics_with_bounds(node, source, &import_map, Some(&parent_scope)))
+        .unwrap_or_default();
+
+    // Merge where clause bounds if present
+    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
+        let where_bounds =
+            extract_where_clause_bounds(where_node, source, &import_map, Some(&parent_scope));
+        merge_parsed_generics(&mut parsed_generics, where_bounds);
+    }
+
+    // Build backward-compatible generic_params
+    let generics: Vec<String> = parsed_generics
+        .params
+        .iter()
+        .map(format_generic_param)
+        .collect();
+
+    // Build generic_bounds map
+    let generic_bounds = build_generic_bounds_map(&parsed_generics);
     // Build generic bounds suffix for disambiguation
     let has_bounds = generics.iter().any(|g| g.contains(':'));
     let bounds_suffix = if has_bounds {
@@ -159,6 +176,7 @@ pub fn handle_impl_impl(
     let mut metadata = EntityMetadata {
         is_generic: !generics.is_empty(),
         generic_params: generics.clone(),
+        generic_bounds,
         ..Default::default()
     };
 
@@ -170,6 +188,13 @@ pub fn handle_impl_impl(
     metadata
         .attributes
         .insert("implements".to_string(), for_type_resolved.clone());
+
+    // Add trait bounds to uses_types for relationship resolution
+    if !parsed_generics.bound_trait_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -261,12 +286,7 @@ pub fn handle_impl_trait_impl(
     let for_type = for_type_raw.clone();
     let trait_name = trait_name_raw.clone();
 
-    // Extract generics
-    let generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_from_node(node, source))
-        .unwrap_or_default();
-
-    // Build qualified name: "<TypeFQN as TraitFQN>" with optional generic bounds
+    // Build qualified name context
     let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
     let parent_scope = scope_result.parent_scope;
 
@@ -274,6 +294,27 @@ pub fn handle_impl_trait_impl(
     let full_prefix =
         compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
 
+    // Extract generics with parsed bounds
+    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
+        .map(|node| extract_generics_with_bounds(node, source, &import_map, Some(&parent_scope)))
+        .unwrap_or_default();
+
+    // Merge where clause bounds if present
+    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
+        let where_bounds =
+            extract_where_clause_bounds(where_node, source, &import_map, Some(&parent_scope));
+        merge_parsed_generics(&mut parsed_generics, where_bounds);
+    }
+
+    // Build backward-compatible generic_params
+    let generics: Vec<String> = parsed_generics
+        .params
+        .iter()
+        .map(format_generic_param)
+        .collect();
+
+    // Build generic_bounds map
+    let generic_bounds = build_generic_bounds_map(&parsed_generics);
     // Build generic bounds suffix for disambiguation
     let has_bounds = generics.iter().any(|g| g.contains(':'));
     let bounds_suffix = if has_bounds {
@@ -316,6 +357,7 @@ pub fn handle_impl_trait_impl(
     let mut metadata = EntityMetadata {
         is_generic: !generics.is_empty(),
         generic_params: generics.clone(),
+        generic_bounds,
         ..Default::default()
     };
 
@@ -330,6 +372,13 @@ pub fn handle_impl_trait_impl(
     metadata
         .attributes
         .insert("implements_trait".to_string(), trait_name_resolved.clone());
+
+    // Add trait bounds to uses_types for relationship resolution
+    if !parsed_generics.bound_trait_refs.is_empty() {
+        if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)

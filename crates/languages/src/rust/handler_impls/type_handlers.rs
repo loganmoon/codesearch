@@ -13,8 +13,9 @@ use crate::common::entity_building::{
 use crate::common::import_map::{parse_file_imports, resolve_reference, ImportMap};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
-    extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
-    find_capture_node, node_to_text, require_capture_node,
+    build_generic_bounds_map, extract_generics_with_bounds, extract_preceding_doc_comments,
+    extract_visibility, extract_where_clause_bounds, find_capture_node, format_generic_param,
+    merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
@@ -71,13 +72,30 @@ pub fn handle_struct_impl(
     let struct_node = require_capture_node(query_match, query, capture_names::STRUCT)?;
     let import_map = get_file_import_map(struct_node, source);
 
+    // Extract common components for parent_scope
+    let components = extract_common_components(&ctx, capture_names::NAME, struct_node, "rust")?;
+
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
-        let generics = extract_generics(ctx);
+        // Extract generics with parsed bounds
+        let parsed_generics =
+            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+
+        // Build backward-compatible generic_params
+        let generics: Vec<String> = parsed_generics
+            .params
+            .iter()
+            .map(format_generic_param)
+            .collect();
+
+        // Build generic_bounds map
+        let generic_bounds = build_generic_bounds_map(&parsed_generics);
+
         let derives = extract_derives(ctx);
         let (fields, is_tuple) = extract_struct_fields(ctx);
 
         let mut metadata = EntityMetadata::default();
         metadata.generic_params = generics;
+        metadata.generic_bounds = generic_bounds;
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.decorators = derives;
 
@@ -95,11 +113,24 @@ pub fn handle_struct_impl(
             }
 
             // Extract and resolve field types for USES relationships
-            let uses_types = extract_field_type_refs(&fields, &import_map);
+            let mut uses_types = extract_field_type_refs(&fields, &import_map);
+
+            // Add trait bounds to uses_types
+            for trait_ref in &parsed_generics.bound_trait_refs {
+                if !uses_types.contains(trait_ref) {
+                    uses_types.push(trait_ref.clone());
+                }
+            }
+
             if !uses_types.is_empty() {
                 if let Ok(json) = serde_json::to_string(&uses_types) {
                     metadata.attributes.insert("uses_types".to_string(), json);
                 }
+            }
+        } else if !parsed_generics.bound_trait_refs.is_empty() {
+            // No fields but has trait bounds
+            if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+                metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
 
@@ -135,13 +166,30 @@ pub fn handle_enum_impl(
     let enum_node = require_capture_node(query_match, query, capture_names::ENUM)?;
     let import_map = get_file_import_map(enum_node, source);
 
+    // Extract common components for parent_scope
+    let components = extract_common_components(&ctx, capture_names::NAME, enum_node, "rust")?;
+
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
-        let generics = extract_generics(ctx);
+        // Extract generics with parsed bounds
+        let parsed_generics =
+            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+
+        // Build backward-compatible generic_params
+        let generics: Vec<String> = parsed_generics
+            .params
+            .iter()
+            .map(format_generic_param)
+            .collect();
+
+        // Build generic_bounds map
+        let generic_bounds = build_generic_bounds_map(&parsed_generics);
+
         let derives = extract_derives(ctx);
         let variants = extract_enum_variants(ctx);
 
         let mut metadata = EntityMetadata::default();
         metadata.generic_params = generics;
+        metadata.generic_bounds = generic_bounds;
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.decorators = derives;
 
@@ -152,11 +200,24 @@ pub fn handle_enum_impl(
             }
 
             // Extract and resolve field types from variants for USES relationships
-            let uses_types = extract_variant_type_refs(&variants, &import_map);
+            let mut uses_types = extract_variant_type_refs(&variants, &import_map);
+
+            // Add trait bounds to uses_types
+            for trait_ref in &parsed_generics.bound_trait_refs {
+                if !uses_types.contains(trait_ref) {
+                    uses_types.push(trait_ref.clone());
+                }
+            }
+
             if !uses_types.is_empty() {
                 if let Ok(json) = serde_json::to_string(&uses_types) {
                     metadata.attributes.insert("uses_types".to_string(), json);
                 }
+            }
+        } else if !parsed_generics.bound_trait_refs.is_empty() {
+            // No variants but has trait bounds
+            if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+                metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
 
@@ -187,14 +248,37 @@ pub fn handle_trait_impl(
         source_root,
         repo_root,
     };
+
+    // Build ImportMap from file's imports for type resolution
+    let trait_node = require_capture_node(query_match, query, capture_names::TRAIT)?;
+    let import_map = get_file_import_map(trait_node, source);
+
+    // Extract common components for parent_scope
+    let components = extract_common_components(&ctx, capture_names::NAME, trait_node, "rust")?;
+
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
-        let generics = extract_generics(ctx);
+        // Extract generics with parsed bounds
+        let parsed_generics =
+            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+
+        // Build backward-compatible generic_params
+        let generics: Vec<String> = parsed_generics
+            .params
+            .iter()
+            .map(format_generic_param)
+            .collect();
+
+        // Build generic_bounds map
+        let generic_bounds = build_generic_bounds_map(&parsed_generics);
+
+        // Extract supertrait bounds (trait Foo: Bar + Baz)
         let bounds = extract_trait_bounds(ctx);
         let (associated_types, methods) = extract_trait_members(ctx);
         let is_unsafe = check_trait_is_unsafe(ctx);
 
         let mut metadata = EntityMetadata::default();
         metadata.generic_params = generics;
+        metadata.generic_bounds = generic_bounds;
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.is_abstract = true; // Traits are abstract by nature
 
@@ -220,6 +304,19 @@ pub fn handle_trait_impl(
             metadata
                 .attributes
                 .insert("methods".to_string(), methods.join(","));
+        }
+
+        // Build uses_types from supertrait bounds and generic bounds
+        let mut uses_types: Vec<String> = bounds.clone();
+        for trait_ref in &parsed_generics.bound_trait_refs {
+            if !uses_types.contains(trait_ref) {
+                uses_types.push(trait_ref.clone());
+            }
+        }
+        if !uses_types.is_empty() {
+            if let Ok(json) = serde_json::to_string(&uses_types) {
+                metadata.attributes.insert("uses_types".to_string(), json);
+            }
         }
 
         metadata
@@ -265,11 +362,26 @@ fn build_entity_data(
 // Generic Parameter Extraction
 // ============================================================================
 
-/// Extract generic parameters
-fn extract_generics(ctx: &ExtractionContext) -> Vec<String> {
-    find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
-        .map(|node| extract_generics_from_node(node, ctx.source))
-        .unwrap_or_default()
+/// Extract generic parameters with parsed bounds
+fn extract_generics_with_where(
+    ctx: &ExtractionContext,
+    import_map: &ImportMap,
+    parent_scope: Option<&str>,
+) -> ParsedGenerics {
+    // Extract inline generics
+    let mut parsed_generics =
+        find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
+            .map(|node| extract_generics_with_bounds(node, ctx.source, import_map, parent_scope))
+            .unwrap_or_default();
+
+    // Merge where clause bounds if present
+    if let Some(where_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::WHERE) {
+        let where_bounds =
+            extract_where_clause_bounds(where_node, ctx.source, import_map, parent_scope);
+        merge_parsed_generics(&mut parsed_generics, where_bounds);
+    }
+
+    parsed_generics
 }
 
 // ============================================================================

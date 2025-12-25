@@ -44,6 +44,12 @@ pub(crate) mod node_kinds {
     pub const CONSTRAINED_TYPE_PARAMETER: &str = "constrained_type_parameter";
     pub const OPTIONAL_TYPE_PARAMETER: &str = "optional_type_parameter";
 
+    // Where clauses and trait bounds
+    #[allow(dead_code)] // Used for documentation; where_clause nodes come from query captures
+    pub const WHERE_CLAUSE: &str = "where_clause";
+    pub const WHERE_PREDICATE: &str = "where_predicate";
+    pub const TRAIT_BOUNDS: &str = "trait_bounds";
+
     // Trait members
     pub const ASSOCIATED_TYPE: &str = "associated_type";
 
@@ -76,6 +82,7 @@ pub(crate) mod capture_names {
     pub const IMPL_TRAIT: &str = "impl_trait";
     pub const IMPL_BODY: &str = "impl_body";
     pub const TYPE: &str = "type";
+    pub const WHERE: &str = "where";
 }
 
 // ============================================================================

@@ -12,10 +12,11 @@ use crate::common::entity_building::{
 };
 use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::handler_impls::common::{
-    extract_function_calls, extract_function_modifiers, extract_function_parameters,
-    extract_generics_from_node, extract_local_var_types, extract_preceding_doc_comments,
-    extract_type_references, extract_visibility, find_capture_node, node_to_text,
-    require_capture_node,
+    build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
+    extract_function_parameters, extract_generics_with_bounds, extract_local_var_types,
+    extract_preceding_doc_comments, extract_type_references, extract_visibility,
+    extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
+    node_to_text, require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType, FunctionSignature, Language};
@@ -77,10 +78,41 @@ pub fn handle_function_impl(
             .map(extract_function_modifiers)
             .unwrap_or((false, false, false));
 
-    // Extract generics
-    let generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_from_node(node, source))
+    // Build ImportMap from file's imports for qualified name resolution
+    let import_map = get_file_import_map(function_node, source);
+
+    // Extract generics with parsed bounds
+    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
+        .map(|node| {
+            extract_generics_with_bounds(
+                node,
+                source,
+                &import_map,
+                components.parent_scope.as_deref(),
+            )
+        })
         .unwrap_or_default();
+
+    // Merge where clause bounds if present
+    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
+        let where_bounds = extract_where_clause_bounds(
+            where_node,
+            source,
+            &import_map,
+            components.parent_scope.as_deref(),
+        );
+        merge_parsed_generics(&mut parsed_generics, where_bounds);
+    }
+
+    // Build backward-compatible generic_params (raw strings)
+    let generics: Vec<String> = parsed_generics
+        .params
+        .iter()
+        .map(format_generic_param)
+        .collect();
+
+    // Build generic_bounds map
+    let generic_bounds = build_generic_bounds_map(&parsed_generics);
 
     // Extract parameters
     let parameters = find_capture_node(query_match, query, capture_names::PARAMS)
@@ -91,9 +123,6 @@ pub fn handle_function_impl(
     // Extract return type
     let return_type = find_capture_node(query_match, query, capture_names::RETURN)
         .and_then(|node| node_to_text(node, source).ok());
-
-    // Build ImportMap from file's imports for qualified name resolution
-    let import_map = get_file_import_map(function_node, source);
 
     // Extract local variable types for method call resolution
     let local_vars = extract_local_var_types(function_node, source);
@@ -108,18 +137,26 @@ pub fn handle_function_impl(
     );
 
     // Extract type references for USES relationships
-    let type_refs = extract_type_references(
+    let mut type_refs = extract_type_references(
         function_node,
         source,
         &import_map,
         components.parent_scope.as_deref(),
     );
 
+    // Add trait bounds to type references (they also create USES relationships)
+    for trait_ref in &parsed_generics.bound_trait_refs {
+        if !type_refs.contains(trait_ref) {
+            type_refs.push(trait_ref.clone());
+        }
+    }
+
     // Build metadata
     let mut metadata = EntityMetadata {
         is_async,
         is_const,
         generic_params: generics.clone(),
+        generic_bounds,
         is_generic: !generics.is_empty(),
         ..Default::default()
     };

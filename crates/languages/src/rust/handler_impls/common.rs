@@ -10,7 +10,7 @@
 use crate::rust::handler_impls::constants::{
     capture_names, node_kinds, punctuation, visibility_keywords,
 };
-use codesearch_core::entities::Visibility;
+use codesearch_core::entities::{ReferenceType, SourceLocation, SourceReference, Visibility};
 use codesearch_core::error::Result;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryMatch};
@@ -484,13 +484,14 @@ use std::collections::HashMap;
 /// Extract function calls from a function body using tree-sitter queries
 ///
 /// This version resolves bare identifiers to qualified names using imports and scope.
+/// Returns SourceReferences with location data for disambiguation.
 pub fn extract_function_calls(
     function_node: Node,
     source: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
     local_vars: &HashMap<String, String>, // var_name -> type_name for method resolution
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let query_source = r#"
         (call_expression
           function: (identifier) @bare_callee)
@@ -540,12 +541,20 @@ pub fn extract_function_calls(
             // Bare identifier call like `foo()`
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = resolve_reference(&name, import_map, parent_scope, "::");
-                calls.push(resolved);
+                calls.push(SourceReference {
+                    target: resolved,
+                    location: SourceLocation::from_tree_sitter_node(bare_cap.node),
+                    ref_type: ReferenceType::Call,
+                });
             }
         } else if let Some(scoped_cap) = scoped_callee {
             // Already scoped call like `std::io::read()`
             if let Ok(full_path) = node_to_text(scoped_cap.node, source) {
-                calls.push(full_path);
+                calls.push(SourceReference {
+                    target: full_path,
+                    location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
+                    ref_type: ReferenceType::Call,
+                });
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
             // Method call like `x.bar()`
@@ -558,7 +567,11 @@ pub fn extract_function_calls(
                     // Resolve the type name through imports
                     let resolved_type =
                         resolve_reference(recv_type, import_map, parent_scope, "::");
-                    calls.push(format!("{resolved_type}::{method_name}"));
+                    calls.push(SourceReference {
+                        target: format!("{resolved_type}::{method_name}"),
+                        location: SourceLocation::from_tree_sitter_node(method_cap.node),
+                        ref_type: ReferenceType::Call,
+                    });
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
             }
@@ -675,13 +688,13 @@ fn extract_base_type_name(type_node: Node, source: &str) -> Option<String> {
 /// - Local variable type annotations
 /// - Generic type arguments
 ///
-/// Returns a list of type names (resolved to qualified names via ImportMap)
+/// Returns SourceReferences with location data for disambiguation.
 pub fn extract_type_references(
     function_node: Node,
     source: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
-) -> Vec<String> {
+) -> Vec<SourceReference> {
     let query_source = r#"
         ; Type identifiers in all contexts
         (type_identifier) @type_ref
@@ -720,7 +733,11 @@ pub fn extract_type_references(
                         let resolved =
                             resolve_reference(&type_name, import_map, parent_scope, "::");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(resolved);
+                            type_refs.push(SourceReference {
+                                target: resolved,
+                                location: SourceLocation::from_tree_sitter_node(capture.node),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }
@@ -728,7 +745,11 @@ pub fn extract_type_references(
                     if let Ok(full_path) = node_to_text(capture.node, source) {
                         // Scoped types are already qualified
                         if seen.insert(full_path.clone()) {
-                            type_refs.push(full_path);
+                            type_refs.push(SourceReference {
+                                target: full_path,
+                                location: SourceLocation::from_tree_sitter_node(capture.node),
+                                ref_type: ReferenceType::TypeUsage,
+                            });
                         }
                     }
                 }

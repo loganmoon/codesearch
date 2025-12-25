@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::python::handler_impls::handle_function_impl;
-use codesearch_core::entities::EntityType;
+use codesearch_core::entities::{EntityType, SourceReference};
 
 #[test]
 fn test_simple_function() {
@@ -241,11 +241,11 @@ def process():
     let calls_attr = entity.metadata.attributes.get("calls");
     assert!(calls_attr.is_some(), "Should have calls attribute");
 
-    let calls: Vec<String> =
+    let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should extract both function calls
-    assert!(calls.iter().any(|c| c.contains("helper")));
-    assert!(calls.iter().any(|c| c.contains("print")));
+    assert!(calls.iter().any(|c| c.target.contains("helper")));
+    assert!(calls.iter().any(|c| c.target.contains("print")));
 }
 
 #[test]
@@ -266,10 +266,10 @@ def process():
     let calls_attr = entity.metadata.attributes.get("calls");
     assert!(calls_attr.is_some(), "Should have calls attribute");
 
-    let calls: Vec<String> =
+    let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should resolve through import - absolute imports are marked with external. prefix
-    assert!(calls.contains(&"external.utils.helper".to_string()));
+    assert!(calls.iter().any(|c| c.target == "external.utils.helper"));
 }
 
 // ============================================================================
@@ -295,13 +295,13 @@ def process_user(user: User, request: Request) -> Response:
         "Should have uses_types attribute"
     );
 
-    let uses_types: Vec<String> =
+    let uses_types: Vec<SourceReference> =
         serde_json::from_str(uses_types_attr.unwrap()).expect("Should parse uses_types JSON");
 
     // Should extract non-primitive types from type hints
-    assert!(uses_types.iter().any(|t| t.contains("User")));
-    assert!(uses_types.iter().any(|t| t.contains("Request")));
-    assert!(uses_types.iter().any(|t| t.contains("Response")));
+    assert!(uses_types.iter().any(|t| t.target.contains("User")));
+    assert!(uses_types.iter().any(|t| t.target.contains("Request")));
+    assert!(uses_types.iter().any(|t| t.target.contains("Response")));
 }
 
 #[test]

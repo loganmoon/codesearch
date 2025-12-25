@@ -5,9 +5,35 @@
 use codesearch_embeddings::{EmbeddingManager, MockEmbeddingProvider};
 use codesearch_indexer::{create_indexer, IndexerConfig};
 use codesearch_storage::{MockPostgresClient, PostgresClientTrait};
+use git2::Repository;
+use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
+
+/// Initialize a git repository in the given path with an initial commit.
+fn init_git_repo(repo_path: &Path) {
+    let repo = Repository::init(repo_path).unwrap();
+
+    // Configure git user
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Add all files to the index
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["."], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+
+    // Create initial commit
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+        .unwrap();
+}
 
 fn create_test_embedding_manager() -> Arc<EmbeddingManager> {
     Arc::new(EmbeddingManager::new(
@@ -439,37 +465,8 @@ pub fn test_function_{i}() -> i32 {{
             .unwrap();
     }
 
-    // Initialize Git repo
-    tokio::process::Command::new("git")
-        .args(["init"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
+    // Initialize git repository
+    init_git_repo(repo_path);
 
     // Create indexer with batch_size=10
     let postgres_client = Arc::new(MockPostgresClient::new());
@@ -546,37 +543,8 @@ async fn test_walker_error_resilience() {
     .await
     .unwrap();
 
-    // Initialize Git repo
-    tokio::process::Command::new("git")
-        .args(["init"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
+    // Initialize git repository
+    init_git_repo(repo_path);
 
     // Create indexer
     let postgres_client = Arc::new(MockPostgresClient::new());
@@ -651,37 +619,8 @@ async fn test_symlink_exclusion() {
         .await
         .unwrap();
 
-    // Initialize Git repo
-    tokio::process::Command::new("git")
-        .args(["init"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
-    tokio::process::Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(repo_path)
-        .output()
-        .await
-        .unwrap();
+    // Initialize git repository
+    init_git_repo(repo_path);
 
     // Create indexer
     let postgres_client = Arc::new(MockPostgresClient::new());

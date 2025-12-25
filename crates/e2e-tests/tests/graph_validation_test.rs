@@ -6,9 +6,10 @@
 //! Run with: cargo test --manifest-path crates/e2e-tests/Cargo.toml graph_validation -- --ignored --nocapture
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+
+use git2::{build::RepoBuilder, FetchOptions};
 
 use anyhow::{Context, Result};
 use codesearch_e2e_tests::common::*;
@@ -21,7 +22,7 @@ const TEST_REPO_URL: &str = "https://github.com/dtolnay/anyhow.git";
 const TEST_REPO_REF: &str = "1.0.100";
 const TEST_PACKAGE_NAME: &str = "anyhow";
 
-/// Clone a test repository to a temporary directory with unique suffix
+/// Clone a test repository to a temporary directory with unique suffix.
 fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
     let repo_dir = PathBuf::from(format!("/tmp/graph-validation-test-repo-{suffix}"));
 
@@ -32,22 +33,16 @@ fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
 
     println!("Cloning test repository: {TEST_REPO_URL} @ {TEST_REPO_REF}");
 
-    let status = Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            TEST_REPO_REF,
-            TEST_REPO_URL,
-            repo_dir.to_str().unwrap(),
-        ])
-        .status()
-        .context("Failed to run git clone")?;
+    // Configure shallow clone with depth 1
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.depth(1);
 
-    if !status.success() {
-        anyhow::bail!("git clone failed");
-    }
+    // Clone with specific branch/tag
+    RepoBuilder::new()
+        .fetch_options(fetch_opts)
+        .branch(TEST_REPO_REF)
+        .clone(TEST_REPO_URL, &repo_dir)
+        .context("Failed to clone repository")?;
 
     // Verify Cargo.toml exists
     if !repo_dir.join("Cargo.toml").exists() {

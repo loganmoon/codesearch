@@ -11,31 +11,23 @@
 use anyhow::Result;
 use codesearch::init::ensure_storage_initialized;
 use codesearch_core::config::{Config, EmbeddingsConfig, StorageConfig};
+use git2::Repository;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::fs;
 
-// Helper to create a test repository directory
+// Helper to create a test repository directory.
 async fn create_test_repo() -> Result<TempDir> {
     let temp_dir = TempDir::new()?;
     let repo_path = temp_dir.path();
 
-    // Initialize git repository
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["init"])
-        .output()?;
+    // Initialize git repository using git2
+    let repo = Repository::init(repo_path)?;
 
     // Configure git user
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["config", "user.email", "test@example.com"])
-        .output()?;
-
-    std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args(["config", "user.name", "Test User"])
-        .output()?;
+    let mut config = repo.config()?;
+    config.set_str("user.email", "test@example.com")?;
+    config.set_str("user.name", "Test User")?;
 
     Ok(temp_dir)
 }
@@ -265,14 +257,16 @@ async fn test_repository_registration_success() -> Result<()> {
 
     // Create initial commit (required for repository)
     fs::write(repo_dir.path().join("test.txt"), "test content").await?;
-    std::process::Command::new("git")
-        .current_dir(repo_dir.path())
-        .args(["add", "."])
-        .output()?;
-    std::process::Command::new("git")
-        .current_dir(repo_dir.path())
-        .args(["commit", "-m", "Initial commit"])
-        .output()?;
+
+    // Add and commit using git2
+    let repo = Repository::open(repo_dir.path())?;
+    let mut index = repo.index()?;
+    index.add_all(["."], git2::IndexAddOption::DEFAULT, None)?;
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let sig = repo.signature()?;
+    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
 
     // Call ensure_storage_initialized - full happy path
     let result = ensure_storage_initialized(repo_dir.path(), Some(&config_path), false).await;

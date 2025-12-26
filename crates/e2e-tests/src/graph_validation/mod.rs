@@ -413,9 +413,17 @@ mod entity_type_tests {
         let error = EntityRef::new("anyhow::Error").with_entity_type(EntityType::Struct);
         assert_eq!(extract_module_from_entity(&error), "anyhow");
 
-        // Chain struct
+        // Chain struct in module
         let chain = EntityRef::new("anyhow::chain::Chain").with_entity_type(EntityType::Struct);
         assert_eq!(extract_module_from_entity(&chain), "anyhow::chain");
+
+        // Method on top-level type - drops 2 segments (method + type)
+        let method = EntityRef::new("anyhow::Error::downcast").with_entity_type(EntityType::Method);
+        assert_eq!(extract_module_from_entity(&method), "anyhow");
+
+        // Method on nested type - drops 2 segments
+        let method_nested = EntityRef::new("anyhow::chain::Chain::new").with_entity_type(EntityType::Method);
+        assert_eq!(extract_module_from_entity(&method_nested), "anyhow::chain");
 
         // Module should keep its name (up to 2 segments)
         let module = EntityRef::new("anyhow::error").with_entity_type(EntityType::Module);

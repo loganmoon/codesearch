@@ -374,7 +374,8 @@ fn clean_qualified_name(qualified_name: &str) -> &str {
 ///
 /// For SCIP comparison, we need to map entities to their containing module:
 /// - Module/Package entities: use qualified_name directly (it IS a module)
-/// - Other entities: extract parent module (drop the last segment)
+/// - Methods: drop 2 segments (method name + type name) since methods are on types
+/// - Other entities (functions, types): drop 1 segment (the entity name)
 ///
 /// Then limit to max 2 segments for SCIP's module-level granularity:
 /// - `anyhow::error` -> `anyhow::error`
@@ -397,24 +398,29 @@ pub fn extract_module_from_entity(entity: &EntityRef) -> String {
 
     let segments: Vec<&str> = cleaned.split("::").collect();
 
-    // Determine how many segments to keep based on entity type
-    let module_segments: Vec<&str> = match entity.entity_type() {
-        // Module and Package ARE modules - use all segments (up to limit)
-        Some(EntityType::Module) | Some(EntityType::Package) => {
-            segments.iter().take(2).copied().collect()
-        }
-        // For all other types, drop the last segment (the entity name itself)
-        // to get the parent module
-        _ => {
-            if segments.len() <= 1 {
-                // Top-level entity, return package name
-                segments.clone()
-            } else {
-                // Drop the last segment (entity name), keep up to 2 module segments
-                segments[..segments.len() - 1].iter().take(2).copied().collect()
-            }
-        }
+    // Determine how many segments to drop based on entity type
+    let segments_to_drop = match entity.entity_type() {
+        // Module and Package ARE modules - don't drop any
+        Some(EntityType::Module) | Some(EntityType::Package) => 0,
+        // Methods are on types, so drop 2: method name + type name
+        // e.g., anyhow::Error::downcast -> anyhow
+        // e.g., anyhow::error::Error::new -> anyhow::error
+        Some(EntityType::Method) => 2,
+        // Other entities (functions, types, etc.) - drop 1: the entity name
+        // e.g., anyhow::error::ErrorImpl -> anyhow::error
+        // e.g., anyhow::Error -> anyhow
+        _ => 1,
     };
+
+    let remaining = if segments.len() <= segments_to_drop {
+        // Not enough segments, return package name
+        segments.first().map(|s| vec![*s]).unwrap_or_default()
+    } else {
+        segments[..segments.len() - segments_to_drop].to_vec()
+    };
+
+    // Limit to 2 segments for SCIP comparison
+    let module_segments: Vec<&str> = remaining.iter().take(2).copied().collect();
 
     if module_segments.is_empty() {
         return segments.first().map(|s| s.to_string()).unwrap_or_default();
@@ -550,9 +556,17 @@ mod tests {
         let strct = EntityRef::new("anyhow::error::ErrorImpl").with_entity_type(EntityType::Struct);
         assert_eq!(extract_module_from_entity(&strct), "anyhow::error");
 
-        // Method entity - drops the method name
+        // Method entity - drops 2 segments (method name + type name)
         let method = EntityRef::new("anyhow::chain::Chain::new").with_entity_type(EntityType::Method);
         assert_eq!(extract_module_from_entity(&method), "anyhow::chain");
+
+        // Method on top-level type - drops 2 segments
+        let method_top = EntityRef::new("anyhow::Error::downcast").with_entity_type(EntityType::Method);
+        assert_eq!(extract_module_from_entity(&method_top), "anyhow");
+
+        // Method on deeply nested type
+        let method_deep = EntityRef::new("anyhow::error::ErrorImpl::new").with_entity_type(EntityType::Method);
+        assert_eq!(extract_module_from_entity(&method_deep), "anyhow::error");
 
         // Module entity - keeps module path (up to 2 segments)
         let module = EntityRef::new("anyhow::error").with_entity_type(EntityType::Module);

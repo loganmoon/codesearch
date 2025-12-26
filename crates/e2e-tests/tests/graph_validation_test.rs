@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use git2::{build::RepoBuilder, FetchOptions};
+use git2::build::RepoBuilder;
 
 use anyhow::{Context, Result};
 use codesearch_e2e_tests::common::*;
@@ -19,7 +19,7 @@ use codesearch_e2e_tests::graph_validation::{
 
 /// Test repository: a small, stable Rust project
 const TEST_REPO_URL: &str = "https://github.com/dtolnay/anyhow.git";
-const TEST_REPO_REF: &str = "1.0.100";
+const TEST_REPO_REF: &str = "f2b963a759decf0828efb58a8fdd417fb12f71fb"; // 1.0.99
 const TEST_PACKAGE_NAME: &str = "anyhow";
 
 /// Clone a test repository to a temporary directory with unique suffix.
@@ -33,16 +33,18 @@ fn clone_test_repo(suffix: &str) -> Result<PathBuf> {
 
     println!("Cloning test repository: {TEST_REPO_URL} @ {TEST_REPO_REF}");
 
-    // Configure shallow clone with depth 1
-    let mut fetch_opts = FetchOptions::new();
-    fetch_opts.depth(1);
-
-    // Clone with specific branch/tag
-    RepoBuilder::new()
-        .fetch_options(fetch_opts)
-        .branch(TEST_REPO_REF)
+    // Clone the repository
+    let repo = RepoBuilder::new()
         .clone(TEST_REPO_URL, &repo_dir)
         .context("Failed to clone repository")?;
+
+    // Checkout the specific commit
+    let oid = git2::Oid::from_str(TEST_REPO_REF).context("Invalid commit hash")?;
+    let commit = repo.find_commit(oid).context("Failed to find commit")?;
+    repo.checkout_tree(commit.as_object(), None)
+        .context("Failed to checkout commit")?;
+    repo.set_head_detached(oid)
+        .context("Failed to set HEAD to commit")?;
 
     // Verify Cargo.toml exists
     if !repo_dir.join("Cargo.toml").exists() {

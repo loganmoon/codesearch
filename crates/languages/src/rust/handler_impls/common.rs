@@ -163,7 +163,7 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
 // Structured Generic Bounds Extraction (Query-Based)
 // ============================================================================
 
-use crate::common::import_map::{resolve_reference, ImportMap};
+use crate::common::import_map::{resolve_rust_reference, ImportMap};
 
 /// A parsed generic parameter with its trait bounds
 #[derive(Debug, Clone, Default)]
@@ -179,6 +179,35 @@ pub struct ParsedGenerics {
     pub bound_trait_refs: Vec<String>,
 }
 
+/// Context for resolving Rust references to fully qualified names.
+///
+/// Bundles all the information needed to resolve bare identifiers and
+/// Rust-relative paths (crate::, self::, super::) to absolute qualified names.
+#[derive(Debug, Clone, Copy)]
+pub struct RustResolutionContext<'a> {
+    /// Import map from the current file's use declarations
+    pub import_map: &'a ImportMap,
+    /// Parent scope for unresolved identifiers (e.g., "my_module::MyStruct")
+    pub parent_scope: Option<&'a str>,
+    /// Package/crate name for normalizing crate:: paths (e.g., "anyhow")
+    pub package_name: Option<&'a str>,
+    /// Current module path for normalizing self::/super:: paths (e.g., "error::context")
+    pub current_module: Option<&'a str>,
+}
+
+impl<'a> RustResolutionContext<'a> {
+    /// Resolve a reference using this context
+    pub fn resolve(&self, name: &str) -> String {
+        resolve_rust_reference(
+            name,
+            self.import_map,
+            self.parent_scope,
+            self.package_name,
+            self.current_module,
+        )
+    }
+}
+
 /// Extract generic parameters with bounds using tree-sitter queries.
 ///
 /// Uses queries to capture type parameter names and their trait bounds in one pass,
@@ -186,8 +215,7 @@ pub struct ParsedGenerics {
 pub fn extract_generics_with_bounds(
     node: Node,
     source: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    ctx: &RustResolutionContext,
 ) -> ParsedGenerics {
     // Query captures: param names and their bounds
     // Note: type_parameter contains name field and optional bounds field
@@ -202,15 +230,14 @@ pub fn extract_generics_with_bounds(
         (const_parameter name: (identifier) @const_param)
     "#;
 
-    extract_params_with_bounds(node, source, query_source, import_map, parent_scope)
+    extract_params_with_bounds(node, source, query_source, ctx)
 }
 
 /// Extract bounds from a where_clause node using tree-sitter queries.
 pub fn extract_where_clause_bounds(
     node: Node,
     source: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    ctx: &RustResolutionContext,
 ) -> ParsedGenerics {
     let query_source = r#"
         (where_predicate
@@ -219,7 +246,7 @@ pub fn extract_where_clause_bounds(
                 [(type_identifier) (scoped_type_identifier) (generic_type type: (type_identifier))] @bound))
     "#;
 
-    extract_params_with_bounds(node, source, query_source, import_map, parent_scope)
+    extract_params_with_bounds(node, source, query_source, ctx)
 }
 
 /// Core query execution for extracting parameters and bounds.
@@ -227,8 +254,7 @@ fn extract_params_with_bounds(
     node: Node,
     source: &str,
     query_source: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    ctx: &RustResolutionContext,
 ) -> ParsedGenerics {
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
@@ -271,8 +297,7 @@ fn extract_params_with_bounds(
                     };
 
                     if !is_primitive_type(bound_text) {
-                        let resolved =
-                            resolve_reference(bound_text, import_map, parent_scope, "::");
+                        let resolved = ctx.resolve(bound_text);
 
                         if let Some(ref param) = current_param {
                             params_map
@@ -488,8 +513,7 @@ use std::collections::HashMap;
 pub fn extract_function_calls(
     function_node: Node,
     source: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    ctx: &RustResolutionContext,
     local_vars: &HashMap<String, String>, // var_name -> type_name for method resolution
 ) -> Vec<SourceReference> {
     let query_source = r#"
@@ -540,7 +564,7 @@ pub fn extract_function_calls(
         if let Some(bare_cap) = bare_callee {
             // Bare identifier call like `foo()`
             if let Ok(name) = node_to_text(bare_cap.node, source) {
-                let resolved = resolve_reference(&name, import_map, parent_scope, "::");
+                let resolved = ctx.resolve(&name);
                 calls.push(SourceReference {
                     target: resolved,
                     location: SourceLocation::from_tree_sitter_node(bare_cap.node),
@@ -548,10 +572,12 @@ pub fn extract_function_calls(
                 });
             }
         } else if let Some(scoped_cap) = scoped_callee {
-            // Already scoped call like `std::io::read()`
+            // Scoped call like `std::io::read()` or `crate::utils::helper()`
             if let Ok(full_path) = node_to_text(scoped_cap.node, source) {
+                // Resolve to normalize crate::, self::, super:: paths
+                let resolved = ctx.resolve(&full_path);
                 calls.push(SourceReference {
-                    target: full_path,
+                    target: resolved,
                     location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
                     ref_type: ReferenceType::Call,
                 });
@@ -565,8 +591,7 @@ pub fn extract_function_calls(
                 // Try to resolve receiver type from local variables
                 if let Some(recv_type) = local_vars.get(&recv_name) {
                     // Resolve the type name through imports
-                    let resolved_type =
-                        resolve_reference(recv_type, import_map, parent_scope, "::");
+                    let resolved_type = ctx.resolve(recv_type);
                     calls.push(SourceReference {
                         target: format!("{resolved_type}::{method_name}"),
                         location: SourceLocation::from_tree_sitter_node(method_cap.node),
@@ -692,8 +717,7 @@ fn extract_base_type_name(type_node: Node, source: &str) -> Option<String> {
 pub fn extract_type_references(
     function_node: Node,
     source: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    ctx: &RustResolutionContext,
 ) -> Vec<SourceReference> {
     let query_source = r#"
         ; Type identifiers in all contexts
@@ -730,8 +754,7 @@ pub fn extract_type_references(
                             continue;
                         }
                         // Resolve through imports
-                        let resolved =
-                            resolve_reference(&type_name, import_map, parent_scope, "::");
+                        let resolved = ctx.resolve(&type_name);
                         if seen.insert(resolved.clone()) {
                             type_refs.push(SourceReference {
                                 target: resolved,
@@ -743,10 +766,11 @@ pub fn extract_type_references(
                 }
                 "scoped_type_ref" => {
                     if let Ok(full_path) = node_to_text(capture.node, source) {
-                        // Scoped types are already qualified
-                        if seen.insert(full_path.clone()) {
+                        // Resolve to normalize crate::, self::, super:: paths
+                        let resolved = ctx.resolve(&full_path);
+                        if seen.insert(resolved.clone()) {
                             type_refs.push(SourceReference {
-                                target: full_path,
+                                target: resolved,
                                 location: SourceLocation::from_tree_sitter_node(capture.node),
                                 ref_type: ReferenceType::TypeUsage,
                             });

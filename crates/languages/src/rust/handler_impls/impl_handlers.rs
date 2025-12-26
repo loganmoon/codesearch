@@ -15,7 +15,7 @@ use crate::rust::handler_impls::common::{
     extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
     extract_local_var_types, extract_preceding_doc_comments, extract_type_references,
     extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
-    node_to_text, require_capture_node,
+    node_to_text, require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -113,15 +113,22 @@ pub fn handle_impl_impl(
     let full_prefix =
         compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
 
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: Some(parent_scope.as_str()),
+        package_name,
+        current_module: module_path.as_deref(),
+    };
+
     // Extract generics with parsed bounds
     let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_with_bounds(node, source, &import_map, Some(&parent_scope)))
+        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
         .unwrap_or_default();
 
     // Merge where clause bounds if present
     if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds =
-            extract_where_clause_bounds(where_node, source, &import_map, Some(&parent_scope));
+        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -294,15 +301,22 @@ pub fn handle_impl_trait_impl(
     let full_prefix =
         compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
 
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: Some(parent_scope.as_str()),
+        package_name,
+        current_module: module_path.as_deref(),
+    };
+
     // Extract generics with parsed bounds
     let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_with_bounds(node, source, &import_map, Some(&parent_scope)))
+        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
         .unwrap_or_default();
 
     // Merge where clause bounds if present
     if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds =
-            extract_where_clause_bounds(where_node, source, &import_map, Some(&parent_scope));
+        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -699,25 +713,24 @@ fn extract_method(
     // Build ImportMap from file's imports for qualified name resolution
     let import_map = get_file_import_map(method_node, source);
 
+    // Build resolution context for qualified name normalization
+    // Note: package_name and current_module are None here; full normalization
+    // happens at the impl block level. This still handles import map resolution.
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: Some(impl_ctx.qualified_name),
+        package_name: None,
+        current_module: None,
+    };
+
     // Extract local variable types for method call resolution
     let local_vars = extract_local_var_types(method_node, source);
 
     // Extract function calls from the method body with qualified name resolution
-    let calls = extract_function_calls(
-        method_node,
-        source,
-        &import_map,
-        Some(impl_ctx.qualified_name),
-        &local_vars,
-    );
+    let calls = extract_function_calls(method_node, source, &resolution_ctx, &local_vars);
 
     // Extract type references for USES relationships
-    let type_refs = extract_type_references(
-        method_node,
-        source,
-        &import_map,
-        Some(impl_ctx.qualified_name),
-    );
+    let type_refs = extract_type_references(method_node, source, &resolution_ctx);
 
     // Build metadata
     let mut metadata = EntityMetadata {

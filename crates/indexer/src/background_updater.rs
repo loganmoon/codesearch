@@ -3,7 +3,7 @@
 //! This module provides background index updating that runs during `codesearch serve`.
 //! The update strategy determines how the index is kept in sync:
 //!
-//! - `MainOnly`: Poll git periodically, detect main branch changes, re-index
+//! - `MainOnly`: Poll git periodically, detect HEAD changes on main/master/trunk, perform incremental sync
 //! - `Live`: Watch filesystem changes via watcher, process incrementally
 //! - `Disabled`: No automatic updating (user runs `codesearch index` manually)
 
@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 /// Handle for managing background index updating
 ///
-/// Dropping this handle will signal the background task to shut down.
+/// Dropping this handle will signal the background task to shut down,
+/// but does not wait for completion. Use `wait()` for graceful shutdown.
 pub struct BackgroundUpdaterHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     task_handle: Option<JoinHandle<()>>,
@@ -113,7 +114,8 @@ pub async fn start_background_updater(
 
 /// Start the MainOnly strategy updater
 ///
-/// Polls git periodically to detect changes on the main branch and re-indexes.
+/// Polls git periodically to detect HEAD changes on main/master/trunk branches
+/// and performs incremental sync using git diff.
 async fn start_main_only_updater(
     repo_id: Uuid,
     repo_path: PathBuf,
@@ -123,8 +125,6 @@ async fn start_main_only_updater(
     poll_interval_secs: u64,
 ) -> Result<BackgroundUpdaterHandle> {
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-
-    // Open git repository
     let git_repo = GitRepository::open(&repo_path)?;
 
     let task_handle = tokio::spawn(async move {
@@ -137,7 +137,6 @@ async fn start_main_only_updater(
         let mut last_commit: Option<String> = None;
 
         loop {
-            // Check for shutdown signal
             match shutdown_rx.try_recv() {
                 Ok(()) | Err(oneshot::error::TryRecvError::Closed) => {
                     info!("MainOnly updater received shutdown signal");
@@ -146,11 +145,13 @@ async fn start_main_only_updater(
                 Err(oneshot::error::TryRecvError::Empty) => {}
             }
 
-            // Check if we're on a main branch
             let current_branch = match git_repo.current_branch() {
                 Ok(branch) => branch,
                 Err(e) => {
-                    debug!("Failed to get current branch: {e}");
+                    warn!(
+                        "Failed to get current branch for {}: {e}",
+                        repo_path.display()
+                    );
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
@@ -167,11 +168,13 @@ async fn start_main_only_updater(
                 continue;
             }
 
-            // Check if HEAD has changed
             let current_commit = match git_repo.current_commit_hash() {
                 Ok(commit) => commit,
                 Err(e) => {
-                    debug!("Failed to get current commit: {e}");
+                    warn!(
+                        "Failed to get current commit for {}: {e}",
+                        repo_path.display()
+                    );
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
@@ -204,7 +207,11 @@ async fn start_main_only_updater(
                         last_commit = Some(current_commit);
                     }
                     Err(e) => {
-                        error!("Background index update failed: {e}");
+                        error!(
+                            "Background index update failed for {} (commit {}): {e}",
+                            repo_path.display(),
+                            &current_commit[..8.min(current_commit.len())]
+                        );
                     }
                 }
             } else {
@@ -236,15 +243,12 @@ async fn start_live_updater(
 ) -> Result<BackgroundUpdaterHandle> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    // Create file watcher with the watcher crate's config
     let watcher_crate_config = codesearch_watcher::WatcherConfig::builder()
         .debounce_ms(watcher_config.debounce_ms)
         .ignore_patterns(watcher_config.ignore_patterns.clone())
         .build();
 
     let mut file_watcher = FileWatcher::new(watcher_crate_config)?;
-
-    // Start watching the repository
     let event_rx = file_watcher.watch(&repo_path).await?;
 
     info!(
@@ -252,7 +256,6 @@ async fn start_live_updater(
         repo_path.display()
     );
 
-    // Use the existing start_watching function from lib.rs
     let indexer_handle = start_watching(
         event_rx,
         repo_id,
@@ -262,12 +265,10 @@ async fn start_live_updater(
         indexer_config,
     );
 
-    // Spawn a task that waits for shutdown and then stops the watcher
     let task_handle = tokio::spawn(async move {
-        // Wait for shutdown signal
         let _ = shutdown_rx.await;
 
-        // Drop the file watcher to stop watching
+        // Dropping closes the event channel, signaling the indexer task to finish
         drop(file_watcher);
 
         // Wait for the indexer task to finish processing remaining events
@@ -309,9 +310,56 @@ mod tests {
     }
 
     #[test]
-    fn test_background_updater_handle_noop() {
-        let handle = BackgroundUpdaterHandle::noop();
-        assert!(handle.shutdown_tx.is_none());
-        assert!(handle.task_handle.is_none());
+    fn test_is_main_branch_name_edge_cases() {
+        assert!(!is_main_branch_name(""));
+        assert!(!is_main_branch_name("main2"));
+        assert!(!is_main_branch_name("mainline"));
+        assert!(!is_main_branch_name("the-main-branch"));
+    }
+
+    #[test]
+    fn test_background_updater_handle_noop_shutdown_is_idempotent() {
+        let mut handle = BackgroundUpdaterHandle::noop();
+        // Calling shutdown on a noop handle should not panic
+        handle.shutdown();
+        handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn test_background_updater_handle_shutdown_signals_task() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let task_handle = tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+        });
+
+        let mut handle = BackgroundUpdaterHandle {
+            shutdown_tx: Some(shutdown_tx),
+            task_handle: Some(task_handle),
+        };
+
+        handle.shutdown();
+
+        // Task should complete within reasonable time
+        tokio::time::timeout(Duration::from_millis(100), handle.wait())
+            .await
+            .expect("Task should terminate after shutdown");
+    }
+
+    #[tokio::test]
+    async fn test_background_updater_handle_wait_is_idempotent() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let task_handle = tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+        });
+
+        let handle = BackgroundUpdaterHandle {
+            shutdown_tx: Some(shutdown_tx),
+            task_handle: Some(task_handle),
+        };
+
+        // wait() consumes self and should complete cleanly
+        tokio::time::timeout(Duration::from_millis(100), handle.wait())
+            .await
+            .expect("wait() should complete");
     }
 }

@@ -223,15 +223,14 @@ async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
 
     // Start background index updaters for each repository
     let mut background_updaters: Vec<BackgroundUpdaterHandle> = Vec::new();
+    let mut failed_repos: Vec<(PathBuf, String)> = Vec::new();
 
     if config.watcher.update_strategy != codesearch_core::UpdateStrategy::Disabled {
-        // Create embedding manager for background updating
         let embedding_manager =
             codesearch_embeddings::create_embedding_manager_from_app_config(&config.embeddings)
                 .await
                 .context("Failed to create embedding manager")?;
 
-        // Create indexer config with sparse embeddings
         let indexer_config = codesearch_indexer::IndexerConfig::new()
             .with_sparse_embeddings(config.sparse_embeddings.clone());
 
@@ -260,7 +259,20 @@ async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
                         "Failed to start background updater for {}: {e}",
                         repo_path.display()
                     );
+                    failed_repos.push((repo_path.clone(), e.to_string()));
                 }
+            }
+        }
+
+        if !failed_repos.is_empty() {
+            error!(
+                "Background updating disabled for {} of {} repositories. \
+                 These repos will NOT be automatically indexed:",
+                failed_repos.len(),
+                valid_repos.len()
+            );
+            for (path, reason) in &failed_repos {
+                error!("  - {}: {reason}", path.display());
             }
         }
     } else {
@@ -273,10 +285,19 @@ async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
             .await
             .map_err(|e| anyhow!("REST server error: {e}"));
 
-    // Shutdown background updaters
-    info!("Shutting down background updaters...");
-    for mut handle in background_updaters {
-        handle.shutdown();
+    // Shutdown background updaters with graceful await
+    if !background_updaters.is_empty() {
+        info!(
+            "Shutting down {} background updater(s)...",
+            background_updaters.len()
+        );
+        for handle in background_updaters {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), handle.wait()).await {
+                Ok(()) => {}
+                Err(_) => warn!("Background updater shutdown timed out after 5 seconds"),
+            }
+        }
+        info!("Background updaters stopped");
     }
 
     // Always perform graceful shutdown of outbox processor, regardless of server result

@@ -63,6 +63,29 @@ fn is_impl_block_entity(qualified_name: &str) -> bool {
     false
 }
 
+/// Extract EntityType from Neo4j node labels.
+///
+/// Labels are like ["Entity", "Function"] - we want to find the type-specific label.
+fn extract_entity_type_from_labels(
+    labels: &[serde_json::Value],
+) -> Option<codesearch_core::entities::EntityType> {
+    use codesearch_core::entities::EntityType;
+
+    for label in labels {
+        if let Some(label_str) = label.as_str() {
+            // Skip the common "Entity" label
+            if label_str == "Entity" {
+                continue;
+            }
+            // Try to parse as EntityType
+            if let Ok(entity_type) = EntityType::from_str(label_str) {
+                return Some(entity_type);
+            }
+        }
+    }
+    None
+}
+
 /// Query all relationships from Neo4j for a repository.
 ///
 /// Returns relationships with qualified names for accurate comparison against SCIP.
@@ -82,17 +105,17 @@ pub async fn query_all_relationships(
 
     // Query all relationships between Entity nodes
     // Use qualified_name for accurate symbol matching
-    // Include entity_type for intelligent filtering
+    // Include labels to extract entity_type (stored as labels like :Entity:Function)
     let body = serde_json::json!({
         "statements": [{
             "statement": r#"
                 MATCH (source:Entity {repository_id: $repo_id})-[r]->(target:Entity)
                 RETURN
                     source.qualified_name AS source_qname,
-                    source.entity_type AS source_type,
+                    labels(source) AS source_labels,
                     type(r) AS rel_type,
                     target.qualified_name AS target_qname,
-                    target.entity_type AS target_type
+                    labels(target) AS target_labels
             "#,
             "parameters": {
                 "repo_id": repository_id
@@ -131,17 +154,17 @@ pub async fn query_all_relationships(
     for statement_result in &result.results {
         for row_data in &statement_result.data {
             let row = &row_data.row;
-            // Now expecting 5 fields: source_qname, source_type, rel_type, target_qname, target_type
+            // Now expecting 5 fields: source_qname, source_labels, rel_type, target_qname, target_labels
             if row.len() < 5 {
                 skipped_malformed += 1;
                 continue;
             }
 
             let source_qname = row[0].as_str().unwrap_or_default();
-            let source_type_str = row[1].as_str().unwrap_or_default();
+            let source_labels = row[1].as_array();
             let rel_type_str = row[2].as_str().unwrap_or_default();
             let target_qname = row[3].as_str().unwrap_or_default();
-            let target_type_str = row[4].as_str().unwrap_or_default();
+            let target_labels = row[4].as_array();
 
             // Skip empty values
             if source_qname.is_empty() || target_qname.is_empty() {
@@ -155,9 +178,9 @@ pub async fn query_all_relationships(
                 continue;
             }
 
-            // Parse entity types
-            let source_type = codesearch_core::entities::EntityType::from_str(source_type_str).ok();
-            let target_type = codesearch_core::entities::EntityType::from_str(target_type_str).ok();
+            // Extract entity types from labels (e.g., ["Entity", "Function"] -> Function)
+            let source_type = source_labels.and_then(|labels| extract_entity_type_from_labels(labels));
+            let target_type = target_labels.and_then(|labels| extract_entity_type_from_labels(labels));
 
             // Parse relationship type
             if let Some(rel_type) = RelationshipType::from_neo4j_type(rel_type_str) {
@@ -338,5 +361,64 @@ mod tests {
         assert!(!is_impl_block_entity(""));
         assert!(!is_impl_block_entity("MyStruct"));
         assert!(!is_impl_block_entity("crate::module::function"));
+    }
+}
+
+#[cfg(test)]
+mod entity_type_tests {
+    use super::*;
+    use codesearch_core::entities::EntityType;
+
+    #[test]
+    fn test_entity_type_parsing() {
+        // Test that strum parses our Neo4j labels correctly
+        assert_eq!(EntityType::from_str("Function").ok(), Some(EntityType::Function));
+        assert_eq!(EntityType::from_str("Struct").ok(), Some(EntityType::Struct));
+        assert_eq!(EntityType::from_str("Module").ok(), Some(EntityType::Module));
+        assert_eq!(EntityType::from_str("Class").ok(), Some(EntityType::Class));
+
+        // These should fail (wrong case or unknown)
+        assert!(EntityType::from_str("function").is_err());
+        assert!(EntityType::from_str("ImplBlock").is_err()); // We use "ImplBlock" but enum is "Impl"
+    }
+
+    #[test]
+    fn test_extract_from_labels() {
+        // Test the helper function
+        let labels_func = vec![
+            serde_json::json!("Entity"),
+            serde_json::json!("Function"),
+        ];
+        assert_eq!(extract_entity_type_from_labels(&labels_func), Some(EntityType::Function));
+
+        let labels_struct = vec![
+            serde_json::json!("Entity"),
+            serde_json::json!("Struct"),
+            serde_json::json!("Class"),
+        ];
+        assert_eq!(extract_entity_type_from_labels(&labels_struct), Some(EntityType::Struct));
+
+        let labels_module = vec![
+            serde_json::json!("Entity"),
+            serde_json::json!("Module"),
+        ];
+        assert_eq!(extract_entity_type_from_labels(&labels_module), Some(EntityType::Module));
+    }
+
+    #[test]
+    fn test_module_extraction_for_types() {
+        use crate::graph_validation::models::{extract_module_from_entity, EntityRef};
+
+        // Struct at top level - should return parent module
+        let error = EntityRef::new("anyhow::Error").with_entity_type(EntityType::Struct);
+        assert_eq!(extract_module_from_entity(&error), "anyhow");
+
+        // Chain struct
+        let chain = EntityRef::new("anyhow::chain::Chain").with_entity_type(EntityType::Struct);
+        assert_eq!(extract_module_from_entity(&chain), "anyhow::chain");
+
+        // Module should keep its name (up to 2 segments)
+        let module = EntityRef::new("anyhow::error").with_entity_type(EntityType::Module);
+        assert_eq!(extract_module_from_entity(&module), "anyhow::error");
     }
 }

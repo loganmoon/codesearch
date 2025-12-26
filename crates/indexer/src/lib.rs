@@ -18,6 +18,7 @@ mod event_batcher;
 mod repository_indexer;
 
 // Public modules for file change processing
+pub mod background_updater;
 pub mod catch_up_indexer;
 pub mod entity_processor;
 pub mod file_change_processor;
@@ -34,6 +35,7 @@ pub use codesearch_core::error::{Error, Result};
 pub use repository_indexer::RepositoryIndexer;
 
 // Re-export public functions and types
+pub use background_updater::{start_background_updater, BackgroundUpdaterHandle};
 pub use catch_up_indexer::{catch_up_from_git, CatchUpStats};
 pub use entity_processor::extract_embedding_content;
 pub use file_change_processor::{process_file_changes, ProcessingStats};

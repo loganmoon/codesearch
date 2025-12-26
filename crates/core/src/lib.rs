@@ -25,7 +25,7 @@ pub mod search_models;
 // Re-export main types for convenience
 pub use config::{
     Config, EmbeddingsConfig, HybridSearchConfig, IndexerConfig, RerankingConfig, StorageConfig,
-    WatcherConfig,
+    UpdateStrategy, WatcherConfig,
 };
 pub use entities::{
     CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,

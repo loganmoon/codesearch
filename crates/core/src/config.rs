@@ -202,9 +202,26 @@ fn default_sparse_batch_size() -> usize {
     32
 }
 
+/// Update strategy for keeping the index synchronized
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateStrategy {
+    /// Keep the main branch indexed - poll git for changes (default)
+    #[default]
+    MainOnly,
+    /// Watch for file changes in real-time (expensive, continuous CPU/IO)
+    Live,
+    /// No automatic updating - only explicit `codesearch index`
+    Disabled,
+}
+
 /// Configuration for file watching
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatcherConfig {
+    /// Update strategy for keeping the index synchronized
+    #[serde(default)]
+    pub update_strategy: UpdateStrategy,
+
     /// Debounce time in milliseconds
     #[serde(default = "default_debounce_ms")]
     pub debounce_ms: u64,
@@ -212,6 +229,10 @@ pub struct WatcherConfig {
     /// Patterns to ignore
     #[serde(default = "default_ignore_patterns")]
     pub ignore_patterns: Vec<String>,
+
+    /// Interval in seconds for polling git in MainOnly strategy
+    #[serde(default = "default_main_branch_poll_interval_secs")]
+    pub main_branch_poll_interval_secs: u64,
 }
 
 /// Configuration for storage backend
@@ -521,6 +542,10 @@ fn default_ignore_patterns() -> Vec<String> {
     ]
 }
 
+fn default_main_branch_poll_interval_secs() -> u64 {
+    30
+}
+
 fn default_qdrant_host() -> String {
     DEFAULT_QDRANT_HOST.to_string()
 }
@@ -689,8 +714,10 @@ impl Default for EmbeddingsConfig {
 impl Default for WatcherConfig {
     fn default() -> Self {
         Self {
+            update_strategy: UpdateStrategy::default(),
             debounce_ms: default_debounce_ms(),
             ignore_patterns: default_ignore_patterns(),
+            main_branch_poll_interval_secs: default_main_branch_poll_interval_secs(),
         }
     }
 }

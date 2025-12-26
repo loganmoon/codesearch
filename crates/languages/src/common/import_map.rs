@@ -197,6 +197,7 @@ pub fn normalize_rust_path(
 ///    - Import map lookup
 ///    - parent_scope::name fallback
 ///    - external::name marker for unresolved references
+/// 3. Normalize the result if it contains Rust-relative prefixes (from import map)
 pub fn resolve_rust_reference(
     name: &str,
     import_map: &ImportMap,
@@ -210,7 +211,17 @@ pub fn resolve_rust_reference(
     }
 
     // Delegate to standard resolution
-    resolve_reference(name, import_map, parent_scope, "::")
+    let resolved = resolve_reference(name, import_map, parent_scope, "::");
+
+    // Normalize result if it contains Rust-relative prefixes (e.g., from import map)
+    if resolved.starts_with("crate::")
+        || resolved.starts_with("self::")
+        || resolved.starts_with("super::")
+    {
+        normalize_rust_path(&resolved, package_name, current_module)
+    } else {
+        resolved
+    }
 }
 
 /// Resolve a relative import path to an absolute module path
@@ -1439,6 +1450,62 @@ import lodash from 'lodash';
         assert_eq!(
             normalize_rust_path("super::super::thing", Some("mypackage"), Some("a::b")),
             "mypackage::thing"
+        );
+    }
+
+    // ========================================================================
+    // Tests for import map result normalization
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_rust_reference_normalizes_import_map_crate_prefix() {
+        // When import map returns crate::Error (from `use crate::Error;`),
+        // the result should be normalized to package::Error
+        let mut map = ImportMap::new("::");
+        map.add("Error", "crate::Error");
+
+        assert_eq!(
+            resolve_rust_reference("Error", &map, None, Some("anyhow"), Some("error")),
+            "anyhow::Error"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_normalizes_import_map_self_prefix() {
+        // When import map returns self::helper (from `use self::helper;`),
+        // the result should be normalized
+        let mut map = ImportMap::new("::");
+        map.add("helper", "self::helper");
+
+        assert_eq!(
+            resolve_rust_reference("helper", &map, None, Some("mypackage"), Some("utils")),
+            "mypackage::utils::helper"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_normalizes_import_map_super_prefix() {
+        // When import map returns super::types::Foo (from `use super::types::Foo;`),
+        // the result should be normalized
+        let mut map = ImportMap::new("::");
+        map.add("Foo", "super::types::Foo");
+
+        assert_eq!(
+            resolve_rust_reference("Foo", &map, None, Some("mypackage"), Some("utils::helpers")),
+            "mypackage::utils::types::Foo"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_no_normalization_for_absolute() {
+        // When import map returns an absolute path (std::io::Read),
+        // no normalization should occur
+        let mut map = ImportMap::new("::");
+        map.add("Read", "std::io::Read");
+
+        assert_eq!(
+            resolve_rust_reference("Read", &map, None, Some("mypackage"), Some("utils")),
+            "std::io::Read"
         );
     }
 }

@@ -16,7 +16,7 @@ use crate::rust::handler_impls::common::{
     extract_function_parameters, extract_generics_with_bounds, extract_local_var_types,
     extract_preceding_doc_comments, extract_type_references, extract_visibility,
     extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
-    node_to_text, require_capture_node,
+    node_to_text, require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{
@@ -84,26 +84,26 @@ pub fn handle_function_impl(
     // Build ImportMap from file's imports for qualified name resolution
     let import_map = get_file_import_map(function_node, source);
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: components.parent_scope.as_deref(),
+        package_name,
+        current_module: module_path.as_deref(),
+    };
+
     // Extract generics with parsed bounds
     let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| {
-            extract_generics_with_bounds(
-                node,
-                source,
-                &import_map,
-                components.parent_scope.as_deref(),
-            )
-        })
+        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
         .unwrap_or_default();
 
     // Merge where clause bounds if present
     if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds = extract_where_clause_bounds(
-            where_node,
-            source,
-            &import_map,
-            components.parent_scope.as_deref(),
-        );
+        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -131,21 +131,10 @@ pub fn handle_function_impl(
     let local_vars = extract_local_var_types(function_node, source);
 
     // Extract function calls from the function body with qualified name resolution
-    let calls = extract_function_calls(
-        function_node,
-        source,
-        &import_map,
-        components.parent_scope.as_deref(),
-        &local_vars,
-    );
+    let calls = extract_function_calls(function_node, source, &resolution_ctx, &local_vars);
 
     // Extract type references for USES relationships
-    let mut type_refs = extract_type_references(
-        function_node,
-        source,
-        &import_map,
-        components.parent_scope.as_deref(),
-    );
+    let mut type_refs = extract_type_references(function_node, source, &resolution_ctx);
 
     // Add trait bounds to type references (they also create USES relationships)
     let func_location = SourceLocation::from_tree_sitter_node(function_node);

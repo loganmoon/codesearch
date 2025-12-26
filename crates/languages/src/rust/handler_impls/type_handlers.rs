@@ -10,12 +10,13 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
-use crate::common::import_map::{parse_file_imports, resolve_reference, ImportMap};
+use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_generics_with_bounds, extract_preceding_doc_comments,
     extract_visibility, extract_where_clause_bounds, find_capture_node, format_generic_param,
     is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
+    RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
@@ -75,10 +76,17 @@ pub fn handle_struct_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, struct_node, "rust")?;
 
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: components.parent_scope.as_deref(),
+        package_name,
+        current_module: None, // TODO: derive from file path if needed
+    };
+
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
         // Extract generics with parsed bounds
-        let parsed_generics =
-            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+        let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
         // Build backward-compatible generic_params
         let generics: Vec<String> = parsed_generics
@@ -113,7 +121,7 @@ pub fn handle_struct_impl(
             }
 
             // Extract and resolve field types for USES relationships
-            let mut uses_types = extract_field_type_refs(&fields, &import_map);
+            let mut uses_types = extract_field_type_refs(&fields, &resolution_ctx);
 
             // Add trait bounds to uses_types
             for trait_ref in &parsed_generics.bound_trait_refs {
@@ -169,10 +177,17 @@ pub fn handle_enum_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, enum_node, "rust")?;
 
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: components.parent_scope.as_deref(),
+        package_name,
+        current_module: None, // TODO: derive from file path if needed
+    };
+
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         // Extract generics with parsed bounds
-        let parsed_generics =
-            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+        let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
         // Build backward-compatible generic_params
         let generics: Vec<String> = parsed_generics
@@ -200,7 +215,7 @@ pub fn handle_enum_impl(
             }
 
             // Extract and resolve field types from variants for USES relationships
-            let mut uses_types = extract_variant_type_refs(&variants, &import_map);
+            let mut uses_types = extract_variant_type_refs(&variants, &resolution_ctx);
 
             // Add trait bounds to uses_types
             for trait_ref in &parsed_generics.bound_trait_refs {
@@ -256,10 +271,17 @@ pub fn handle_trait_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, trait_node, "rust")?;
 
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: components.parent_scope.as_deref(),
+        package_name,
+        current_module: None, // TODO: derive from file path if needed
+    };
+
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         // Extract generics with parsed bounds
-        let parsed_generics =
-            extract_generics_with_where(ctx, &import_map, components.parent_scope.as_deref());
+        let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
         // Build backward-compatible generic_params
         let generics: Vec<String> = parsed_generics
@@ -365,19 +387,17 @@ fn build_entity_data(
 /// Extract generic parameters with parsed bounds
 fn extract_generics_with_where(
     ctx: &ExtractionContext,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
+    resolution_ctx: &RustResolutionContext,
 ) -> ParsedGenerics {
     // Extract inline generics
     let mut parsed_generics =
         find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
-            .map(|node| extract_generics_with_bounds(node, ctx.source, import_map, parent_scope))
+            .map(|node| extract_generics_with_bounds(node, ctx.source, resolution_ctx))
             .unwrap_or_default();
 
     // Merge where clause bounds if present
     if let Some(where_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::WHERE) {
-        let where_bounds =
-            extract_where_clause_bounds(where_node, ctx.source, import_map, parent_scope);
+        let where_bounds = extract_where_clause_bounds(where_node, ctx.source, resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -733,14 +753,14 @@ fn get_file_import_map(node: Node, source: &str) -> ImportMap {
 }
 
 /// Extract and resolve field types for USES relationships
-fn extract_field_type_refs(fields: &[FieldInfo], import_map: &ImportMap) -> Vec<String> {
+fn extract_field_type_refs(fields: &[FieldInfo], ctx: &RustResolutionContext) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
     for field in fields {
         for type_name in extract_type_names_from_field_type(&field.field_type) {
             if !is_primitive_type(&type_name) {
-                let resolved = resolve_reference(&type_name, import_map, None, "::");
+                let resolved = ctx.resolve(&type_name);
                 if seen.insert(resolved.clone()) {
                     result.push(resolved);
                 }
@@ -752,7 +772,7 @@ fn extract_field_type_refs(fields: &[FieldInfo], import_map: &ImportMap) -> Vec<
 }
 
 /// Extract and resolve types from enum variant fields for USES relationships
-fn extract_variant_type_refs(variants: &[VariantInfo], import_map: &ImportMap) -> Vec<String> {
+fn extract_variant_type_refs(variants: &[VariantInfo], ctx: &RustResolutionContext) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
@@ -760,7 +780,7 @@ fn extract_variant_type_refs(variants: &[VariantInfo], import_map: &ImportMap) -
         for field in &variant.fields {
             for type_name in extract_type_names_from_field_type(&field.field_type) {
                 if !is_primitive_type(&type_name) {
-                    let resolved = resolve_reference(&type_name, import_map, None, "::");
+                    let resolved = ctx.resolve(&type_name);
                     if seen.insert(resolved.clone()) {
                         result.push(resolved);
                     }

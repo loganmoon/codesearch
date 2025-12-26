@@ -5,7 +5,7 @@ A semantic code search engine that indexes codebases using AST-based entity extr
 ## Quick Start
 
 **Prerequisites:**
-- Rust 1.70+
+- Rust 1.91+
 - Docker and Docker Compose
 - Jina API key (free tier available at jina.ai) or NVIDIA GPU for self-hosted embeddings
 
@@ -135,8 +135,8 @@ cargo build --workspace --all-targets
 
 **Test:**
 ```bash
-cargo test --workspace                              # Unit tests
-cargo test --package codesearch-e2e-tests -- --ignored  # E2E tests
+cargo test --workspace                                              # Unit tests
+cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored # E2E tests
 ```
 
 **Lint:**

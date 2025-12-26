@@ -6,6 +6,68 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Codesearch is a Rust-based semantic code indexing system that provides intelligent code search through AST-based code graph extraction, local/remote embeddings, and real-time file watching with REST API server integration.
 
+## REPOSITORY STRUCTURE
+
+```
+codesearch/
+├── .git/                # Shared git directory (separate from worktrees)
+├── main/                # Worktree for main branch
+├── <branch-name>/       # Additional worktrees for feature branches
+│
+# Within each worktree:
+├── crates/              # Rust workspace crates (see CRATE ARCHITECTURE below)
+├── infrastructure/      # Docker Compose configuration for services
+├── migrations/          # PostgreSQL database migrations
+├── scripts/             # Development and deployment scripts
+│   └── hooks/           # Git hook scripts
+├── .githooks/           # Active git hooks (pre-commit, pre-merge-commit)
+├── Cargo.toml           # Workspace configuration
+└── CLAUDE.md            # This file
+```
+
+## WORKTREE WORKFLOW
+
+This project uses git worktrees with a separate git directory for parallel development. Each issue or feature gets its own worktree.
+
+**Branch/worktree naming convention:**
+- `feature--short-description` - New features
+- `bug--short-description` - Bug fixes
+- `docs--short-description` - Documentation changes
+- `chore--short-description` - Maintenance tasks
+- `refactor--short-description` - Code refactoring
+
+**Initial clone setup:**
+```bash
+# Clone with separate git directory (one-time setup)
+git clone --separate-git-dir=.git <repo-url> main
+cd ..  # Stay in parent directory for worktree management
+```
+
+**Creating a new worktree for an issue:**
+```bash
+# From the parent directory (containing .git/)
+git worktree add <branch-name> -b <branch-name>
+cd <branch-name>
+```
+
+**Working with main:**
+The `main/` directory is the worktree for the main branch. Use it for:
+- Pulling latest changes: `cd main && git pull`
+- Reviewing the current stable state
+- Never commit directly to main (blocked by pre-commit hook)
+
+**Listing worktrees:**
+```bash
+git worktree list
+```
+
+**Removing a worktree after merging:**
+```bash
+git worktree remove <branch-name>
+```
+
+**Important:** Never use `git checkout <branch>` inside a worktree. Worktrees are permanently tied to their specific branch.
+
 ## Rust Development Practices
 
 **Architecture Principles:**
@@ -33,22 +95,39 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 ## CRATE ARCHITECTURE
 
 This is a workspace with these crates:
+
+**Foundation:**
 - **core**: Foundation types, entities, configuration, error handling
 - **languages**: AST parsing and entity extraction. Fully implemented for Rust, JavaScript/TypeScript, and Python. Go has partial infrastructure but no actual parsing implementation.
-- **embeddings**: Vector embedding providers and local/remote embedding generation
+- **languages-macros**: Procedural macros for defining language extractors
+
+**Indexing & Storage:**
 - **indexer**: Repository indexing logic with Git integration
 - **watcher**: Real-time file system monitoring with ignore patterns
 - **storage**: Persistent storage layer (Postgres, Qdrant, Neo4j)
-- **cli**: Command-line interface and REST API server (`codesearch` binary)
+- **outbox-processor**: Background processor for Neo4j relationship resolution
+
+**Search & Retrieval:**
+- **embeddings**: Vector embedding providers (Jina, LocalApi/vLLM)
+- **reranking**: Cross-encoder reranking providers for improved relevance
+- **agentic-search**: Multi-agent search orchestration with dual-track pipeline
+
+**Servers & Interfaces:**
+- **cli**: Command-line interface (`codesearch` binary)
+- **server**: REST API server with filesystem watching integration
+- **mcp-server**: Model Context Protocol server for AI tool integration
+
+**Testing:**
+- **e2e-tests**: E2E test infrastructure (excluded from default builds, run with `--manifest-path`)
 
 ## DEVELOPMENT COMMANDS
 
 **Build & Test:**
 ```bash
-cargo build --workspace --all-targets                           # Build all
-cargo test --workspace                                          # Unit & integration tests
-cargo test --package codesearch-e2e-tests -- --ignored          # E2E tests (require Docker)
-cargo clippy --workspace && cargo fmt                           # Lint & format
+cargo build --workspace --all-targets                                        # Build all
+cargo test --workspace                                                       # Unit & integration tests
+cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored          # E2E tests (require Docker)
+cargo clippy --workspace && cargo fmt                                        # Lint & format
 ```
 
 **Run:**

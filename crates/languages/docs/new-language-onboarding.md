@@ -13,10 +13,9 @@ Neo4j graph creation.
 5. [Step 2: Tree-Sitter Queries](#step-2-tree-sitter-queries)
 6. [Step 3: Handler Implementations](#step-3-handler-implementations)
 7. [Step 4: Import Map Support](#step-4-import-map-support)
-8. [Step 5: TSG Rules for Cross-File Resolution](#step-5-tsg-rules-for-cross-file-resolution)
-9. [Step 6: Relationship Resolution](#step-6-relationship-resolution)
-10. [Testing](#testing)
-11. [Metadata Attributes Reference](#metadata-attributes-reference)
+8. [Step 5: Relationship Resolution](#step-5-relationship-resolution)
+9. [Testing](#testing)
+10. [Metadata Attributes Reference](#metadata-attributes-reference)
 
 ---
 
@@ -148,11 +147,9 @@ crates/languages/src/
 │   ├── ...
 │   └── utils.rs                    # Python-specific utilities
 │
-└── tsg/                            # Tree-sitter-graph rules
-    ├── rust.tsg                    # Rust definition/import/reference extraction
-    ├── javascript.tsg
-    ├── typescript.tsg
-    └── python.tsg
+└── typescript/
+    ├── ...
+    └── utils.rs                    # TypeScript-specific utilities
 ```
 
 ---
@@ -554,102 +551,12 @@ enabling proper relationship resolution in Neo4j.
 
 ---
 
-## Step 5: TSG Rules for Cross-File Resolution
-
-TSG (Tree-Sitter-Graph) rules extract nodes for cross-file symbol resolution.
-
-### 5.1 Create TSG file (`tsg/newlang.tsg`)
-
-```scheme
-; crates/languages/src/tsg/rust.tsg
-
-; ============================================================
-; DEFINITIONS - Items that introduce new names
-; ============================================================
-
-; Function definitions
-(function_item
-  (visibility_modifier)? @vis
-  name: (identifier) @name) @def
-{
-  node @def.node
-  attr (@def.node) type = "Definition"
-  attr (@def.node) kind = "function"
-  attr (@def.node) name = (source-text @name)
-  attr (@def.node) start_row = (start-row @def)
-  attr (@def.node) end_row = (end-row @def)
-  if some @vis {
-    attr (@def.node) visibility = (source-text @vis)
-  }
-}
-
-; Struct definitions
-(struct_item
-  (visibility_modifier)? @vis
-  name: (type_identifier) @name) @def
-{
-  node @def.node
-  attr (@def.node) type = "Definition"
-  attr (@def.node) kind = "struct"
-  attr (@def.node) name = (source-text @name)
-  attr (@def.node) start_row = (start-row @def)
-  attr (@def.node) end_row = (end-row @def)
-}
-
-; ============================================================
-; IMPORTS - Use declarations
-; ============================================================
-
-; Simple use: `use foo::Bar;`
-(use_declaration
-  (visibility_modifier)? @_vis
-  argument: (scoped_identifier) @path) @import
-{
-  node @import.node
-  attr (@import.node) type = "Import"
-  attr (@import.node) name = (source-text @path)
-  attr (@import.node) path = (source-text @path)
-  attr (@import.node) is_glob = "false"
-  attr (@import.node) start_row = (start-row @import)
-  attr (@import.node) end_row = (end-row @import)
-}
-
-; ============================================================
-; REFERENCES - Identifier usages
-; ============================================================
-
-; Function call: `foo()`
-(call_expression
-  function: (identifier) @ref) @_call
-{
-  node @ref.node
-  attr (@ref.node) type = "Reference"
-  attr (@ref.node) name = (source-text @ref)
-  attr (@ref.node) context = "call"
-  attr (@ref.node) start_row = (start-row @ref)
-  attr (@ref.node) end_row = (end-row @ref)
-}
-
-; Type reference
-(type_identifier) @ref
-{
-  node @ref.node
-  attr (@ref.node) type = "Reference"
-  attr (@ref.node) name = (source-text @ref)
-  attr (@ref.node) context = "type"
-  attr (@ref.node) start_row = (start-row @ref)
-  attr (@ref.node) end_row = (end-row @ref)
-}
-```
-
----
-
-## Step 6: Relationship Resolution
+## Step 5: Relationship Resolution
 
 Resolvers in `crates/outbox-processor/src/neo4j_relationship_resolver.rs` create
 Neo4j edges from entity metadata.
 
-### 6.1 Available Resolvers
+### 5.1 Available Resolvers
 
 | Resolver | Relationships | Required Attributes |
 |----------|--------------|---------------------|
@@ -661,11 +568,11 @@ Neo4j edges from entity metadata.
 | `ImportsResolver` | IMPORTS, IMPORTED_BY | `imports` |
 | `ExternalResolver` | Creates External nodes | All unresolved refs |
 
-### 6.2 Adding Metadata for Resolution
+### 5.2 Adding Metadata for Resolution
 
 Handlers must populate specific metadata attributes for resolvers to work.
 
-**Important:** The resolvers use the base attribute names shown in section 6.1 (e.g., `implements_trait`, `uses_types`, `calls`). Store qualified/resolved names directly in these attributes at extraction time. There is no `*_resolved` suffix pattern.
+**Important:** The resolvers use the base attribute names shown in section 5.1 (e.g., `implements_trait`, `uses_types`, `calls`). Store qualified/resolved names directly in these attributes at extraction time.
 
 ```rust
 // In impl_handlers.rs - for TraitImplResolver
@@ -692,14 +599,20 @@ metadata.attributes.insert("calls".to_string(), serde_json::to_string(&call_name
 
 ### E2E Tests (Authoritative)
 
-The authoritative tests for relationship resolution are in:
-`crates/e2e-tests/tests/test_resolution_e2e.rs`
+The authoritative tests for graph extraction and relationship resolution are in:
+- `crates/e2e-tests/tests/graph_validation_test.rs` - Validates graph extraction against rust-analyzer SCIP output
+- `crates/e2e-tests/tests/test_outbox_processor_e2e.rs` - Tests the outbox processor relationship resolution
 
 These tests exercise the complete pipeline against real codebases:
 
 ```bash
+# Graph validation test
 cargo test --manifest-path crates/e2e-tests/Cargo.toml \
-    --test test_resolution_e2e -- --ignored --nocapture
+    --test graph_validation_test -- --ignored --nocapture
+
+# Outbox processor e2e test
+cargo test --manifest-path crates/e2e-tests/Cargo.toml \
+    --test test_outbox_processor_e2e -- --ignored --nocapture
 ```
 
 ### Unit Tests for Handlers
@@ -782,8 +695,7 @@ All languages (except Go) now support:
 3. [ ] Create `queries.rs` with tree-sitter queries
 4. [ ] Create `handler_impls/` directory with handlers
 5. [ ] Add import parser in `common/import_map.rs`
-6. [ ] Create `tsg/newlang.tsg` for cross-file resolution
-7. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
-8. [ ] Add file extension mapping
-9. [ ] Write handler unit tests
-10. [ ] Test with e2e resolution tests
+6. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
+7. [ ] Add file extension mapping
+8. [ ] Write handler unit tests
+9. [ ] Test with e2e resolution tests

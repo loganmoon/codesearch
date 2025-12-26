@@ -13,7 +13,9 @@ use codesearch::{docker, infrastructure, initialize_backends};
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use codesearch_core::config::Config;
-use codesearch_indexer::{Indexer, RepositoryIndexer};
+use codesearch_indexer::{
+    start_background_updater, BackgroundUpdaterHandle, Indexer, RepositoryIndexer,
+};
 use dialoguer::{Confirm, Select};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -219,11 +221,63 @@ async fn serve(config_path: Option<&Path>, enable_agentic: bool) -> Result<()> {
 
     info!("Outbox processor started successfully");
 
+    // Start background index updaters for each repository
+    let mut background_updaters: Vec<BackgroundUpdaterHandle> = Vec::new();
+
+    if config.watcher.update_strategy != codesearch_core::UpdateStrategy::Disabled {
+        // Create embedding manager for background updating
+        let embedding_manager =
+            codesearch_embeddings::create_embedding_manager_from_app_config(&config.embeddings)
+                .await
+                .context("Failed to create embedding manager")?;
+
+        // Create indexer config with sparse embeddings
+        let indexer_config = codesearch_indexer::IndexerConfig::new()
+            .with_sparse_embeddings(config.sparse_embeddings.clone());
+
+        for (repo_id, _collection_name, repo_path) in &valid_repos {
+            match start_background_updater(
+                config.watcher.update_strategy,
+                *repo_id,
+                repo_path.clone(),
+                embedding_manager.clone(),
+                postgres_client.clone(),
+                indexer_config.clone(),
+                config.watcher.clone(),
+            )
+            .await
+            {
+                Ok(handle) => {
+                    info!(
+                        "Background updater started for {} ({:?})",
+                        repo_path.display(),
+                        config.watcher.update_strategy
+                    );
+                    background_updaters.push(handle);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to start background updater for {}: {e}",
+                        repo_path.display()
+                    );
+                }
+            }
+        }
+    } else {
+        info!("Background index updating disabled");
+    }
+
     // Run REST API server
     let server_result =
         codesearch_server::run_rest_server(config, valid_repos, postgres_client, enable_agentic)
             .await
             .map_err(|e| anyhow!("REST server error: {e}"));
+
+    // Shutdown background updaters
+    info!("Shutting down background updaters...");
+    for mut handle in background_updaters {
+        handle.shutdown();
+    }
 
     // Always perform graceful shutdown of outbox processor, regardless of server result
     // This ensures proper cleanup even if the server failed

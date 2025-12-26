@@ -1,5 +1,6 @@
 //! Extract relationships from entity metadata for Neo4j graph construction
 
+use codesearch_core::entities::SourceReference;
 use codesearch_core::{CodeEntity, EntityType, Language};
 use serde_json::json;
 use std::collections::HashMap;
@@ -262,13 +263,13 @@ pub fn extract_calls_relationships(entity: &CodeEntity) -> Vec<Relationship> {
         EntityType::Function | EntityType::Method
     ) {
         if let Some(calls_json) = entity.metadata.attributes.get("calls") {
-            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_json) {
-                for callee_name in calls {
+            if let Ok(calls) = serde_json::from_str::<Vec<SourceReference>>(calls_json) {
+                for call_ref in calls {
                     relationships.push(Relationship {
                         rel_type: "CALLS".to_string(),
                         from_id: entity.entity_id.clone(),
                         to_id: None,
-                        to_name: Some(callee_name),
+                        to_name: Some(call_ref.target),
                         properties: HashMap::new(),
                     });
                 }
@@ -279,27 +280,26 @@ pub fn extract_calls_relationships(entity: &CodeEntity) -> Vec<Relationship> {
     relationships
 }
 
-/// Extract IMPORTS relationships from module metadata
+/// Extract IMPORTS relationships from entity metadata
+/// Any entity type can have imports (functions, structs, enums, traits, impls, modules, etc.)
 pub fn extract_imports_relationships(entity: &CodeEntity) -> Vec<Relationship> {
     let mut relationships = Vec::new();
 
-    if entity.entity_type == EntityType::Module {
-        if let Some(imports_str) = entity.metadata.attributes.get("imports") {
-            // Parse as JSON array (format: ["import1", "import2"])
-            let imports: Vec<String> = match serde_json::from_str(imports_str) {
-                Ok(i) => i,
-                Err(_) => return relationships,
-            };
+    if let Some(imports_str) = entity.metadata.attributes.get("imports") {
+        // Parse as JSON array (format: ["import1", "import2"])
+        let imports: Vec<String> = match serde_json::from_str(imports_str) {
+            Ok(i) => i,
+            Err(_) => return relationships,
+        };
 
-            for import_path in imports {
-                relationships.push(Relationship {
-                    rel_type: "IMPORTS".to_string(),
-                    from_id: entity.entity_id.clone(),
-                    to_id: None,
-                    to_name: Some(import_path),
-                    properties: HashMap::new(),
-                });
-            }
+        for import_path in imports {
+            relationships.push(Relationship {
+                rel_type: "IMPORTS".to_string(),
+                from_id: entity.entity_id.clone(),
+                to_id: None,
+                to_name: Some(import_path),
+                properties: HashMap::new(),
+            });
         }
     }
 
@@ -546,7 +546,8 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_imports_relationships_wrong_entity_type() {
+    fn test_extract_imports_relationships_from_function() {
+        // Imports can now come from any entity type (functions have scope-local imports)
         let mut metadata = EntityMetadata::default();
         metadata
             .attributes
@@ -572,6 +573,9 @@ mod tests {
             .expect("Failed to build test entity");
 
         let relationships = extract_imports_relationships(&function);
-        assert_eq!(relationships.len(), 0);
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0].rel_type, "IMPORTS");
+        assert_eq!(relationships[0].from_id, "func_id");
+        assert_eq!(relationships[0].to_name, Some("std::io".to_string()));
     }
 }

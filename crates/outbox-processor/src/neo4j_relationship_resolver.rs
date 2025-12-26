@@ -30,9 +30,8 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
-use codesearch_core::entities::{CodeEntity, EntityType};
+use codesearch_core::entities::{CodeEntity, EntityType, SourceReference};
 use codesearch_core::error::Result;
-use codesearch_languages::common::import_map::resolve_relative_import;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -495,7 +494,7 @@ impl RelationshipResolver for TypeUsageResolver {
         let callables: Vec<_> = functions.into_iter().chain(methods).collect();
         for callable in callables {
             if let Some(uses_types_json) = callable.metadata.attributes.get("uses_types") {
-                let types = match serde_json::from_str::<Vec<String>>(uses_types_json) {
+                let types = match serde_json::from_str::<Vec<SourceReference>>(uses_types_json) {
                     Ok(t) => t,
                     Err(e) => {
                         warn!(
@@ -507,7 +506,12 @@ impl RelationshipResolver for TypeUsageResolver {
                 };
                 for type_ref in types {
                     // Strip generics and get the base type name
-                    let type_name = type_ref.split('<').next().unwrap_or(&type_ref).trim();
+                    let type_name = type_ref
+                        .target
+                        .split('<')
+                        .next()
+                        .unwrap_or(&type_ref.target)
+                        .trim();
 
                     if let Some(type_id) = type_map.get(type_name) {
                         // Forward edge: function/method -> type
@@ -558,7 +562,7 @@ impl RelationshipResolver for CallGraphResolver {
 
         for caller in all_callables {
             if let Some(calls_json) = caller.metadata.attributes.get("calls") {
-                let calls = match serde_json::from_str::<Vec<String>>(calls_json) {
+                let calls = match serde_json::from_str::<Vec<SourceReference>>(calls_json) {
                     Ok(c) => c,
                     Err(e) => {
                         warn!(
@@ -568,8 +572,8 @@ impl RelationshipResolver for CallGraphResolver {
                         continue;
                     }
                 };
-                for callee_name in calls {
-                    if let Some(callee_id) = callable_map.get(&callee_name) {
+                for call_ref in calls {
+                    if let Some(callee_id) = callable_map.get(&call_ref.target) {
                         // Forward edge: caller -> callee
                         relationships.push((
                             caller.entity_id.clone(),
@@ -592,6 +596,10 @@ impl RelationshipResolver for CallGraphResolver {
 }
 
 /// Resolver for imports (IMPORTS relationships)
+///
+/// Creates import relationships from any entity with an `imports` attribute
+/// to the entities they import. External imports are handled separately
+/// by resolve_external_references.
 pub struct ImportsResolver;
 
 #[async_trait]
@@ -601,87 +609,70 @@ impl RelationshipResolver for ImportsResolver {
     }
 
     async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
-        let modules = cache.by_type(EntityType::Module);
-
-        // Build lookup maps for module resolution
-        // 1. By path_entity_identifier (file-path-based, best for relative imports)
-        // 2. By qualified_name (semantic, package-relative)
-        // 3. By simple name (for bare imports within the same package)
-        let path_id_map: HashMap<String, String> = modules
+        // Build lookup map by qualified_name for all entities
+        let qname_map: HashMap<&str, &str> = cache
+            .all()
             .iter()
-            .filter_map(|m| {
-                m.path_entity_identifier
-                    .as_ref()
-                    .map(|pid| (pid.clone(), m.entity_id.clone()))
-            })
+            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
             .collect();
 
-        let module_map: HashMap<String, String> = modules
+        // Also build a simple name map for fallback resolution
+        let simple_name_map: HashMap<&str, &str> = cache
+            .all()
             .iter()
-            .map(|m| (m.qualified_name.clone(), m.entity_id.clone()))
-            .collect();
-
-        let simple_name_map: HashMap<String, String> = modules
-            .iter()
-            .map(|m| (m.name.clone(), m.entity_id.clone()))
+            .map(|e| (e.name.as_str(), e.entity_id.as_str()))
             .collect();
 
         let mut relationships = Vec::new();
 
-        for module_entity in &modules {
-            if let Some(imports_json) = module_entity.metadata.attributes.get("imports") {
+        // Process all entities that have imports
+        for entity in cache.all() {
+            if let Some(imports_json) = entity.metadata.attributes.get("imports") {
                 let imports = match serde_json::from_str::<Vec<String>>(imports_json) {
                     Ok(i) => i,
                     Err(e) => {
                         warn!(
                             "Failed to parse 'imports' JSON for entity {}: {}",
-                            module_entity.entity_id, e
+                            entity.entity_id, e
                         );
                         continue;
                     }
                 };
+
                 for import_path in imports {
-                    // Try to resolve the import using multiple fallback strategies
-                    let imported_module_id = if import_path.starts_with('.') {
-                        // Relative import: resolve based on importer's location
-                        // First try using path_entity_identifier (more accurate for file-based resolution)
-                        let base_path = module_entity
-                            .path_entity_identifier
-                            .as_ref()
-                            .unwrap_or(&module_entity.qualified_name);
+                    // Try to resolve the import:
+                    // 1. Exact qualified name match
+                    // 2. Simple name fallback (for internal package imports)
+                    let imported_id = qname_map.get(import_path.as_str()).or_else(|| {
+                        // Try matching just the last segment (simple name)
+                        let simple_name = import_path
+                            .rsplit("::")
+                            .next()
+                            .or_else(|| import_path.rsplit('.').next())
+                            .unwrap_or(&import_path);
+                        simple_name_map.get(simple_name)
+                    });
 
-                        resolve_relative_import(base_path, &import_path)
-                            .and_then(|resolved| {
-                                // Try path_entity_identifier first, then qualified_name
-                                path_id_map
-                                    .get(&resolved)
-                                    .or_else(|| module_map.get(&resolved))
-                            })
-                            .or_else(|| {
-                                // Fall back to qualified_name-based resolution
-                                resolve_relative_import(&module_entity.qualified_name, &import_path)
-                                    .and_then(|resolved| module_map.get(&resolved))
-                            })
-                    } else {
-                        // Bare import: try simple name match (internal package import)
-                        // External packages (react, lodash, etc.) won't match
-                        simple_name_map.get(&import_path)
-                    };
+                    if let Some(imported_id) = imported_id {
+                        // Skip self-imports
+                        if *imported_id == entity.entity_id {
+                            continue;
+                        }
 
-                    if let Some(imported_id) = imported_module_id {
-                        // Forward edge: module -> imported_module
+                        // Forward edge: entity -> imported_entity
                         relationships.push((
-                            module_entity.entity_id.clone(),
-                            imported_id.clone(),
+                            entity.entity_id.clone(),
+                            (*imported_id).to_string(),
                             "IMPORTS".to_string(),
                         ));
-                        // Reciprocal edge: imported_module -> module
+                        // Reciprocal edge: imported_entity -> entity
                         relationships.push((
-                            imported_id.clone(),
-                            module_entity.entity_id.clone(),
+                            (*imported_id).to_string(),
+                            entity.entity_id.clone(),
                             "IMPORTED_BY".to_string(),
                         ));
                     }
+                    // Note: Unresolved imports (external) are handled by resolve_external_references
                 }
             }
         }
@@ -838,12 +829,12 @@ pub async fn resolve_external_references(
             }
         }
 
-        // Check uses_types (JSON array of type references)
+        // Check uses_types (JSON array of SourceReference)
         if let Some(uses_types_str) = entity.metadata.attributes.get("uses_types") {
-            if let Ok(types) = serde_json::from_str::<Vec<String>>(uses_types_str) {
+            if let Ok(types) = serde_json::from_str::<Vec<SourceReference>>(uses_types_str) {
                 for type_ref in types {
-                    if is_external_ref(&type_ref, &known_names, &name_to_qname) {
-                        let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref));
+                    if is_external_ref(&type_ref.target, &known_names, &name_to_qname) {
+                        let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref.target));
                         let ext_id = ext_ref.entity_id();
                         external_refs.insert(ext_ref);
                         relationships.push((
@@ -861,12 +852,12 @@ pub async fn resolve_external_references(
             }
         }
 
-        // Check calls (JSON array of function calls)
+        // Check calls (JSON array of SourceReference)
         if let Some(calls_str) = entity.metadata.attributes.get("calls") {
-            if let Ok(calls) = serde_json::from_str::<Vec<String>>(calls_str) {
+            if let Ok(calls) = serde_json::from_str::<Vec<SourceReference>>(calls_str) {
                 for call_ref in calls {
-                    if is_external_ref(&call_ref, &known_names, &name_to_qname) {
-                        let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref));
+                    if is_external_ref(&call_ref.target, &known_names, &name_to_qname) {
+                        let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref.target));
                         let ext_id = ext_ref.entity_id();
                         external_refs.insert(ext_ref);
                         relationships.push((
@@ -878,6 +869,29 @@ pub async fn resolve_external_references(
                             ext_id,
                             entity.entity_id.clone(),
                             "CALLED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Check imports (JSON array of import paths)
+        if let Some(imports_str) = entity.metadata.attributes.get("imports") {
+            if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_str) {
+                for import_ref in imports {
+                    if is_external_ref(&import_ref, &known_names, &name_to_qname) {
+                        let ext_ref = ExternalRef::new(normalize_external_ref(&import_ref));
+                        let ext_id = ext_ref.entity_id();
+                        external_refs.insert(ext_ref);
+                        relationships.push((
+                            entity.entity_id.clone(),
+                            ext_id.clone(),
+                            "IMPORTS".to_string(),
+                        ));
+                        relationships.push((
+                            ext_id,
+                            entity.entity_id.clone(),
+                            "IMPORTED_BY".to_string(),
                         ));
                     }
                 }

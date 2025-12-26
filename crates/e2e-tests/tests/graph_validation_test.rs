@@ -14,7 +14,8 @@ use git2::build::RepoBuilder;
 use anyhow::{Context, Result};
 use codesearch_e2e_tests::common::*;
 use codesearch_e2e_tests::graph_validation::{
-    compare, generate_scip_index, parse_scip_relationships, query_all_relationships, write_report,
+    aggregate_imports_to_module_level, compare, generate_scip_index, parse_scip_relationships,
+    query_all_relationships, write_report,
 };
 
 /// Test repository: a small, stable Rust project
@@ -230,7 +231,24 @@ async fn test_graph_extraction_accuracy() -> Result<()> {
 
     // 7. Compare and report
     println!("\nComparing graphs...");
-    let result = compare(&ground_truth, &extracted);
+
+    // Aggregate IMPORTS to module level for comparison with SCIP
+    // SCIP tracks module→module imports while we track entity→entity
+    println!("Aggregating IMPORTS to module level for SCIP comparison...");
+    let ground_truth_aggregated = aggregate_imports_to_module_level(&ground_truth);
+    let extracted_aggregated = aggregate_imports_to_module_level(&extracted);
+    println!(
+        "  Ground truth: {} -> {} relationships",
+        ground_truth.len(),
+        ground_truth_aggregated.len()
+    );
+    println!(
+        "  Extracted: {} -> {} relationships",
+        extracted.len(),
+        extracted_aggregated.len()
+    );
+
+    let result = compare(&ground_truth_aggregated, &extracted_aggregated);
 
     // Print summary to stdout
     result.print_summary();

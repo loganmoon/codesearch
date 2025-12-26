@@ -179,6 +179,14 @@ pub fn handle_function_impl(
         }
     }
 
+    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    if !imports.is_empty() {
+        if let Ok(json) = serde_json::to_string(&imports) {
+            metadata.attributes.insert("imports".to_string(), json);
+        }
+    }
+
     // Build the entity using the shared helper
     let entity = build_entity(
         components,

@@ -73,6 +73,27 @@ impl ImportMap {
     pub fn len(&self) -> usize {
         self.mappings.len()
     }
+
+    /// Get all imported qualified paths (the values of the import map)
+    pub fn imported_paths(&self) -> Vec<String> {
+        self.mappings.values().cloned().collect()
+    }
+
+    /// Get all imported qualified paths with Rust path normalization
+    ///
+    /// Normalizes crate::, self::, and super:: prefixes to absolute paths.
+    /// This is needed because import statements store paths with relative prefixes,
+    /// but entity qualified_names use absolute paths (package::module::name).
+    pub fn imported_paths_normalized(
+        &self,
+        package_name: Option<&str>,
+        current_module: Option<&str>,
+    ) -> Vec<String> {
+        self.mappings
+            .values()
+            .map(|path| normalize_rust_path(path, package_name, current_module))
+            .collect()
+    }
 }
 
 /// Resolve a reference to a qualified name using import map and scope context

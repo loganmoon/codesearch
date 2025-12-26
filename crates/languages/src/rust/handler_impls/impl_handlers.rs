@@ -165,6 +165,8 @@ pub fn handle_impl_impl(
             for_type_resolved: &for_type_resolved,
             trait_name_resolved: None, // No trait for inherent impl
             generics: &generics,
+            package_name,
+            module_path: module_path.as_deref(),
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
@@ -200,6 +202,14 @@ pub fn handle_impl_impl(
     if !parsed_generics.bound_trait_refs.is_empty() {
         if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
             metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
+    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    if !imports.is_empty() {
+        if let Ok(json) = serde_json::to_string(&imports) {
+            metadata.attributes.insert("imports".to_string(), json);
         }
     }
 
@@ -353,6 +363,8 @@ pub fn handle_impl_trait_impl(
             for_type_resolved: &for_type_resolved,
             trait_name_resolved: Some(&trait_name_resolved),
             generics: &generics,
+            package_name,
+            module_path: module_path.as_deref(),
         };
         let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
         entities.extend(methods);
@@ -391,6 +403,14 @@ pub fn handle_impl_trait_impl(
     if !parsed_generics.bound_trait_refs.is_empty() {
         if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
             metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
+    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    if !imports.is_empty() {
+        if let Ok(json) = serde_json::to_string(&imports) {
+            metadata.attributes.insert("imports".to_string(), json);
         }
     }
 
@@ -469,6 +489,10 @@ struct ImplContext<'a> {
     /// Generic parameters with bounds (e.g., ["T: Clone", "U"])
     /// Used to disambiguate impl blocks with different bounds
     generics: &'a [String],
+    /// Package name for path normalization
+    package_name: Option<&'a str>,
+    /// Module path for path normalization
+    module_path: Option<&'a str>,
 }
 
 /// Components for building impl block member entities (methods, associated constants)
@@ -714,13 +738,11 @@ fn extract_method(
     let import_map = get_file_import_map(method_node, source);
 
     // Build resolution context for qualified name normalization
-    // Note: package_name and current_module are None here; full normalization
-    // happens at the impl block level. This still handles import map resolution.
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: Some(impl_ctx.qualified_name),
-        package_name: None,
-        current_module: None,
+        package_name: impl_ctx.package_name,
+        current_module: impl_ctx.module_path,
     };
 
     // Extract local variable types for method call resolution
@@ -758,6 +780,14 @@ fn extract_method(
     if !type_refs.is_empty() {
         if let Ok(json) = serde_json::to_string(&type_refs) {
             metadata.attributes.insert("uses_types".to_string(), json);
+        }
+    }
+
+    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    let imports = import_map.imported_paths_normalized(impl_ctx.package_name, impl_ctx.module_path);
+    if !imports.is_empty() {
+        if let Ok(json) = serde_json::to_string(&imports) {
+            metadata.attributes.insert("imports".to_string(), json);
         }
     }
 

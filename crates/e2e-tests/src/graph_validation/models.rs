@@ -317,9 +317,423 @@ impl ComparisonResult {
     }
 }
 
+/// Check if a qualified name contains external references or test types.
+///
+/// Returns true if the name should be filtered out from IMPORTS comparison.
+fn should_filter_import_name(name: &str) -> bool {
+    // Filter out external references
+    if name.contains("external::") {
+        return true;
+    }
+
+    // Filter out test types (TestError, test fixtures, etc.)
+    let test_patterns = ["TestError", "test_", "Test::", "tests::"];
+    for pattern in test_patterns {
+        if name.contains(pattern) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Clean up a qualified name for module extraction.
+///
+/// Handles impl blocks like "anyhow::error::impl external" or
+/// "anyhow::backtrace::capture::impl anyhow::backtrace::capture"
+fn clean_qualified_name(qualified_name: &str) -> &str {
+    // Handle "impl X" patterns - find "impl " and take everything before it
+    if let Some(impl_pos) = qualified_name.find("::impl ") {
+        return &qualified_name[..impl_pos];
+    }
+
+    // Handle trait impl blocks like "<Type as Trait>::method"
+    if qualified_name.starts_with('<') {
+        // Try to extract the first type before " as " or ">"
+        let inner = qualified_name.trim_start_matches('<');
+        let type_part = inner
+            .split(" as ")
+            .next()
+            .unwrap_or(inner)
+            .split('>')
+            .next()
+            .unwrap_or(inner);
+
+        // If the type itself contains external::, return as-is for filtering
+        if type_part.contains("external::") {
+            return qualified_name;
+        }
+
+        return type_part;
+    }
+
+    qualified_name
+}
+
+/// Extract the module path from a qualified name using entity type.
+///
+/// For SCIP comparison, we need to map entities to their containing module:
+/// - Module/Package entities: use qualified_name directly (it IS a module)
+/// - Other entities: extract parent module (drop the last segment)
+///
+/// Then limit to max 2 segments for SCIP's module-level granularity:
+/// - `anyhow::error` -> `anyhow::error`
+/// - `anyhow::backtrace::capture` -> `anyhow::backtrace`
+pub fn extract_module_from_entity(entity: &EntityRef) -> String {
+    let qualified_name = entity.qualified_name();
+
+    // Handle special cases
+    if qualified_name.is_empty() {
+        return qualified_name.to_string();
+    }
+
+    // Clean up impl blocks first
+    let cleaned = clean_qualified_name(qualified_name);
+
+    // Skip entities with "external::" - these are unresolved references
+    if cleaned.contains("external::") {
+        return qualified_name.to_string();
+    }
+
+    let segments: Vec<&str> = cleaned.split("::").collect();
+
+    // Determine how many segments to keep based on entity type
+    let module_segments: Vec<&str> = match entity.entity_type() {
+        // Module and Package ARE modules - use all segments (up to limit)
+        Some(EntityType::Module) | Some(EntityType::Package) => {
+            segments.iter().take(2).copied().collect()
+        }
+        // For all other types, drop the last segment (the entity name itself)
+        // to get the parent module
+        _ => {
+            if segments.len() <= 1 {
+                // Top-level entity, return package name
+                segments.clone()
+            } else {
+                // Drop the last segment (entity name), keep up to 2 module segments
+                segments[..segments.len() - 1].iter().take(2).copied().collect()
+            }
+        }
+    };
+
+    if module_segments.is_empty() {
+        return segments.first().map(|s| s.to_string()).unwrap_or_default();
+    }
+
+    module_segments.join("::")
+}
+
+/// Legacy function for extracting module when entity type is unknown.
+/// Uses CamelCase heuristic as fallback.
+fn is_type_segment(segment: &str) -> bool {
+    if segment.is_empty() {
+        return false;
+    }
+    segment.chars().next().unwrap_or('a').is_ascii_uppercase()
+}
+
+/// Extract module from qualified name without entity type info.
+/// Used as fallback when entity type is not available.
+pub fn extract_module_from_qualified_name(qualified_name: &str) -> String {
+    if qualified_name.is_empty() {
+        return qualified_name.to_string();
+    }
+
+    let cleaned = clean_qualified_name(qualified_name);
+    if cleaned.contains("external::") {
+        return qualified_name.to_string();
+    }
+
+    let segments: Vec<&str> = cleaned.split("::").collect();
+
+    // Use CamelCase heuristic: stop at first uppercase segment
+    let mut module_segments = Vec::new();
+    for segment in &segments {
+        if is_type_segment(segment) {
+            break;
+        }
+        module_segments.push(*segment);
+        if module_segments.len() >= 2 {
+            break;
+        }
+    }
+
+    if module_segments.is_empty() {
+        return segments.first().map(|s| s.to_string()).unwrap_or_default();
+    }
+
+    module_segments.join("::")
+}
+
+/// Aggregate IMPORTS relationships to module level.
+///
+/// SCIP tracks module→module imports, while codesearch tracks entity→entity.
+/// This function converts entity-level IMPORTS to module-level for comparison.
+///
+/// Uses entity type information when available:
+/// - Module/Package: use qualified_name as the module
+/// - Other types: extract parent module by dropping the last segment
+///
+/// Filtering applied:
+/// 1. Filter out sources/targets containing `external::`
+/// 2. Filter out imports targeting test types (TestError, etc.)
+/// 3. Handle impl qualified names - strip the impl portion
+/// 4. Aggregate to top-level modules (max 2 segments)
+/// 5. Deduplicate module→module pairs
+pub fn aggregate_imports_to_module_level(relationships: &[Relationship]) -> Vec<Relationship> {
+    use std::collections::HashSet;
+
+    let mut module_imports: HashSet<(String, String)> = HashSet::new();
+    let mut result = Vec::new();
+
+    for rel in relationships {
+        if rel.relationship_type == RelationshipType::Imports {
+            let source_qname = rel.source.qualified_name();
+            let target_qname = rel.target.qualified_name();
+
+            // Filter out external references and test types
+            if should_filter_import_name(source_qname) || should_filter_import_name(target_qname) {
+                continue;
+            }
+
+            // Use entity type-aware extraction when available, fall back to heuristic
+            let source_module = if rel.source.entity_type().is_some() {
+                extract_module_from_entity(&rel.source)
+            } else {
+                extract_module_from_qualified_name(source_qname)
+            };
+
+            let target_module = if rel.target.entity_type().is_some() {
+                extract_module_from_entity(&rel.target)
+            } else {
+                extract_module_from_qualified_name(target_qname)
+            };
+
+            // Skip if extraction resulted in external:: (from impl blocks for external types)
+            if source_module.contains("external::") || target_module.contains("external::") {
+                continue;
+            }
+
+            // Skip self-imports
+            if source_module == target_module {
+                continue;
+            }
+
+            // Deduplicate
+            if module_imports.insert((source_module.clone(), target_module.clone())) {
+                result.push(Relationship::new(
+                    EntityRef::new(source_module),
+                    EntityRef::new(target_module),
+                    RelationshipType::Imports,
+                ));
+            }
+        } else {
+            // Keep other relationship types as-is
+            result.push(rel.clone());
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_module_from_entity_with_types() {
+        // Function entity - drops the function name to get parent module
+        let func = EntityRef::new("anyhow::error::object_boxed").with_entity_type(EntityType::Function);
+        assert_eq!(extract_module_from_entity(&func), "anyhow::error");
+
+        // Struct entity - drops the struct name to get parent module
+        let strct = EntityRef::new("anyhow::error::ErrorImpl").with_entity_type(EntityType::Struct);
+        assert_eq!(extract_module_from_entity(&strct), "anyhow::error");
+
+        // Method entity - drops the method name
+        let method = EntityRef::new("anyhow::chain::Chain::new").with_entity_type(EntityType::Method);
+        assert_eq!(extract_module_from_entity(&method), "anyhow::chain");
+
+        // Module entity - keeps module path (up to 2 segments)
+        let module = EntityRef::new("anyhow::error").with_entity_type(EntityType::Module);
+        assert_eq!(extract_module_from_entity(&module), "anyhow::error");
+
+        // Deeply nested module - limited to 2 segments
+        let deep_mod = EntityRef::new("anyhow::backtrace::capture").with_entity_type(EntityType::Module);
+        assert_eq!(extract_module_from_entity(&deep_mod), "anyhow::backtrace");
+
+        // Top-level type - returns package only
+        let top_type = EntityRef::new("anyhow::Error").with_entity_type(EntityType::Struct);
+        assert_eq!(extract_module_from_entity(&top_type), "anyhow");
+    }
+
+    #[test]
+    fn test_extract_module_from_qualified_name_heuristic() {
+        // Simple module/package
+        assert_eq!(extract_module_from_qualified_name("anyhow"), "anyhow");
+
+        // Type at top level - stop at type (CamelCase), return package only
+        assert_eq!(extract_module_from_qualified_name("anyhow::Error"), "anyhow");
+
+        // Type at top level with method
+        assert_eq!(extract_module_from_qualified_name("anyhow::Error::new"), "anyhow");
+
+        // Nested type - stop at type
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::error::ErrorImpl"),
+            "anyhow::error"
+        );
+
+        // Type with nested method
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::chain::Chain::new"),
+            "anyhow::chain"
+        );
+
+        // All lowercase - limited to 2 segments
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::error::object_boxed"),
+            "anyhow::error"
+        );
+
+        // Deeply nested modules (all lowercase) - limited to 2 segments
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::backtrace::capture::output_filename"),
+            "anyhow::backtrace"
+        );
+    }
+
+    #[test]
+    fn test_extract_module_handles_impl_blocks() {
+        // Impl block patterns should strip the impl portion
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::error::impl external"),
+            "anyhow::error"
+        );
+
+        assert_eq!(
+            extract_module_from_qualified_name("anyhow::backtrace::capture::impl anyhow"),
+            "anyhow::backtrace"
+        );
+    }
+
+    #[test]
+    fn test_is_type_segment() {
+        // Types are CamelCase
+        assert!(is_type_segment("Error"));
+        assert!(is_type_segment("ErrorImpl"));
+        assert!(is_type_segment("Chain"));
+        assert!(is_type_segment("Result"));
+
+        // Modules are snake_case
+        assert!(!is_type_segment("error"));
+        assert!(!is_type_segment("chain"));
+        assert!(!is_type_segment("backtrace"));
+        assert!(!is_type_segment("object_boxed"));
+
+        // Edge cases
+        assert!(!is_type_segment(""));
+        assert!(!is_type_segment("anyhow"));
+    }
+
+    #[test]
+    fn test_should_filter_import_name() {
+        // External references should be filtered
+        assert!(should_filter_import_name("external::ErrorImpl"));
+        assert!(should_filter_import_name("anyhow::<external::T as Foo>"));
+
+        // Test types should be filtered
+        assert!(should_filter_import_name("TestError"));
+        assert!(should_filter_import_name("anyhow::test_foo"));
+        assert!(should_filter_import_name("anyhow::tests::helper"));
+
+        // Normal names should not be filtered
+        assert!(!should_filter_import_name("anyhow::error"));
+        assert!(!should_filter_import_name("anyhow::Error"));
+    }
+
+    #[test]
+    fn test_aggregate_imports_to_module_level() {
+        let imports = vec![
+            Relationship::new(
+                EntityRef::new("anyhow::fmt::Indented"),
+                EntityRef::new("anyhow::chain::Chain"),
+                RelationshipType::Imports,
+            ),
+            Relationship::new(
+                EntityRef::new("anyhow::fmt::format_err"),
+                EntityRef::new("anyhow::chain::ChainState"),
+                RelationshipType::Imports,
+            ),
+            // This should be deduplicated (same module pair)
+            Relationship::new(
+                EntityRef::new("anyhow::fmt::another"),
+                EntityRef::new("anyhow::chain::Other"),
+                RelationshipType::Imports,
+            ),
+        ];
+
+        let aggregated = aggregate_imports_to_module_level(&imports);
+
+        // Should have 1 unique module->module import (anyhow::fmt -> anyhow::chain)
+        let import_count = aggregated
+            .iter()
+            .filter(|r| r.relationship_type == RelationshipType::Imports)
+            .count();
+        assert_eq!(import_count, 1);
+
+        let import = aggregated
+            .iter()
+            .find(|r| r.relationship_type == RelationshipType::Imports)
+            .unwrap();
+        assert_eq!(import.source.qualified_name(), "anyhow::fmt");
+        assert_eq!(import.target.qualified_name(), "anyhow::chain");
+    }
+
+    #[test]
+    fn test_aggregate_filters_external_and_test() {
+        let imports = vec![
+            // Should be filtered - external in source
+            Relationship::new(
+                EntityRef::new("anyhow::<external::T as Foo>::method"),
+                EntityRef::new("anyhow::error::Error"),
+                RelationshipType::Imports,
+            ),
+            // Should be filtered - external in target
+            Relationship::new(
+                EntityRef::new("anyhow::error::Error"),
+                EntityRef::new("external::TestError"),
+                RelationshipType::Imports,
+            ),
+            // Should be filtered - test type
+            Relationship::new(
+                EntityRef::new("anyhow::fmt::tests::helper"),
+                EntityRef::new("anyhow::chain::Chain"),
+                RelationshipType::Imports,
+            ),
+            // Should be kept
+            Relationship::new(
+                EntityRef::new("anyhow::context::private::Sealed"),
+                EntityRef::new("anyhow::error::Error"),
+                RelationshipType::Imports,
+            ),
+        ];
+
+        let aggregated = aggregate_imports_to_module_level(&imports);
+
+        let import_count = aggregated
+            .iter()
+            .filter(|r| r.relationship_type == RelationshipType::Imports)
+            .count();
+        assert_eq!(import_count, 1);
+
+        let import = aggregated
+            .iter()
+            .find(|r| r.relationship_type == RelationshipType::Imports)
+            .unwrap();
+        assert_eq!(import.source.qualified_name(), "anyhow::context");
+        assert_eq!(import.target.qualified_name(), "anyhow::error");
+    }
 
     #[test]
     fn test_metrics_calculate_all_zeros() {

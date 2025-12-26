@@ -11,13 +11,17 @@ pub mod models;
 pub mod report;
 pub mod scip_parser;
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
 use crate::common::containers::TestNeo4j;
 pub use comparator::compare;
-pub use models::{ComparisonResult, EntityRef, Metrics, Relationship, RelationshipType};
+pub use models::{
+    aggregate_imports_to_module_level, ComparisonResult, EntityRef, Metrics, Relationship,
+    RelationshipType,
+};
 pub use report::write_report;
 pub use scip_parser::{
     generate_scip_index, is_internal_symbol, parse_scip_relationships, parse_scip_symbol,
@@ -78,14 +82,17 @@ pub async fn query_all_relationships(
 
     // Query all relationships between Entity nodes
     // Use qualified_name for accurate symbol matching
+    // Include entity_type for intelligent filtering
     let body = serde_json::json!({
         "statements": [{
             "statement": r#"
                 MATCH (source:Entity {repository_id: $repo_id})-[r]->(target:Entity)
                 RETURN
                     source.qualified_name AS source_qname,
+                    source.entity_type AS source_type,
                     type(r) AS rel_type,
-                    target.qualified_name AS target_qname
+                    target.qualified_name AS target_qname,
+                    target.entity_type AS target_type
             "#,
             "parameters": {
                 "repo_id": repository_id
@@ -124,14 +131,17 @@ pub async fn query_all_relationships(
     for statement_result in &result.results {
         for row_data in &statement_result.data {
             let row = &row_data.row;
-            if row.len() < 3 {
+            // Now expecting 5 fields: source_qname, source_type, rel_type, target_qname, target_type
+            if row.len() < 5 {
                 skipped_malformed += 1;
                 continue;
             }
 
             let source_qname = row[0].as_str().unwrap_or_default();
-            let rel_type_str = row[1].as_str().unwrap_or_default();
-            let target_qname = row[2].as_str().unwrap_or_default();
+            let source_type_str = row[1].as_str().unwrap_or_default();
+            let rel_type_str = row[2].as_str().unwrap_or_default();
+            let target_qname = row[3].as_str().unwrap_or_default();
+            let target_type_str = row[4].as_str().unwrap_or_default();
 
             // Skip empty values
             if source_qname.is_empty() || target_qname.is_empty() {
@@ -145,10 +155,22 @@ pub async fn query_all_relationships(
                 continue;
             }
 
+            // Parse entity types
+            let source_type = codesearch_core::entities::EntityType::from_str(source_type_str).ok();
+            let target_type = codesearch_core::entities::EntityType::from_str(target_type_str).ok();
+
             // Parse relationship type
             if let Some(rel_type) = RelationshipType::from_neo4j_type(rel_type_str) {
-                let source = EntityRef::new(source_qname);
-                let target = EntityRef::new(target_qname);
+                let mut source = EntityRef::new(source_qname);
+                let mut target = EntityRef::new(target_qname);
+
+                if let Some(et) = source_type {
+                    source = source.with_entity_type(et);
+                }
+                if let Some(et) = target_type {
+                    target = target.with_entity_type(et);
+                }
+
                 relationships.push(Relationship::new(source, target, rel_type));
             } else {
                 skipped_unknown_rel += 1;

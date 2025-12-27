@@ -1,9 +1,27 @@
 //! Custom assertions for E2E tests
 
 use super::containers::TestQdrant;
-use super::fixtures::ExpectedEntity;
 use anyhow::{Context, Result};
+use codesearch_core::entities::EntityType;
 use serde::Deserialize;
+
+/// Expected entity for Qdrant validation
+pub struct ExpectedEntity {
+    pub name: String,
+    pub entity_type: EntityType,
+    pub file_path_contains: String,
+}
+
+impl ExpectedEntity {
+    /// Create a new expected entity
+    pub fn new(name: &str, entity_type: EntityType, file_path_contains: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            entity_type,
+            file_path_contains: file_path_contains.to_string(),
+        }
+    }
+}
 
 /// Assert that a collection exists in Qdrant
 pub async fn assert_collection_exists(qdrant: &TestQdrant, collection_name: &str) -> Result<()> {

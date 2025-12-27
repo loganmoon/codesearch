@@ -73,10 +73,6 @@ define_language_extractor! {
         r#macro => {
             query: queries::MACRO_QUERY,
             handler: handler_impls::handle_macro_impl
-        },
-        crate_root => {
-            query: queries::CRATE_ROOT_QUERY,
-            handler: handler_impls::handle_crate_root_impl
         }
     }
 }

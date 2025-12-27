@@ -86,6 +86,13 @@ impl PackageMap {
     pub fn has_package_at(&self, dir: &Path) -> bool {
         self.packages.iter().any(|(pkg_dir, _)| pkg_dir == dir)
     }
+
+    /// Iterate over all packages
+    ///
+    /// Returns tuples of (package_directory, package_info) for each package.
+    pub fn iter(&self) -> impl Iterator<Item = (&PathBuf, &PackageInfo)> {
+        self.packages.iter().map(|(dir, info)| (dir, info))
+    }
 }
 
 /// Detect and parse project manifest in repository root

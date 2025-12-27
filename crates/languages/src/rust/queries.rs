@@ -129,12 +129,3 @@ pub const MACRO_QUERY: &str = r#"
   name: (identifier) @name
 ) @macro
 "#;
-
-/// Query for extracting the crate root module
-///
-/// This matches the entire source_file node, which exists once per file.
-/// The handler uses file path detection to only create an entity when
-/// processing lib.rs or main.rs (crate root files).
-pub const CRATE_ROOT_QUERY: &str = r#"
-(source_file) @crate_root
-"#;

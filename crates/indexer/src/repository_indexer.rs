@@ -9,6 +9,9 @@ use crate::{IndexResult, IndexStats};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::config::SparseEmbeddingsConfig;
+use codesearch_core::entities::{
+    CodeEntityBuilder, EntityType, Language, SourceLocation, Visibility,
+};
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
@@ -298,6 +301,60 @@ async fn stage_file_discovery(
     Ok(total)
 }
 
+/// Create crate root module entities from the project manifest
+///
+/// This creates a Module entity for each package/crate in the project.
+/// The crate root is the top-level module that contains all other modules.
+fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<CodeEntity> {
+    package_map
+        .iter()
+        .filter_map(|(_pkg_dir, info)| {
+            // Determine the crate root file (lib.rs or main.rs)
+            let lib_rs = info.source_root.join("lib.rs");
+            let main_rs = info.source_root.join("main.rs");
+            let crate_root_file = if lib_rs.exists() {
+                lib_rs
+            } else if main_rs.exists() {
+                main_rs
+            } else {
+                // No crate root file found, skip this package
+                debug!(
+                    "No lib.rs or main.rs found in {} for package {}",
+                    info.source_root.display(),
+                    info.name
+                );
+                return None;
+            };
+
+            let entity_id = uuid::Uuid::new_v4().to_string();
+
+            match CodeEntityBuilder::default()
+                .entity_id(entity_id)
+                .repository_id(repo_id.to_string())
+                .name(info.name.clone())
+                .qualified_name(info.name.clone())
+                .entity_type(EntityType::Module)
+                .file_path(crate_root_file)
+                .location(SourceLocation {
+                    start_line: 1,
+                    start_column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                })
+                .visibility(Visibility::Public)
+                .language(Language::Rust)
+                .build()
+            {
+                Ok(entity) => Some(entity),
+                Err(e) => {
+                    warn!("Failed to build crate root entity for {}: {}", info.name, e);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 /// Stage 2: Extract entities from files in parallel
 #[allow(clippy::too_many_arguments)]
 async fn stage_extract_entities(
@@ -313,6 +370,30 @@ async fn stage_extract_entities(
 ) -> Result<(usize, usize)> {
     let mut total_extracted = 0;
     let mut total_failed = 0;
+
+    // Create crate root entities from manifest before processing files
+    if let Some(ref pm) = package_map {
+        let repo_id_str = repo_id.to_string();
+        let crate_roots = create_crate_root_entities(pm, &repo_id_str);
+        if !crate_roots.is_empty() {
+            let count = crate_roots.len();
+            info!("Stage 2: Creating {} crate root module entities", count);
+
+            entity_tx
+                .send(EntityBatch {
+                    entities: crate_roots,
+                    file_indices: Vec::new(), // Crate roots don't come from file extraction
+                    repo_id,
+                    git_commit: git_commit.clone(),
+                    collection_name: collection_name.clone(),
+                    failed_files: 0,
+                })
+                .await
+                .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
+
+            total_extracted += count;
+        }
+    }
 
     // Accumulator for building entity batches
     let mut entities = Vec::new();

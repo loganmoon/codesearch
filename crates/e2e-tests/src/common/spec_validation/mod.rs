@@ -4,20 +4,21 @@
 //! extraction pipeline correctly identifies entities and relationships
 //! from Rust source code.
 
-pub mod assertions;
-pub mod neo4j_queries;
-pub mod schema;
+mod assertions;
+mod neo4j_queries;
+mod schema;
+
+// Re-export only what tests need
+pub use schema::{ExpectedEntity, ExpectedRelationship, Fixture, ProjectType};
 
 use super::containers::{
     create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
-    get_shared_qdrant, wait_for_graph_ready,
-    TestPostgres,
+    get_shared_qdrant, wait_for_graph_ready, TestPostgres,
 };
 use super::run_cli_with_full_infra;
 use anyhow::{Context, Result};
 use assertions::{assert_entities_match, assert_relationships_match};
 use neo4j_queries::{get_all_entities, get_all_relationships};
-use schema::Fixture;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;

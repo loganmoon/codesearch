@@ -29,9 +29,19 @@ codesearch/
 
 This project uses git worktrees with a separate git directory for parallel development. Each issue or feature gets its own worktree.
 
+**Directory structure:**
+```
+/path/to/codesearch/              # Parent directory (NOT a worktree itself)
+├── .git/                         # Shared git directory
+├── main/                         # Worktree for 'main' branch (read-only)
+└── feature--my-feature/          # Worktree for feature branch
+```
+
+**Important:** The parent directory containing `.git/` is NOT a worktree. All worktrees (`main/`, `feature--xyz/`, etc.) are subdirectories. All worktree management commands must be run from this parent directory.
+
 **Branch/worktree naming convention:**
-- `feature--short-description` - New features
-- `bug--short-description` - Bug fixes
+- `feature--<issue-number>-short-description` - New features
+- `bug--<issue-number>-short-description` - Bug fixes
 - `docs--short-description` - Documentation changes
 - `chore--short-description` - Maintenance tasks
 - `refactor--short-description` - Code refactoring

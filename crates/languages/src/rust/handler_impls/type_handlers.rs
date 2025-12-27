@@ -76,12 +76,16 @@ pub fn handle_struct_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, struct_node, "rust")?;
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
-        current_module: None, // TODO: derive from file path if needed
+        current_module: module_path.as_deref(),
     };
 
     extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
@@ -142,6 +146,15 @@ pub fn handle_struct_impl(
             }
         }
 
+        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+        let imports =
+            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
+        if !imports.is_empty() {
+            if let Ok(json) = serde_json::to_string(&imports) {
+                metadata.attributes.insert("imports".to_string(), json);
+            }
+        }
+
         metadata
     })
     .map(|data| vec![data])
@@ -177,12 +190,16 @@ pub fn handle_enum_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, enum_node, "rust")?;
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
-        current_module: None, // TODO: derive from file path if needed
+        current_module: module_path.as_deref(),
     };
 
     extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
@@ -236,6 +253,15 @@ pub fn handle_enum_impl(
             }
         }
 
+        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+        let imports =
+            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
+        if !imports.is_empty() {
+            if let Ok(json) = serde_json::to_string(&imports) {
+                metadata.attributes.insert("imports".to_string(), json);
+            }
+        }
+
         metadata
     })
     .map(|data| vec![data])
@@ -271,12 +297,16 @@ pub fn handle_trait_impl(
     // Extract common components for parent_scope
     let components = extract_common_components(&ctx, capture_names::NAME, trait_node, "rust")?;
 
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
-        current_module: None, // TODO: derive from file path if needed
+        current_module: module_path.as_deref(),
     };
 
     extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
@@ -338,6 +368,15 @@ pub fn handle_trait_impl(
         if !uses_types.is_empty() {
             if let Ok(json) = serde_json::to_string(&uses_types) {
                 metadata.attributes.insert("uses_types".to_string(), json);
+            }
+        }
+
+        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+        let imports =
+            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
+        if !imports.is_empty() {
+            if let Ok(json) = serde_json::to_string(&imports) {
+                metadata.attributes.insert("imports".to_string(), json);
             }
         }
 

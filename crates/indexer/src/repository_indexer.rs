@@ -1797,4 +1797,126 @@ mod tests {
             .expect("Snapshot should exist");
         assert_eq!(snapshot, new_entities);
     }
+
+    mod create_crate_root_tests {
+        use super::super::create_crate_root_entities;
+        use codesearch_core::project_manifest::{PackageInfo, PackageMap};
+        use std::path::PathBuf;
+        use tempfile::TempDir;
+
+        fn create_package(name: &str, source_root: PathBuf) -> (PathBuf, PackageInfo) {
+            let pkg_dir = source_root.parent().unwrap_or(&source_root).to_path_buf();
+            (
+                pkg_dir,
+                PackageInfo {
+                    name: name.to_string(),
+                    source_root,
+                },
+            )
+        }
+
+        #[test]
+        fn test_create_crate_root_with_lib_rs() {
+            let temp_dir = TempDir::new().unwrap();
+            let src_dir = temp_dir.path().join("src");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            std::fs::write(src_dir.join("lib.rs"), "// lib").unwrap();
+
+            let mut package_map = PackageMap::new();
+            let (pkg_dir, info) = create_package("my_crate", src_dir);
+            package_map.add(pkg_dir, info);
+
+            let entities = create_crate_root_entities(&package_map, "test-repo-id");
+
+            assert_eq!(entities.len(), 1);
+            let entity = &entities[0];
+            assert_eq!(entity.name, "my_crate");
+            assert_eq!(entity.qualified_name, "my_crate");
+            assert!(entity.file_path.ends_with("lib.rs"));
+        }
+
+        #[test]
+        fn test_create_crate_root_with_main_rs() {
+            let temp_dir = TempDir::new().unwrap();
+            let src_dir = temp_dir.path().join("src");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+            let mut package_map = PackageMap::new();
+            let (pkg_dir, info) = create_package("my_binary", src_dir);
+            package_map.add(pkg_dir, info);
+
+            let entities = create_crate_root_entities(&package_map, "test-repo-id");
+
+            assert_eq!(entities.len(), 1);
+            let entity = &entities[0];
+            assert_eq!(entity.name, "my_binary");
+            assert!(entity.file_path.ends_with("main.rs"));
+        }
+
+        #[test]
+        fn test_create_crate_root_prefers_lib_over_main() {
+            let temp_dir = TempDir::new().unwrap();
+            let src_dir = temp_dir.path().join("src");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            std::fs::write(src_dir.join("lib.rs"), "// lib").unwrap();
+            std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+            let mut package_map = PackageMap::new();
+            let (pkg_dir, info) = create_package("dual_crate", src_dir);
+            package_map.add(pkg_dir, info);
+
+            let entities = create_crate_root_entities(&package_map, "test-repo-id");
+
+            assert_eq!(entities.len(), 1);
+            let entity = &entities[0];
+            // lib.rs should be preferred over main.rs
+            assert!(entity.file_path.ends_with("lib.rs"));
+        }
+
+        #[test]
+        fn test_create_crate_root_missing_entry_point() {
+            let temp_dir = TempDir::new().unwrap();
+            let src_dir = temp_dir.path().join("src");
+            std::fs::create_dir_all(&src_dir).unwrap();
+            // No lib.rs or main.rs
+
+            let mut package_map = PackageMap::new();
+            let (pkg_dir, info) = create_package("empty_crate", src_dir);
+            package_map.add(pkg_dir, info);
+
+            let entities = create_crate_root_entities(&package_map, "test-repo-id");
+
+            // Should return empty vec, not panic
+            assert!(entities.is_empty());
+        }
+
+        #[test]
+        fn test_create_crate_root_multiple_packages() {
+            let temp_dir = TempDir::new().unwrap();
+
+            // Create first package with lib.rs
+            let src1 = temp_dir.path().join("crate1/src");
+            std::fs::create_dir_all(&src1).unwrap();
+            std::fs::write(src1.join("lib.rs"), "// lib1").unwrap();
+
+            // Create second package with main.rs
+            let src2 = temp_dir.path().join("crate2/src");
+            std::fs::create_dir_all(&src2).unwrap();
+            std::fs::write(src2.join("main.rs"), "fn main() {}").unwrap();
+
+            let mut package_map = PackageMap::new();
+            let (pkg1, info1) = create_package("crate1", src1);
+            let (pkg2, info2) = create_package("crate2", src2);
+            package_map.add(pkg1, info1);
+            package_map.add(pkg2, info2);
+
+            let entities = create_crate_root_entities(&package_map, "test-repo-id");
+
+            assert_eq!(entities.len(), 2);
+            let names: Vec<_> = entities.iter().map(|e| e.name.as_str()).collect();
+            assert!(names.contains(&"crate1"));
+            assert!(names.contains(&"crate2"));
+        }
+    }
 }

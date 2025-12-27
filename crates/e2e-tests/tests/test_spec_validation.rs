@@ -8,8 +8,8 @@
 
 use anyhow::Result;
 use codesearch_e2e_tests::common::spec_validation::{
-    run_spec_validation,
-    schema::{ExpectedEntity, ExpectedRelationship, Fixture, ProjectType},
+    run_spec_validation, EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType,
+    RelationshipKind,
 };
 
 // =============================================================================
@@ -24,13 +24,30 @@ static BASIC_MOD: Fixture = Fixture {
         ("foo.rs", "pub fn bar() {}\n"),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::foo" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::foo::bar" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::foo",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::foo::bar",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::foo" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::foo", to: "test_crate::foo::bar" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::foo",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::foo",
+            to: "test_crate::foo::bar",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -48,15 +65,39 @@ fn private_fn() {}
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::public_fn" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::crate_fn" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::private_fn" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::public_fn",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::crate_fn",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::private_fn",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::public_fn" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::crate_fn" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::private_fn" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::public_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::crate_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::private_fn",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -66,19 +107,46 @@ fn private_fn() {}
 static USE_IMPORTS: Fixture = Fixture {
     name: "use_imports",
     files: &[
-        ("lib.rs", "pub mod utils;\nuse crate::utils::helper;\n\npub fn caller() { helper(); }\n"),
+        (
+            "lib.rs",
+            "pub mod utils;\nuse crate::utils::helper;\n\npub fn caller() { helper(); }\n",
+        ),
         ("utils.rs", "pub fn helper() {}\n"),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::utils" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::caller" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::utils::helper" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::utils",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::caller",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::utils::helper",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::utils" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::utils", to: "test_crate::utils::helper" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::utils",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::utils",
+            to: "test_crate::utils::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -92,13 +160,30 @@ static REEXPORTS: Fixture = Fixture {
         ("internal.rs", "pub fn helper() {}\n"),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::internal" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::internal::helper" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::internal",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::internal::helper",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::internal" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::internal", to: "test_crate::internal::helper" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::internal",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::internal",
+            to: "test_crate::internal::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -111,8 +196,9 @@ static REEXPORTS: Fixture = Fixture {
 /// Deep module nesting (3+ levels) with mixed inline and file-based modules
 static DEEP_MODULE_NESTING: Fixture = Fixture {
     name: "deep_module_nesting",
-    files: &[
-        ("lib.rs", r#"
+    files: &[(
+        "lib.rs",
+        r#"
 pub mod level1 {
     pub mod level2 {
         pub mod level3 {
@@ -120,20 +206,51 @@ pub mod level1 {
         }
     }
 }
-"#),
-    ],
+"#,
+    )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::level1" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::level1::level2" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::level1::level2::level3" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::level1::level2::level3::deep_function" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::level1",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::level1::level2",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::level1::level2::level3",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::level1::level2::level3::deep_function",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::level1" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::level1", to: "test_crate::level1::level2" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::level1::level2", to: "test_crate::level1::level2::level3" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::level1::level2::level3", to: "test_crate::level1::level2::level3::deep_function" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::level1",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::level1",
+            to: "test_crate::level1::level2",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::level1::level2",
+            to: "test_crate::level1::level2::level3",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::level1::level2::level3",
+            to: "test_crate::level1::level2::level3::deep_function",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -143,36 +260,90 @@ pub mod level1 {
 static MIXED_MODULE_STRUCTURE: Fixture = Fixture {
     name: "mixed_module_structure",
     files: &[
-        ("lib.rs", r#"
+        (
+            "lib.rs",
+            r#"
 pub mod api;          // file-based
 pub mod utils {       // inline
     pub fn helper() {}
 }
-"#),
-        ("api/mod.rs", r#"
+"#,
+        ),
+        (
+            "api/mod.rs",
+            r#"
 pub mod handlers;     // file-based inside directory
 pub fn api_root() {}
-"#),
-        ("api/handlers.rs", r#"
+"#,
+        ),
+        (
+            "api/handlers.rs",
+            r#"
 pub fn handle_request() {}
-"#),
+"#,
+        ),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::api" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::api::handlers" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::utils" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::api::api_root" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::api::handlers::handle_request" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::utils::helper" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::api",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::api::handlers",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::utils",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::api::api_root",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::api::handlers::handle_request",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::utils::helper",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::api" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::utils" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::api", to: "test_crate::api::handlers" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::api", to: "test_crate::api::api_root" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::api::handlers", to: "test_crate::api::handlers::handle_request" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::utils", to: "test_crate::utils::helper" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::api",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::utils",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::api",
+            to: "test_crate::api::handlers",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::api",
+            to: "test_crate::api::api_root",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::api::handlers",
+            to: "test_crate::api::handlers::handle_request",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::utils",
+            to: "test_crate::utils::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -181,8 +352,9 @@ pub fn handle_request() {}
 /// Self and super references in modules
 static SELF_SUPER_REFERENCES: Fixture = Fixture {
     name: "self_super_references",
-    files: &[
-        ("lib.rs", r#"
+    files: &[(
+        "lib.rs",
+        r#"
 pub fn root_fn() {}
 
 pub mod child {
@@ -202,25 +374,75 @@ pub mod child {
         }
     }
 }
-"#),
-    ],
+"#,
+    )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::child" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::child::grandchild" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::root_fn" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::child::child_fn" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::child::grandchild::grandchild_fn" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::child",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::child::grandchild",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::root_fn",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::child::child_fn",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::child::grandchild::grandchild_fn",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::root_fn" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::child" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::child", to: "test_crate::child::child_fn" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::child", to: "test_crate::child::grandchild" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::child::grandchild", to: "test_crate::child::grandchild::grandchild_fn" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::child::child_fn", to: "test_crate::root_fn" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::child::grandchild::grandchild_fn", to: "test_crate::root_fn" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::child::grandchild::grandchild_fn", to: "test_crate::child::child_fn" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::root_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::child",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::child",
+            to: "test_crate::child::child_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::child",
+            to: "test_crate::child::grandchild",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::child::grandchild",
+            to: "test_crate::child::grandchild::grandchild_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::child::child_fn",
+            to: "test_crate::root_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::child::grandchild::grandchild_fn",
+            to: "test_crate::root_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::child::grandchild::grandchild_fn",
+            to: "test_crate::child::child_fn",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -244,14 +466,35 @@ pub fn callee() {}
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::caller" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::callee" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::caller",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::callee",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::callee" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::callee" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::callee",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::callee",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -273,15 +516,38 @@ impl Foo {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Foo" },
-        ExpectedEntity { entity_type: "ImplBlock", qualified_name: "test_crate::impl Foo" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Foo::method" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Foo::associated" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Foo",
+        },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::impl Foo",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Foo::method",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Foo::associated",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Foo" },
-        ExpectedRelationship { rel_type: "ASSOCIATES", from: "test_crate::impl Foo", to: "test_crate::Foo" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Foo",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Associates,
+            from: "test_crate::impl Foo",
+            to: "test_crate::Foo",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -304,16 +570,44 @@ pub fn main_caller() {
         ("utils.rs", "pub fn helper() {}\n"),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::utils" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::main_caller" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::utils::helper" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::utils",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::main_caller",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::utils::helper",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::utils" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::main_caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::utils", to: "test_crate::utils::helper" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::main_caller", to: "test_crate::utils::helper" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::utils",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::main_caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::utils",
+            to: "test_crate::utils::helper",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::main_caller",
+            to: "test_crate::utils::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -357,17 +651,37 @@ impl Counter {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Counter" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Counter",
+        },
         // Note: Two separate impl blocks, both for Counter
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Counter::new" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Counter::with_value" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Counter::increment" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::Counter::get" },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Counter::new",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Counter::with_value",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Counter::increment",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::Counter::get",
+        },
     ],
-    relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Counter" },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "test_crate",
+        to: "test_crate::Counter",
+    }],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
 };
@@ -394,18 +708,53 @@ impl AsyncService {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::async_caller" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::async_callee" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::AsyncService" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::AsyncService::process" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::async_caller",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::async_callee",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::AsyncService",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::AsyncService::process",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::async_caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::async_callee" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::AsyncService" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::async_caller", to: "test_crate::async_callee" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::AsyncService::process", to: "test_crate::async_callee" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::async_caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::async_callee",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::AsyncService",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::async_caller",
+            to: "test_crate::async_callee",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::AsyncService::process",
+            to: "test_crate::async_callee",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -459,23 +808,75 @@ pub fn create_config() -> Config {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::ConfigBuilder" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Config" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::ConfigBuilder::new" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::ConfigBuilder::name" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::ConfigBuilder::value" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::ConfigBuilder::build" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_config" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::ConfigBuilder",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Config",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::ConfigBuilder::new",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::ConfigBuilder::name",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::ConfigBuilder::value",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::ConfigBuilder::build",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_config",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::ConfigBuilder" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Config" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_config" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_config", to: "test_crate::ConfigBuilder::new" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_config", to: "test_crate::ConfigBuilder::name" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_config", to: "test_crate::ConfigBuilder::value" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_config", to: "test_crate::ConfigBuilder::build" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::ConfigBuilder",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Config",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_config",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_config",
+            to: "test_crate::ConfigBuilder::new",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_config",
+            to: "test_crate::ConfigBuilder::name",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_config",
+            to: "test_crate::ConfigBuilder::value",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_config",
+            to: "test_crate::ConfigBuilder::build",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -505,18 +906,54 @@ pub fn mutually_recursive_b(n: u32) -> u32 {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::factorial" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::mutually_recursive_a" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::mutually_recursive_b" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::factorial",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::mutually_recursive_a",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::mutually_recursive_b",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::factorial" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::mutually_recursive_a" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::mutually_recursive_b" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::factorial", to: "test_crate::factorial" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::mutually_recursive_a", to: "test_crate::mutually_recursive_b" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::mutually_recursive_b", to: "test_crate::mutually_recursive_a" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::factorial",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::mutually_recursive_a",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::mutually_recursive_b",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::factorial",
+            to: "test_crate::factorial",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::mutually_recursive_a",
+            to: "test_crate::mutually_recursive_b",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::mutually_recursive_b",
+            to: "test_crate::mutually_recursive_a",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -542,14 +979,35 @@ pub struct Wrapper {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Config" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Wrapper" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Config",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Wrapper",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Config" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Wrapper" },
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::Wrapper", to: "test_crate::Config" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Config",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Wrapper",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::Wrapper",
+            to: "test_crate::Config",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -569,12 +1027,20 @@ pub enum Status {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Enum", qualified_name: "test_crate::Status" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Enum,
+            qualified_name: "test_crate::Status",
+        },
     ],
-    relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Status" },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "test_crate",
+        to: "test_crate::Status",
+    }],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
 };
@@ -590,13 +1056,30 @@ pub type Result<T> = std::result::Result<T, Error>;
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Error" },
-        ExpectedEntity { entity_type: "TypeAlias", qualified_name: "test_crate::Result" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Error",
+        },
+        ExpectedEntity {
+            kind: EntityKind::TypeAlias,
+            qualified_name: "test_crate::Result",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Error" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Result" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Error",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Result",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -629,17 +1112,48 @@ pub struct NamedPoint {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::UnitMarker" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Point" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::UserId" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::NamedPoint" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::UnitMarker",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Point",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::UserId",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::NamedPoint",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::UnitMarker" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Point" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::UserId" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::NamedPoint" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::UnitMarker",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Point",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::UserId",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::NamedPoint",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -677,17 +1191,49 @@ pub enum Message {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::RequestData" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::ErrorDetails" },
-        ExpectedEntity { entity_type: "Enum", qualified_name: "test_crate::Message" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::RequestData",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::ErrorDetails",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Enum,
+            qualified_name: "test_crate::Message",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::RequestData" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::ErrorDetails" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Message" },
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::Message", to: "test_crate::RequestData" },
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::Message", to: "test_crate::ErrorDetails" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::RequestData",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::ErrorDetails",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Message",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::Message",
+            to: "test_crate::RequestData",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::Message",
+            to: "test_crate::ErrorDetails",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -721,17 +1267,48 @@ where
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Container" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Pair" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::BoundedContainer" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::MultipleConstraints" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Container",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Pair",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::BoundedContainer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::MultipleConstraints",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Container" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Pair" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::BoundedContainer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::MultipleConstraints" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Container",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Pair",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::BoundedContainer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::MultipleConstraints",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -762,17 +1339,48 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Borrowed" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::MultipleBorrows" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::borrow_data" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::longest" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Borrowed",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::MultipleBorrows",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::borrow_data",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::longest",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Borrowed" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::MultipleBorrows" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::borrow_data" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::longest" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Borrowed",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::MultipleBorrows",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::borrow_data",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::longest",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -795,12 +1403,20 @@ pub trait Handler {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Handler" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Handler",
+        },
     ],
-    relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Handler" },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "test_crate",
+        to: "test_crate::Handler",
+    }],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
 };
@@ -823,16 +1439,44 @@ impl Handler for MyHandler {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Handler" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::MyHandler" },
-        ExpectedEntity { entity_type: "ImplBlock", qualified_name: "test_crate::impl Handler for MyHandler" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Handler",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::MyHandler",
+        },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::impl Handler for MyHandler",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Handler" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::MyHandler" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Handler for MyHandler", to: "test_crate::Handler" },
-        ExpectedRelationship { rel_type: "ASSOCIATES", from: "test_crate::impl Handler for MyHandler", to: "test_crate::MyHandler" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Handler",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::MyHandler",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Handler for MyHandler",
+            to: "test_crate::Handler",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Associates,
+            from: "test_crate::impl Handler for MyHandler",
+            to: "test_crate::MyHandler",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -854,14 +1498,35 @@ pub trait Extended: Base {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Base" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Extended" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Base",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Extended",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Base" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Extended" },
-        ExpectedRelationship { rel_type: "EXTENDS_INTERFACE", from: "test_crate::Extended", to: "test_crate::Base" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Base",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Extended",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::ExtendsInterface,
+            from: "test_crate::Extended",
+            to: "test_crate::Base",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -897,14 +1562,35 @@ impl Iterator for Counter {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Iterator" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Counter" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Iterator",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Counter",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Iterator" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Counter" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Iterator for Counter", to: "test_crate::Iterator" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Iterator",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Counter",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Iterator for Counter",
+            to: "test_crate::Iterator",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -952,20 +1638,63 @@ impl Clone for Value {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Display" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Debug" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Clone" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Value" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Display",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Debug",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Clone",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Value",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Display" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Debug" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Clone" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Value" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Display for Value", to: "test_crate::Display" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Debug for Value", to: "test_crate::Debug" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Clone for Value", to: "test_crate::Clone" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Display",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Debug",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Clone",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Value",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Display for Value",
+            to: "test_crate::Display",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Debug for Value",
+            to: "test_crate::Debug",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Clone for Value",
+            to: "test_crate::Clone",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -995,16 +1724,44 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Transformer" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::BoundedTransformer" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::StringToInt" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Transformer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::BoundedTransformer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::StringToInt",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Transformer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::BoundedTransformer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::StringToInt" },
-        ExpectedRelationship { rel_type: "IMPLEMENTS", from: "test_crate::impl Transformer for StringToInt", to: "test_crate::Transformer" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Transformer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::BoundedTransformer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::StringToInt",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::impl Transformer for StringToInt",
+            to: "test_crate::Transformer",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1025,13 +1782,30 @@ pub static GLOBAL_VALUE: i32 = 42;
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Constant", qualified_name: "test_crate::MAX_SIZE" },
-        ExpectedEntity { entity_type: "Constant", qualified_name: "test_crate::GLOBAL_VALUE" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Constant,
+            qualified_name: "test_crate::MAX_SIZE",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Constant,
+            qualified_name: "test_crate::GLOBAL_VALUE",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::MAX_SIZE" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::GLOBAL_VALUE" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::MAX_SIZE",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::GLOBAL_VALUE",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1051,12 +1825,20 @@ macro_rules! my_macro {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Macro", qualified_name: "test_crate::my_macro" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Macro,
+            qualified_name: "test_crate::my_macro",
+        },
     ],
-    relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::my_macro" },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "test_crate",
+        to: "test_crate::my_macro",
+    }],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
 };
@@ -1069,36 +1851,80 @@ macro_rules! my_macro {
 static MULTI_HOP_REEXPORTS: Fixture = Fixture {
     name: "multi_hop_reexports",
     files: &[
-        ("lib.rs", r#"
+        (
+            "lib.rs",
+            r#"
 mod internal;
 pub use internal::actual_function;
 
 fn caller() {
     actual_function();
 }
-"#),
-        ("internal/mod.rs", r#"
+"#,
+        ),
+        (
+            "internal/mod.rs",
+            r#"
 mod deep;
 pub use deep::actual_function;
-"#),
-        ("internal/deep.rs", r#"
+"#,
+        ),
+        (
+            "internal/deep.rs",
+            r#"
 pub fn actual_function() {}
-"#),
+"#,
+        ),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::internal" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::internal::deep" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::internal::deep::actual_function" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::caller" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::internal",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::internal::deep",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::internal::deep::actual_function",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::caller",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::internal" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::internal", to: "test_crate::internal::deep" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::internal::deep", to: "test_crate::internal::deep::actual_function" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::internal",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::internal",
+            to: "test_crate::internal::deep",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::internal::deep",
+            to: "test_crate::internal::deep::actual_function",
+        },
         // The key test: does CALLS resolve through the re-export chain?
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::internal::deep::actual_function" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::internal::deep::actual_function",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1108,7 +1934,9 @@ pub fn actual_function() {}
 static GLOB_REEXPORTS: Fixture = Fixture {
     name: "glob_reexports",
     files: &[
-        ("lib.rs", r#"
+        (
+            "lib.rs",
+            r#"
 mod helpers;
 pub use helpers::*;
 
@@ -1116,27 +1944,70 @@ fn caller() {
     helper_a();
     helper_b();
 }
-"#),
-        ("helpers.rs", r#"
+"#,
+        ),
+        (
+            "helpers.rs",
+            r#"
 pub fn helper_a() {}
 pub fn helper_b() {}
-"#),
+"#,
+        ),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::helpers" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::helpers::helper_a" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::helpers::helper_b" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::caller" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::helpers",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::helpers::helper_a",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::helpers::helper_b",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::caller",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::helpers" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::helpers", to: "test_crate::helpers::helper_a" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::helpers", to: "test_crate::helpers::helper_b" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::helpers",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::helpers",
+            to: "test_crate::helpers::helper_a",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::helpers",
+            to: "test_crate::helpers::helper_b",
+        },
         // Key test: do CALLS resolve through glob imports?
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::helpers::helper_a" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::helpers::helper_b" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::helpers::helper_a",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::helpers::helper_b",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1178,20 +2049,59 @@ pub fn call_trait(d: &Data) -> String {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Formatter" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Data" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::call_inherent" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::call_trait" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Formatter",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Data",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::call_inherent",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::call_trait",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Formatter" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Data" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::call_inherent" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::call_trait" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Formatter",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Data",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::call_inherent",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::call_trait",
+        },
         // Key tests: different CALLS targets for same method name
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::call_inherent", to: "test_crate::Data::format" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::call_trait", to: "test_crate::Formatter::format" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::call_inherent",
+            to: "test_crate::Data::format",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::call_trait",
+            to: "test_crate::Formatter::format",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1201,7 +2111,9 @@ pub fn call_trait(d: &Data) -> String {
 static SCATTERED_IMPL_BLOCKS: Fixture = Fixture {
     name: "scattered_impl_blocks",
     files: &[
-        ("lib.rs", r#"
+        (
+            "lib.rs",
+            r#"
 pub mod types;
 mod widget_display;
 mod widget_builder;
@@ -1212,13 +2124,19 @@ pub fn caller() {
     let w = Widget::new(1);
     w.display();
 }
-"#),
-        ("types.rs", r#"
+"#,
+        ),
+        (
+            "types.rs",
+            r#"
 pub struct Widget {
     pub id: u32,
 }
-"#),
-        ("widget_display.rs", r#"
+"#,
+        ),
+        (
+            "widget_display.rs",
+            r#"
 use crate::types::Widget;
 
 impl Widget {
@@ -1226,8 +2144,11 @@ impl Widget {
         println!("Widget {}", self.id);
     }
 }
-"#),
-        ("widget_builder.rs", r#"
+"#,
+        ),
+        (
+            "widget_builder.rs",
+            r#"
 use crate::types::Widget;
 
 impl Widget {
@@ -1235,25 +2156,70 @@ impl Widget {
         Widget { id }
     }
 }
-"#),
+"#,
+        ),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::types" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::widget_display" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::widget_builder" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::types::Widget" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::caller" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::types::Widget::display" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::types::Widget::new" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::types",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::widget_display",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::widget_builder",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::types::Widget",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::caller",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::types::Widget::display",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::types::Widget::new",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::types" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::caller" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::types", to: "test_crate::types::Widget" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::types",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::caller",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::types",
+            to: "test_crate::types::Widget",
+        },
         // Key test: calls resolve to methods defined in different modules
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::types::Widget::new" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::caller", to: "test_crate::types::Widget::display" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::types::Widget::new",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::types::Widget::display",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1293,22 +2259,68 @@ pub fn use_string_producer(p: &StringProducer) -> String {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Producer" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::IntProducer" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::StringProducer" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::use_int_producer" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::use_string_producer" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Producer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::IntProducer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::StringProducer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::use_int_producer",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::use_string_producer",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Producer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::IntProducer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::StringProducer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::use_int_producer" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::use_string_producer" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Producer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::IntProducer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::StringProducer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::use_int_producer",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::use_string_producer",
+        },
         // Key test: calls should resolve to the specific impl's method
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::use_int_producer", to: "test_crate::IntProducer::produce" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::use_string_producer", to: "test_crate::StringProducer::produce" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::use_int_producer",
+            to: "test_crate::IntProducer::produce",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::use_string_producer",
+            to: "test_crate::StringProducer::produce",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1341,21 +2353,64 @@ pub fn create_unknown() -> Option<i32> {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Enum", qualified_name: "test_crate::Option" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_some" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_none" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_unknown" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Enum,
+            qualified_name: "test_crate::Option",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_some",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_none",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_unknown",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Option" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_some" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_none" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_unknown" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Option",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_some",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_none",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_unknown",
+        },
         // Key test: USES should point to local Option, not std::option::Option
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::create_some", to: "test_crate::Option" },
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::create_none", to: "test_crate::Option" },
-        ExpectedRelationship { rel_type: "USES", from: "test_crate::create_unknown", to: "test_crate::Option" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::create_some",
+            to: "test_crate::Option",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::create_none",
+            to: "test_crate::Option",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::create_unknown",
+            to: "test_crate::Option",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1401,26 +2456,87 @@ pub fn process_and_validate<T: Processor + Validator>(item: &T) -> (i32, bool) {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Processor" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::Validator" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::Data" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::process_item" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::validate_item" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::process_and_validate" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Processor",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::Validator",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::Data",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::process_item",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::validate_item",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::process_and_validate",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Processor" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Validator" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Data" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::process_item" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::validate_item" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::process_and_validate" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Processor",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Validator",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Data",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::process_item",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::validate_item",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::process_and_validate",
+        },
         // Key test: CALLS should point to trait methods (not concrete impls, since T is generic)
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::process_item", to: "test_crate::Processor::process" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::validate_item", to: "test_crate::Validator::validate" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::process_and_validate", to: "test_crate::Processor::process" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::process_and_validate", to: "test_crate::Validator::validate" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::process_item",
+            to: "test_crate::Processor::process",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::validate_item",
+            to: "test_crate::Validator::validate",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::process_and_validate",
+            to: "test_crate::Processor::process",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::process_and_validate",
+            to: "test_crate::Validator::validate",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1460,27 +2576,86 @@ pub fn create_with_value() -> AppConfig {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "test_crate::RawConfig" },
-        ExpectedEntity { entity_type: "TypeAlias", qualified_name: "test_crate::Config" },
-        ExpectedEntity { entity_type: "TypeAlias", qualified_name: "test_crate::AppConfig" },
-        ExpectedEntity { entity_type: "TypeAlias", qualified_name: "test_crate::Settings" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_settings" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::create_with_value" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "test_crate::RawConfig",
+        },
+        ExpectedEntity {
+            kind: EntityKind::TypeAlias,
+            qualified_name: "test_crate::Config",
+        },
+        ExpectedEntity {
+            kind: EntityKind::TypeAlias,
+            qualified_name: "test_crate::AppConfig",
+        },
+        ExpectedEntity {
+            kind: EntityKind::TypeAlias,
+            qualified_name: "test_crate::Settings",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_settings",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::create_with_value",
+        },
         // Methods are on RawConfig, accessed through aliases
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::RawConfig::new" },
-        ExpectedEntity { entity_type: "Method", qualified_name: "test_crate::RawConfig::with_value" },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::RawConfig::new",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "test_crate::RawConfig::with_value",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::RawConfig" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Config" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::AppConfig" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::Settings" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_settings" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::create_with_value" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::RawConfig",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Config",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::AppConfig",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Settings",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_settings",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::create_with_value",
+        },
         // Key test: calls through type aliases resolve to the underlying type's methods
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_settings", to: "test_crate::RawConfig::new" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::create_with_value", to: "test_crate::RawConfig::with_value" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_settings",
+            to: "test_crate::RawConfig::new",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::create_with_value",
+            to: "test_crate::RawConfig::with_value",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1490,7 +2665,9 @@ pub fn create_with_value() -> AppConfig {
 static NESTED_USE_RENAMING: Fixture = Fixture {
     name: "nested_use_renaming",
     files: &[
-        ("lib.rs", r#"
+        (
+            "lib.rs",
+            r#"
 pub mod network;
 
 use network::{
@@ -1503,41 +2680,115 @@ pub fn make_requests() {
     http_post();
     tcp_connect();
 }
-"#),
-        ("network/mod.rs", r#"
+"#,
+        ),
+        (
+            "network/mod.rs",
+            r#"
 pub mod http;
 pub mod tcp;
-"#),
-        ("network/http.rs", r#"
+"#,
+        ),
+        (
+            "network/http.rs",
+            r#"
 pub fn get() {}
 pub fn post() {}
-"#),
-        ("network/tcp.rs", r#"
+"#,
+        ),
+        (
+            "network/tcp.rs",
+            r#"
 pub fn connect() {}
-"#),
+"#,
+        ),
     ],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::network" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::network::http" },
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate::network::tcp" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::network::http::get" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::network::http::post" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::network::tcp::connect" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::make_requests" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::network",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::network::http",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::network::tcp",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::network::http::get",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::network::http::post",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::network::tcp::connect",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::make_requests",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::network" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::make_requests" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::network", to: "test_crate::network::http" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::network", to: "test_crate::network::tcp" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::network::http", to: "test_crate::network::http::get" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::network::http", to: "test_crate::network::http::post" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate::network::tcp", to: "test_crate::network::tcp::connect" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::network",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::make_requests",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::network",
+            to: "test_crate::network::http",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::network",
+            to: "test_crate::network::tcp",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::network::http",
+            to: "test_crate::network::http::get",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::network::http",
+            to: "test_crate::network::http::post",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::network::tcp",
+            to: "test_crate::network::tcp::connect",
+        },
         // Key test: CALLS resolve through renamed imports to original functions
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::make_requests", to: "test_crate::network::http::get" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::make_requests", to: "test_crate::network::http::post" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::make_requests", to: "test_crate::network::tcp::connect" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::make_requests",
+            to: "test_crate::network::http::get",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::make_requests",
+            to: "test_crate::network::http::post",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::make_requests",
+            to: "test_crate::network::tcp::connect",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1586,23 +2837,66 @@ pub fn count_words_string(s: String) -> usize {
 "#,
     )],
     entities: &[
-        ExpectedEntity { entity_type: "Module", qualified_name: "test_crate" },
-        ExpectedEntity { entity_type: "Trait", qualified_name: "test_crate::StringExt" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::check_string" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::check_str" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "test_crate::count_words_string" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Trait,
+            qualified_name: "test_crate::StringExt",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::check_string",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::check_str",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::count_words_string",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::StringExt" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::check_string" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::check_str" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "test_crate", to: "test_crate::count_words_string" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::StringExt",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::check_string",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::check_str",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::count_words_string",
+        },
         // Key test: CALLS should distinguish between impls for String vs str
         // Note: The exact qualified names for these methods depends on how impl blocks for
         // external types are named. This tests that distinction.
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::check_string", to: "test_crate::StringExt::is_blank" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::check_str", to: "test_crate::StringExt::is_blank" },
-        ExpectedRelationship { rel_type: "CALLS", from: "test_crate::count_words_string", to: "test_crate::StringExt::word_count" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::check_string",
+            to: "test_crate::StringExt::is_blank",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::check_str",
+            to: "test_crate::StringExt::is_blank",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::count_words_string",
+            to: "test_crate::StringExt::word_count",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -1617,12 +2911,17 @@ static WORKSPACE_BASIC: Fixture = Fixture {
     name: "workspace_basic",
     files: &[
         // Core crate
-        ("crates/core/Cargo.toml", r#"[package]
+        (
+            "crates/core/Cargo.toml",
+            r#"[package]
 name = "my_core"
 version = "0.1.0"
 edition = "2021"
-"#),
-        ("crates/core/src/lib.rs", r#"
+"#,
+        ),
+        (
+            "crates/core/src/lib.rs",
+            r#"
 pub struct CoreType {
     pub value: i32,
 }
@@ -1630,45 +2929,85 @@ pub struct CoreType {
 pub fn core_function() -> CoreType {
     CoreType { value: 42 }
 }
-"#),
+"#,
+        ),
         // Utils crate that depends on core
-        ("crates/utils/Cargo.toml", r#"[package]
+        (
+            "crates/utils/Cargo.toml",
+            r#"[package]
 name = "my_utils"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 my_core = { path = "../core" }
-"#),
-        ("crates/utils/src/lib.rs", r#"
+"#,
+        ),
+        (
+            "crates/utils/src/lib.rs",
+            r#"
 use my_core::CoreType;
 
 pub fn process_core(ct: CoreType) -> i32 {
     ct.value * 2
 }
-"#),
+"#,
+        ),
     ],
     entities: &[
         // Core crate entities
-        ExpectedEntity { entity_type: "Module", qualified_name: "my_core" },
-        ExpectedEntity { entity_type: "Struct", qualified_name: "my_core::CoreType" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "my_core::core_function" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "my_core",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Struct,
+            qualified_name: "my_core::CoreType",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "my_core::core_function",
+        },
         // Utils crate entities
-        ExpectedEntity { entity_type: "Module", qualified_name: "my_utils" },
-        ExpectedEntity { entity_type: "Function", qualified_name: "my_utils::process_core" },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "my_utils",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "my_utils::process_core",
+        },
     ],
     relationships: &[
-        ExpectedRelationship { rel_type: "CONTAINS", from: "my_core", to: "my_core::CoreType" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "my_core", to: "my_core::core_function" },
-        ExpectedRelationship { rel_type: "CONTAINS", from: "my_utils", to: "my_utils::process_core" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "my_core",
+            to: "my_core::CoreType",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "my_core",
+            to: "my_core::core_function",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "my_utils",
+            to: "my_utils::process_core",
+        },
         // Cross-crate import
-        ExpectedRelationship { rel_type: "IMPORTS", from: "my_utils::process_core", to: "my_core::CoreType" },
+        ExpectedRelationship {
+            kind: RelationshipKind::Imports,
+            from: "my_utils::process_core",
+            to: "my_core::CoreType",
+        },
     ],
     project_type: ProjectType::Workspace,
-    cargo_toml: Some(r#"[workspace]
+    cargo_toml: Some(
+        r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
-"#),
+"#,
+    ),
 };
 
 // =============================================================================

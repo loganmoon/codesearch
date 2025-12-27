@@ -357,7 +357,7 @@ async fn test_verify_expected_entities_are_indexed() -> Result<()> {
 
     drop(processor); // Clean up processor
 
-    let expected = ExpectedEntity::new(
+    let expected = QdrantExpectedEntity::new(
         "Calculator",
         codesearch_core::entities::EntityType::Struct,
         "main.rs",

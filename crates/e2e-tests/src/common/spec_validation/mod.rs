@@ -9,21 +9,70 @@ mod neo4j_queries;
 mod schema;
 
 // Re-export only what tests need
-pub use schema::{ExpectedEntity, ExpectedRelationship, Fixture, ProjectType};
+pub use schema::{
+    EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+};
 
 use super::containers::{
     create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
     get_shared_qdrant, wait_for_graph_ready, TestPostgres,
 };
 use super::run_cli_with_full_infra;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use assertions::{assert_entities_match, assert_relationships_match};
 use neo4j_queries::{get_all_entities, get_all_relationships};
 use std::fs;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+
+/// RAII guard that ensures test database cleanup even on test failure
+struct TestDatabaseGuard {
+    postgres: Arc<TestPostgres>,
+    db_name: String,
+    cleaned_up: bool,
+}
+
+impl TestDatabaseGuard {
+    fn new(postgres: Arc<TestPostgres>, db_name: String) -> Self {
+        Self {
+            postgres,
+            db_name,
+            cleaned_up: false,
+        }
+    }
+
+    /// Mark as cleaned up (call this after successful explicit cleanup)
+    fn mark_cleaned_up(&mut self) {
+        self.cleaned_up = true;
+    }
+}
+
+impl Drop for TestDatabaseGuard {
+    fn drop(&mut self) {
+        if !self.cleaned_up {
+            // Use blocking cleanup since we're in a Drop implementation
+            let postgres = self.postgres.clone();
+            let db_name = self.db_name.clone();
+            eprintln!(
+                "TestDatabaseGuard: Cleaning up test database {} on drop",
+                db_name
+            );
+            // Schedule cleanup on a new runtime since we can't use async in Drop
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().ok();
+                if let Some(rt) = rt {
+                    rt.block_on(async {
+                        let _ = drop_test_database(&postgres, &db_name).await;
+                    });
+                }
+            });
+        }
+    }
+}
 
 /// Run a specification validation test for a given fixture
 ///
@@ -41,8 +90,9 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let neo4j = get_shared_neo4j().await?;
 
-    // Create isolated test database
+    // Create isolated test database with RAII cleanup guard
     let db_name = create_test_database(&postgres).await?;
+    let mut cleanup_guard = TestDatabaseGuard::new(postgres.clone(), db_name.clone());
     eprintln!("Created test database: {}", db_name);
 
     // Create temporary repository with fixture files
@@ -54,14 +104,15 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     create_config_file(repo_path, &qdrant, &postgres, &db_name)?;
 
     // Run the indexing CLI
-    let output = run_cli_with_full_infra(repo_path, &["index"], &qdrant, &postgres, &neo4j, &db_name)?;
+    let output =
+        run_cli_with_full_infra(repo_path, &["index"], &qdrant, &postgres, &neo4j, &db_name)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         eprintln!("CLI stdout:\n{}", stdout);
         eprintln!("CLI stderr:\n{}", stderr);
-        anyhow::bail!("CLI index command failed: {:?}", output.status);
+        bail!("CLI index command failed: {:?}", output.status);
     }
 
     eprintln!("Indexing completed, waiting for graph_ready flag...");
@@ -80,7 +131,11 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     let actual_entities = get_all_entities(&neo4j, &repository_id).await?;
     let actual_relationships = get_all_relationships(&neo4j, &repository_id).await?;
 
-    eprintln!("Found {} entities, {} relationships", actual_entities.len(), actual_relationships.len());
+    eprintln!(
+        "Found {} entities, {} relationships",
+        actual_entities.len(),
+        actual_relationships.len()
+    );
 
     // Debug: print actual entities
     eprintln!("\nActual entities:");
@@ -91,7 +146,10 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     // Debug: print actual relationships
     eprintln!("\nActual relationships:");
     for r in &actual_relationships {
-        eprintln!("  {} {} -> {}", r.rel_type, r.from_qualified_name, r.to_qualified_name);
+        eprintln!(
+            "  {} {} -> {}",
+            r.rel_type, r.from_qualified_name, r.to_qualified_name
+        );
     }
 
     // Assert entities match
@@ -104,8 +162,9 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
 
     eprintln!("\n=== {} PASSED ===\n", fixture.name);
 
-    // Cleanup
+    // Explicit cleanup and mark guard as cleaned up
     drop_test_database(&postgres, &db_name).await?;
+    cleanup_guard.mark_cleaned_up();
 
     Ok(())
 }
@@ -140,65 +199,56 @@ fn create_test_repository(fixture: &Fixture) -> Result<TempDir> {
     let cargo_toml = match fixture.cargo_toml {
         Some(custom) => custom.to_string(),
         None => match fixture.project_type {
-            ProjectType::SingleCrate | ProjectType::BinaryCrate => {
-                r#"[package]
+            ProjectType::SingleCrate | ProjectType::BinaryCrate => r#"[package]
 name = "test_crate"
 version = "0.1.0"
 edition = "2021"
 "#
-                .to_string()
-            }
-            ProjectType::Workspace => {
-                r#"[workspace]
+            .to_string(),
+            ProjectType::Workspace => r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
 "#
-                .to_string()
-            }
-            ProjectType::Custom => {
-                r#"[package]
+            .to_string(),
+            ProjectType::Custom => r#"[package]
 name = "test_crate"
 version = "0.1.0"
 edition = "2021"
 "#
-                .to_string()
-            }
+            .to_string(),
         },
     };
     fs::write(repo_path.join("Cargo.toml"), cargo_toml)?;
 
     // Initialize git repository (required for indexing)
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to init git repo")?;
-
-    std::process::Command::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to set git email")?;
-
-    std::process::Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to set git name")?;
-
-    std::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to git add")?;
-
-    std::process::Command::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(repo_path)
-        .output()
-        .context("Failed to git commit")?;
+    run_git_command(repo_path, &["init"])?;
+    run_git_command(repo_path, &["config", "user.email", "test@test.com"])?;
+    run_git_command(repo_path, &["config", "user.name", "Test"])?;
+    run_git_command(repo_path, &["add", "."])?;
+    run_git_command(repo_path, &["commit", "-m", "Initial commit"])?;
 
     Ok(temp_dir)
+}
+
+/// Run a git command and verify it succeeds
+fn run_git_command(repo_path: &Path, args: &[&str]) -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_path)
+        .output()
+        .with_context(|| format!("Failed to run git {}", args.join(" ")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "git {} failed with status {}: {}",
+            args.join(" "),
+            output.status,
+            stderr
+        );
+    }
+
+    Ok(())
 }
 
 /// Create a codesearch.toml config file with mock embeddings

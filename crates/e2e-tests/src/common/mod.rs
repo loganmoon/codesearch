@@ -21,7 +21,7 @@ use std::time::Duration;
 // Re-export commonly used types
 pub use assertions::{
     assert_collection_exists, assert_entity_in_qdrant, assert_min_point_count, assert_point_count,
-    assert_vector_dimensions, get_point_count, ExpectedEntity,
+    assert_vector_dimensions, get_point_count, QdrantExpectedEntity,
 };
 pub use containers::{
     create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
@@ -152,7 +152,10 @@ pub fn run_cli_with_full_infra(
     let config_path = repo_path.join("codesearch.toml");
 
     // Build args with --config first
-    let mut full_args = vec!["--config", config_path.to_str().unwrap_or("codesearch.toml")];
+    let mut full_args = vec![
+        "--config",
+        config_path.to_str().unwrap_or("codesearch.toml"),
+    ];
     full_args.extend(args.iter().copied());
 
     Command::new(codesearch_binary())

@@ -6,13 +6,17 @@ use codesearch_core::entities::EntityType;
 use serde::Deserialize;
 
 /// Expected entity for Qdrant validation
-pub struct ExpectedEntity {
+///
+/// This type is used to validate that specific entities exist in Qdrant
+/// with the expected name, type, and file path. Distinct from
+/// `spec_validation::ExpectedEntity` which is used for Neo4j graph validation.
+pub struct QdrantExpectedEntity {
     pub name: String,
     pub entity_type: EntityType,
     pub file_path_contains: String,
 }
 
-impl ExpectedEntity {
+impl QdrantExpectedEntity {
     /// Create a new expected entity
     pub fn new(name: &str, entity_type: EntityType, file_path_contains: &str) -> Self {
         Self {
@@ -115,7 +119,7 @@ pub async fn assert_min_point_count(
 pub async fn assert_entity_in_qdrant(
     qdrant: &TestQdrant,
     collection_name: &str,
-    expected: &ExpectedEntity,
+    expected: &QdrantExpectedEntity,
 ) -> Result<()> {
     // Scroll through all points to find matching entity
     let url = format!(

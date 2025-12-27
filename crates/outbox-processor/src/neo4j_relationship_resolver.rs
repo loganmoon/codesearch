@@ -349,6 +349,40 @@ impl RelationshipResolver for TraitImplResolver {
             }
         }
 
+        // EXTENDS_INTERFACE relationships for Rust trait supertraits
+        // E.g., `trait Extended: Base {}` creates Extended -> Base relationship
+        // Uses pre-resolved uses_types attribute which contains qualified supertrait names
+        for trait_entity in &traits {
+            if let Some(uses_types_json) = trait_entity.metadata.attributes.get("uses_types") {
+                let supertraits: Vec<String> = match serde_json::from_str(uses_types_json) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                for supertrait in supertraits {
+                    // Skip lifetimes (start with ')
+                    if supertrait.starts_with('\'') {
+                        continue;
+                    }
+                    // Strip generics from supertrait name
+                    let base_trait = supertrait.split('<').next().unwrap_or(&supertrait).trim();
+                    if let Some(supertrait_id) = trait_map.get(base_trait) {
+                        // Forward edge: trait -> supertrait
+                        relationships.push((
+                            trait_entity.entity_id.clone(),
+                            supertrait_id.clone(),
+                            "EXTENDS_INTERFACE".to_string(),
+                        ));
+                        // Reciprocal edge: supertrait -> trait
+                        relationships.push((
+                            supertrait_id.clone(),
+                            trait_entity.entity_id.clone(),
+                            "EXTENDED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(relationships)
     }
 }

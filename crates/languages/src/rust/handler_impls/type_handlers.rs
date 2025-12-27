@@ -359,7 +359,13 @@ pub fn handle_trait_impl(
         }
 
         // Build uses_types from supertrait bounds and generic bounds
-        let mut uses_types: Vec<String> = bounds.clone();
+        // Resolve supertrait names through the resolution context
+        let mut uses_types: Vec<String> = bounds
+            .iter()
+            .filter(|b| !b.starts_with('\'')) // Skip lifetimes
+            .map(|b| resolution_ctx.resolve(b))
+            .collect();
+        // Add resolved generic bounds (already resolved)
         for trait_ref in &parsed_generics.bound_trait_refs {
             if !uses_types.contains(trait_ref) {
                 uses_types.push(trait_ref.clone());

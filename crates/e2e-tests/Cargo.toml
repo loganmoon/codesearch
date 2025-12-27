@@ -46,3 +46,6 @@ protobuf = "3.7"
 
 # Git operations (use git2 instead of shelling out to git CLI)
 git2 = "0.19"
+
+# Neo4j driver for graph queries
+neo4rs = "0.8"

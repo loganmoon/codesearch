@@ -6,6 +6,7 @@
 pub(crate) mod common;
 pub(crate) mod constant_handlers;
 pub(crate) mod constants;
+pub(crate) mod crate_root_handlers;
 pub(crate) mod function_handlers;
 pub(crate) mod impl_handlers;
 pub(crate) mod macro_handlers;
@@ -17,6 +18,7 @@ pub(crate) mod type_handlers;
 mod tests;
 
 pub use constant_handlers::handle_constant_impl;
+pub use crate_root_handlers::handle_crate_root_impl;
 pub use function_handlers::handle_function_impl;
 pub use impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
 pub use macro_handlers::handle_macro_impl;

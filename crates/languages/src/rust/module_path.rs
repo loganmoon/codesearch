@@ -1,8 +1,26 @@
 //! Module path derivation for Rust files
 //!
 //! Derives the Rust module path from a file path relative to the source root.
+//! Also provides utilities for detecting crate root files.
 
 use std::path::Path;
+
+/// Check if a file is a crate root (lib.rs or main.rs)
+///
+/// These files represent the implicit root module of a Rust crate and have no
+/// explicit `mod` declaration - they are the entry points of the crate.
+///
+/// # Examples
+/// - `src/lib.rs` -> true
+/// - `src/main.rs` -> true
+/// - `src/foo.rs` -> false
+/// - `src/foo/mod.rs` -> false
+pub fn is_crate_root(file_path: &Path) -> bool {
+    file_path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .is_some_and(|name| name == "lib.rs" || name == "main.rs")
+}
 
 /// Derive Rust module path from file path relative to source root
 ///
@@ -140,5 +158,25 @@ mod tests {
             derive_module_path(&file, &root),
             Some("integration".to_string())
         );
+    }
+
+    #[test]
+    fn test_is_crate_root_lib() {
+        assert!(is_crate_root(&PathBuf::from("/project/src/lib.rs")));
+    }
+
+    #[test]
+    fn test_is_crate_root_main() {
+        assert!(is_crate_root(&PathBuf::from("/project/src/main.rs")));
+    }
+
+    #[test]
+    fn test_is_crate_root_false_for_regular_file() {
+        assert!(!is_crate_root(&PathBuf::from("/project/src/foo.rs")));
+    }
+
+    #[test]
+    fn test_is_crate_root_false_for_mod_rs() {
+        assert!(!is_crate_root(&PathBuf::from("/project/src/foo/mod.rs")));
     }
 }

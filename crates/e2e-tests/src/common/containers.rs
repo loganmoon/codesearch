@@ -688,12 +688,11 @@ pub async fn wait_for_graph_ready(
 
     loop {
         // Check if any repository has graph_ready = false
-        let not_ready_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM repositories WHERE graph_ready = false",
-        )
-        .fetch_one(&pool)
-        .await
-        .context("Failed to query repositories table")?;
+        let not_ready_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM repositories WHERE graph_ready = false")
+                .fetch_one(&pool)
+                .await
+                .context("Failed to query repositories table")?;
 
         if not_ready_count == 0 {
             pool.close().await;

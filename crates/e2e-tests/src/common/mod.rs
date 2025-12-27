@@ -9,6 +9,7 @@ pub mod assertions;
 pub mod cleanup;
 pub mod containers;
 pub mod logging;
+pub mod spec_validation;
 
 use anyhow::{Context, Result};
 use std::future::Future;
@@ -17,10 +18,16 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-// Re-export key types and utilities
-pub use assertions::*;
-pub use containers::*;
-pub use logging::*;
+// Re-export commonly used types
+pub use assertions::{
+    assert_collection_exists, assert_entity_in_qdrant, assert_min_point_count, assert_point_count,
+    assert_vector_dimensions, get_point_count, QdrantExpectedEntity,
+};
+pub use containers::{
+    create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
+    get_shared_qdrant, wait_for_graph_ready, TestNeo4j, TestPostgres, TestQdrant,
+};
+pub use logging::init_test_logging;
 
 /// Wrap a test future with a timeout
 ///
@@ -145,7 +152,10 @@ pub fn run_cli_with_full_infra(
     let config_path = repo_path.join("codesearch.toml");
 
     // Build args with --config first
-    let mut full_args = vec!["--config", config_path.to_str().unwrap_or("codesearch.toml")];
+    let mut full_args = vec![
+        "--config",
+        config_path.to_str().unwrap_or("codesearch.toml"),
+    ];
     full_args.extend(args.iter().copied());
 
     Command::new(codesearch_binary())

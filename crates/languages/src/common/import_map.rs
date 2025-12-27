@@ -213,12 +213,11 @@ pub fn normalize_rust_path(
 ///
 /// Resolution order:
 /// 1. If path starts with crate::/self::/super::, normalize it and return
-/// 2. Otherwise, delegate to resolve_reference() which handles:
-///    - Scoped paths (contains ::) - used as-is
-///    - Import map lookup
-///    - parent_scope::name fallback
-///    - external::name marker for unresolved references
-/// 3. Normalize the result if it contains Rust-relative prefixes (from import map)
+/// 2. If already scoped (contains ::), use as-is
+/// 3. Try import map lookup
+/// 4. Try parent_scope::name
+/// 5. Try package_name::current_module::name (for locally-defined types)
+/// 6. Mark as external::name (only if no package context available)
 pub fn resolve_rust_reference(
     name: &str,
     import_map: &ImportMap,
@@ -231,17 +230,44 @@ pub fn resolve_rust_reference(
         return normalize_rust_path(name, package_name, current_module);
     }
 
-    // Delegate to standard resolution
-    let resolved = resolve_reference(name, import_map, parent_scope, "::");
+    // Already scoped? Use as-is
+    if ImportMap::is_scoped(name, "::") {
+        return name.to_string();
+    }
 
-    // Normalize result if it contains Rust-relative prefixes (e.g., from import map)
-    if resolved.starts_with("crate::")
-        || resolved.starts_with("self::")
-        || resolved.starts_with("super::")
-    {
-        normalize_rust_path(&resolved, package_name, current_module)
-    } else {
-        resolved
+    // Try import map
+    if let Some(resolved) = import_map.resolve(name) {
+        // Normalize result if it contains Rust-relative prefixes
+        if resolved.starts_with("crate::")
+            || resolved.starts_with("self::")
+            || resolved.starts_with("super::")
+        {
+            return normalize_rust_path(resolved, package_name, current_module);
+        }
+        return resolved.to_string();
+    }
+
+    // Try parent scope
+    if let Some(scope) = parent_scope {
+        if !scope.is_empty() {
+            return format!("{scope}::{name}");
+        }
+    }
+
+    // Try package_name::current_module::name for locally-defined types
+    // This handles types defined in the same module that aren't imported
+    match (package_name, current_module) {
+        (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
+            format!("{pkg}::{module}::{name}")
+        }
+        (Some(pkg), _) if !pkg.is_empty() => {
+            // At crate root (no module path)
+            format!("{pkg}::{name}")
+        }
+        _ => {
+            // No package context available, mark as external
+            format!("external::{name}")
+        }
     }
 }
 

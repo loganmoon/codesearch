@@ -597,24 +597,6 @@ metadata.attributes.insert("calls".to_string(), serde_json::to_string(&call_name
 
 ## Testing
 
-### E2E Tests (Authoritative)
-
-The authoritative tests for graph extraction and relationship resolution are in:
-- `crates/e2e-tests/tests/graph_validation_test.rs` - Validates graph extraction against rust-analyzer SCIP output
-- `crates/e2e-tests/tests/test_outbox_processor_e2e.rs` - Tests the outbox processor relationship resolution
-
-These tests exercise the complete pipeline against real codebases:
-
-```bash
-# Graph validation test
-cargo test --manifest-path crates/e2e-tests/Cargo.toml \
-    --test graph_validation_test -- --ignored --nocapture
-
-# Outbox processor e2e test
-cargo test --manifest-path crates/e2e-tests/Cargo.toml \
-    --test test_outbox_processor_e2e -- --ignored --nocapture
-```
-
 ### Unit Tests for Handlers
 
 Each handler module should have unit tests:

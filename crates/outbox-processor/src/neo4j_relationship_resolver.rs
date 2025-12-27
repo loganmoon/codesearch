@@ -451,40 +451,72 @@ impl RelationshipResolver for TypeUsageResolver {
 
         let mut relationships = Vec::new();
 
-        // Process struct field types
+        // Process struct field types using pre-resolved uses_types attribute
         for struct_entity in structs {
-            if let Some(fields_json) = struct_entity.metadata.attributes.get("fields") {
-                let fields = match serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
-                    Ok(f) => f,
+            if let Some(uses_types_json) = struct_entity.metadata.attributes.get("uses_types") {
+                let types: Vec<String> = match serde_json::from_str(uses_types_json) {
+                    Ok(t) => t,
                     Err(e) => {
                         warn!(
-                            "Failed to parse 'fields' JSON for entity {}: {}",
+                            "Failed to parse 'uses_types' JSON for struct {}: {}",
                             struct_entity.entity_id, e
                         );
                         continue;
                     }
                 };
-                for field in fields {
-                    if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
-                        if field.get("name").and_then(|v| v.as_str()).is_some() {
-                            let type_name =
-                                field_type.split('<').next().unwrap_or(field_type).trim();
+                for type_name in types {
+                    // Strip generics and get the base type name
+                    let base_type = type_name.split('<').next().unwrap_or(&type_name).trim();
 
-                            if let Some(type_id) = type_map.get(type_name) {
-                                // Forward edge: struct -> type
-                                relationships.push((
-                                    struct_entity.entity_id.clone(),
-                                    type_id.clone(),
-                                    "USES".to_string(),
-                                ));
-                                // Reciprocal edge: type -> struct
-                                relationships.push((
-                                    type_id.clone(),
-                                    struct_entity.entity_id.clone(),
-                                    "USED_BY".to_string(),
-                                ));
-                            }
-                        }
+                    if let Some(type_id) = type_map.get(base_type) {
+                        // Forward edge: struct -> type
+                        relationships.push((
+                            struct_entity.entity_id.clone(),
+                            type_id.clone(),
+                            "USES".to_string(),
+                        ));
+                        // Reciprocal edge: type -> struct
+                        relationships.push((
+                            type_id.clone(),
+                            struct_entity.entity_id.clone(),
+                            "USED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Process enum variant types using pre-resolved uses_types attribute
+        let enums = cache.by_type(EntityType::Enum);
+        for enum_entity in enums {
+            if let Some(uses_types_json) = enum_entity.metadata.attributes.get("uses_types") {
+                let types: Vec<String> = match serde_json::from_str(uses_types_json) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'uses_types' JSON for enum {}: {}",
+                            enum_entity.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for type_name in types {
+                    // Strip generics and get the base type name
+                    let base_type = type_name.split('<').next().unwrap_or(&type_name).trim();
+
+                    if let Some(type_id) = type_map.get(base_type) {
+                        // Forward edge: enum -> type
+                        relationships.push((
+                            enum_entity.entity_id.clone(),
+                            type_id.clone(),
+                            "USES".to_string(),
+                        ));
+                        // Reciprocal edge: type -> enum
+                        relationships.push((
+                            type_id.clone(),
+                            enum_entity.entity_id.clone(),
+                            "USED_BY".to_string(),
+                        ));
                     }
                 }
             }

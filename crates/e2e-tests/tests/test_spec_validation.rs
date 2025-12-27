@@ -526,14 +526,14 @@ impl Foo {
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::impl Foo",
+            qualified_name: "test_crate::impl test_crate::Foo",
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Foo::method",
         },
         ExpectedEntity {
-            kind: EntityKind::Method,
+            kind: EntityKind::Function,
             qualified_name: "test_crate::Foo::associated",
         },
     ],
@@ -544,9 +544,19 @@ impl Foo {
             to: "test_crate::Foo",
         },
         ExpectedRelationship {
-            kind: RelationshipKind::Associates,
-            from: "test_crate::impl Foo",
-            to: "test_crate::Foo",
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::impl test_crate::Foo",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::impl test_crate::Foo",
+            to: "test_crate::Foo::method",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::impl test_crate::Foo",
+            to: "test_crate::Foo::associated",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -1453,7 +1463,11 @@ impl Handler for MyHandler {
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::impl Handler for MyHandler",
+            qualified_name: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::MyHandler as test_crate::Handler>::handle",
         },
     ],
     relationships: &[
@@ -1468,14 +1482,19 @@ impl Handler for MyHandler {
             to: "test_crate::MyHandler",
         },
         ExpectedRelationship {
-            kind: RelationshipKind::Implements,
-            from: "test_crate::impl Handler for MyHandler",
-            to: "test_crate::Handler",
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
         },
         ExpectedRelationship {
-            kind: RelationshipKind::Associates,
-            from: "test_crate::impl Handler for MyHandler",
-            to: "test_crate::MyHandler",
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
+            to: "<test_crate::MyHandler as test_crate::Handler>::handle",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
+            to: "test_crate::Handler",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -1574,6 +1593,18 @@ impl Iterator for Counter {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Counter",
         },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<test_crate::Counter as test_crate::Iterator>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::Counter as test_crate::Iterator>::next",
+        },
+        ExpectedEntity {
+            kind: EntityKind::TypeAlias,
+            qualified_name: "test_crate::Counter::Item",
+        },
     ],
     relationships: &[
         ExpectedRelationship {
@@ -1587,8 +1618,23 @@ impl Iterator for Counter {
             to: "test_crate::Counter",
         },
         ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::Counter as test_crate::Iterator>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::Counter as test_crate::Iterator>",
+            to: "<test_crate::Counter as test_crate::Iterator>::next",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Counter",
+            to: "test_crate::Counter::Item",
+        },
+        ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::impl Iterator for Counter",
+            from: "test_crate::<test_crate::Counter as test_crate::Iterator>",
             to: "test_crate::Iterator",
         },
     ],
@@ -1658,6 +1704,30 @@ impl Clone for Value {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Value",
         },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<test_crate::Value as test_crate::Display>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<test_crate::Value as test_crate::Debug>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<test_crate::Value as test_crate::Clone>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::Value as test_crate::Display>::display",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::Value as test_crate::Debug>::debug",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::Value as test_crate::Clone>::clone",
+        },
     ],
     relationships: &[
         ExpectedRelationship {
@@ -1681,18 +1751,48 @@ impl Clone for Value {
             to: "test_crate::Value",
         },
         ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::Value as test_crate::Display>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::Value as test_crate::Debug>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::Value as test_crate::Clone>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::Value as test_crate::Display>",
+            to: "<test_crate::Value as test_crate::Display>::display",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::Value as test_crate::Debug>",
+            to: "<test_crate::Value as test_crate::Debug>::debug",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::Value as test_crate::Clone>",
+            to: "<test_crate::Value as test_crate::Clone>::clone",
+        },
+        ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::impl Display for Value",
+            from: "test_crate::<test_crate::Value as test_crate::Display>",
             to: "test_crate::Display",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::impl Debug for Value",
+            from: "test_crate::<test_crate::Value as test_crate::Debug>",
             to: "test_crate::Debug",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::impl Clone for Value",
+            from: "test_crate::<test_crate::Value as test_crate::Clone>",
             to: "test_crate::Clone",
         },
     ],
@@ -1740,6 +1840,14 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::StringToInt",
         },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::StringToInt as test_crate::Transformer>::transform",
+        },
     ],
     relationships: &[
         ExpectedRelationship {
@@ -1758,8 +1866,18 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
             to: "test_crate::StringToInt",
         },
         ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
+            to: "<test_crate::StringToInt as test_crate::Transformer>::transform",
+        },
+        ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::impl Transformer for StringToInt",
+            from: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
             to: "test_crate::Transformer",
         },
     ],

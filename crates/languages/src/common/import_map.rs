@@ -230,8 +230,28 @@ pub fn resolve_rust_reference(
         return normalize_rust_path(name, package_name, current_module);
     }
 
-    // Already scoped? Use as-is
+    // Already scoped paths need special handling
     if ImportMap::is_scoped(name, "::") {
+        // Check if it looks like an external path (common external crates)
+        // If it starts with known external prefixes, return as-is
+        if name.starts_with("std::")
+            || name.starts_with("core::")
+            || name.starts_with("alloc::")
+            || name.starts_with("external::")
+        {
+            return name.to_string();
+        }
+        // Try to resolve through import map first
+        if let Some(resolved) = import_map.resolve(name) {
+            return resolved.to_string();
+        }
+        // For relative scoped paths like `utils::helper`, prepend package name
+        // to make them absolute (e.g., `test_crate::utils::helper`)
+        if let Some(pkg) = package_name {
+            if !pkg.is_empty() {
+                return format!("{pkg}::{name}");
+            }
+        }
         return name.to_string();
     }
 

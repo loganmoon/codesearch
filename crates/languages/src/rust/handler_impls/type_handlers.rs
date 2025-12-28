@@ -13,17 +13,22 @@ use crate::common::entity_building::{
 use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
-    build_generic_bounds_map, extract_generics_with_bounds, extract_preceding_doc_comments,
-    extract_visibility, extract_where_clause_bounds, find_capture_node, format_generic_param,
-    is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
+    build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
+    extract_preceding_doc_comments, extract_visibility, extract_where_clause_bounds,
+    find_capture_node, find_child_by_kind, format_generic_param, is_primitive_type,
+    merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
     RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
-use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
+use codesearch_core::entities::{
+    EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+};
+use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::collections::HashSet;
 use std::path::Path;
+use tracing::warn;
 use tree_sitter::{Node, Query, QueryMatch};
 
 // ============================================================================
@@ -309,7 +314,7 @@ pub fn handle_trait_impl(
         current_module: module_path.as_deref(),
     };
 
-    extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
+    let trait_entity = extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         // Extract generics with parsed bounds
         let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
@@ -358,16 +363,33 @@ pub fn handle_trait_impl(
                 .insert("methods".to_string(), methods.join(","));
         }
 
-        // Build uses_types from supertrait bounds and generic bounds
-        let mut uses_types: Vec<String> = bounds.clone();
-        for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types.contains(trait_ref) {
-                uses_types.push(trait_ref.clone());
+        // Store resolved supertraits separately for EXTENDS_INTERFACE relationships
+        let supertraits: Vec<String> = bounds
+            .iter()
+            .filter(|b| !b.starts_with('\'')) // Skip lifetimes
+            .map(|b| resolution_ctx.resolve(b))
+            .collect();
+        if !supertraits.is_empty() {
+            match serde_json::to_string(&supertraits) {
+                Ok(json) => {
+                    metadata.attributes.insert("supertraits".to_string(), json);
+                }
+                Err(e) => {
+                    warn!("Failed to serialize supertraits: {e}");
+                }
             }
         }
+
+        // Build uses_types from generic bounds only (supertraits are stored separately)
+        let uses_types: Vec<String> = parsed_generics.bound_trait_refs.clone();
         if !uses_types.is_empty() {
-            if let Ok(json) = serde_json::to_string(&uses_types) {
-                metadata.attributes.insert("uses_types".to_string(), json);
+            match serde_json::to_string(&uses_types) {
+                Ok(json) => {
+                    metadata.attributes.insert("uses_types".to_string(), json);
+                }
+                Err(e) => {
+                    warn!("Failed to serialize uses_types: {e}");
+                }
             }
         }
 
@@ -381,8 +403,23 @@ pub fn handle_trait_impl(
         }
 
         metadata
-    })
-    .map(|data| vec![data])
+    })?;
+
+    let mut entities = vec![trait_entity.clone()];
+
+    // Extract trait methods as separate entities
+    if let Some(body_node) = find_capture_node(query_match, query, capture_names::TRAIT_BODY) {
+        let trait_methods = extract_trait_method_entities(
+            body_node,
+            source,
+            file_path,
+            repository_id,
+            &trait_entity.qualified_name,
+        );
+        entities.extend(trait_methods);
+    }
+
+    Ok(entities)
 }
 
 // ============================================================================
@@ -680,7 +717,13 @@ fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match tree_sitter::Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for trait bounds: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return Vec::new();
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -751,6 +794,133 @@ fn extract_method_name(node: Node, source: &str) -> Option<String> {
                     .is_some()
         })
         .and_then(|child| node_to_text(child, source).ok())
+}
+
+/// Extract trait methods as separate CodeEntity objects
+fn extract_trait_method_entities(
+    body_node: Node,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    trait_qualified_name: &str,
+) -> Vec<CodeEntity> {
+    let mut entities = Vec::new();
+    let mut cursor = body_node.walk();
+
+    for child in body_node.children(&mut cursor) {
+        match child.kind() {
+            node_kinds::FUNCTION_SIGNATURE_ITEM | node_kinds::FUNCTION_ITEM => {
+                if let Some(method_entity) = extract_single_trait_method(
+                    child,
+                    source,
+                    file_path,
+                    repository_id,
+                    trait_qualified_name,
+                ) {
+                    entities.push(method_entity);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    entities
+}
+
+/// Extract a single trait method as a CodeEntity
+fn extract_single_trait_method(
+    method_node: Node,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    trait_qualified_name: &str,
+) -> Option<CodeEntity> {
+    // Extract method name
+    let method_name = extract_method_name(method_node, source)?;
+
+    // Build qualified name: TraitName::method_name
+    let qualified_name = format!("{trait_qualified_name}::{method_name}");
+
+    // Extract parameters - convert to (String, Option<String>) format
+    let parameters: Vec<(String, Option<String>)> = find_child_by_kind(method_node, "parameters")
+        .and_then(|params_node| extract_function_parameters(params_node, source).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, type_str)| (name, Some(type_str)))
+        .collect();
+
+    // Extract return type
+    let return_type = find_child_by_kind(method_node, "return_type")
+        .and_then(|node| node_to_text(node, source).ok())
+        .map(|s: String| s.trim_start_matches("->").trim().to_string());
+
+    // Check if it's async (look for async keyword in function_modifiers)
+    let is_async = {
+        let mut cursor = method_node.walk();
+        let children: Vec<_> = method_node.children(&mut cursor).collect();
+        children.iter().any(|c| {
+            if c.kind() == "function_modifiers" {
+                let mut c_cursor = c.walk();
+                let mods: Vec<_> = c.children(&mut c_cursor).collect();
+                mods.iter().any(|m| m.kind() == "async")
+            } else {
+                false
+            }
+        })
+    };
+
+    // Determine if method has body (function_item) or just signature (function_signature_item)
+    let has_body = method_node.kind() == node_kinds::FUNCTION_ITEM;
+
+    // Build signature
+    let signature = FunctionSignature {
+        parameters,
+        return_type,
+        is_async,
+        generics: Vec::new(),
+    };
+
+    // Build metadata
+    let mut metadata = EntityMetadata {
+        is_async,
+        is_abstract: !has_body, // Methods without body are abstract
+        ..Default::default()
+    };
+
+    // Store that this is a trait method
+    metadata
+        .attributes
+        .insert("trait_method".to_string(), "true".to_string());
+
+    // Extract documentation
+    let documentation_summary = extract_preceding_doc_comments(method_node, source);
+
+    // Get location and content
+    let location = SourceLocation::from_tree_sitter_node(method_node);
+    let content = node_to_text(method_node, source).ok();
+
+    // Generate entity_id
+    let file_path_str = file_path.to_str()?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    Some(CodeEntity {
+        entity_id,
+        repository_id: repository_id.to_string(),
+        entity_type: EntityType::Method,
+        name: method_name,
+        qualified_name,
+        path_entity_identifier: None,
+        parent_scope: Some(trait_qualified_name.to_string()),
+        dependencies: Vec::new(),
+        documentation_summary,
+        file_path: file_path.to_path_buf(),
+        language: Language::Rust,
+        content,
+        metadata,
+        signature: Some(signature),
+        visibility: Visibility::Public, // Trait methods are always public
+        location,
+    })
 }
 
 /// Check if a trait has the unsafe modifier

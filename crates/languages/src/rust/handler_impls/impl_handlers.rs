@@ -14,8 +14,8 @@ use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
     extract_local_var_types, extract_preceding_doc_comments, extract_type_references,
-    extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
-    node_to_text, require_capture_node, RustResolutionContext,
+    extract_where_clause_bounds, find_capture_node, find_child_by_kind, format_generic_param,
+    merge_parsed_generics, node_to_text, require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -667,18 +667,6 @@ fn extract_associated_constant(
     )
 }
 
-/// Find a child node by kind
-#[allow(clippy::manual_find)]
-fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == kind {
-            return Some(child);
-        }
-    }
-    None
-}
-
 /// Extract a single method from an impl block
 fn extract_method(
     method_node: Node,
@@ -738,9 +726,11 @@ fn extract_method(
     let import_map = get_file_import_map(method_node, source);
 
     // Build resolution context for qualified name normalization
+    // Use module path as parent_scope (not impl block name) so bare function calls
+    // like `async_callee()` resolve to `module::async_callee` not `impl_block::async_callee`
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
-        parent_scope: Some(impl_ctx.qualified_name),
+        parent_scope: impl_ctx.module_path,
         package_name: impl_ctx.package_name,
         current_module: impl_ctx.module_path,
     };

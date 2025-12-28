@@ -94,6 +94,17 @@ impl ImportMap {
             .map(|path| normalize_rust_path(path, package_name, current_module))
             .collect()
     }
+
+    /// Check if any imported path starts with the given crate prefix.
+    ///
+    /// This helps distinguish external crates from local modules. If we have
+    /// an import like `serde::Serialize`, then `serde` is known to be an
+    /// external crate, so other paths like `serde::Deserialize` should also
+    /// be treated as external.
+    pub fn has_crate_import(&self, crate_name: &str, separator: &str) -> bool {
+        let prefix = format!("{crate_name}{separator}");
+        self.mappings.values().any(|path| path.starts_with(&prefix))
+    }
 }
 
 /// Resolve a reference to a qualified name using import map and scope context
@@ -213,12 +224,11 @@ pub fn normalize_rust_path(
 ///
 /// Resolution order:
 /// 1. If path starts with crate::/self::/super::, normalize it and return
-/// 2. Otherwise, delegate to resolve_reference() which handles:
-///    - Scoped paths (contains ::) - used as-is
-///    - Import map lookup
-///    - parent_scope::name fallback
-///    - external::name marker for unresolved references
-/// 3. Normalize the result if it contains Rust-relative prefixes (from import map)
+/// 2. If already scoped (contains ::), use as-is
+/// 3. Try import map lookup
+/// 4. Try parent_scope::name
+/// 5. Try package_name::current_module::name (for locally-defined types)
+/// 6. Mark as external::name (only if no package context available)
 pub fn resolve_rust_reference(
     name: &str,
     import_map: &ImportMap,
@@ -231,17 +241,80 @@ pub fn resolve_rust_reference(
         return normalize_rust_path(name, package_name, current_module);
     }
 
-    // Delegate to standard resolution
-    let resolved = resolve_reference(name, import_map, parent_scope, "::");
+    // Already scoped paths need special handling
+    if ImportMap::is_scoped(name, "::") {
+        // Check if it looks like an external path
+        // If it starts with known external prefixes, return as-is
+        if name.starts_with("std::")
+            || name.starts_with("core::")
+            || name.starts_with("alloc::")
+            || name.starts_with("external::")
+        {
+            return name.to_string();
+        }
+        // Try to resolve through import map first
+        if let Some(resolved) = import_map.resolve(name) {
+            return resolved.to_string();
+        }
+        // For relative scoped paths like `utils::helper`, prepend package name
+        // to make them absolute (e.g., `test_crate::utils::helper`).
+        // BUT: if the first segment is a known external crate, return as-is.
+        if let Some(pkg) = package_name {
+            if !pkg.is_empty() {
+                // Extract the first path segment
+                let first_segment = name.split("::").next().unwrap_or(name);
+                // If the first segment matches the package name, it's already
+                // absolute within this crate - return as-is
+                if first_segment == pkg {
+                    return name.to_string();
+                }
+                // Check if any import in the map starts with this segment.
+                // If so, it's a known external crate (e.g., `serde::Deserialize`
+                // when we have `use serde::Serialize;`).
+                if import_map.has_crate_import(first_segment, "::") {
+                    return name.to_string();
+                }
+                // Otherwise, assume it's a relative internal path and prepend
+                // the package name (e.g., `utils::helper` -> `my_crate::utils::helper`)
+                return format!("{pkg}::{name}");
+            }
+        }
+        return name.to_string();
+    }
 
-    // Normalize result if it contains Rust-relative prefixes (e.g., from import map)
-    if resolved.starts_with("crate::")
-        || resolved.starts_with("self::")
-        || resolved.starts_with("super::")
-    {
-        normalize_rust_path(&resolved, package_name, current_module)
-    } else {
-        resolved
+    // Try import map
+    if let Some(resolved) = import_map.resolve(name) {
+        // Normalize result if it contains Rust-relative prefixes
+        if resolved.starts_with("crate::")
+            || resolved.starts_with("self::")
+            || resolved.starts_with("super::")
+        {
+            return normalize_rust_path(resolved, package_name, current_module);
+        }
+        return resolved.to_string();
+    }
+
+    // Try parent scope
+    if let Some(scope) = parent_scope {
+        if !scope.is_empty() {
+            return format!("{scope}::{name}");
+        }
+    }
+
+    // Try package_name::current_module::name for locally-defined types
+    // This handles types defined in the same module that aren't imported
+    match (package_name, current_module) {
+        (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
+            format!("{pkg}::{module}::{name}")
+        }
+        (Some(pkg), _) if !pkg.is_empty() => {
+            // At crate root (no module path)
+            format!("{pkg}::{name}")
+        }
+        _ => {
+            // No package context available, mark as external
+            format!("external::{name}")
+        }
     }
 }
 
@@ -1527,6 +1600,105 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference("Read", &map, None, Some("mypackage"), Some("utils")),
             "std::io::Read"
+        );
+    }
+
+    // ========================================================================
+    // Tests for has_crate_import
+    // ========================================================================
+
+    #[test]
+    fn test_has_crate_import_exists() {
+        let mut map = ImportMap::new("::");
+        map.add("Serialize", "serde::Serialize");
+        map.add("Deserialize", "serde::Deserialize");
+
+        assert!(map.has_crate_import("serde", "::"));
+    }
+
+    #[test]
+    fn test_has_crate_import_not_exists() {
+        let mut map = ImportMap::new("::");
+        map.add("Serialize", "serde::Serialize");
+
+        assert!(!map.has_crate_import("tokio", "::"));
+    }
+
+    #[test]
+    fn test_has_crate_import_partial_match() {
+        let mut map = ImportMap::new("::");
+        map.add("Foo", "serde_json::Foo");
+
+        // "serde" should not match "serde_json"
+        assert!(!map.has_crate_import("serde", "::"));
+        assert!(map.has_crate_import("serde_json", "::"));
+    }
+
+    // ========================================================================
+    // Tests for external crate detection in resolve_rust_reference
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_rust_reference_detects_external_crate_from_imports() {
+        // If we have `use serde::Serialize;` in imports, then
+        // `serde::Deserialize` should be recognized as external
+        let mut map = ImportMap::new("::");
+        map.add("Serialize", "serde::Serialize");
+
+        // This should NOT be prefixed with my_crate since serde is a known external
+        assert_eq!(
+            resolve_rust_reference("serde::Deserialize", &map, None, Some("my_crate"), None),
+            "serde::Deserialize"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_prefixes_unknown_scoped_path() {
+        // Unknown scoped paths like `utils::helper` should get package prefix
+        let map = ImportMap::new("::");
+
+        assert_eq!(
+            resolve_rust_reference("utils::helper", &map, None, Some("my_crate"), None),
+            "my_crate::utils::helper"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_keeps_own_crate_prefix() {
+        // Paths already starting with the package name should stay as-is
+        let map = ImportMap::new("::");
+
+        assert_eq!(
+            resolve_rust_reference(
+                "my_crate::utils::helper",
+                &map,
+                None,
+                Some("my_crate"),
+                None
+            ),
+            "my_crate::utils::helper"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_std_is_external() {
+        // std paths are always external
+        let map = ImportMap::new("::");
+
+        assert_eq!(
+            resolve_rust_reference("std::io::Read", &map, None, Some("my_crate"), None),
+            "std::io::Read"
+        );
+    }
+
+    #[test]
+    fn test_resolve_rust_reference_core_is_external() {
+        // core paths are always external
+        let map = ImportMap::new("::");
+
+        assert_eq!(
+            resolve_rust_reference("core::fmt::Display", &map, None, Some("my_crate"), None),
+            "core::fmt::Display"
         );
     }
 }

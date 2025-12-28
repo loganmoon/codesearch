@@ -4,6 +4,22 @@ use super::*;
 use crate::rust::handler_impls::type_handlers::handle_trait_impl;
 use codesearch_core::entities::EntityType;
 
+/// Helper to find the trait entity from extracted entities
+fn find_trait_entity(entities: &[codesearch_core::CodeEntity]) -> &codesearch_core::CodeEntity {
+    entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Trait)
+        .expect("Should have a Trait entity")
+}
+
+/// Helper to count method entities
+fn count_method_entities(entities: &[codesearch_core::CodeEntity]) -> usize {
+    entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Method)
+        .count()
+}
+
 #[test]
 fn test_simple_trait() {
     let source = r#"
@@ -15,8 +31,11 @@ trait SimpleTrait {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 1 method entity
+    assert_eq!(entities.len(), 2);
+    assert_eq!(count_method_entities(&entities), 1);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "SimpleTrait");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -39,8 +58,11 @@ trait Container<T> {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 2 method entities
+    assert_eq!(entities.len(), 3);
+    assert_eq!(count_method_entities(&entities), 2);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "Container");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -71,17 +93,11 @@ trait Iterator {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    // Debug output
-    eprintln!("Number of entities extracted: {}", entities.len());
-    for (i, entity) in entities.iter().enumerate() {
-        eprintln!(
-            "Entity {}: name={}, qualified_name={}",
-            i, entity.name, entity.qualified_name
-        );
-    }
+    // Trait + 1 method entity
+    assert_eq!(entities.len(), 2);
+    assert_eq!(count_method_entities(&entities), 1);
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "Iterator");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -118,8 +134,11 @@ trait DefaultMethods {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 3 method entities
+    assert_eq!(entities.len(), 4);
+    assert_eq!(count_method_entities(&entities), 3);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "DefaultMethods");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -130,6 +149,32 @@ trait DefaultMethods {
     assert!(methods_str.contains("required"));
     assert!(methods_str.contains("with_default"));
     assert!(methods_str.contains("another_default"));
+
+    // Verify abstract vs non-abstract method entities
+    let method_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Method)
+        .collect();
+
+    // required has no body -> is_abstract = true
+    let required = method_entities
+        .iter()
+        .find(|e| e.name == "required")
+        .expect("Should have required method");
+    assert!(
+        required.metadata.is_abstract,
+        "required should be abstract (no body)"
+    );
+
+    // with_default has a body -> is_abstract = false
+    let with_default = method_entities
+        .iter()
+        .find(|e| e.name == "with_default")
+        .expect("Should have with_default method");
+    assert!(
+        !with_default.metadata.is_abstract,
+        "with_default should not be abstract (has body)"
+    );
 }
 
 #[test]
@@ -147,33 +192,45 @@ trait Complex: Display + Send + Sync + 'static {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 2);
+    // 2 traits + 2 method entities total
+    let trait_count = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Trait)
+        .count();
+    assert_eq!(trait_count, 2);
 
-    // Check first trait
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Display");
-    assert_eq!(entity.entity_type, EntityType::Trait);
+    let method_count = count_method_entities(&entities);
+    assert_eq!(method_count, 2);
+
+    // Check first trait (Display)
+    let display_trait = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Trait && e.name == "Display")
+        .expect("Should have Display trait");
+    assert_eq!(display_trait.name, "Display");
 
     // Check bounds (supertraits)
-    let bounds = entity.metadata.attributes.get("bounds");
+    let bounds = display_trait.metadata.attributes.get("bounds");
     assert!(bounds.is_some());
     let bounds_str = bounds.unwrap();
     assert!(bounds_str.contains("Debug"));
     assert!(bounds_str.contains("Clone"));
 
     // Check methods
-    let methods = entity.metadata.attributes.get("methods");
+    let methods = display_trait.metadata.attributes.get("methods");
     assert!(methods.is_some());
     let methods_str = methods.unwrap();
     assert!(methods_str.contains("fmt"));
 
-    // Check second trait
-    let entity = &entities[1];
-    assert_eq!(entity.name, "Complex");
-    assert_eq!(entity.entity_type, EntityType::Trait);
+    // Check second trait (Complex)
+    let complex_trait = entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Trait && e.name == "Complex")
+        .expect("Should have Complex trait");
+    assert_eq!(complex_trait.name, "Complex");
 
     // Check bounds (supertraits)
-    let bounds = entity.metadata.attributes.get("bounds");
+    let bounds = complex_trait.metadata.attributes.get("bounds");
     assert!(bounds.is_some());
     let bounds_str = bounds.unwrap();
     assert!(bounds_str.contains("Display"));
@@ -181,7 +238,7 @@ trait Complex: Display + Send + Sync + 'static {
     assert!(bounds_str.contains("Sync"));
 
     // Check methods
-    let methods = entity.metadata.attributes.get("methods");
+    let methods = complex_trait.metadata.attributes.get("methods");
     assert!(methods.is_some());
     let methods_str = methods.unwrap();
     assert!(methods_str.contains("process"));
@@ -198,8 +255,11 @@ unsafe trait UnsafeMarker {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 1 method entity
+    assert_eq!(entities.len(), 2);
+    assert_eq!(count_method_entities(&entities), 1);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "UnsafeMarker");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -234,8 +294,11 @@ where
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 1 method entity
+    assert_eq!(entities.len(), 2);
+    assert_eq!(count_method_entities(&entities), 1);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "ComplexBounds");
     assert_eq!(entity.entity_type, EntityType::Trait);
 
@@ -276,8 +339,11 @@ pub trait Serialize {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 1 method entity
+    assert_eq!(entities.len(), 2);
+    assert_eq!(count_method_entities(&entities), 1);
+
+    let entity = find_trait_entity(&entities);
 
     assert!(entity.documentation_summary.is_some());
     let doc = entity.documentation_summary.as_ref().unwrap();
@@ -304,8 +370,11 @@ trait Container<T: Clone + Send, U> {
     let entities = extract_with_handler(source, queries::TRAIT_QUERY, handle_trait_impl)
         .expect("Failed to extract trait");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Trait + 2 method entities
+    assert_eq!(entities.len(), 3);
+    assert_eq!(count_method_entities(&entities), 2);
+
+    let entity = find_trait_entity(&entities);
     assert_eq!(entity.name, "Container");
 
     // Check generic_params (backward-compat raw strings)

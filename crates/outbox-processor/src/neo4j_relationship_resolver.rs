@@ -351,12 +351,18 @@ impl RelationshipResolver for TraitImplResolver {
 
         // EXTENDS_INTERFACE relationships for Rust trait supertraits
         // E.g., `trait Extended: Base {}` creates Extended -> Base relationship
-        // Uses pre-resolved uses_types attribute which contains qualified supertrait names
+        // Uses pre-resolved supertraits attribute which contains qualified supertrait names
         for trait_entity in &traits {
-            if let Some(uses_types_json) = trait_entity.metadata.attributes.get("uses_types") {
-                let supertraits: Vec<String> = match serde_json::from_str(uses_types_json) {
+            if let Some(supertraits_json) = trait_entity.metadata.attributes.get("supertraits") {
+                let supertraits: Vec<String> = match serde_json::from_str(supertraits_json) {
                     Ok(t) => t,
-                    Err(_) => continue,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'supertraits' JSON for trait {}: {}",
+                            trait_entity.entity_id, e
+                        );
+                        continue;
+                    }
                 };
                 for supertrait in supertraits {
                     // Skip lifetimes (start with ')

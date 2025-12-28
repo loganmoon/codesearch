@@ -15,8 +15,9 @@ use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
     extract_preceding_doc_comments, extract_visibility, extract_where_clause_bounds,
-    find_capture_node, format_generic_param, is_primitive_type, merge_parsed_generics,
-    node_to_text, require_capture_node, ParsedGenerics, RustResolutionContext,
+    find_capture_node, find_child_by_kind, format_generic_param, is_primitive_type,
+    merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
+    RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{
@@ -27,6 +28,7 @@ use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::collections::HashSet;
 use std::path::Path;
+use tracing::warn;
 use tree_sitter::{Node, Query, QueryMatch};
 
 // ============================================================================
@@ -361,22 +363,33 @@ pub fn handle_trait_impl(
                 .insert("methods".to_string(), methods.join(","));
         }
 
-        // Build uses_types from supertrait bounds and generic bounds
-        // Resolve supertrait names through the resolution context
-        let mut uses_types: Vec<String> = bounds
+        // Store resolved supertraits separately for EXTENDS_INTERFACE relationships
+        let supertraits: Vec<String> = bounds
             .iter()
             .filter(|b| !b.starts_with('\'')) // Skip lifetimes
             .map(|b| resolution_ctx.resolve(b))
             .collect();
-        // Add resolved generic bounds (already resolved)
-        for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types.contains(trait_ref) {
-                uses_types.push(trait_ref.clone());
+        if !supertraits.is_empty() {
+            match serde_json::to_string(&supertraits) {
+                Ok(json) => {
+                    metadata.attributes.insert("supertraits".to_string(), json);
+                }
+                Err(e) => {
+                    warn!("Failed to serialize supertraits: {e}");
+                }
             }
         }
+
+        // Build uses_types from generic bounds only (supertraits are stored separately)
+        let uses_types: Vec<String> = parsed_generics.bound_trait_refs.clone();
         if !uses_types.is_empty() {
-            if let Ok(json) = serde_json::to_string(&uses_types) {
-                metadata.attributes.insert("uses_types".to_string(), json);
+            match serde_json::to_string(&uses_types) {
+                Ok(json) => {
+                    metadata.attributes.insert("uses_types".to_string(), json);
+                }
+                Err(e) => {
+                    warn!("Failed to serialize uses_types: {e}");
+                }
             }
         }
 
@@ -704,7 +717,13 @@ fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match tree_sitter::Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for trait bounds: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return Vec::new();
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -808,17 +827,6 @@ fn extract_trait_method_entities(
     entities
 }
 
-/// Find a direct child node by its kind
-fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == kind {
-            return Some(child);
-        }
-    }
-    None
-}
-
 /// Extract a single trait method as a CodeEntity
 fn extract_single_trait_method(
     method_node: Node,
@@ -835,8 +843,7 @@ fn extract_single_trait_method(
 
     // Extract parameters - convert to (String, Option<String>) format
     let parameters: Vec<(String, Option<String>)> = find_child_by_kind(method_node, "parameters")
-        .map(|params_node| extract_function_parameters(params_node, source).ok())
-        .flatten()
+        .and_then(|params_node| extract_function_parameters(params_node, source).ok())
         .unwrap_or_default()
         .into_iter()
         .map(|(name, type_str)| (name, Some(type_str)))

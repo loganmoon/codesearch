@@ -13,6 +13,7 @@ use crate::rust::handler_impls::constants::{
 use codesearch_core::entities::{ReferenceType, SourceLocation, SourceReference, Visibility};
 use codesearch_core::error::Result;
 use streaming_iterator::StreamingIterator;
+use tracing::{trace, warn};
 use tree_sitter::{Node, Query, QueryMatch};
 
 // Import shared utilities from common module
@@ -537,7 +538,13 @@ pub fn extract_function_calls(
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for function call extraction: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return Vec::new();
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -570,9 +577,9 @@ pub fn extract_function_calls(
         let chain_receiver = captures.iter().find(|c| {
             query.capture_names().get(c.index as usize).copied() == Some("chain_receiver")
         });
-        let chain_method = captures.iter().find(|c| {
-            query.capture_names().get(c.index as usize).copied() == Some("chain_method")
-        });
+        let chain_method = captures
+            .iter()
+            .find(|c| query.capture_names().get(c.index as usize).copied() == Some("chain_method"));
 
         if let Some(bare_cap) = bare_callee {
             // Bare identifier call like `foo()`
@@ -613,20 +620,26 @@ pub fn extract_function_calls(
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
             }
-        } else if let (Some(chain_recv_cap), Some(chain_method_cap)) = (chain_receiver, chain_method)
+        } else if let (Some(chain_recv_cap), Some(chain_method_cap)) =
+            (chain_receiver, chain_method)
         {
             // Chained method call like `Type::new().method()` or `expr().method()`
             if let Ok(method_name) = node_to_text(chain_method_cap.node, source) {
                 // Try to extract the chain head type from the receiver expression
-                if let Some(chain_head_type) =
-                    extract_method_chain_head_type(chain_recv_cap.node, source, local_vars)
-                {
-                    let resolved_type = ctx.resolve(&chain_head_type);
-                    calls.push(SourceReference {
-                        target: format!("{resolved_type}::{method_name}"),
-                        location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
-                        ref_type: ReferenceType::Call,
-                    });
+                match extract_method_chain_head_type(chain_recv_cap.node, source, local_vars) {
+                    Some(chain_head_type) => {
+                        let resolved_type = ctx.resolve(&chain_head_type);
+                        calls.push(SourceReference {
+                            target: format!("{resolved_type}::{method_name}"),
+                            location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
+                            ref_type: ReferenceType::Call,
+                        });
+                    }
+                    None => {
+                        trace!(
+                            "Could not resolve chain head type for method call '{method_name}' - skipping"
+                        );
+                    }
                 }
             }
         }
@@ -638,7 +651,8 @@ pub fn extract_function_calls(
 /// Extract the type from the head of a method chain.
 ///
 /// For chains like `Type::new().method1().method2()`, this walks back to find `Type`.
-/// For chains starting with a variable like `x.method()`, this returns None (handled elsewhere).
+/// For chains starting with a variable like `x.method()`, this looks up the variable's
+/// type in `local_vars` and returns it if found, or None if the variable type is unknown.
 fn extract_method_chain_head_type(
     call_expr_node: Node,
     source: &str,
@@ -719,7 +733,13 @@ pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<Str
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return var_types,
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for local var types: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return var_types;
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -777,7 +797,13 @@ fn extract_parameter_types_into(
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return,
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for parameter types: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return;
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -870,7 +896,13 @@ pub fn extract_type_references(
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            warn!(
+                "Failed to compile tree-sitter query for type references: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return Vec::new();
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -925,6 +957,17 @@ pub fn extract_type_references(
     type_refs
 }
 
+/// Find a direct child node by its kind.
+///
+/// Returns the first matching child node, or None if no child matches.
+pub fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == kind);
+    result
+}
+
 /// Check if a type name is a Rust primitive type
 pub(crate) fn is_primitive_type(name: &str) -> bool {
     matches!(
@@ -949,4 +992,195 @@ pub(crate) fn is_primitive_type(name: &str) -> bool {
             | "Self"
             | "()"
     )
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    /// Parse Rust source code and return the root node
+    fn parse_rust(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        parser.parse(source, None).unwrap()
+    }
+
+    /// Find a function node in the parsed tree
+    fn find_function_node(tree: &tree_sitter::Tree) -> Option<tree_sitter::Node<'_>> {
+        let root = tree.root_node();
+        let mut cursor = root.walk();
+        let result = root
+            .children(&mut cursor)
+            .find(|child| child.kind() == "function_item");
+        result
+    }
+
+    // =========================================================================
+    // Tests for extract_local_var_types (tests extract_parameter_types_into)
+    // =========================================================================
+
+    #[test]
+    fn test_extract_local_var_types_simple_parameters() {
+        let source = r#"
+            fn process(data: Data, config: Config) {
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        assert_eq!(types.get("data"), Some(&"Data".to_string()));
+        assert_eq!(types.get("config"), Some(&"Config".to_string()));
+    }
+
+    #[test]
+    fn test_extract_local_var_types_reference_parameters() {
+        let source = r#"
+            fn process(data: &Data, config: &mut Config) {
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        // Reference types should extract to base type
+        assert_eq!(types.get("data"), Some(&"Data".to_string()));
+        assert_eq!(types.get("config"), Some(&"Config".to_string()));
+    }
+
+    #[test]
+    fn test_extract_local_var_types_generic_parameters() {
+        let source = r#"
+            fn process(items: Vec<Item>, map: HashMap<String, Value>) {
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        // Generic types should extract to base type only
+        assert_eq!(types.get("items"), Some(&"Vec".to_string()));
+        assert_eq!(types.get("map"), Some(&"HashMap".to_string()));
+    }
+
+    #[test]
+    fn test_extract_local_var_types_let_statements() {
+        let source = r#"
+            fn process() {
+                let x: Foo = Foo::new();
+                let y: &Bar = get_bar();
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        assert_eq!(types.get("x"), Some(&"Foo".to_string()));
+        assert_eq!(types.get("y"), Some(&"Bar".to_string()));
+    }
+
+    #[test]
+    fn test_extract_local_var_types_mixed() {
+        let source = r#"
+            fn process(input: Input) {
+                let result: Result<Output, Error> = input.transform();
+                let count: usize = 0;
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        assert_eq!(types.get("input"), Some(&"Input".to_string()));
+        assert_eq!(types.get("result"), Some(&"Result".to_string()));
+        // Primitive types are also captured
+        assert_eq!(types.get("count"), Some(&"usize".to_string()));
+    }
+
+    #[test]
+    fn test_extract_local_var_types_no_type_annotation() {
+        let source = r#"
+            fn process() {
+                let x = foo();
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+        let types = extract_local_var_types(func_node, source);
+
+        // Variables without type annotations are not included
+        assert!(!types.contains_key("x"));
+    }
+
+    // =========================================================================
+    // Tests for is_primitive_type
+    // =========================================================================
+
+    #[test]
+    fn test_is_primitive_type_integer_types() {
+        assert!(is_primitive_type("i8"));
+        assert!(is_primitive_type("i16"));
+        assert!(is_primitive_type("i32"));
+        assert!(is_primitive_type("i64"));
+        assert!(is_primitive_type("i128"));
+        assert!(is_primitive_type("isize"));
+        assert!(is_primitive_type("u8"));
+        assert!(is_primitive_type("u16"));
+        assert!(is_primitive_type("u32"));
+        assert!(is_primitive_type("u64"));
+        assert!(is_primitive_type("u128"));
+        assert!(is_primitive_type("usize"));
+    }
+
+    #[test]
+    fn test_is_primitive_type_other_primitives() {
+        assert!(is_primitive_type("bool"));
+        assert!(is_primitive_type("char"));
+        assert!(is_primitive_type("str"));
+        assert!(is_primitive_type("f32"));
+        assert!(is_primitive_type("f64"));
+        assert!(is_primitive_type("Self"));
+        assert!(is_primitive_type("()"));
+    }
+
+    #[test]
+    fn test_is_primitive_type_non_primitives() {
+        assert!(!is_primitive_type("String"));
+        assert!(!is_primitive_type("Vec"));
+        assert!(!is_primitive_type("Option"));
+        assert!(!is_primitive_type("Result"));
+        assert!(!is_primitive_type("MyStruct"));
+    }
+
+    // =========================================================================
+    // Tests for find_child_by_kind
+    // =========================================================================
+
+    #[test]
+    fn test_find_child_by_kind_exists() {
+        let source = "fn foo() {}";
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        let params = find_child_by_kind(func_node, "parameters");
+        assert!(params.is_some());
+    }
+
+    #[test]
+    fn test_find_child_by_kind_not_exists() {
+        let source = "fn foo() {}";
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        let where_clause = find_child_by_kind(func_node, "where_clause");
+        assert!(where_clause.is_none());
+    }
 }

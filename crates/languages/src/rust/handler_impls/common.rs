@@ -527,6 +527,11 @@ pub fn extract_function_calls(
           function: (field_expression
             value: (identifier) @receiver
             field: (field_identifier) @method))
+
+        (call_expression
+          function: (field_expression
+            value: (call_expression) @chain_receiver
+            field: (field_identifier) @chain_method))
     "#;
 
     let language = tree_sitter_rust::LANGUAGE.into();
@@ -553,13 +558,21 @@ pub fn extract_function_calls(
             query.capture_names().get(c.index as usize).copied() == Some("scoped_callee")
         });
 
-        // Check for method call (receiver.method())
+        // Check for method call on identifier (receiver.method())
         let receiver = captures
             .iter()
             .find(|c| query.capture_names().get(c.index as usize).copied() == Some("receiver"));
         let method = captures
             .iter()
             .find(|c| query.capture_names().get(c.index as usize).copied() == Some("method"));
+
+        // Check for chained method call (expr().method())
+        let chain_receiver = captures.iter().find(|c| {
+            query.capture_names().get(c.index as usize).copied() == Some("chain_receiver")
+        });
+        let chain_method = captures.iter().find(|c| {
+            query.capture_names().get(c.index as usize).copied() == Some("chain_method")
+        });
 
         if let Some(bare_cap) = bare_callee {
             // Bare identifier call like `foo()`
@@ -600,30 +613,103 @@ pub fn extract_function_calls(
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
             }
+        } else if let (Some(chain_recv_cap), Some(chain_method_cap)) = (chain_receiver, chain_method)
+        {
+            // Chained method call like `Type::new().method()` or `expr().method()`
+            if let Ok(method_name) = node_to_text(chain_method_cap.node, source) {
+                // Try to extract the chain head type from the receiver expression
+                if let Some(chain_head_type) =
+                    extract_method_chain_head_type(chain_recv_cap.node, source, local_vars)
+                {
+                    let resolved_type = ctx.resolve(&chain_head_type);
+                    calls.push(SourceReference {
+                        target: format!("{resolved_type}::{method_name}"),
+                        location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
+                        ref_type: ReferenceType::Call,
+                    });
+                }
+            }
         }
     }
 
     calls
 }
 
-/// Extract local variable types from let statements in a function body
+/// Extract the type from the head of a method chain.
 ///
-/// This function scans a function body for `let` statements with type annotations
-/// and returns a mapping of variable names to their declared types (base type only).
+/// For chains like `Type::new().method1().method2()`, this walks back to find `Type`.
+/// For chains starting with a variable like `x.method()`, this returns None (handled elsewhere).
+fn extract_method_chain_head_type(
+    call_expr_node: Node,
+    source: &str,
+    local_vars: &HashMap<String, String>,
+) -> Option<String> {
+    // The node is a call_expression. Check what kind of call it is.
+    // Look for the "function" child to determine call type.
+    let mut cursor = call_expr_node.walk();
+
+    for child in call_expr_node.children(&mut cursor) {
+        if child.kind() == "scoped_identifier" {
+            // This is a scoped call like `Type::method()` or `module::func()`
+            // Extract the type/path prefix (everything before the last ::segment)
+            if let Ok(full_path) = node_to_text(child, source) {
+                // Split by :: and get everything but the last segment
+                let parts: Vec<&str> = full_path.split("::").collect();
+                if parts.len() >= 2 {
+                    // Return the type part (everything except the method name)
+                    return Some(parts[..parts.len() - 1].join("::"));
+                }
+            }
+        } else if child.kind() == "field_expression" {
+            // This is a method call on something. Recursively find the chain head.
+            // field_expression has "value" and "field" children
+            for field_child in child.children(&mut child.walk()) {
+                if field_child.kind() == "call_expression" {
+                    // Recurse into the chain
+                    return extract_method_chain_head_type(field_child, source, local_vars);
+                } else if field_child.kind() == "identifier" {
+                    // Chain starts with a variable - check local_vars
+                    if let Ok(var_name) = node_to_text(field_child, source) {
+                        return local_vars.get(&var_name).cloned();
+                    }
+                }
+            }
+        } else if child.kind() == "identifier" {
+            // Bare function call - can't determine return type
+            return None;
+        }
+    }
+
+    None
+}
+
+/// Extract local variable and parameter types from a function body
+///
+/// This function scans a function for:
+/// - `let` statements with type annotations
+/// - Function parameter types
+///
+/// Returns a mapping of variable/parameter names to their declared types (base type only).
 ///
 /// # Example
 /// For code like:
 /// ```text
-/// let x: Foo = Foo::new();
-/// let y: Bar<T> = Default::default();
+/// fn foo(x: &Data, y: Config) {
+///     let z: Foo = Foo::new();
+/// }
 /// ```
-/// Returns: {"x" -> "Foo", "y" -> "Bar"}
+/// Returns: {"x" -> "Data", "y" -> "Config", "z" -> "Foo"}
 ///
 /// # Note
-/// - Only extracts types from explicit annotations (e.g., `let x: Type = ...`)
-/// - Does not infer types from expressions
 /// - For generic types, extracts only the base type using AST traversal
+/// - Reference types like `&T` extract to base type `T`
 pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<String, String> {
+    let mut var_types = HashMap::new();
+
+    // First, extract function parameter types
+    extract_parameter_types_into(function_node, source, &mut var_types);
+
+    // Then, extract let statement types
     let query_source = r#"
         (let_declaration
           pattern: (identifier) @var_name
@@ -633,11 +719,10 @@ pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<Str
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return HashMap::new(),
+        Err(_) => return var_types,
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
-    let mut var_types = HashMap::new();
 
     let mut matches = cursor.matches(&query, function_node, source.as_bytes());
     while let Some(query_match) = matches.next() {
@@ -674,6 +759,61 @@ pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<Str
     }
 
     var_types
+}
+
+/// Extract function parameter types into a map
+fn extract_parameter_types_into(
+    function_node: Node,
+    source: &str,
+    var_types: &mut HashMap<String, String>,
+) {
+    let query_source = r#"
+        (parameters
+          (parameter
+            pattern: (identifier) @param_name
+            type: (_) @param_type))
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return,
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, function_node, source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        let mut param_name: Option<String> = None;
+        let mut param_type_node: Option<Node> = None;
+
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
+
+            match capture_name {
+                "param_name" => {
+                    if let Ok(name) = node_to_text(capture.node, source) {
+                        param_name = Some(name);
+                    }
+                }
+                "param_type" => {
+                    param_type_node = Some(capture.node);
+                }
+                _ => {}
+            }
+        }
+
+        if let (Some(name), Some(type_node)) = (param_name, param_type_node) {
+            let base_type = extract_base_type_name(type_node, source);
+            if let Some(base) = base_type {
+                var_types.insert(name, base);
+            }
+        }
+    }
 }
 
 /// Extract the base type name from a type node.

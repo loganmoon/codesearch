@@ -738,9 +738,11 @@ fn extract_method(
     let import_map = get_file_import_map(method_node, source);
 
     // Build resolution context for qualified name normalization
+    // Use module path as parent_scope (not impl block name) so bare function calls
+    // like `async_callee()` resolve to `module::async_callee` not `impl_block::async_callee`
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
-        parent_scope: Some(impl_ctx.qualified_name),
+        parent_scope: impl_ctx.module_path,
         package_name: impl_ctx.package_name,
         current_module: impl_ctx.module_path,
     };

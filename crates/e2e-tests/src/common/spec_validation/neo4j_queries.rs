@@ -35,9 +35,10 @@ pub async fn get_all_entities(neo4j: &TestNeo4j, repository_id: &str) -> Result<
                 let labels: Vec<String> = row
                     .get::<Vec<String>>("labels")
                     .with_context(|| format!("Failed to get labels for entity {entity_id}"))?;
-                let qualified_name: String = row
-                    .get::<String>("qualified_name")
-                    .with_context(|| format!("Failed to get qualified_name for entity {entity_id}"))?;
+                let qualified_name: String =
+                    row.get::<String>("qualified_name").with_context(|| {
+                        format!("Failed to get qualified_name for entity {entity_id}")
+                    })?;
                 let name: String = row
                     .get::<String>("name")
                     .with_context(|| format!("Failed to get name for entity {entity_id}"))?;

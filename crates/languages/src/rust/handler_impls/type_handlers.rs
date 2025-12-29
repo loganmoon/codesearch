@@ -1079,3 +1079,36 @@ fn is_valid_type_name(name: &str) -> bool {
             .next()
             .is_some_and(|c| c.is_alphabetic() || c == '_')
 }
+
+/// Extract type references from a type expression string.
+///
+/// This is a public wrapper around `extract_type_names_from_field_type` that filters
+/// primitives and resolves type names using the provided context.
+///
+/// Used by type_alias_handlers to extract USES relationships.
+pub(crate) fn extract_type_refs_from_type_expr(
+    type_expr: &str,
+    ctx: &RustResolutionContext,
+    generic_params: &[String],
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for type_name in extract_type_names_from_field_type(type_expr) {
+        // Skip primitives
+        if is_primitive_type(&type_name) {
+            continue;
+        }
+        // Skip generic type parameters (e.g., T, U, etc.)
+        if generic_params.contains(&type_name) {
+            continue;
+        }
+        // Resolve through imports
+        let resolved = ctx.resolve(&type_name);
+        if seen.insert(resolved.clone()) {
+            result.push(resolved);
+        }
+    }
+
+    result
+}

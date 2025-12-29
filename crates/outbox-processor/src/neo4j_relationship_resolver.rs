@@ -468,8 +468,10 @@ impl RelationshipResolver for InheritanceResolver {
 /// Resolver for type usage (USES relationships)
 ///
 /// Handles:
-/// - Struct field types (from `fields` attribute)
+/// - Struct field types (from `uses_types` attribute)
+/// - Enum variant types (from `uses_types` attribute)
 /// - Function/Method parameter and return types (from `uses_types` attribute)
+/// - Type alias referenced types (from `uses_types` attribute)
 pub struct TypeUsageResolver;
 
 #[async_trait]
@@ -597,6 +599,42 @@ impl RelationshipResolver for TypeUsageResolver {
                         relationships.push((
                             type_id.clone(),
                             callable.entity_id.clone(),
+                            "USED_BY".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Process type alias uses_types
+        let type_aliases = cache.by_type(EntityType::TypeAlias);
+        for alias_entity in type_aliases {
+            if let Some(uses_types_json) = alias_entity.metadata.attributes.get("uses_types") {
+                let types: Vec<String> = match serde_json::from_str(uses_types_json) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse 'uses_types' JSON for type alias {}: {}",
+                            alias_entity.entity_id, e
+                        );
+                        continue;
+                    }
+                };
+                for type_name in types {
+                    // Strip generics and get the base type name
+                    let base_type = type_name.split('<').next().unwrap_or(&type_name).trim();
+
+                    if let Some(type_id) = type_map.get(base_type) {
+                        // Forward edge: type alias -> type
+                        relationships.push((
+                            alias_entity.entity_id.clone(),
+                            type_id.clone(),
+                            "USES".to_string(),
+                        ));
+                        // Reciprocal edge: type -> type alias
+                        relationships.push((
+                            type_id.clone(),
+                            alias_entity.entity_id.clone(),
                             "USED_BY".to_string(),
                         ));
                     }

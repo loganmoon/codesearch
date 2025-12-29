@@ -10,16 +10,18 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::handler_impls::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
-    find_capture_node, node_to_text, require_capture_node,
+    find_capture_node, node_to_text, require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
+use crate::rust::handler_impls::type_handlers::extract_type_refs_from_type_expr;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
+use tree_sitter::{Node, Query, QueryMatch};
 
 /// Process a type alias query match and extract entity data
 #[allow(clippy::too_many_arguments)]
@@ -51,6 +53,21 @@ pub fn handle_type_alias_impl(
     // Extract common components
     let components = extract_common_components(&ctx, capture_names::NAME, main_node, "rust")?;
 
+    // Build ImportMap from file's imports for type resolution
+    let import_map = get_file_import_map(main_node, source);
+
+    // Derive module path from file path for qualified name resolution
+    let module_path =
+        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+
+    // Build resolution context for qualified name normalization
+    let resolution_ctx = RustResolutionContext {
+        import_map: &import_map,
+        parent_scope: components.parent_scope.as_deref(),
+        package_name,
+        current_module: module_path.as_deref(),
+    };
+
     // Extract Rust-specific: visibility, documentation, content
     let visibility = extract_visibility(query_match, query);
     let documentation = extract_preceding_doc_comments(main_node, source);
@@ -75,12 +92,20 @@ pub fn handle_type_alias_impl(
     // Store aliased type in attributes
     metadata
         .attributes
-        .insert("aliased_type".to_string(), aliased_type);
+        .insert("aliased_type".to_string(), aliased_type.clone());
 
     if !generics.is_empty() {
         metadata
             .attributes
             .insert("generic_params".to_string(), generics.join(","));
+    }
+
+    // Extract type references from the aliased type for USES relationships
+    let uses_types = extract_type_refs_from_type_expr(&aliased_type, &resolution_ctx, &generics);
+    if !uses_types.is_empty() {
+        if let Ok(json) = serde_json::to_string(&uses_types) {
+            metadata.attributes.insert("uses_types".to_string(), json);
+        }
     }
 
     // Build the entity using the shared helper
@@ -98,4 +123,18 @@ pub fn handle_type_alias_impl(
     )?;
 
     Ok(vec![entity])
+}
+
+/// Build ImportMap from file's use statements for type resolution
+fn get_file_import_map(node: Node, source: &str) -> ImportMap {
+    // Walk up to the root node
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        current = parent;
+    }
+
+    // Parse imports from the root
+    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
+    // so no module_path resolution is needed
+    parse_file_imports(current, source, Language::Rust, None)
 }

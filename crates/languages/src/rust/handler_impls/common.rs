@@ -1566,4 +1566,46 @@ pub fn make_requests() {
         let result = resolve_type_alias_chain("Alias", &aliases, 10);
         assert_eq!(result, Some("RealType".to_string()));
     }
+
+    #[test]
+    fn test_extract_function_calls_ufcs() {
+        let source = r#"
+            fn use_ufcs(data: &Data) -> i32 {
+                <Data as Processor>::process(data)
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        eprintln!(
+            "Function text: {}",
+            func_node.utf8_text(source.as_bytes()).unwrap()
+        );
+
+        // Build resolution context
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: None,
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        let local_vars = std::collections::HashMap::new();
+        let generic_bounds = im::HashMap::new();
+        let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
+
+        eprintln!("Extracted calls:");
+        for call in &calls {
+            eprintln!("  target: {}", call.target);
+        }
+
+        // Should have 1 call with fully qualified UFCS name
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].target,
+            "<test_crate::Data as test_crate::Processor>::process"
+        );
+    }
 }

@@ -1098,7 +1098,13 @@ pub fn extract_type_alias_map(root: Node, source: &str) -> HashMap<String, Strin
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match tree_sitter::Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return HashMap::new(),
+        Err(e) => {
+            warn!(
+                "Failed to compile type alias query: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return HashMap::new();
+        }
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();

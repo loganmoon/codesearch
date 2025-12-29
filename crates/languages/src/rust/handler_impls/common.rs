@@ -611,15 +611,6 @@ pub fn extract_function_calls(
             ) {
                 // Try to resolve receiver type from local variables
                 if let Some(recv_type) = local_vars.get(&recv_name) {
-                    // DEBUG: Log the lookup
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "DEBUG extract_function_calls: recv_name={}, recv_type={}, generic_bounds keys={:?}, lookup={:?}",
-                        recv_name,
-                        recv_type,
-                        generic_bounds.keys().collect::<Vec<_>>(),
-                        generic_bounds.get(recv_type)
-                    );
                     // Check if the receiver type is a generic type parameter with trait bounds
                     if let Some(bounds) = generic_bounds.get(recv_type) {
                         // For generic type parameters, add call targets for ALL trait bounds.
@@ -1539,5 +1530,49 @@ pub fn make_requests() {
             bounds[0], "test_crate::Processor",
             "Bound should be resolved to test_crate::Processor"
         );
+    }
+
+    // =========================================================================
+    // Tests for resolve_type_alias_chain
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_type_alias_chain_simple() {
+        let mut aliases = HashMap::new();
+        aliases.insert("AppConfig".to_string(), "Settings".to_string());
+        aliases.insert("Settings".to_string(), "RawConfig".to_string());
+
+        // Chain resolution: AppConfig -> Settings -> RawConfig
+        let result = resolve_type_alias_chain("AppConfig", &aliases, 10);
+        assert_eq!(result, Some("RawConfig".to_string()));
+
+        // Non-alias type returns None
+        let result = resolve_type_alias_chain("RawConfig", &aliases, 10);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_type_alias_chain_handles_cycles() {
+        let mut aliases = HashMap::new();
+        aliases.insert("A".to_string(), "B".to_string());
+        aliases.insert("B".to_string(), "C".to_string());
+        aliases.insert("C".to_string(), "A".to_string()); // Creates cycle: A -> B -> C -> A
+
+        // Should not panic or infinite loop; returns last value before hitting max_depth
+        let result = resolve_type_alias_chain("A", &aliases, 10);
+        assert!(result.is_some());
+
+        // With max_depth=2, should stop after A -> B -> C
+        let result = resolve_type_alias_chain("A", &aliases, 2);
+        assert_eq!(result, Some("C".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_type_alias_chain_single_hop() {
+        let mut aliases = HashMap::new();
+        aliases.insert("Alias".to_string(), "RealType".to_string());
+
+        let result = resolve_type_alias_chain("Alias", &aliases, 10);
+        assert_eq!(result, Some("RealType".to_string()));
     }
 }

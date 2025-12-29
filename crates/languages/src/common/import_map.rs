@@ -397,7 +397,10 @@ pub fn resolve_rust_reference(
 
     // Try glob imports as fallback
     // For `use helpers::*`, when encountering bare `helper_a`, try `helpers::helper_a`
-    // We use the first glob import since we can't verify which one contains the symbol
+    //
+    // NOTE: When multiple glob imports exist (e.g., `use helpers::*; use utils::*;`),
+    // we only try the first one since we cannot determine at extraction time which
+    // module contains the symbol. This is a known limitation.
     if let Some(glob_path) = import_map.glob_imports().first() {
         // Build the potential qualified path from glob import
         let candidate = format!("{glob_path}::{name}");
@@ -1348,33 +1351,35 @@ use network::{
         parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
         let tree = parser.parse(source, None).unwrap();
 
-        // Debug: print AST structure
-        fn print_node(node: tree_sitter::Node, source: &str, indent: usize) {
-            let text: String = node
-                .utf8_text(source.as_bytes())
-                .unwrap_or("?")
-                .chars()
-                .take(40)
-                .collect();
-            let has_path = node.child_by_field_name("path").is_some();
-            let has_alias = node.child_by_field_name("alias").is_some();
-            println!(
-                "{:indent$}{} (path={}, alias={}): {}",
-                "",
-                node.kind(),
-                has_path,
-                has_alias,
-                text,
-                indent = indent
-            );
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                print_node(child, source, indent + 2);
+        // Debug: print AST structure (only when DEBUG_AST env var is set)
+        if std::env::var("DEBUG_AST").is_ok() {
+            fn print_node(node: tree_sitter::Node, source: &str, indent: usize) {
+                let text: String = node
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or("?")
+                    .chars()
+                    .take(40)
+                    .collect();
+                let has_path = node.child_by_field_name("path").is_some();
+                let has_alias = node.child_by_field_name("alias").is_some();
+                println!(
+                    "{:indent$}{} (path={}, alias={}): {}",
+                    "",
+                    node.kind(),
+                    has_path,
+                    has_alias,
+                    text,
+                    indent = indent
+                );
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    print_node(child, source, indent + 2);
+                }
             }
+            println!("\n=== AST Structure ===");
+            print_node(tree.root_node(), source, 0);
+            println!("===================\n");
         }
-        println!("\n=== AST Structure ===");
-        print_node(tree.root_node(), source, 0);
-        println!("===================\n");
 
         let import_map = parse_rust_imports(tree.root_node(), source);
 
@@ -1911,6 +1916,94 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference("core::fmt::Display", &map, None, Some("my_crate"), None),
             "core::fmt::Display"
+        );
+    }
+
+    // =========================================================================
+    // Tests for glob imports
+    // =========================================================================
+
+    #[test]
+    fn test_glob_import_storage() {
+        let mut map = ImportMap::new("::");
+        map.add_glob("helpers");
+        map.add_glob("utils");
+
+        let globs = map.glob_imports();
+        assert_eq!(globs.len(), 2);
+        assert_eq!(globs[0], "helpers");
+        assert_eq!(globs[1], "utils");
+    }
+
+    #[test]
+    fn test_multiple_glob_imports_uses_first() {
+        // When multiple glob imports exist, only the first is used for resolution
+        let mut map = ImportMap::new("::");
+        map.add_glob("helpers");
+        map.add_glob("utils");
+
+        // First glob import takes precedence
+        assert_eq!(
+            map.glob_imports().first().map(|s| s.as_str()),
+            Some("helpers")
+        );
+    }
+
+    #[test]
+    fn test_glob_import_fallback_resolution() {
+        // Test that glob imports are used as fallback for unresolved names
+        let source = r#"use helpers::*;"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        // The glob import should be stored
+        assert!(!import_map.glob_imports().is_empty());
+        assert_eq!(import_map.glob_imports()[0], "helpers");
+    }
+
+    // =========================================================================
+    // Tests for deeply nested use statements
+    // =========================================================================
+
+    #[test]
+    fn test_deeply_nested_use_statement() {
+        // Test 4-level deep path
+        let source = r#"use a::b::c::d::e;"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        assert_eq!(
+            import_map.resolve("e"),
+            Some("a::b::c::d::e"),
+            "e should resolve to full path a::b::c::d::e"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_use_with_braces() {
+        // Test deeply nested paths with braces
+        let source = r#"use a::b::{c::d::e, f::g::h};"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        assert_eq!(
+            import_map.resolve("e"),
+            Some("a::b::c::d::e"),
+            "e should resolve to a::b::c::d::e"
+        );
+        assert_eq!(
+            import_map.resolve("h"),
+            Some("a::b::f::g::h"),
+            "h should resolve to a::b::f::g::h"
         );
     }
 }

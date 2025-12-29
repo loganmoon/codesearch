@@ -80,7 +80,7 @@ impl Drop for TestDatabaseGuard {
 ///
 /// This function:
 /// 1. Creates a temporary repository with the fixture's source files
-/// 2. Runs the full indexing pipeline via CLI
+/// 2. Runs the indexer and outbox processor directly
 /// 3. Waits for graph resolution to complete
 /// 4. Queries Neo4j for actual entities and relationships
 /// 5. Compares against the expected spec
@@ -113,15 +113,6 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     // Get repository_id from the database
     let repository_id = get_repository_id(&postgres, &db_name).await?;
     eprintln!("Repository ID: {}", repository_id);
-
-    // DEBUG: Query entity metadata to check for 'calls' attribute
-    // Use fixture name to customize debug search
-    let debug_search = if fixture.name == "glob_reexports" || fixture.name == "multi_hop_reexports" {
-        "caller"
-    } else {
-        "process_item"
-    };
-    debug_entity_metadata(&postgres, &db_name, debug_search).await?;
 
     // Query actual entities and relationships
     let actual_entities = get_all_entities(&neo4j, &repository_id).await?;
@@ -247,46 +238,6 @@ fn run_git_command(repo_path: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Create a codesearch.toml config file with mock embeddings
-fn create_config_file(
-    repo_path: &Path,
-    qdrant: &super::containers::TestQdrant,
-    postgres: &super::containers::TestPostgres,
-    db_name: &str,
-) -> Result<()> {
-    let config = format!(
-        r#"[indexer]
-
-[storage]
-qdrant_host = "localhost"
-qdrant_port = {}
-qdrant_rest_port = {}
-auto_start_deps = false
-postgres_host = "localhost"
-postgres_port = {}
-postgres_database = "{}"
-postgres_user = "codesearch"
-postgres_password = "codesearch"
-
-[embeddings]
-provider = "mock"
-
-[watcher]
-debounce_ms = 500
-ignore_patterns = ["*.log", "target", ".git"]
-
-[languages]
-enabled = ["rust"]
-"#,
-        qdrant.port(),
-        qdrant.rest_port(),
-        postgres.port(),
-        db_name
-    );
-    fs::write(repo_path.join("codesearch.toml"), config)?;
-    Ok(())
-}
-
 /// Run the indexer and outbox processor directly (instead of spawning CLI subprocess)
 ///
 /// This approach ensures we're always testing the latest code in the workspace,
@@ -370,7 +321,7 @@ async fn run_indexer_directly(
     let storage_config_for_outbox = storage_config.clone();
     let outbox_config = OutboxConfig::default();
     let outbox_handle = tokio::spawn(async move {
-        if let Err(e) = codesearch_outbox_processor::start_outbox_processor_with_drain(
+        codesearch_outbox_processor::start_outbox_processor_with_drain(
             postgres_client_for_outbox,
             &qdrant_config,
             storage_config_for_outbox,
@@ -378,9 +329,6 @@ async fn run_indexer_directly(
             outbox_drain_rx,
         )
         .await
-        {
-            eprintln!("Outbox processor task failed: {e}");
-        }
     });
 
     info!("Outbox processor started (will drain after indexing completes)");
@@ -418,9 +366,10 @@ async fn run_indexer_directly(
 
     // Wait for outbox processor to finish draining
     match tokio::time::timeout(Duration::from_secs(60), outbox_handle).await {
-        Ok(Ok(())) => info!("Outbox processor drained and stopped successfully"),
-        Ok(Err(e)) => eprintln!("Outbox processor task panicked: {e}"),
-        Err(_) => eprintln!("Outbox processor drain timed out after 60 seconds"),
+        Ok(Ok(Ok(()))) => info!("Outbox processor drained and stopped successfully"),
+        Ok(Ok(Err(e))) => bail!("Outbox processor failed: {e}"),
+        Ok(Err(e)) => bail!("Outbox processor task panicked: {e}"),
+        Err(_) => bail!("Outbox processor drain timed out after 60 seconds"),
     }
 
     Ok(())
@@ -447,65 +396,4 @@ async fn get_repository_id(postgres: &Arc<TestPostgres>, db_name: &str) -> Resul
     pool.close().await;
 
     Ok(repo_id)
-}
-
-/// Debug function to query entity metadata and check for 'calls' attribute
-async fn debug_entity_metadata(
-    postgres: &Arc<TestPostgres>,
-    db_name: &str,
-    entity_name: &str,
-) -> Result<()> {
-    use sqlx::PgPool;
-
-    let connection_url = format!(
-        "postgresql://codesearch:codesearch@localhost:{}/{}",
-        postgres.port(),
-        db_name
-    );
-
-    let pool = PgPool::connect(&connection_url).await?;
-
-    // Query entity_metadata for entities matching the name
-    // entity_data is a JSONB column containing the full CodeEntity serialized
-    let rows: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
-        r#"
-        SELECT qualified_name, entity_type, entity_data
-        FROM entity_metadata
-        WHERE qualified_name LIKE $1
-        "#,
-    )
-    .bind(format!("%{entity_name}%"))
-    .fetch_all(&pool)
-    .await
-    .context("Failed to query entity_metadata")?;
-
-    eprintln!("\nDEBUG: Entity metadata for entities containing '{entity_name}':");
-    for (qname, etype, entity_data) in &rows {
-        eprintln!("  Entity: {} ({})", qname, etype);
-        // entity_data.metadata.attributes.calls
-        if let Some(metadata) = entity_data.get("metadata") {
-            // Print generic_bounds
-            if let Some(gb) = metadata.get("generic_bounds") {
-                eprintln!("    generic_bounds: {}", gb);
-            } else {
-                eprintln!("    generic_bounds: NOT PRESENT");
-            }
-            if let Some(attrs) = metadata.get("attributes") {
-                if let Some(calls) = attrs.get("calls") {
-                    eprintln!("    calls: {}", calls);
-                } else {
-                    eprintln!("    calls: NOT PRESENT in attributes");
-                    // Print what IS in attributes
-                    eprintln!("    attributes keys: {:?}", attrs.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-                }
-            } else {
-                eprintln!("    attributes: NOT PRESENT in metadata");
-            }
-        } else {
-            eprintln!("    metadata: NOT PRESENT in entity_data");
-        }
-    }
-
-    pool.close().await;
-    Ok(())
 }

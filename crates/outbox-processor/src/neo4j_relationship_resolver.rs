@@ -34,7 +34,7 @@ use codesearch_core::entities::{CodeEntity, EntityType, SourceReference};
 use codesearch_core::error::Result;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 // ============================================================================
@@ -661,7 +661,7 @@ impl RelationshipResolver for CallGraphResolver {
             callable_map.len()
         );
         for (qname, _) in callable_map.iter() {
-            debug!("  callable: {}", qname);
+            trace!("  callable: {}", qname);
         }
 
         for caller in all_callables {
@@ -681,7 +681,7 @@ impl RelationshipResolver for CallGraphResolver {
                     }
                 };
                 for call_ref in calls {
-                    debug!(
+                    trace!(
                         "  call target: {} (in callable_map: {}, in trait_impl_map: {})",
                         call_ref.target,
                         callable_map.contains_key(&call_ref.target),
@@ -700,7 +700,7 @@ impl RelationshipResolver for CallGraphResolver {
                         });
 
                     if let Some(callee_id) = callee_id {
-                        debug!("  -> resolved to callee_id: {}", callee_id);
+                        trace!("  -> resolved to callee_id: {}", callee_id);
                         // Forward edge: caller -> callee
                         relationships.push((
                             caller.entity_id.clone(),
@@ -714,7 +714,7 @@ impl RelationshipResolver for CallGraphResolver {
                             "CALLED_BY".to_string(),
                         ));
                     } else {
-                        debug!("  -> NOT FOUND in any lookup map");
+                        trace!("  -> NOT FOUND in any lookup map");
                     }
                 }
             }

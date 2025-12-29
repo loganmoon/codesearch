@@ -2429,15 +2429,16 @@ pub fn use_string_producer(p: &StringProducer) -> String {
             to: "test_crate::use_string_producer",
         },
         // Key test: calls should resolve to the specific impl's method
+        // Methods in trait impls are named with full <Type as Trait>::method syntax
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::use_int_producer",
-            to: "test_crate::IntProducer::produce",
+            to: "<test_crate::IntProducer as test_crate::Producer>::produce",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::use_string_producer",
-            to: "test_crate::StringProducer::produce",
+            to: "<test_crate::StringProducer as test_crate::Producer>::produce",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -2998,22 +2999,21 @@ pub fn count_words_string(s: String) -> usize {
             to: "test_crate::count_words_string",
         },
         // Key test: CALLS should distinguish between impls for String vs str
-        // Note: The exact qualified names for these methods depends on how impl blocks for
-        // external types are named. This tests that distinction.
+        // Methods are named with full <Type as Trait>::method syntax
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::check_string",
-            to: "test_crate::StringExt::is_blank",
+            to: "<test_crate::String as test_crate::StringExt>::is_blank",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::check_str",
-            to: "test_crate::StringExt::is_blank",
+            to: "<test_crate::str as test_crate::StringExt>::is_blank",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::count_words_string",
-            to: "test_crate::StringExt::word_count",
+            to: "<test_crate::String as test_crate::StringExt>::word_count",
         },
     ],
     project_type: ProjectType::SingleCrate,

@@ -516,6 +516,7 @@ pub fn extract_function_calls(
     source: &str,
     ctx: &RustResolutionContext,
     local_vars: &HashMap<String, String>, // var_name -> type_name for method resolution
+    generic_bounds: &im::HashMap<String, Vec<String>>, // type_param -> [trait_bounds] for generic resolution
 ) -> Vec<SourceReference> {
     let query_source = r#"
         (call_expression
@@ -610,13 +611,37 @@ pub fn extract_function_calls(
             ) {
                 // Try to resolve receiver type from local variables
                 if let Some(recv_type) = local_vars.get(&recv_name) {
-                    // Resolve the type name through imports
-                    let resolved_type = ctx.resolve(recv_type);
-                    calls.push(SourceReference {
-                        target: format!("{resolved_type}::{method_name}"),
-                        location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                        ref_type: ReferenceType::Call,
-                    });
+                    // DEBUG: Log the lookup
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "DEBUG extract_function_calls: recv_name={}, recv_type={}, generic_bounds keys={:?}, lookup={:?}",
+                        recv_name,
+                        recv_type,
+                        generic_bounds.keys().collect::<Vec<_>>(),
+                        generic_bounds.get(recv_type)
+                    );
+                    // Check if the receiver type is a generic type parameter with trait bounds
+                    if let Some(bounds) = generic_bounds.get(recv_type) {
+                        // For generic type parameters, add call targets for ALL trait bounds.
+                        // We can't know at extraction time which trait provides the method,
+                        // so we add all possibilities. The outbox processor's resolution
+                        // will only create CALLS relationships for methods that exist as entities.
+                        for bound in bounds {
+                            calls.push(SourceReference {
+                                target: format!("{bound}::{method_name}"),
+                                location: SourceLocation::from_tree_sitter_node(method_cap.node),
+                                ref_type: ReferenceType::Call,
+                            });
+                        }
+                    } else {
+                        // Not a generic type parameter, resolve through imports
+                        let resolved_type = ctx.resolve(recv_type);
+                        calls.push(SourceReference {
+                            target: format!("{resolved_type}::{method_name}"),
+                            location: SourceLocation::from_tree_sitter_node(method_cap.node),
+                            ref_type: ReferenceType::Call,
+                        });
+                    }
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
             }
@@ -723,7 +748,7 @@ pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<Str
     // First, extract function parameter types
     extract_parameter_types_into(function_node, source, &mut var_types);
 
-    // Then, extract let statement types
+    // Then, extract let statement types from explicit type annotations
     let query_source = r#"
         (let_declaration
           pattern: (identifier) @var_name
@@ -774,6 +799,67 @@ pub fn extract_local_var_types(function_node: Node, source: &str) -> HashMap<Str
             let base_type = extract_base_type_name(type_node, source);
             if let Some(base) = base_type {
                 var_types.insert(name, base);
+            }
+        }
+    }
+
+    // Also extract types from constructor-style initializers like `let w = Widget::new()`
+    // This handles cases where the type is inferred from a Type::method() call
+    let constructor_query_source = r#"
+        (let_declaration
+          pattern: (identifier) @var_name
+          value: (call_expression
+            function: (scoped_identifier) @constructor))
+    "#;
+
+    let constructor_query = match Query::new(&language, constructor_query_source) {
+        Ok(q) => q,
+        Err(e) => {
+            warn!(
+                "Failed to compile constructor type query: {e}. \
+                 This indicates a bug in the query definition."
+            );
+            return var_types;
+        }
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&constructor_query, function_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        let mut var_name: Option<String> = None;
+        let mut constructor_path: Option<String> = None;
+
+        for capture in query_match.captures {
+            let capture_name = constructor_query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
+
+            match capture_name {
+                "var_name" => {
+                    if let Ok(name) = node_to_text(capture.node, source) {
+                        var_name = Some(name);
+                    }
+                }
+                "constructor" => {
+                    if let Ok(path) = node_to_text(capture.node, source) {
+                        constructor_path = Some(path);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Extract type from constructor path (e.g., "Widget::new" -> "Widget")
+        if let (Some(name), Some(path)) = (var_name, constructor_path) {
+            // Only add if we don't already have a type for this variable
+            // (explicit annotations take precedence)
+            if let std::collections::hash_map::Entry::Vacant(e) = var_types.entry(name) {
+                // Extract the type part - everything before the last ::segment
+                if let Some(type_part) = path.rsplit_once("::").map(|(prefix, _)| prefix) {
+                    e.insert(type_part.to_string());
+                }
             }
         }
     }
@@ -994,6 +1080,105 @@ pub(crate) fn is_primitive_type(name: &str) -> bool {
     )
 }
 
+// ============================================================================
+// Type Alias Resolution
+// ============================================================================
+
+/// Extract type aliases from an AST and build a resolution map.
+///
+/// Returns a map from alias name to aliased type (the target of the alias).
+/// This allows following type alias chains to find the underlying concrete type.
+///
+/// Example:
+/// ```text
+/// type Settings = RawConfig;
+/// type AppConfig = Settings;
+/// ```
+/// Returns: {"Settings" -> "RawConfig", "AppConfig" -> "Settings"}
+pub fn extract_type_alias_map(root: Node, source: &str) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+
+    let query_source = r#"
+        (type_item
+          name: (type_identifier) @name
+          type: (_) @type)
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match tree_sitter::Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(_) => return aliases,
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, root, source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        let mut alias_name = None;
+        let mut aliased_type = None;
+
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
+
+            match capture_name {
+                "name" => {
+                    alias_name = capture.node.utf8_text(source.as_bytes()).ok();
+                }
+                "type" => {
+                    // Get the type text, stripping any generics
+                    if let Ok(type_text) = capture.node.utf8_text(source.as_bytes()) {
+                        // Strip generics: "Foo<T>" -> "Foo"
+                        let base_type = type_text.split('<').next().unwrap_or(type_text).trim();
+                        aliased_type = Some(base_type.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let (Some(name), Some(target)) = (alias_name, aliased_type) {
+            aliases.insert(name.to_string(), target);
+        }
+    }
+
+    aliases
+}
+
+/// Resolve a type name through the type alias map, following chains until
+/// we find a non-alias type or hit a cycle.
+///
+/// Example:
+/// ```text
+/// // aliases: {"AppConfig" -> "Settings", "Settings" -> "RawConfig"}
+/// resolve_type_alias_chain("AppConfig", &aliases) // -> Some("RawConfig")
+/// resolve_type_alias_chain("RawConfig", &aliases) // -> None (not an alias)
+/// ```
+pub fn resolve_type_alias_chain(
+    type_name: &str,
+    aliases: &HashMap<String, String>,
+    max_depth: usize,
+) -> Option<String> {
+    let mut current = type_name;
+    let mut resolved = None;
+    let mut depth = 0;
+
+    while let Some(target) = aliases.get(current) {
+        resolved = Some(target.clone());
+        current = target;
+        depth += 1;
+        if depth >= max_depth {
+            // Prevent infinite loops from cyclic aliases
+            break;
+        }
+    }
+
+    resolved
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1182,5 +1367,177 @@ mod tests {
 
         let where_clause = find_child_by_kind(func_node, "where_clause");
         assert!(where_clause.is_none());
+    }
+
+    // =========================================================================
+    // Tests for extract_function_calls with import resolution
+    // =========================================================================
+
+    #[test]
+    fn test_extract_function_calls_with_renamed_imports() {
+        use crate::common::import_map::parse_rust_imports;
+
+        // Source code with nested use statement and calls
+        let source = r#"
+use network::{
+    http::{get as http_get, post as http_post},
+    tcp::connect as tcp_connect,
+};
+
+pub fn make_requests() {
+    http_get();
+    http_post();
+    tcp_connect();
+}
+        "#;
+
+        let tree = parse_rust(source);
+        let root = tree.root_node();
+
+        // Build import map
+        let import_map = parse_rust_imports(root, source);
+        println!("Import map contents:");
+        for (k, v) in import_map.mappings() {
+            println!("  {} -> {}", k, v);
+        }
+
+        // Find the make_requests function
+        let func_node = find_function_node(&tree).unwrap();
+        println!("Function node kind: {}", func_node.kind());
+        println!(
+            "Function text: {}",
+            func_node.utf8_text(source.as_bytes()).unwrap()
+        );
+
+        // Build resolution context
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: None,
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        let local_vars = std::collections::HashMap::new();
+        let generic_bounds = im::HashMap::new();
+        let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
+
+        println!("Extracted calls:");
+        for call in &calls {
+            println!("  target: {}", call.target);
+        }
+
+        // Should have 3 calls with fully qualified names
+        assert_eq!(calls.len(), 3);
+
+        let targets: Vec<&str> = calls.iter().map(|c| c.target.as_str()).collect();
+        assert!(
+            targets.contains(&"test_crate::network::http::get"),
+            "Expected test_crate::network::http::get in {:?}",
+            targets
+        );
+        assert!(
+            targets.contains(&"test_crate::network::http::post"),
+            "Expected test_crate::network::http::post in {:?}",
+            targets
+        );
+        assert!(
+            targets.contains(&"test_crate::network::tcp::connect"),
+            "Expected test_crate::network::tcp::connect in {:?}",
+            targets
+        );
+    }
+
+    #[test]
+    fn test_extract_function_calls_with_generic_bounds() {
+        let source = r#"
+            fn process_item<T: Processor>(item: &T) {
+                item.process();
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        // Extract local vars - should map "item" -> "T"
+        let local_vars = extract_local_var_types(func_node, source);
+        eprintln!("local_vars: {:?}", local_vars);
+        assert_eq!(local_vars.get("item"), Some(&"T".to_string()));
+
+        // Build generic bounds - should map "T" -> ["test_crate::Processor"]
+        let mut generic_bounds = im::HashMap::new();
+        generic_bounds.insert("T".to_string(), vec!["test_crate::Processor".to_string()]);
+
+        // Create a resolution context
+        let import_map = crate::common::import_map::ImportMap::default();
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: Some("test_crate"),
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        // Extract function calls
+        let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
+        eprintln!(
+            "calls: {:?}",
+            calls.iter().map(|c| &c.target).collect::<Vec<_>>()
+        );
+
+        // Should resolve item.process() to test_crate::Processor::process
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].target, "test_crate::Processor::process");
+    }
+
+    #[test]
+    fn test_extract_generics_with_bounds_resolves_correctly() {
+        let source = r#"
+            fn process_item<T: Processor>(item: &T) {
+                item.process();
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        // Find the type_parameters node
+        let mut cursor = func_node.walk();
+        let type_params_node = func_node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "type_parameters");
+
+        assert!(
+            type_params_node.is_some(),
+            "Should find type_parameters node"
+        );
+        let type_params_node = type_params_node.unwrap();
+
+        // Create a resolution context
+        let import_map = crate::common::import_map::ImportMap::default();
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: Some("test_crate"),
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        // Extract generics with bounds - this should resolve "Processor" to "test_crate::Processor"
+        let parsed = extract_generics_with_bounds(type_params_node, source, &ctx);
+        eprintln!("parsed_generics params: {:?}", parsed.params);
+
+        // Build the generic bounds map
+        let generic_bounds = build_generic_bounds_map(&parsed);
+        eprintln!("generic_bounds: {:?}", generic_bounds);
+
+        // Should have T with bounds ["test_crate::Processor"]
+        assert!(
+            generic_bounds.contains_key("T"),
+            "Should have T in generic_bounds"
+        );
+        let bounds = generic_bounds.get("T").unwrap();
+        assert_eq!(bounds.len(), 1, "T should have one bound");
+        assert_eq!(
+            bounds[0], "test_crate::Processor",
+            "Bound should be resolved to test_crate::Processor"
+        );
     }
 }

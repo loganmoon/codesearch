@@ -33,8 +33,8 @@ This project uses git worktrees with a separate git directory for parallel devel
 ```
 /path/to/codesearch/              # Parent directory (NOT a worktree itself)
 ├── .git/                         # Shared git directory
-├── main/                         # Worktree for 'main' branch (read-only)
-└── feature--my-feature/          # Worktree for feature branch
+├── main/                         # READ-ONLY - never edit files here during feature work
+└── feature--my-feature/          # Your working directory - all edits happen here
 ```
 
 **Important:** The parent directory containing `.git/` is NOT a worktree. All worktrees (`main/`, `feature--xyz/`, etc.) are subdirectories. All worktree management commands must be run from this parent directory.
@@ -61,10 +61,18 @@ cd <branch-name>
 ```
 
 **Working with main:**
-The `main/` directory is the worktree for the main branch. Use it for:
-- Pulling latest changes: `cd main && git pull`
-- Reviewing the current stable state
+The `main/` directory is the worktree for the main branch and is READ-ONLY during feature work:
+- **NEVER edit files in `main/`** while working on a feature/bug branch
+- To reference main's code, read files using their absolute path (e.g., `/path/to/codesearch/main/crates/...`) without changing directories
+- Pulling latest changes: `cd main && git pull` (only when not in the middle of feature work)
 - Never commit directly to main (blocked by pre-commit hook)
+
+**During feature/bug work (IMPORTANT):**
+- **Stay in your feature worktree for ALL operations** - edits, builds, tests, and cargo commands
+- **Never switch directories to another worktree to make edits** - this causes code to end up in the wrong place
+- If you need to compare with main, READ from main's path but WRITE only in your feature worktree
+- Example: You're in `bug--123/`. To see main's version of a file, read `/path/to/codesearch/main/crates/foo/src/lib.rs`. To edit, use `bug--123/crates/foo/src/lib.rs`
+- All `cargo build`, `cargo test`, etc. commands should run from within your feature worktree
 
 **Listing worktrees:**
 ```bash

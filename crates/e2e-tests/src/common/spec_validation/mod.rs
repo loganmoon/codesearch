@@ -15,19 +15,21 @@ pub use schema::{
 
 use super::containers::{
     create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
-    get_shared_qdrant, wait_for_graph_ready, TestPostgres,
+    get_shared_qdrant, wait_for_graph_ready, TestNeo4j, TestPostgres, TestQdrant,
 };
-use super::run_cli_with_full_infra;
 use anyhow::{bail, Context, Result};
 use assertions::{assert_entities_match, assert_relationships_match};
+use codesearch_core::config::OutboxConfig;
+use codesearch_embeddings::{EmbeddingManager, MockEmbeddingProvider};
+use codesearch_indexer::create_indexer;
+use codesearch_storage::QdrantConfig;
 use neo4j_queries::{get_all_entities, get_all_relationships};
 use std::fs;
-use std::future::Future;
 use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+use tracing::info;
 
 /// RAII guard that ensures test database cleanup even on test failure
 struct TestDatabaseGuard {
@@ -100,25 +102,10 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     let repo_path = temp_dir.path();
     eprintln!("Created test repository at: {}", repo_path.display());
 
-    // Create codesearch.toml config file with mock embeddings
-    create_config_file(repo_path, &qdrant, &postgres, &db_name)?;
-
-    // Run the indexing CLI
-    let output =
-        run_cli_with_full_infra(repo_path, &["index"], &qdrant, &postgres, &neo4j, &db_name)?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        eprintln!("CLI stdout:\n{}", stdout);
-        eprintln!("CLI stderr:\n{}", stderr);
-        bail!("CLI index command failed: {:?}", output.status);
-    }
+    // Run indexer and outbox processor directly (instead of CLI subprocess)
+    run_indexer_directly(repo_path, &qdrant, &postgres, &neo4j, &db_name).await?;
 
     eprintln!("Indexing completed, waiting for graph_ready flag...");
-
-    // The CLI runs the outbox processor with drain mode, so relationships should be resolved
-    // when the CLI exits. We just need to wait for the graph_ready flag to be set.
     wait_for_graph_ready(&postgres, &db_name, Duration::from_secs(30)).await?;
 
     eprintln!("Graph sync completed, querying results...");
@@ -126,6 +113,15 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     // Get repository_id from the database
     let repository_id = get_repository_id(&postgres, &db_name).await?;
     eprintln!("Repository ID: {}", repository_id);
+
+    // DEBUG: Query entity metadata to check for 'calls' attribute
+    // Use fixture name to customize debug search
+    let debug_search = if fixture.name == "glob_reexports" || fixture.name == "multi_hop_reexports" {
+        "caller"
+    } else {
+        "process_item"
+    };
+    debug_entity_metadata(&postgres, &db_name, debug_search).await?;
 
     // Query actual entities and relationships
     let actual_entities = get_all_entities(&neo4j, &repository_id).await?;
@@ -291,6 +287,145 @@ enabled = ["rust"]
     Ok(())
 }
 
+/// Run the indexer and outbox processor directly (instead of spawning CLI subprocess)
+///
+/// This approach ensures we're always testing the latest code in the workspace,
+/// avoiding stale binary issues that can occur with subprocess execution.
+async fn run_indexer_directly(
+    repo_path: &Path,
+    qdrant: &Arc<TestQdrant>,
+    postgres: &Arc<TestPostgres>,
+    neo4j: &Arc<TestNeo4j>,
+    db_name: &str,
+) -> Result<()> {
+    use codesearch_core::StorageConfig;
+    use codesearch_storage::create_postgres_client;
+
+    // Create mock embedding manager
+    let embedding_manager = Arc::new(EmbeddingManager::new(
+        Arc::new(MockEmbeddingProvider::new(384)),
+        "test-model-v1".to_string(),
+    ));
+
+    // Create storage config for postgres client
+    let storage_config = StorageConfig {
+        qdrant_host: "localhost".to_string(),
+        qdrant_port: qdrant.port(),
+        qdrant_rest_port: qdrant.rest_port(),
+        auto_start_deps: false,
+        docker_compose_file: None,
+        postgres_host: "localhost".to_string(),
+        postgres_port: postgres.port(),
+        postgres_database: db_name.to_string(),
+        postgres_user: "codesearch".to_string(),
+        postgres_password: "codesearch".to_string(),
+        postgres_pool_size: 5,
+        max_entities_per_db_operation: 1000,
+        neo4j_host: "localhost".to_string(),
+        neo4j_bolt_port: neo4j.bolt_port(),
+        neo4j_http_port: neo4j.http_port(),
+        neo4j_user: "neo4j".to_string(),
+        neo4j_password: String::new(),
+    };
+
+    // Create postgres client
+    let postgres_client = create_postgres_client(&storage_config)
+        .await
+        .context("Failed to connect to Postgres")?;
+
+    // Generate collection name and register the repository
+    // ensure_repository generates a deterministic UUID from the path
+    let collection_name = format!(
+        "test_{}",
+        repo_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("repo")
+    );
+
+    // Insert repository record - this returns the deterministic UUID
+    let repository_id = postgres_client
+        .ensure_repository(repo_path, &collection_name, None)
+        .await
+        .context("Failed to register repository")?;
+
+    info!(
+        repository_id = %repository_id,
+        collection_name = %collection_name,
+        "Registered test repository"
+    );
+
+    // Create Qdrant config for outbox processor
+    let qdrant_config = QdrantConfig {
+        host: "localhost".to_string(),
+        port: qdrant.port(),
+        rest_port: qdrant.rest_port(),
+    };
+
+    // Create outbox processor drain channel
+    let (outbox_drain_tx, outbox_drain_rx) = tokio::sync::oneshot::channel();
+
+    // Spawn outbox processor as background task with drain mode
+    let postgres_client_for_outbox = postgres_client.clone();
+    let storage_config_for_outbox = storage_config.clone();
+    let outbox_config = OutboxConfig::default();
+    let outbox_handle = tokio::spawn(async move {
+        if let Err(e) = codesearch_outbox_processor::start_outbox_processor_with_drain(
+            postgres_client_for_outbox,
+            &qdrant_config,
+            storage_config_for_outbox,
+            &outbox_config,
+            outbox_drain_rx,
+        )
+        .await
+        {
+            eprintln!("Outbox processor task failed: {e}");
+        }
+    });
+
+    info!("Outbox processor started (will drain after indexing completes)");
+
+    // Create GitRepository
+    let git_repo = codesearch_watcher::GitRepository::open(repo_path).ok();
+
+    // Create and run indexer
+    let indexer_config = codesearch_indexer::IndexerConfig::default();
+    let mut indexer = create_indexer(
+        repo_path.to_path_buf(),
+        repository_id.to_string(),
+        embedding_manager,
+        None, // sparse_manager
+        postgres_client,
+        git_repo,
+        indexer_config,
+    )?;
+
+    // Run indexing
+    let result = indexer
+        .index_repository()
+        .await
+        .context("Failed to index repository")?;
+
+    info!(
+        "Indexing completed: {} files, {} entities",
+        result.stats().total_files(),
+        result.stats().entities_extracted()
+    );
+
+    // Signal the outbox processor to drain remaining entries
+    info!("Indexing complete. Signaling outbox processor to drain remaining entries...");
+    let _ = outbox_drain_tx.send(());
+
+    // Wait for outbox processor to finish draining
+    match tokio::time::timeout(Duration::from_secs(60), outbox_handle).await {
+        Ok(Ok(())) => info!("Outbox processor drained and stopped successfully"),
+        Ok(Err(e)) => eprintln!("Outbox processor task panicked: {e}"),
+        Err(_) => eprintln!("Outbox processor drain timed out after 60 seconds"),
+    }
+
+    Ok(())
+}
+
 /// Get the repository ID from the database
 async fn get_repository_id(postgres: &Arc<TestPostgres>, db_name: &str) -> Result<String> {
     use sqlx::PgPool;
@@ -312,4 +447,65 @@ async fn get_repository_id(postgres: &Arc<TestPostgres>, db_name: &str) -> Resul
     pool.close().await;
 
     Ok(repo_id)
+}
+
+/// Debug function to query entity metadata and check for 'calls' attribute
+async fn debug_entity_metadata(
+    postgres: &Arc<TestPostgres>,
+    db_name: &str,
+    entity_name: &str,
+) -> Result<()> {
+    use sqlx::PgPool;
+
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/{}",
+        postgres.port(),
+        db_name
+    );
+
+    let pool = PgPool::connect(&connection_url).await?;
+
+    // Query entity_metadata for entities matching the name
+    // entity_data is a JSONB column containing the full CodeEntity serialized
+    let rows: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
+        r#"
+        SELECT qualified_name, entity_type, entity_data
+        FROM entity_metadata
+        WHERE qualified_name LIKE $1
+        "#,
+    )
+    .bind(format!("%{entity_name}%"))
+    .fetch_all(&pool)
+    .await
+    .context("Failed to query entity_metadata")?;
+
+    eprintln!("\nDEBUG: Entity metadata for entities containing '{entity_name}':");
+    for (qname, etype, entity_data) in &rows {
+        eprintln!("  Entity: {} ({})", qname, etype);
+        // entity_data.metadata.attributes.calls
+        if let Some(metadata) = entity_data.get("metadata") {
+            // Print generic_bounds
+            if let Some(gb) = metadata.get("generic_bounds") {
+                eprintln!("    generic_bounds: {}", gb);
+            } else {
+                eprintln!("    generic_bounds: NOT PRESENT");
+            }
+            if let Some(attrs) = metadata.get("attributes") {
+                if let Some(calls) = attrs.get("calls") {
+                    eprintln!("    calls: {}", calls);
+                } else {
+                    eprintln!("    calls: NOT PRESENT in attributes");
+                    // Print what IS in attributes
+                    eprintln!("    attributes keys: {:?}", attrs.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+                }
+            } else {
+                eprintln!("    attributes: NOT PRESENT in metadata");
+            }
+        } else {
+            eprintln!("    metadata: NOT PRESENT in entity_data");
+        }
+    }
+
+    pool.close().await;
+    Ok(())
 }

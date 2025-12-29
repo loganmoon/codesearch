@@ -1087,7 +1087,7 @@ pub(crate) fn is_primitive_type(name: &str) -> bool {
 /// ```
 /// Returns: {"Settings" -> "RawConfig", "AppConfig" -> "Settings"}
 pub fn extract_type_alias_map(root: Node, source: &str) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+    use streaming_iterator::StreamingIterator;
 
     let query_source = r#"
         (type_item
@@ -1098,40 +1098,35 @@ pub fn extract_type_alias_map(root: Node, source: &str) -> HashMap<String, Strin
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match tree_sitter::Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return aliases,
+        Err(_) => return HashMap::new(),
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
     let mut matches = cursor.matches(&query, root, source.as_bytes());
+    let mut aliases = HashMap::new();
 
     while let Some(query_match) = matches.next() {
-        let mut alias_name = None;
-        let mut aliased_type = None;
+        // Extract name and type captures from this match using functional style
+        let alias_name = query_match.captures.iter().find_map(|capture| {
+            let capture_name = query.capture_names().get(capture.index as usize).copied()?;
+            (capture_name == "name")
+                .then(|| capture.node.utf8_text(source.as_bytes()).ok())
+                .flatten()
+        });
 
-        for capture in query_match.captures {
-            let capture_name = query
-                .capture_names()
-                .get(capture.index as usize)
-                .copied()
-                .unwrap_or("");
-
-            match capture_name {
-                "name" => {
-                    alias_name = capture.node.utf8_text(source.as_bytes()).ok();
-                }
-                "type" => {
-                    // Get the type text, stripping any generics
-                    if let Ok(type_text) = capture.node.utf8_text(source.as_bytes()) {
-                        // Strip generics: "Foo<T>" -> "Foo"
-                        let base_type = type_text.split('<').next().unwrap_or(type_text).trim();
-                        aliased_type = Some(base_type.to_string());
-                    }
-                }
-                _ => {}
+        let aliased_type = query_match.captures.iter().find_map(|capture| {
+            let capture_name = query.capture_names().get(capture.index as usize).copied()?;
+            if capture_name == "type" {
+                let type_text = capture.node.utf8_text(source.as_bytes()).ok()?;
+                // Strip generics: "Foo<T>" -> "Foo"
+                let base_type = type_text.split('<').next().unwrap_or(type_text).trim();
+                Some(base_type.to_string())
+            } else {
+                None
             }
-        }
+        });
 
-        if let (Some(name), Some(target)) = (alias_name, aliased_type) {
+        if let Some((name, target)) = alias_name.zip(aliased_type) {
             aliases.insert(name.to_string(), target);
         }
     }
@@ -1153,21 +1148,11 @@ pub fn resolve_type_alias_chain(
     aliases: &HashMap<String, String>,
     max_depth: usize,
 ) -> Option<String> {
-    let mut current = type_name;
-    let mut resolved = None;
-    let mut depth = 0;
-
-    while let Some(target) = aliases.get(current) {
-        resolved = Some(target.clone());
-        current = target;
-        depth += 1;
-        if depth >= max_depth {
-            // Prevent infinite loops from cyclic aliases
-            break;
-        }
-    }
-
-    resolved
+    // Use successors to generate the chain of alias resolutions
+    std::iter::successors(aliases.get(type_name), |current| aliases.get(*current))
+        .take(max_depth)
+        .last()
+        .cloned()
 }
 
 #[cfg(test)]

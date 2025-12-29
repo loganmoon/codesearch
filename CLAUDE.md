@@ -69,6 +69,7 @@ The `main/` directory is the worktree for the main branch and is READ-ONLY durin
 
 **During feature/bug work (IMPORTANT):**
 - **Stay in your feature worktree for ALL operations** - edits, builds, tests, and cargo commands
+- **NEVER switch between worktrees without explicit user instruction** - Claude Code must remain in the current worktree unless the user explicitly requests a worktree change
 - **Never switch directories to another worktree to make edits** - this causes code to end up in the wrong place
 - If you need to compare with main, READ from main's path but WRITE only in your feature worktree
 - Example: You're in `bug--123/`. To see main's version of a file, read `/path/to/codesearch/main/crates/foo/src/lib.rs`. To edit, use `bug--123/crates/foo/src/lib.rs`

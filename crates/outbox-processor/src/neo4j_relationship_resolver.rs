@@ -32,6 +32,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use codesearch_core::entities::{CodeEntity, EntityType, SourceReference};
 use codesearch_core::error::Result;
+use codesearch_languages::rust::import_resolution::parse_trait_impl_short_form;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::collections::HashMap;
 use tracing::{debug, info, trace, warn};
@@ -722,38 +723,6 @@ impl RelationshipResolver for CallGraphResolver {
 
         Ok(relationships)
     }
-}
-
-/// Parse a trait impl method qualified name to extract the short form.
-///
-/// For example:
-/// - `<test_crate::IntProducer as test_crate::Producer>::produce` -> `test_crate::IntProducer::produce`
-/// - `<pkg::Type as pkg::Trait>::method` -> `pkg::Type::method`
-///
-/// Returns `None` if the qualified name is not a trait impl method.
-fn parse_trait_impl_short_form(qualified_name: &str) -> Option<String> {
-    // Check if it starts with '<' (trait impl syntax)
-    if !qualified_name.starts_with('<') {
-        return None;
-    }
-
-    // Find the pattern: <TypeFQN as TraitFQN>::method
-    // We need to extract TypeFQN and method
-
-    // Find the " as " separator
-    let as_pos = qualified_name.find(" as ")?;
-
-    // Extract the type FQN (between '<' and ' as ')
-    let type_fqn = &qualified_name[1..as_pos];
-
-    // Find ">::" which separates the trait from the method name
-    let method_sep = qualified_name.find(">::")?;
-
-    // Extract the method name (after >::)
-    let method_name = &qualified_name[method_sep + 3..];
-
-    // Build the short form: TypeFQN::method
-    Some(format!("{type_fqn}::{method_name}"))
 }
 
 /// Resolver for imports (IMPORTS relationships)

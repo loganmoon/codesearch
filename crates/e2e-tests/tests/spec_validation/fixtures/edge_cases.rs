@@ -5,7 +5,7 @@ use super::{
 };
 
 /// Tests that `<Type as Trait>::method()` syntax creates proper impl block structure
-/// Note: CALLS relationships for UFCS are not yet resolved - this test validates entity extraction
+/// and that UFCS calls are resolved to the correct trait impl method.
 pub static UFCS_EXPLICIT: Fixture = Fixture {
     name: "ufcs_explicit",
     files: &[(
@@ -82,6 +82,12 @@ pub fn use_ufcs(data: &Data) -> i32 {
             kind: RelationshipKind::Implements,
             from: "test_crate::<test_crate::Data as test_crate::Processor>",
             to: "test_crate::Processor",
+        },
+        // UFCS call: <Data as Processor>::process(data) resolves to the trait impl method
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::use_ufcs",
+            to: "<test_crate::Data as test_crate::Processor>::process",
         },
     ],
     project_type: ProjectType::SingleCrate,

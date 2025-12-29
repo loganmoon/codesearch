@@ -97,6 +97,9 @@ pub fn handle_function_impl(
                 } else {
                     Some(rest.to_string())
                 }
+            } else if parent == pkg {
+                // Parent is exactly the package name (function at crate root)
+                None
             } else {
                 // Parent doesn't have package prefix, use as-is
                 Some(parent.to_string())

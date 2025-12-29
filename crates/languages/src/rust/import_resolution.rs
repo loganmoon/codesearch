@@ -91,6 +91,66 @@ pub fn normalize_rust_path(
     }
 }
 
+/// Resolve a UFCS (Universal Function Call Syntax) call pattern.
+///
+/// Parses patterns like `<Type as Trait>::method` and resolves both the type
+/// and trait through the import map to produce the canonical qualified name
+/// matching trait impl method entities.
+///
+/// # Arguments
+/// * `name` - The UFCS call pattern (e.g., `<Data as Processor>::process`)
+/// * `import_map` - Import map for resolving type and trait names
+/// * `package_name` - Current crate name for path normalization
+/// * `current_module` - Current module path for path normalization
+///
+/// # Returns
+/// The resolved canonical form (e.g., `<test_crate::Data as test_crate::Processor>::process`)
+/// or the original pattern if parsing fails.
+fn resolve_ufcs_call(
+    name: &str,
+    import_map: &ImportMap,
+    package_name: Option<&str>,
+    current_module: Option<&str>,
+) -> String {
+    // Parse: <Type as Trait>::method
+    // Find " as " separator
+    let as_pos = match name.find(" as ") {
+        Some(pos) => pos,
+        None => return name.to_string(), // Can't parse, return as-is
+    };
+
+    // Find ">::" which separates the trait from the method name
+    let method_sep = match name.find(">::") {
+        Some(pos) => pos,
+        None => return name.to_string(), // Can't parse, return as-is
+    };
+
+    // Extract components
+    let type_name = &name[1..as_pos]; // Skip leading '<'
+    let trait_name = &name[as_pos + 4..method_sep]; // Skip " as "
+    let method_name = &name[method_sep + 3..]; // Skip ">::"
+
+    // Resolve both type and trait through imports
+    // Use None for parent_scope since we're resolving type/trait names, not methods
+    let resolved_type = resolve_rust_reference(
+        type_name.trim(),
+        import_map,
+        None,
+        package_name,
+        current_module,
+    );
+    let resolved_trait = resolve_rust_reference(
+        trait_name.trim(),
+        import_map,
+        None,
+        package_name,
+        current_module,
+    );
+
+    // Return canonical form matching trait impl method qualified names
+    format!("<{resolved_type} as {resolved_trait}>::{method_name}")
+}
+
 /// Resolve a Rust reference with path normalization
 ///
 /// This extends resolve_reference() to handle crate::, self::, super:: prefixes.
@@ -109,6 +169,11 @@ pub fn resolve_rust_reference(
     package_name: Option<&str>,
     current_module: Option<&str>,
 ) -> String {
+    // Handle UFCS (Universal Function Call Syntax) patterns: <Type as Trait>::method
+    if name.starts_with('<') {
+        return resolve_ufcs_call(name, import_map, package_name, current_module);
+    }
+
     // First normalize any Rust-relative paths
     if name.starts_with("crate::") || name.starts_with("self::") || name.starts_with("super::") {
         return normalize_rust_path(name, package_name, current_module);
@@ -618,6 +683,89 @@ mod tests {
                 Some("a::b")
             ),
             "mypackage::thing"
+        );
+    }
+
+    // ========================================================================
+    // Tests for resolve_ufcs_call
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_ufcs_call_basic() {
+        // UFCS call with bare type and trait names in same module
+        let import_map = ImportMap::new("::");
+        let result = resolve_ufcs_call(
+            "<Data as Processor>::process",
+            &import_map,
+            Some("test_crate"),
+            None,
+        );
+        assert_eq!(
+            result,
+            "<test_crate::Data as test_crate::Processor>::process"
+        );
+    }
+
+    #[test]
+    fn test_resolve_ufcs_call_with_imports() {
+        // UFCS call where type and trait are imported
+        let mut import_map = ImportMap::new("::");
+        import_map.add("Widget", "types::Widget");
+        import_map.add("Drawable", "traits::Drawable");
+
+        let result = resolve_ufcs_call(
+            "<Widget as Drawable>::draw",
+            &import_map,
+            Some("my_crate"),
+            None,
+        );
+        assert_eq!(
+            result,
+            "<my_crate::types::Widget as my_crate::traits::Drawable>::draw"
+        );
+    }
+
+    #[test]
+    fn test_resolve_ufcs_call_already_qualified() {
+        // UFCS call with already-qualified paths
+        let import_map = ImportMap::new("::");
+        let result = resolve_ufcs_call(
+            "<std::vec::Vec as std::iter::Iterator>::next",
+            &import_map,
+            Some("test_crate"),
+            None,
+        );
+        // std:: paths should remain as-is
+        assert_eq!(result, "<std::vec::Vec as std::iter::Iterator>::next");
+    }
+
+    #[test]
+    fn test_resolve_ufcs_call_invalid_pattern() {
+        // Invalid UFCS patterns should be returned as-is
+        let import_map = ImportMap::new("::");
+
+        // Missing " as "
+        let result = resolve_ufcs_call("<Data>::process", &import_map, Some("test"), None);
+        assert_eq!(result, "<Data>::process");
+
+        // Missing ">::"
+        let result = resolve_ufcs_call("<Data as Trait>", &import_map, Some("test"), None);
+        assert_eq!(result, "<Data as Trait>");
+    }
+
+    #[test]
+    fn test_resolve_ufcs_call_with_whitespace() {
+        // UFCS with extra whitespace should still parse correctly
+        let import_map = ImportMap::new("::");
+        let result = resolve_ufcs_call(
+            "< Data as Processor >::process",
+            &import_map,
+            Some("test_crate"),
+            None,
+        );
+        assert_eq!(
+            result,
+            "<test_crate::Data as test_crate::Processor>::process"
         );
     }
 

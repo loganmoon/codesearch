@@ -32,9 +32,10 @@ use anyhow::Context;
 use async_trait::async_trait;
 use codesearch_core::entities::{CodeEntity, EntityType, SourceReference};
 use codesearch_core::error::Result;
+use codesearch_languages::rust::import_resolution::parse_trait_impl_short_form;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 // ============================================================================
@@ -630,10 +631,46 @@ impl RelationshipResolver for CallGraphResolver {
             .map(|c| (c.qualified_name.clone(), c.entity_id.clone()))
             .collect();
 
+        // Build secondary lookup for trait impl methods
+        // Maps "TypeFQN::method" -> entity_id for methods like "<TypeFQN as TraitFQN>::method"
+        // This allows resolution of calls like `value.method()` where the method is from a trait impl
+        let trait_impl_map: HashMap<String, String> = all_callables
+            .iter()
+            .filter_map(|c| {
+                // Parse trait impl method names like "<test_crate::IntProducer as test_crate::Producer>::produce"
+                parse_trait_impl_short_form(&c.qualified_name)
+                    .map(|short_form| (short_form, c.entity_id.clone()))
+            })
+            .collect();
+
+        // Build simple name map for re-export fallback resolution
+        // For each simple name, store the entity_id if there's only one match (to avoid collisions)
+        let mut simple_name_counts: HashMap<String, usize> = HashMap::new();
+        let mut simple_name_map: HashMap<String, String> = HashMap::new();
+        for c in &all_callables {
+            *simple_name_counts.entry(c.name.clone()).or_insert(0) += 1;
+            simple_name_map.insert(c.name.clone(), c.entity_id.clone());
+        }
+        // Remove entries with multiple matches (ambiguous)
+        simple_name_map.retain(|name, _| simple_name_counts.get(name) == Some(&1));
+
         let mut relationships = Vec::new();
+
+        // DEBUG: Log callable_map contents
+        debug!(
+            "CallGraphResolver: callable_map has {} entries",
+            callable_map.len()
+        );
+        for (qname, _) in callable_map.iter() {
+            trace!("  callable: {}", qname);
+        }
 
         for caller in all_callables {
             if let Some(calls_json) = caller.metadata.attributes.get("calls") {
+                debug!(
+                    "CallGraphResolver: {} has calls attribute: {}",
+                    caller.qualified_name, calls_json
+                );
                 let calls = match serde_json::from_str::<Vec<SourceReference>>(calls_json) {
                     Ok(c) => c,
                     Err(e) => {
@@ -645,7 +682,26 @@ impl RelationshipResolver for CallGraphResolver {
                     }
                 };
                 for call_ref in calls {
-                    if let Some(callee_id) = callable_map.get(&call_ref.target) {
+                    trace!(
+                        "  call target: {} (in callable_map: {}, in trait_impl_map: {})",
+                        call_ref.target,
+                        callable_map.contains_key(&call_ref.target),
+                        trait_impl_map.contains_key(&call_ref.target)
+                    );
+                    // Try direct match first
+                    let callee_id = callable_map
+                        .get(&call_ref.target)
+                        // Fall back to trait impl short form lookup
+                        .or_else(|| trait_impl_map.get(&call_ref.target))
+                        // Fall back to simple name lookup for re-exports
+                        // Extract the last segment of the path as the simple name
+                        .or_else(|| {
+                            let simple_name = call_ref.target.rsplit("::").next()?;
+                            simple_name_map.get(simple_name)
+                        });
+
+                    if let Some(callee_id) = callee_id {
+                        trace!("  -> resolved to callee_id: {}", callee_id);
                         // Forward edge: caller -> callee
                         relationships.push((
                             caller.entity_id.clone(),
@@ -658,6 +714,8 @@ impl RelationshipResolver for CallGraphResolver {
                             caller.entity_id.clone(),
                             "CALLED_BY".to_string(),
                         ));
+                    } else {
+                        trace!("  -> NOT FOUND in any lookup map");
                     }
                 }
             }

@@ -23,6 +23,11 @@ use std::collections::HashMap;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
 
+// Re-export Rust-specific functions from the rust module for backward compatibility
+pub use crate::rust::import_resolution::{
+    normalize_rust_path, parse_rust_imports, parse_trait_impl_short_form, resolve_rust_reference,
+};
+
 /// Language-agnostic import map for resolving bare identifiers to qualified names
 #[derive(Debug, Default)]
 pub struct ImportMap {
@@ -30,6 +35,10 @@ pub struct ImportMap {
     mappings: HashMap<String, String>,
     /// Language-specific path separator ("::" for Rust, "." for JS/TS/Python)
     separator: &'static str,
+    /// Glob import paths (e.g., "helpers" from `use helpers::*`)
+    /// When resolving a bare identifier, if not found in mappings,
+    /// these paths will be tried as prefixes.
+    glob_imports: Vec<String>,
 }
 
 impl ImportMap {
@@ -38,7 +47,18 @@ impl ImportMap {
         Self {
             mappings: HashMap::new(),
             separator,
+            glob_imports: Vec::new(),
         }
+    }
+
+    /// Add a glob import path (e.g., "helpers" from `use helpers::*`)
+    pub fn add_glob(&mut self, path: &str) {
+        self.glob_imports.push(path.to_string());
+    }
+
+    /// Get all glob import paths
+    pub fn glob_imports(&self) -> &[String] {
+        &self.glob_imports
     }
 
     /// Add an import mapping
@@ -72,6 +92,12 @@ impl ImportMap {
     /// Get the number of imports
     pub fn len(&self) -> usize {
         self.mappings.len()
+    }
+
+    /// Get an iterator over all mappings (for testing/debugging)
+    #[cfg(test)]
+    pub fn mappings(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.mappings.iter()
     }
 
     /// Get all imported qualified paths (the values of the import map)
@@ -139,183 +165,6 @@ pub fn resolve_reference(
 
     // Mark as external
     format!("external{separator}{name}")
-}
-
-/// Normalize Rust-relative paths (crate::, self::, super::) to absolute qualified names
-///
-/// # Arguments
-/// * `path` - The path to normalize (e.g., "crate::foo::Bar", "self::utils::Helper",
-///   "super::super::other")
-/// * `package_name` - The current crate name (e.g., "codesearch_core"). If None or empty,
-///   the package prefix is omitted from the result.
-/// * `current_module` - The current module path (e.g., "entities::error"). Required for
-///   accurate self:: and super:: resolution; if None, those prefixes resolve at package root.
-///
-/// # Returns
-/// The normalized absolute path, or the original path if not a relative path.
-///
-/// # Notes
-/// - Supports chained super:: prefixes (e.g., `super::super::foo` navigates up two levels)
-/// - When context is missing, gracefully degrades to partial resolution
-pub fn normalize_rust_path(
-    path: &str,
-    package_name: Option<&str>,
-    current_module: Option<&str>,
-) -> String {
-    if let Some(rest) = path.strip_prefix("crate::") {
-        // crate:: -> package_name::rest
-        match package_name {
-            Some(pkg) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-            _ => rest.to_string(),
-        }
-    } else if let Some(rest) = path.strip_prefix("self::") {
-        // self:: -> package_name::current_module::rest
-        match (package_name, current_module) {
-            (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-                format!("{pkg}::{module}::{rest}")
-            }
-            (Some(pkg), _) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-            (_, Some(module)) if !module.is_empty() => format!("{module}::{rest}"),
-            _ => rest.to_string(),
-        }
-    } else if path.starts_with("super::") {
-        // super:: -> navigate up from current_module (supports chained super::super::)
-        let mut remaining = path;
-        let mut levels_up = 0;
-
-        // Count how many super:: prefixes we have
-        while let Some(rest) = remaining.strip_prefix("super::") {
-            levels_up += 1;
-            remaining = rest;
-        }
-
-        if let Some(module) = current_module {
-            let parts: Vec<&str> = module.split("::").collect();
-            if parts.len() > levels_up {
-                // Navigate up by levels_up
-                let parent = parts[..parts.len() - levels_up].join("::");
-                match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{parent}::{remaining}"),
-                    _ => format!("{parent}::{remaining}"),
-                }
-            } else {
-                // At or beyond root level, super:: goes to package root
-                match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
-                    _ => remaining.to_string(),
-                }
-            }
-        } else {
-            // No module context, return with package prefix if available
-            match package_name {
-                Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
-                _ => remaining.to_string(),
-            }
-        }
-    } else {
-        // Not a relative path, return as-is
-        path.to_string()
-    }
-}
-
-/// Resolve a Rust reference with path normalization
-///
-/// This extends resolve_reference() to handle crate::, self::, super:: prefixes.
-///
-/// Resolution order:
-/// 1. If path starts with crate::/self::/super::, normalize it and return
-/// 2. If already scoped (contains ::), use as-is
-/// 3. Try import map lookup
-/// 4. Try parent_scope::name
-/// 5. Try package_name::current_module::name (for locally-defined types)
-/// 6. Mark as external::name (only if no package context available)
-pub fn resolve_rust_reference(
-    name: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
-    package_name: Option<&str>,
-    current_module: Option<&str>,
-) -> String {
-    // First normalize any Rust-relative paths
-    if name.starts_with("crate::") || name.starts_with("self::") || name.starts_with("super::") {
-        return normalize_rust_path(name, package_name, current_module);
-    }
-
-    // Already scoped paths need special handling
-    if ImportMap::is_scoped(name, "::") {
-        // Check if it looks like an external path
-        // If it starts with known external prefixes, return as-is
-        if name.starts_with("std::")
-            || name.starts_with("core::")
-            || name.starts_with("alloc::")
-            || name.starts_with("external::")
-        {
-            return name.to_string();
-        }
-        // Try to resolve through import map first
-        if let Some(resolved) = import_map.resolve(name) {
-            return resolved.to_string();
-        }
-        // For relative scoped paths like `utils::helper`, prepend package name
-        // to make them absolute (e.g., `test_crate::utils::helper`).
-        // BUT: if the first segment is a known external crate, return as-is.
-        if let Some(pkg) = package_name {
-            if !pkg.is_empty() {
-                // Extract the first path segment
-                let first_segment = name.split("::").next().unwrap_or(name);
-                // If the first segment matches the package name, it's already
-                // absolute within this crate - return as-is
-                if first_segment == pkg {
-                    return name.to_string();
-                }
-                // Check if any import in the map starts with this segment.
-                // If so, it's a known external crate (e.g., `serde::Deserialize`
-                // when we have `use serde::Serialize;`).
-                if import_map.has_crate_import(first_segment, "::") {
-                    return name.to_string();
-                }
-                // Otherwise, assume it's a relative internal path and prepend
-                // the package name (e.g., `utils::helper` -> `my_crate::utils::helper`)
-                return format!("{pkg}::{name}");
-            }
-        }
-        return name.to_string();
-    }
-
-    // Try import map
-    if let Some(resolved) = import_map.resolve(name) {
-        // Normalize result if it contains Rust-relative prefixes
-        if resolved.starts_with("crate::")
-            || resolved.starts_with("self::")
-            || resolved.starts_with("super::")
-        {
-            return normalize_rust_path(resolved, package_name, current_module);
-        }
-        return resolved.to_string();
-    }
-
-    // Try parent scope
-    if let Some(scope) = parent_scope {
-        if !scope.is_empty() {
-            return format!("{scope}::{name}");
-        }
-    }
-
-    // Try package_name::current_module::name for locally-defined types
-    // This handles types defined in the same module that aren't imported
-    match (package_name, current_module) {
-        (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-            format!("{pkg}::{module}::{name}")
-        }
-        (Some(pkg), _) if !pkg.is_empty() => {
-            // At crate root (no module path)
-            format!("{pkg}::{name}")
-        }
-        _ => {
-            // No package context available, mark as external
-            format!("external::{name}")
-        }
-    }
 }
 
 /// Resolve a relative import path to an absolute module path
@@ -415,159 +264,6 @@ pub fn parse_file_imports(
         Language::CSharp => ImportMap::new("."), // C# not implemented
         Language::Cpp => ImportMap::new("::"), // C++ not implemented
         Language::Unknown => ImportMap::new("."),
-    }
-}
-
-/// Parse Rust use declarations
-///
-/// Handles:
-/// - `use std::io::Read;` → ("Read", "std::io::Read")
-/// - `use std::io::{Read, Write};` → [("Read", "std::io::Read"), ("Write", "std::io::Write")]
-/// - `use std::io::Read as MyRead;` → ("MyRead", "std::io::Read")
-/// - `use std::io::*;` → skipped (glob imports out of scope)
-pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
-    let mut import_map = ImportMap::new("::");
-
-    let query_source = r#"
-        (use_declaration
-          argument: (use_as_clause
-            path: (_) @path
-            alias: (identifier) @alias))
-
-        (use_declaration
-          argument: (scoped_identifier) @scoped_path)
-
-        (use_declaration
-          argument: (scoped_use_list
-            path: (_) @base_path
-            list: (use_list) @use_list))
-
-        (use_declaration
-          argument: (identifier) @simple_import)
-    "#;
-
-    let language = tree_sitter_rust::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return import_map,
-    };
-
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, root, source.as_bytes());
-
-    while let Some(query_match) = matches.next() {
-        for capture in query_match.captures {
-            let capture_name = query
-                .capture_names()
-                .get(capture.index as usize)
-                .copied()
-                .unwrap_or("");
-
-            match capture_name {
-                "alias" => {
-                    // use X as Y - the alias name
-                    if let (Some(path_cap), Ok(alias_text)) = (
-                        query_match
-                            .captures
-                            .iter()
-                            .find(|c| {
-                                query.capture_names().get(c.index as usize).copied() == Some("path")
-                            })
-                            .map(|c| c.node),
-                        capture.node.utf8_text(source.as_bytes()),
-                    ) {
-                        if let Ok(path_text) = path_cap.utf8_text(source.as_bytes()) {
-                            import_map.add(alias_text, path_text);
-                        }
-                    }
-                }
-                "scoped_path" => {
-                    // use std::io::Read - extract the last segment as simple name
-                    if let Ok(full_path) = capture.node.utf8_text(source.as_bytes()) {
-                        if let Some(simple_name) = full_path.rsplit("::").next() {
-                            // Skip glob imports
-                            if simple_name != "*" {
-                                import_map.add(simple_name, full_path);
-                            }
-                        }
-                    }
-                }
-                "use_list" => {
-                    // use std::io::{Read, Write} - process the list
-                    if let Some(base_path_cap) = query_match.captures.iter().find(|c| {
-                        query.capture_names().get(c.index as usize).copied() == Some("base_path")
-                    }) {
-                        if let Ok(base_path) = base_path_cap.node.utf8_text(source.as_bytes()) {
-                            parse_rust_use_list(capture.node, source, base_path, &mut import_map);
-                        }
-                    }
-                }
-                "simple_import" => {
-                    // use identifier - rare but valid
-                    if let Ok(name) = capture.node.utf8_text(source.as_bytes()) {
-                        import_map.add(name, name);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    import_map
-}
-
-/// Parse items in a Rust use list (e.g., `{Read, Write, BufReader as BR}`)
-fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_map: &mut ImportMap) {
-    let mut cursor = list_node.walk();
-
-    for child in list_node.children(&mut cursor) {
-        match child.kind() {
-            "identifier" => {
-                if let Ok(name) = child.utf8_text(source.as_bytes()) {
-                    let full_path = format!("{base_path}::{name}");
-                    import_map.add(name, &full_path);
-                }
-            }
-            "use_as_clause" => {
-                // Handle `Read as R` within a use list
-                let mut path = None;
-                let mut alias = None;
-                let mut inner_cursor = child.walk();
-
-                for inner_child in child.children(&mut inner_cursor) {
-                    match inner_child.kind() {
-                        "identifier" if path.is_none() => {
-                            path = inner_child.utf8_text(source.as_bytes()).ok();
-                        }
-                        "identifier" if path.is_some() => {
-                            alias = inner_child.utf8_text(source.as_bytes()).ok();
-                        }
-                        _ => {}
-                    }
-                }
-
-                if let (Some(p), Some(a)) = (path, alias) {
-                    let full_path = format!("{base_path}::{p}");
-                    import_map.add(a, &full_path);
-                }
-            }
-            "scoped_identifier" => {
-                // Handle nested paths like `io::Read` within a use list
-                if let Ok(scoped_path) = child.utf8_text(source.as_bytes()) {
-                    let full_path = format!("{base_path}::{scoped_path}");
-                    if let Some(simple_name) = scoped_path.rsplit("::").next() {
-                        import_map.add(simple_name, &full_path);
-                    }
-                }
-            }
-            "self" => {
-                // Handle `use foo::{self}` - imports the base path itself
-                if let Some(simple_name) = base_path.rsplit("::").next() {
-                    import_map.add(simple_name, base_path);
-                }
-            }
-            _ => {}
-        }
     }
 }
 
@@ -1184,6 +880,68 @@ fn example() {
     }
 
     #[test]
+    fn test_rust_nested_use_with_renaming() {
+        // Test: use network::{http::{get as http_get}, tcp::connect as tcp_connect};
+        let source = r#"
+use network::{
+    http::{get as http_get, post as http_post},
+    tcp::connect as tcp_connect,
+};
+"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        // Debug: print AST structure (only when DEBUG_AST env var is set)
+        if std::env::var("DEBUG_AST").is_ok() {
+            fn print_node(node: tree_sitter::Node, source: &str, indent: usize) {
+                let text: String = node
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or("?")
+                    .chars()
+                    .take(40)
+                    .collect();
+                let has_path = node.child_by_field_name("path").is_some();
+                let has_alias = node.child_by_field_name("alias").is_some();
+                println!(
+                    "{:indent$}{} (path={}, alias={}): {}",
+                    "",
+                    node.kind(),
+                    has_path,
+                    has_alias,
+                    text,
+                    indent = indent
+                );
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    print_node(child, source, indent + 2);
+                }
+            }
+            println!("\n=== AST Structure ===");
+            print_node(tree.root_node(), source, 0);
+            println!("===================\n");
+        }
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        assert_eq!(
+            import_map.resolve("http_get"),
+            Some("network::http::get"),
+            "http_get should resolve to network::http::get"
+        );
+        assert_eq!(
+            import_map.resolve("http_post"),
+            Some("network::http::post"),
+            "http_post should resolve to network::http::post"
+        );
+        assert_eq!(
+            import_map.resolve("tcp_connect"),
+            Some("network::tcp::connect"),
+            "tcp_connect should resolve to network::tcp::connect"
+        );
+    }
+
+    #[test]
     fn test_resolution_priority() {
         // Test that resolution follows the priority: scoped > imports > parent_scope > external
         let mut map = ImportMap::new("::");
@@ -1699,6 +1457,94 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference("core::fmt::Display", &map, None, Some("my_crate"), None),
             "core::fmt::Display"
+        );
+    }
+
+    // =========================================================================
+    // Tests for glob imports
+    // =========================================================================
+
+    #[test]
+    fn test_glob_import_storage() {
+        let mut map = ImportMap::new("::");
+        map.add_glob("helpers");
+        map.add_glob("utils");
+
+        let globs = map.glob_imports();
+        assert_eq!(globs.len(), 2);
+        assert_eq!(globs[0], "helpers");
+        assert_eq!(globs[1], "utils");
+    }
+
+    #[test]
+    fn test_multiple_glob_imports_uses_first() {
+        // When multiple glob imports exist, only the first is used for resolution
+        let mut map = ImportMap::new("::");
+        map.add_glob("helpers");
+        map.add_glob("utils");
+
+        // First glob import takes precedence
+        assert_eq!(
+            map.glob_imports().first().map(|s| s.as_str()),
+            Some("helpers")
+        );
+    }
+
+    #[test]
+    fn test_glob_import_fallback_resolution() {
+        // Test that glob imports are used as fallback for unresolved names
+        let source = r#"use helpers::*;"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        // The glob import should be stored
+        assert!(!import_map.glob_imports().is_empty());
+        assert_eq!(import_map.glob_imports()[0], "helpers");
+    }
+
+    // =========================================================================
+    // Tests for deeply nested use statements
+    // =========================================================================
+
+    #[test]
+    fn test_deeply_nested_use_statement() {
+        // Test 4-level deep path
+        let source = r#"use a::b::c::d::e;"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        assert_eq!(
+            import_map.resolve("e"),
+            Some("a::b::c::d::e"),
+            "e should resolve to full path a::b::c::d::e"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_use_with_braces() {
+        // Test deeply nested paths with braces
+        let source = r#"use a::b::{c::d::e, f::g::h};"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let import_map = parse_rust_imports(tree.root_node(), source);
+
+        assert_eq!(
+            import_map.resolve("e"),
+            Some("a::b::c::d::e"),
+            "e should resolve to a::b::c::d::e"
+        );
+        assert_eq!(
+            import_map.resolve("h"),
+            Some("a::b::f::g::h"),
+            "h should resolve to a::b::f::g::h"
         );
     }
 }

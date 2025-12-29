@@ -84,16 +84,34 @@ pub fn handle_function_impl(
     // Build ImportMap from file's imports for qualified name resolution
     let import_map = get_file_import_map(function_node, source);
 
-    // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    // Derive current module path for super:: resolution
+    // This needs to include inline modules (from parent_scope) not just file-level modules
+    // For example, if parent_scope is "test_crate::child::grandchild" and package is "test_crate",
+    // current_module should be "child::grandchild" for proper super:: resolution
+    let current_module = match (components.parent_scope.as_deref(), package_name) {
+        (Some(parent), Some(pkg)) if !pkg.is_empty() => {
+            let prefix = format!("{pkg}::");
+            if let Some(rest) = parent.strip_prefix(&prefix) {
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                }
+            } else {
+                // Parent doesn't have package prefix, use as-is
+                Some(parent.to_string())
+            }
+        }
+        (Some(parent), _) => Some(parent.to_string()),
+        _ => None,
+    };
 
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
-        current_module: module_path.as_deref(),
+        current_module: current_module.as_deref(),
     };
 
     // Extract generics with parsed bounds
@@ -131,7 +149,13 @@ pub fn handle_function_impl(
     let local_vars = extract_local_var_types(function_node, source);
 
     // Extract function calls from the function body with qualified name resolution
-    let calls = extract_function_calls(function_node, source, &resolution_ctx, &local_vars);
+    let calls = extract_function_calls(
+        function_node,
+        source,
+        &resolution_ctx,
+        &local_vars,
+        &generic_bounds,
+    );
 
     // Extract type references for USES relationships
     let mut type_refs = extract_type_references(function_node, source, &resolution_ctx);
@@ -180,7 +204,7 @@ pub fn handle_function_impl(
     }
 
     // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    let imports = import_map.imported_paths_normalized(package_name, current_module.as_deref());
     if !imports.is_empty() {
         if let Ok(json) = serde_json::to_string(&imports) {
             metadata.attributes.insert("imports".to_string(), json);

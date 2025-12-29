@@ -2,6 +2,7 @@
 
 pub(crate) mod entities;
 pub(crate) mod handler_impls;
+pub mod import_resolution;
 pub mod module_path;
 pub(crate) mod queries;
 

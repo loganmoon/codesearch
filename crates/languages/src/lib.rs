@@ -5,12 +5,14 @@
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
 
-// All internal modules are private
+// Internal modules (private implementation details)
 mod extraction_framework;
 mod javascript;
 mod python;
-mod rust;
 mod typescript;
+
+// Public language-specific modules (for external use)
+pub mod rust;
 
 #[cfg(test)]
 mod test_language;

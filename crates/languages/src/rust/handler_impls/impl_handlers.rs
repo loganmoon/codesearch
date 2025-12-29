@@ -13,9 +13,10 @@ use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
-    extract_local_var_types, extract_preceding_doc_comments, extract_type_references,
-    extract_where_clause_bounds, find_capture_node, find_child_by_kind, format_generic_param,
-    merge_parsed_generics, node_to_text, require_capture_node, RustResolutionContext,
+    extract_local_var_types, extract_preceding_doc_comments, extract_type_alias_map,
+    extract_type_references, extract_where_clause_bounds, find_capture_node, find_child_by_kind,
+    format_generic_param, merge_parsed_generics, node_to_text, require_capture_node,
+    resolve_type_alias_chain, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -94,13 +95,38 @@ pub fn handle_impl_impl(
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    let for_type_resolved = resolve_rust_reference(
+    let for_type_resolved_initial = resolve_rust_reference(
         for_type_base,
         &import_map,
         None,
         package_name,
         module_path.as_deref(),
     );
+
+    // Check if the type is a type alias and resolve to the underlying concrete type.
+    // This ensures `impl Settings` (where Settings = RawConfig) has methods named
+    // RawConfig::new instead of Settings::new.
+    let for_type_resolved = {
+        // Get AST root for type alias extraction
+        let root = crate::common::import_map::get_ast_root(impl_node);
+
+        // Extract type aliases from the file
+        let type_aliases = extract_type_alias_map(root, source);
+
+        // Try to resolve the base type name through the alias chain
+        if let Some(concrete_type) = resolve_type_alias_chain(for_type_base, &type_aliases, 10) {
+            // Build the qualified name for the concrete type
+            resolve_rust_reference(
+                &concrete_type,
+                &import_map,
+                None,
+                package_name,
+                module_path.as_deref(),
+            )
+        } else {
+            for_type_resolved_initial
+        }
+    };
 
     // Keep original for display, but store resolved for relationships
     let for_type = for_type_raw.clone();
@@ -738,8 +764,17 @@ fn extract_method(
     // Extract local variable types for method call resolution
     let local_vars = extract_local_var_types(method_node, source);
 
+    // For methods, pass empty generic bounds (method-level generics with bounds not yet extracted)
+    let method_generic_bounds = im::HashMap::new();
+
     // Extract function calls from the method body with qualified name resolution
-    let calls = extract_function_calls(method_node, source, &resolution_ctx, &local_vars);
+    let calls = extract_function_calls(
+        method_node,
+        source,
+        &resolution_ctx,
+        &local_vars,
+        &method_generic_bounds,
+    );
 
     // Extract type references for USES relationships
     let type_refs = extract_type_references(method_node, source, &resolution_ctx);

@@ -449,3 +449,157 @@ where
     assert!(t_param.contains("Clone"));
     assert!(t_param.contains("Debug"));
 }
+
+/// Tests that method calls on generic type parameters generate CALLS references
+/// to the trait methods. This is the key test for Bug #153 Phase 5.
+#[test]
+fn test_generic_bounds_calls_extraction() {
+    // This test mimics the e2e test scenario: a function with a generic parameter
+    // bounded by a trait, where we call a method from that trait.
+    let source = r#"
+pub trait Processor {
+    fn process(&self) -> i32;
+}
+
+pub fn process_item<T: Processor>(item: &T) -> i32 {
+    item.process()
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
+        .expect("Failed to extract function");
+
+    // Should extract process_item (trait method is inside trait, not matched by FUNCTION_QUERY)
+    assert!(!entities.is_empty(), "Should extract at least one function");
+
+    let process_item = entities
+        .iter()
+        .find(|e| e.name == "process_item")
+        .expect("Should find process_item function");
+
+    // Check that generic_bounds has T -> [Processor]
+    let bounds = &process_item.metadata.generic_bounds;
+    assert!(
+        bounds.contains_key("T"),
+        "Should have bounds for T, got: {:?}",
+        bounds
+    );
+    let t_bounds = bounds.get("T").unwrap();
+    assert!(
+        t_bounds.iter().any(|b| b.contains("Processor")),
+        "T should be bounded by Processor, got: {:?}",
+        t_bounds
+    );
+
+    // KEY TEST: Check that calls attribute contains a call to Processor::process
+    let calls_json = process_item
+        .metadata
+        .attributes
+        .get("calls")
+        .expect("process_item should have calls attribute - this is the bug!");
+
+    let calls: Vec<SourceReference> =
+        serde_json::from_str(calls_json).expect("calls should be valid JSON");
+
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.target.contains("Processor::process")),
+        "Should have a call to Processor::process, got calls: {:?}",
+        calls
+    );
+}
+
+/// Tests that method calls on generic type parameters resolve to fully qualified names
+/// when package_name is provided (simulates e2e test conditions).
+#[test]
+fn test_generic_bounds_calls_with_package_name() {
+    use std::path::Path;
+    use streaming_iterator::StreamingIterator;
+    use tree_sitter::{Parser, Query, QueryCursor};
+
+    let source = r#"
+pub trait Processor {
+    fn process(&self) -> i32;
+}
+
+pub fn process_item<T: Processor>(item: &T) -> i32 {
+    item.process()
+}
+"#;
+
+    // Setup parser and query - same as extract_with_handler but with package_name
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .unwrap();
+    let tree = parser.parse(source, None).unwrap();
+    let query = Query::new(&tree_sitter_rust::LANGUAGE.into(), queries::FUNCTION_QUERY).unwrap();
+
+    let mut cursor = QueryCursor::new();
+    let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+    let path = Path::new("lib.rs");
+    let repository_id = "test-repo-id";
+    let repo_root = Path::new("/test-repo");
+    let package_name = Some("test_crate"); // KEY: provide package name like e2e test
+
+    let mut all_entities = Vec::new();
+    while let Some(query_match) = matches_iter.next() {
+        if let Ok(entities) = handle_function_impl(
+            query_match,
+            &query,
+            source,
+            path,
+            repository_id,
+            package_name,
+            None,
+            repo_root,
+        ) {
+            all_entities.extend(entities);
+        }
+    }
+
+    // Find process_item function
+    let process_item = all_entities
+        .iter()
+        .find(|e| e.name == "process_item")
+        .expect("Should find process_item function");
+
+    eprintln!(
+        "DEBUG with package: qualified_name = {}",
+        process_item.qualified_name
+    );
+    eprintln!(
+        "DEBUG with package: generic_bounds = {:?}",
+        process_item.metadata.generic_bounds
+    );
+
+    // Check that generic_bounds resolves Processor to test_crate::Processor
+    let bounds = &process_item.metadata.generic_bounds;
+    let t_bounds = bounds.get("T").expect("Should have bounds for T");
+    assert!(
+        t_bounds.iter().any(|b| *b == "test_crate::Processor"),
+        "T should be bounded by test_crate::Processor, got: {:?}",
+        t_bounds
+    );
+
+    // Check that calls resolves to test_crate::Processor::process
+    let calls_json = process_item
+        .metadata
+        .attributes
+        .get("calls")
+        .expect("Should have calls attribute");
+    let calls: Vec<SourceReference> =
+        serde_json::from_str(calls_json).expect("calls should be valid JSON");
+
+    eprintln!("DEBUG with package: calls = {:?}", calls);
+
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.target == "test_crate::Processor::process"),
+        "Should have a call to test_crate::Processor::process, got calls: {:?}",
+        calls
+    );
+}

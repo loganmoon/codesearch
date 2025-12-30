@@ -1,0 +1,257 @@
+//! Relationship resolution types for the generic resolver framework
+//!
+//! This module defines the configuration types used by the GenericResolver
+//! to handle different relationship types across languages.
+
+#![deny(warnings)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
+use crate::entities::EntityType;
+
+/// Lookup strategy for resolving entity references
+///
+/// Strategies are tried in order until a match is found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LookupStrategy {
+    /// Match by fully qualified name (e.g., "crate::module::Function")
+    QualifiedName,
+    /// Match by path-based entity identifier (e.g., "src.module.Function")
+    PathEntityIdentifier,
+    /// Match by pre-computed call aliases (for Rust UFCS: Type::method -> <Type as Trait>::method)
+    CallAliases,
+    /// Match by simple name only if unambiguous (exactly one entity with that name)
+    UniqueSimpleName,
+    /// Match by simple name (first match wins, may be ambiguous)
+    SimpleName,
+}
+
+/// Definition of a relationship type for resolution
+///
+/// This struct configures how a specific relationship type is resolved,
+/// including source/target entity types, forward/reciprocal relationship names,
+/// and the lookup strategy chain to use.
+#[derive(Debug, Clone)]
+pub struct RelationshipDef {
+    /// Name of this relationship definition (for logging/debugging)
+    pub name: &'static str,
+    /// Entity types that can be sources of this relationship
+    pub source_types: &'static [EntityType],
+    /// Entity types that can be targets of this relationship
+    pub target_types: &'static [EntityType],
+    /// The forward relationship type (e.g., "CALLS")
+    pub forward_rel: &'static str,
+    /// Optional reciprocal relationship type (e.g., "CALLED_BY")
+    pub reciprocal_rel: Option<&'static str>,
+    /// Ordered list of lookup strategies to try
+    pub lookup_strategies: &'static [LookupStrategy],
+}
+
+impl RelationshipDef {
+    /// Create a new relationship definition
+    pub const fn new(
+        name: &'static str,
+        source_types: &'static [EntityType],
+        target_types: &'static [EntityType],
+        forward_rel: &'static str,
+        reciprocal_rel: Option<&'static str>,
+        lookup_strategies: &'static [LookupStrategy],
+    ) -> Self {
+        Self {
+            name,
+            source_types,
+            target_types,
+            forward_rel,
+            reciprocal_rel,
+            lookup_strategies,
+        }
+    }
+}
+
+/// Standard relationship definitions used across languages
+pub mod definitions {
+    use super::*;
+
+    /// All callable entity types (functions, methods)
+    pub const CALLABLE_TYPES: &[EntityType] = &[EntityType::Function, EntityType::Method];
+
+    /// All type entity types (struct, enum, class, interface, trait, type alias)
+    pub const TYPE_TYPES: &[EntityType] = &[
+        EntityType::Struct,
+        EntityType::Enum,
+        EntityType::Class,
+        EntityType::Interface,
+        EntityType::Trait,
+        EntityType::TypeAlias,
+    ];
+
+    /// All impl block types
+    pub const IMPL_TYPES: &[EntityType] = &[EntityType::Impl];
+
+    /// All module types
+    pub const MODULE_TYPES: &[EntityType] = &[EntityType::Module];
+
+    /// CALLS relationship: Function/Method calls other Function/Method
+    pub const CALLS: RelationshipDef = RelationshipDef::new(
+        "calls",
+        CALLABLE_TYPES,
+        CALLABLE_TYPES,
+        "CALLS",
+        Some("CALLED_BY"),
+        &[
+            LookupStrategy::QualifiedName,
+            LookupStrategy::CallAliases,
+            LookupStrategy::UniqueSimpleName,
+        ],
+    );
+
+    /// USES relationship: Entity uses a type
+    pub const USES: RelationshipDef = RelationshipDef::new(
+        "uses",
+        &[
+            EntityType::Function,
+            EntityType::Method,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Class,
+            EntityType::Interface,
+            EntityType::Trait,
+            EntityType::TypeAlias,
+            EntityType::Impl,
+        ],
+        TYPE_TYPES,
+        "USES",
+        Some("USED_BY"),
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
+    );
+
+    /// IMPLEMENTS relationship: Impl block implements a trait for a type
+    pub const IMPLEMENTS: RelationshipDef = RelationshipDef::new(
+        "implements",
+        IMPL_TYPES,
+        &[EntityType::Trait, EntityType::Interface],
+        "IMPLEMENTS",
+        Some("IMPLEMENTED_BY"),
+        &[LookupStrategy::QualifiedName],
+    );
+
+    /// ASSOCIATES relationship: Impl block associates with a type
+    pub const ASSOCIATES: RelationshipDef = RelationshipDef::new(
+        "associates",
+        IMPL_TYPES,
+        TYPE_TYPES,
+        "ASSOCIATES",
+        Some("ASSOCIATED_WITH"),
+        &[LookupStrategy::QualifiedName],
+    );
+
+    /// EXTENDS relationship: Trait extends another trait (supertraits)
+    pub const EXTENDS: RelationshipDef = RelationshipDef::new(
+        "extends",
+        &[EntityType::Trait, EntityType::Interface],
+        &[EntityType::Trait, EntityType::Interface],
+        "EXTENDS_INTERFACE",
+        Some("EXTENDED_BY"),
+        &[LookupStrategy::QualifiedName],
+    );
+
+    /// INHERITS relationship: Class inherits from another class
+    pub const INHERITS: RelationshipDef = RelationshipDef::new(
+        "inherits",
+        &[EntityType::Class],
+        &[EntityType::Class],
+        "INHERITS_FROM",
+        Some("HAS_SUBCLASS"),
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
+    );
+
+    /// IMPORTS relationship: Module imports another entity
+    pub const IMPORTS: RelationshipDef = RelationshipDef::new(
+        "imports",
+        MODULE_TYPES,
+        &[
+            EntityType::Module,
+            EntityType::Function,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::TypeAlias,
+            EntityType::Constant,
+        ],
+        "IMPORTS",
+        Some("IMPORTED_BY"),
+        &[
+            LookupStrategy::QualifiedName,
+            LookupStrategy::PathEntityIdentifier,
+            LookupStrategy::SimpleName,
+        ],
+    );
+
+    /// CONTAINS relationship: Parent scope contains child entity
+    pub const CONTAINS: RelationshipDef = RelationshipDef::new(
+        "contains",
+        &[
+            EntityType::Module,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::Impl,
+        ],
+        &[
+            EntityType::Function,
+            EntityType::Method,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::Constant,
+            EntityType::TypeAlias,
+            EntityType::Module,
+        ],
+        "CONTAINS",
+        None, // No reciprocal - CONTAINS is directional only
+        &[LookupStrategy::QualifiedName],
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_relationship_def_creation() {
+        let def = RelationshipDef::new(
+            "test",
+            &[EntityType::Function],
+            &[EntityType::Method],
+            "TEST_REL",
+            Some("TESTED_BY"),
+            &[LookupStrategy::QualifiedName],
+        );
+
+        assert_eq!(def.name, "test");
+        assert_eq!(def.source_types, &[EntityType::Function]);
+        assert_eq!(def.target_types, &[EntityType::Method]);
+        assert_eq!(def.forward_rel, "TEST_REL");
+        assert_eq!(def.reciprocal_rel, Some("TESTED_BY"));
+        assert_eq!(def.lookup_strategies, &[LookupStrategy::QualifiedName]);
+    }
+
+    #[test]
+    fn test_standard_definitions() {
+        // CALLS should have reciprocal
+        assert!(definitions::CALLS.reciprocal_rel.is_some());
+        assert_eq!(definitions::CALLS.forward_rel, "CALLS");
+
+        // CONTAINS should not have reciprocal
+        assert!(definitions::CONTAINS.reciprocal_rel.is_none());
+
+        // USES should target type entities
+        assert!(!definitions::USES.target_types.is_empty());
+    }
+}

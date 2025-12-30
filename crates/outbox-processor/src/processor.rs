@@ -1061,19 +1061,24 @@ impl OutboxProcessor {
     /// This method checks for repositories with the pending_relationship_resolution flag set
     /// and runs all relationship resolvers to create relationship edges in Neo4j.
     ///
-    /// Resolution uses dedicated resolvers that query entity_metadata directly:
+    /// Resolution uses GenericResolver with typed relationship data from EntityRelationshipData:
     /// - ContainsResolver: parent/child relationships via parent_scope
-    /// - TraitImplResolver: IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE
-    /// - InheritanceResolver: INHERITS_FROM for class inheritance
-    /// - TypeUsageResolver: USES for type references in fields
-    /// - CallGraphResolver: CALLS for function/method calls
-    /// - ImportsResolver: IMPORTS for module imports
+    /// - calls_resolver: CALLS for function/method calls
+    /// - uses_resolver: USES for type references
+    /// - implements_resolver: IMPLEMENTS for trait implementations
+    /// - associates_resolver: ASSOCIATES for impl blocks
+    /// - extends_resolver: EXTENDS_INTERFACE for trait supertraits
+    /// - inherits_resolver: INHERITS_FROM for class inheritance
+    /// - imports_resolver: IMPORTS for module imports
     ///
     /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
+        use crate::generic_resolver::{
+            associates_resolver, calls_resolver, extends_resolver, implements_resolver,
+            imports_resolver, inherits_resolver, uses_resolver,
+        };
         use crate::neo4j_relationship_resolver::{
-            resolve_relationships_generic, CallGraphResolver, ContainsResolver, EntityCache,
-            ImportsResolver, InheritanceResolver, TraitImplResolver, TypeUsageResolver,
+            resolve_relationships_generic, ContainsResolver, EntityCache,
         };
 
         // Get repositories that need resolution
@@ -1094,14 +1099,25 @@ impl OutboxProcessor {
         // Get Neo4j client
         let neo4j_client = self.get_neo4j_client().await?;
 
-        // Define all resolvers to run
-        let resolvers: &[&dyn crate::neo4j_relationship_resolver::RelationshipResolver] = &[
+        // Create generic resolvers using typed EntityRelationshipData
+        let calls = calls_resolver();
+        let uses = uses_resolver();
+        let implements = implements_resolver();
+        let associates = associates_resolver();
+        let extends = extends_resolver();
+        let inherits = inherits_resolver();
+        let imports = imports_resolver();
+
+        // Define all resolvers to run (ContainsResolver uses parent_scope, not relationships field)
+        let resolvers: Vec<&dyn crate::neo4j_relationship_resolver::RelationshipResolver> = vec![
             &ContainsResolver,
-            &TraitImplResolver,
-            &InheritanceResolver,
-            &TypeUsageResolver,
-            &CallGraphResolver,
-            &ImportsResolver,
+            &calls,
+            &uses,
+            &implements,
+            &associates,
+            &extends,
+            &inherits,
+            &imports,
         ];
 
         // Resolve relationships for each repository
@@ -1149,7 +1165,7 @@ impl OutboxProcessor {
             );
 
             // Run all resolvers using cached entity data
-            for resolver in resolvers {
+            for resolver in &resolvers {
                 if let Err(e) =
                     resolve_relationships_generic(&cache, neo4j_client.as_ref(), *resolver).await
                 {

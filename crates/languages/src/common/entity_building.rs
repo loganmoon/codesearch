@@ -6,8 +6,8 @@
 use crate::common::{find_capture_node, node_to_text};
 use crate::qualified_name::build_qualified_name_from_ast;
 use codesearch_core::entities::{
-    CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-    Visibility,
+    CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
+    Language, SourceLocation, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
@@ -60,6 +60,9 @@ pub struct EntityDetails {
     pub content: Option<String>,
     pub metadata: EntityMetadata,
     pub signature: Option<FunctionSignature>,
+    /// Typed relationship data for graph resolution.
+    /// Defaults to empty if not provided.
+    pub relationships: EntityRelationshipData,
 }
 
 /// Extract common entity components in a language-agnostic way
@@ -252,6 +255,7 @@ pub fn build_entity(
         .signature(details.signature)
         .language(details.language)
         .file_path(components.file_path)
+        .relationships(details.relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build CodeEntity: {e}")))
 }

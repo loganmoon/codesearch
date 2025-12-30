@@ -10,13 +10,12 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
-use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
     extract_preceding_doc_comments, extract_visibility, extract_where_clause_bounds,
-    find_capture_node, find_child_by_kind, format_generic_param, is_primitive_type,
-    merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
+    find_capture_node, find_child_by_kind, format_generic_param, get_file_import_map,
+    is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
     RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
@@ -452,6 +451,7 @@ fn build_entity_data(
             content,
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )
 }
@@ -920,6 +920,7 @@ fn extract_single_trait_method(
         signature: Some(signature),
         visibility: Visibility::Public, // Trait methods are always public
         location,
+        relationships: Default::default(), // Trait method signatures don't have relationship data
     })
 }
 
@@ -944,22 +945,8 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
 }
 
 // ============================================================================
-// Import Resolution Helpers
+// Type Resolution Helpers
 // ============================================================================
-
-/// Get the ImportMap for a file by walking up to the AST root
-fn get_file_import_map(node: Node, source: &str) -> ImportMap {
-    // Walk up to the root node
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        current = parent;
-    }
-
-    // Parse imports from the root
-    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
-    // so no module_path resolution is needed
-    parse_file_imports(current, source, Language::Rust, None)
-}
 
 /// Extract and resolve field types for USES relationships
 fn extract_field_type_refs(fields: &[FieldInfo], ctx: &RustResolutionContext) -> Vec<String> {

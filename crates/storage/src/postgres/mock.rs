@@ -1075,6 +1075,7 @@ mod tests {
             documentation_summary: None,
             content: Some("fn test() {}".to_string()),
             metadata: EntityMetadata::default(),
+            relationships: Default::default(),
         }
     }
 

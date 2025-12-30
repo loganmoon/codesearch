@@ -28,8 +28,9 @@ pub use config::{
     UpdateStrategy, WatcherConfig,
 };
 pub use entities::{
-    CodeEntity, CodeRelationship, EntityType, FunctionSignature, InternedString, Language,
-    ReferenceType, RelationshipType, SourceLocation, SourceReference, Visibility,
+    CodeEntity, CodeRelationship, EntityMetadata, EntityRelationshipData, EntityType,
+    FunctionSignature, InternedString, Language, ReferenceType, RelationshipType, SourceLocation,
+    SourceReference, Visibility,
 };
 pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};

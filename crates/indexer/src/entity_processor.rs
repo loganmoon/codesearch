@@ -720,6 +720,7 @@ mod tests {
             ),
             content: Some("fn handle_request(req: HttpRequest, ctx: Context) -> Result<Response> {\n    // Implementation\n    Ok(Response::new())\n}".to_string()),
             metadata: Default::default(),
+            relationships: Default::default(),
         }
     }
 
@@ -818,6 +819,7 @@ mod tests {
             documentation_summary: None,
             content: None,
             metadata: Default::default(),
+            relationships: Default::default(),
         };
 
         let content = extract_embedding_content(&minimal_entity);
@@ -862,6 +864,7 @@ mod tests {
             documentation_summary: Some("Test with \"quotes\" and\nnewlines".to_string()),
             content: Some("fn test<T>() -> Result<T> { /* ... */ }".to_string()),
             metadata: Default::default(),
+            relationships: Default::default(),
         };
 
         let content = extract_embedding_content(&entity);

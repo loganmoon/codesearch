@@ -10,10 +10,10 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
-use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::handler_impls::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
-    find_capture_node, node_to_text, require_capture_node, RustResolutionContext,
+    find_capture_node, get_file_import_map, node_to_text, require_capture_node,
+    RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use crate::rust::handler_impls::type_handlers::extract_type_refs_from_type_expr;
@@ -21,7 +21,7 @@ use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::{Query, QueryMatch};
 
 /// Process a type alias query match and extract entity data
 #[allow(clippy::too_many_arguments)]
@@ -119,22 +119,9 @@ pub fn handle_type_alias_impl(
             content,
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 
     Ok(vec![entity])
-}
-
-/// Build ImportMap from file's use statements for type resolution
-fn get_file_import_map(node: Node, source: &str) -> ImportMap {
-    // Walk up to the root node
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        current = parent;
-    }
-
-    // Parse imports from the root
-    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
-    // so no module_path resolution is needed
-    parse_file_imports(current, source, Language::Rust, None)
 }

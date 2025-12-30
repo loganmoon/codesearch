@@ -164,7 +164,8 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
 // Structured Generic Bounds Extraction (Query-Based)
 // ============================================================================
 
-use crate::common::import_map::{resolve_rust_reference, ImportMap};
+use crate::common::import_map::{parse_file_imports, resolve_rust_reference, ImportMap};
+use codesearch_core::Language;
 
 /// A parsed generic parameter with its trait bounds
 #[derive(Debug, Clone, Default)]
@@ -1159,6 +1160,27 @@ pub fn resolve_type_alias_chain(
         .take(max_depth)
         .last()
         .cloned()
+}
+
+// ============================================================================
+// Import Map Utilities
+// ============================================================================
+
+/// Get the ImportMap for a Rust file by walking up to the AST root.
+///
+/// This function walks up the AST from the given node to find the root,
+/// then parses all use declarations to build an import map.
+pub fn get_file_import_map(node: Node, source: &str) -> ImportMap {
+    // Walk up to the root node
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        current = parent;
+    }
+
+    // Parse imports from the root
+    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
+    // so no module_path resolution is needed
+    parse_file_imports(current, source, Language::Rust, None)
 }
 
 #[cfg(test)]

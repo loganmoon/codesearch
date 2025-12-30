@@ -1379,6 +1379,7 @@ mod tests {
             documentation_summary: None,
             content: Some(format!("fn {name}() {{}}")),
             metadata: EntityMetadata::default(),
+            relationships: Default::default(),
         }
     }
 

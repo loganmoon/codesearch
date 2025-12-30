@@ -36,6 +36,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
         documentation_summary: None,
         content: Some(format!("fn {name}() {{}}")),
         metadata: EntityMetadata::default(),
+        relationships: Default::default(),
     }
 }
 

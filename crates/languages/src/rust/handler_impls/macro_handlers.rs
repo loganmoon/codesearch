@@ -98,6 +98,7 @@ pub fn handle_macro_impl(
             content,
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 

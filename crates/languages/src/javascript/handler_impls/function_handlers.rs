@@ -129,6 +129,7 @@ pub fn handle_function_impl(
                 generics: Vec::new(),
                 is_async,
             }),
+            relationships: Default::default(),
         },
     )?;
 
@@ -290,6 +291,7 @@ pub fn handle_arrow_function_impl(
                 generics: Vec::new(),
                 is_async,
             }),
+            relationships: Default::default(),
         },
     )?;
 

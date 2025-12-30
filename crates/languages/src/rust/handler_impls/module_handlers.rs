@@ -113,6 +113,7 @@ pub fn handle_module_impl(
             content,
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 

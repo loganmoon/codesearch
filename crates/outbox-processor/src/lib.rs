@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
+pub mod generic_resolver;
 pub mod neo4j_relationship_resolver;
 pub mod processor;
 
@@ -14,9 +15,13 @@ use tokio::time::sleep;
 use tracing::{error, info};
 
 // Re-export for ease of use
+pub use generic_resolver::{
+    associates_resolver, calls_resolver, extends_resolver, implements_resolver, imports_resolver,
+    inherits_resolver, uses_resolver, GenericResolver,
+};
 pub use neo4j_relationship_resolver::{
     resolve_external_references, resolve_relationships_generic, CallGraphResolver,
-    ContainsResolver, ImportsResolver, InheritanceResolver, RelationshipResolver,
+    ContainsResolver, EntityCache, ImportsResolver, InheritanceResolver, RelationshipResolver,
     TraitImplResolver, TypeUsageResolver,
 };
 pub use processor::OutboxProcessor;

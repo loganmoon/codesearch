@@ -358,8 +358,8 @@ impl RelationshipResolver for GenericResolver {
 
             for target_ref in refs {
                 if let Some(target_id) = self.resolve_reference(&target_ref, &maps) {
-                    // Skip self-references
-                    if target_id == source.entity_id {
+                    // Skip self-references (except for CALLS - recursive functions are valid)
+                    if target_id == source.entity_id && self.def.forward_rel != "CALLS" {
                         continue;
                     }
 
@@ -607,5 +607,35 @@ mod tests {
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0], "crate::other::Thing");
+    }
+
+    #[test]
+    fn test_calls_extractor_includes_recursive_self_calls() {
+        let extractor = CallsExtractor;
+        // A recursive function that calls itself
+        let entity = make_test_entity(
+            EntityType::Function,
+            "factorial",
+            "crate::factorial",
+            EntityRelationshipData {
+                calls: vec![SourceReference::new(
+                    "crate::factorial".to_string(), // Self-call
+                    SourceLocation {
+                        start_line: 5,
+                        end_line: 5,
+                        start_column: 0,
+                        end_column: 10,
+                    },
+                    codesearch_core::ReferenceType::Call,
+                )],
+                ..Default::default()
+            },
+        );
+
+        let refs = extractor.extract_refs(&entity);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0], "crate::factorial");
+        // The extractor should return the self-call; filtering happens in GenericResolver
+        // which now allows self-references for CALLS relationships
     }
 }

@@ -242,36 +242,40 @@ impl GenericResolver {
 
     /// Resolve a reference using the configured lookup strategies
     fn resolve_reference(&self, reference: &str, maps: &TargetLookupMaps) -> Option<String> {
-        // Strip generics for lookup
-        let base_ref = reference.split('<').next().unwrap_or(reference).trim();
+        // References are already normalized at extraction time:
+        // - Turbofish generics stripped via tree-sitter query
+        // - UFCS syntax preserved (starts with '<')
+        // - Qualified names resolved via import maps
+        // No string manipulation needed here - just direct lookups.
+        let reference = reference.trim();
 
         for strategy in self.def.lookup_strategies {
             match strategy {
                 LookupStrategy::QualifiedName => {
-                    if let Some(id) = maps.qname.get(base_ref) {
+                    if let Some(id) = maps.qname.get(reference) {
                         trace!("  [QualifiedName] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::PathEntityIdentifier => {
-                    if let Some(id) = maps.path_id.get(base_ref) {
+                    if let Some(id) = maps.path_id.get(reference) {
                         trace!("  [PathEntityIdentifier] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::CallAliases => {
-                    if let Some(id) = maps.call_alias.get(base_ref) {
+                    if let Some(id) = maps.call_alias.get(reference) {
                         trace!("  [CallAliases] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::UniqueSimpleName => {
-                    // Extract simple name (last segment)
-                    let simple_name = base_ref
+                    // Extract simple name (last segment after :: or .)
+                    let simple_name = reference
                         .rsplit("::")
                         .next()
-                        .or_else(|| base_ref.rsplit('.').next())
-                        .unwrap_or(base_ref);
+                        .or_else(|| reference.rsplit('.').next())
+                        .unwrap_or(reference);
 
                     if let Some(id) = maps.unique_simple_name.get(simple_name) {
                         trace!("  [UniqueSimpleName] resolved {} -> {}", reference, id);
@@ -279,12 +283,12 @@ impl GenericResolver {
                     }
                 }
                 LookupStrategy::SimpleName => {
-                    // Extract simple name (last segment)
-                    let simple_name = base_ref
+                    // Extract simple name (last segment after :: or .)
+                    let simple_name = reference
                         .rsplit("::")
                         .next()
-                        .or_else(|| base_ref.rsplit('.').next())
-                        .unwrap_or(base_ref);
+                        .or_else(|| reference.rsplit('.').next())
+                        .unwrap_or(reference);
 
                     // First match wins (may be ambiguous)
                     if let Some(ids) = maps.all_simple_names.get(simple_name) {

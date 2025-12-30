@@ -508,6 +508,42 @@ pub fn extract_function_modifiers(modifiers_node: Node) -> (bool, bool, bool) {
 
 use std::collections::HashMap;
 
+/// Extract the call path from a scoped_identifier node, excluding type arguments.
+///
+/// Uses tree-sitter queries to capture only identifier/type_identifier nodes,
+/// skipping type_arguments. This handles turbofish like `Vec::<String>::new`.
+fn extract_call_path_from_scoped_identifier(node: Node, source: &str) -> Option<String> {
+    // Query to capture the type name and method name from turbofish syntax.
+    // For `Vec::<String>::new`, this captures "Vec" from generic_type and "new" from identifier.
+    let query_source = r#"
+        (scoped_identifier
+          (generic_type
+            (type_identifier) @type_name)
+          (identifier) @method_name)
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = Query::new(&language, query_source).ok()?;
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut segments = Vec::new();
+
+    let mut matches = cursor.matches(&query, node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                segments.push(text.to_string());
+            }
+        }
+    }
+
+    if segments.is_empty() {
+        None
+    } else {
+        Some(segments.join("::"))
+    }
+}
+
 /// Extract function calls from a function body using tree-sitter queries
 ///
 /// This version resolves bare identifiers to qualified names using imports and scope.
@@ -594,10 +630,19 @@ pub fn extract_function_calls(
                 });
             }
         } else if let Some(scoped_cap) = scoped_callee {
-            // Scoped call like `std::io::read()` or `crate::utils::helper()`
-            if let Ok(full_path) = node_to_text(scoped_cap.node, source) {
-                // Resolve to normalize crate::, self::, super:: paths
-                let resolved = ctx.resolve(&full_path);
+            // Scoped call like `std::io::read()`, `Vec::<String>::new()`, or UFCS
+            if let Ok(full_text) = node_to_text(scoped_cap.node, source) {
+                // UFCS syntax like `<Type as Trait>::method` needs special handling
+                // by ctx.resolve() - pass the full text
+                let call_path = if full_text.starts_with('<') {
+                    full_text
+                } else {
+                    // For turbofish like `Vec::<String>::new`, extract path without generics
+                    // using tree-sitter query (not string manipulation)
+                    extract_call_path_from_scoped_identifier(scoped_cap.node, source)
+                        .unwrap_or(full_text)
+                };
+                let resolved = ctx.resolve(&call_path);
                 calls.push(SourceReference {
                     target: resolved,
                     location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
@@ -1629,5 +1674,54 @@ pub fn make_requests() {
             calls[0].target,
             "<test_crate::Data as test_crate::Processor>::process"
         );
+    }
+
+    #[test]
+    fn test_extract_function_calls_turbofish_strips_generics() {
+        // Turbofish syntax like `Vec::<String>::new()` should extract as `Vec::new`
+        // without the generic arguments. Tree-sitter AST traversal handles this.
+        let source = r#"
+            fn caller() {
+                Vec::<String>::new();
+                HashMap::<String, i32>::with_capacity(10);
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: None,
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        let local_vars = std::collections::HashMap::new();
+        let generic_bounds = im::HashMap::new();
+        let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
+
+        eprintln!("Extracted calls (turbofish test):");
+        for call in &calls {
+            eprintln!("  target: {}", call.target);
+        }
+
+        // Verify NO calls contain generic brackets - tree-sitter AST traversal
+        // extracts just the path segments, skipping type_arguments nodes
+        for call in &calls {
+            assert!(
+                !call.target.contains('<'),
+                "Call target should not contain generics: {}",
+                call.target
+            );
+        }
+
+        // Verify we got the expected calls
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().any(|c| c.target == "test_crate::Vec::new"));
+        assert!(calls
+            .iter()
+            .any(|c| c.target == "test_crate::HashMap::with_capacity"));
     }
 }

@@ -1155,6 +1155,11 @@ impl OutboxProcessor {
                         "Failed to create entity cache for repository {}: {}",
                         repository_id, e
                     );
+                    // Clear the pending flag to prevent infinite retry loops
+                    let _ = self
+                        .postgres_client
+                        .set_pending_relationship_resolution(repository_id, false)
+                        .await;
                     continue;
                 }
             };

@@ -405,6 +405,11 @@ impl RelationshipResolver for GenericResolver {
                             reciprocal.to_string(),
                         ));
                     }
+                } else {
+                    debug!(
+                        "GenericResolver[{}]: unresolved reference {} -> {}",
+                        self.def.name, source.qualified_name, rel_ref.target
+                    );
                 }
             }
         }

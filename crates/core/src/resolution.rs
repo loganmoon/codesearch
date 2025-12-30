@@ -188,10 +188,24 @@ pub mod definitions {
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
-    /// IMPORTS relationship: Module imports another entity
+    /// IMPORTS relationship: Entity imports another entity
+    ///
+    /// Note: The old ImportsResolver processed any entity with an `imports` attribute,
+    /// not just modules. We maintain that behavior for backward compatibility.
     pub const IMPORTS: RelationshipDef = RelationshipDef::new(
         "imports",
-        MODULE_TYPES,
+        &[
+            EntityType::Module,
+            EntityType::Function,
+            EntityType::Method,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::TypeAlias,
+            EntityType::Impl,
+        ],
         &[
             EntityType::Module,
             EntityType::Function,

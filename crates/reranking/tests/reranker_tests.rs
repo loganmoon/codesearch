@@ -160,6 +160,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         visibility: Visibility::Public,
         language: Language::Rust,
         metadata: EntityMetadata::default(),
+        relationships: Default::default(),
     };
 
     // Extract content using the function that's used for both indexing and reranking
@@ -208,6 +209,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         visibility: Visibility::Public,
         language: Language::Rust,
         metadata: EntityMetadata::default(),
+        relationships: Default::default(),
     };
 
     let minimal_content = extract_embedding_content(&minimal_entity);

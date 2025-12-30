@@ -139,6 +139,7 @@ pub fn handle_module_impl(
             content: node_to_text(program_node, source).ok(),
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 

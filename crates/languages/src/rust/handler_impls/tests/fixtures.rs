@@ -547,13 +547,12 @@ fn test_large_file_impl_extraction() {
 
     assert!(!trait_impl_entities.is_empty()); // Display for ProcessError
 
-    // Verify trait impl has correct metadata
+    // Verify trait impl has correct metadata (now in typed relationships)
     let display_impl = trait_impl_entities.iter().find(|e| {
-        e.metadata
-            .attributes
-            .get("implements_trait")
-            .map(|t| t.contains("Display"))
-            .unwrap_or(false)
+        e.relationships
+            .implements_trait
+            .as_ref()
+            .is_some_and(|t| t.contains("Display"))
     });
 
     assert!(display_impl.is_some(), "Should find Display trait impl");

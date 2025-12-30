@@ -10,23 +10,22 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
-use crate::common::import_map::{parse_file_imports, ImportMap};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_with_bounds, extract_local_var_types,
     extract_preceding_doc_comments, extract_type_references, extract_visibility,
-    extract_where_clause_bounds, find_capture_node, format_generic_param, merge_parsed_generics,
-    node_to_text, require_capture_node, RustResolutionContext,
+    extract_where_clause_bounds, find_capture_node, format_generic_param, get_file_import_map,
+    merge_parsed_generics, node_to_text, require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{
-    EntityMetadata, EntityType, FunctionSignature, Language, ReferenceType, SourceLocation,
-    SourceReference,
+    EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature, Language, ReferenceType,
+    SourceLocation, SourceReference,
 };
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::{Query, QueryMatch};
 
 /// Process a function query match and extract entity data
 #[allow(clippy::too_many_arguments)]
@@ -192,27 +191,14 @@ pub fn handle_function_impl(
             .insert("unsafe".to_string(), "true".to_string());
     }
 
-    // Store function calls if any exist
-    if !calls.is_empty() {
-        if let Ok(json) = serde_json::to_string(&calls) {
-            metadata.attributes.insert("calls".to_string(), json);
-        }
-    }
-
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
-
-    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    // Build typed relationship data
     let imports = import_map.imported_paths_normalized(package_name, current_module.as_deref());
-    if !imports.is_empty() {
-        if let Ok(json) = serde_json::to_string(&imports) {
-            metadata.attributes.insert("imports".to_string(), json);
-        }
-    }
+    let relationships = EntityRelationshipData {
+        calls,
+        uses_types: type_refs,
+        imports,
+        ..Default::default()
+    };
 
     // Build the entity using the shared helper
     let entity = build_entity(
@@ -233,22 +219,9 @@ pub fn handle_function_impl(
                 is_async,
                 generics,
             }),
+            relationships,
         },
     )?;
 
     Ok(vec![entity])
-}
-
-/// Get the ImportMap for a file by walking up to the AST root
-fn get_file_import_map(node: Node, source: &str) -> ImportMap {
-    // Walk up to the root node
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        current = parent;
-    }
-
-    // Parse imports from the root
-    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
-    // so no module_path resolution is needed
-    parse_file_imports(current, source, Language::Rust, None)
 }

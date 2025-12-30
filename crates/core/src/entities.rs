@@ -154,6 +154,70 @@ pub struct EntityMetadata {
     pub attributes: ImHashMap<String, String>,
 }
 
+/// Typed relationship data extracted from source code.
+///
+/// This struct provides an explicit typed contract between the languages crate
+/// (which extracts entities) and the outbox-processor crate (which resolves
+/// relationships). Each field corresponds to a specific relationship type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EntityRelationshipData {
+    /// Function/method calls made by this entity.
+    /// Resolved to CALLS/CALLED_BY relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<SourceReference>,
+
+    /// Type references used by this entity (parameters, return types, field types).
+    /// Resolved to USES/USED_BY relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uses_types: Vec<SourceReference>,
+
+    /// Imported modules/entities.
+    /// Resolved to IMPORTS/IMPORTED_BY relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imports: Vec<String>,
+
+    /// Trait/interface being implemented (for impl blocks).
+    /// Resolved to IMPLEMENTS/IMPLEMENTED_BY relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implements_trait: Option<String>,
+
+    /// Type this impl block is for (for ASSOCIATES relationship).
+    /// Resolved to ASSOCIATES/ASSOCIATED_WITH relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_type: Option<String>,
+
+    /// Parent class/interface for inheritance (JS/TS extends, Python bases).
+    /// Resolved to INHERITS_FROM/HAS_SUBCLASS relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extends: Vec<String>,
+
+    /// Trait supertraits (Rust trait bounds like `trait Foo: Bar`).
+    /// Resolved to EXTENDS_INTERFACE/EXTENDED_BY relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supertraits: Vec<String>,
+
+    /// Pre-computed call aliases for language-specific resolution.
+    /// E.g., Rust UFCS: "TypeFQN::method" for "<TypeFQN as TraitFQN>::method".
+    /// Computed during extraction to keep outbox-processor language-agnostic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_aliases: Vec<String>,
+}
+
+impl EntityRelationshipData {
+    /// Check if all relationship data is empty
+    pub fn is_empty(&self) -> bool {
+        self.calls.is_empty()
+            && self.uses_types.is_empty()
+            && self.imports.is_empty()
+            && self.implements_trait.is_none()
+            && self.for_type.is_none()
+            && self.extends.is_empty()
+            && self.supertraits.is_empty()
+            && self.call_aliases.is_empty()
+    }
+}
+
 /// Represents a code entity extracted from source code
 #[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 #[builder(setter(into))]
@@ -217,6 +281,13 @@ pub struct CodeEntity {
     /// Language-specific metadata
     #[builder(default = "EntityMetadata::default()")]
     pub metadata: EntityMetadata,
+
+    /// Typed relationship data for graph resolution.
+    /// This field provides explicit typed data for relationship resolution,
+    /// replacing the implicit JSON-encoded data in metadata.attributes.
+    #[serde(default)]
+    #[builder(default = "EntityRelationshipData::default()")]
+    pub relationships: EntityRelationshipData,
 }
 
 /// Function signature information

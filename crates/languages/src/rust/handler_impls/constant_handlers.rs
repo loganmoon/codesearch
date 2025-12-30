@@ -118,6 +118,7 @@ pub fn handle_constant_impl(
             content,
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 

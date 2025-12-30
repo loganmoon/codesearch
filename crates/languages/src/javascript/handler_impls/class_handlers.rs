@@ -103,6 +103,7 @@ pub fn handle_class_impl(
             content: node_to_text(class_node, source).ok(),
             metadata,
             signature: None,
+            relationships: Default::default(),
         },
     )?;
 
@@ -227,6 +228,7 @@ pub fn handle_method_impl(
                 generics: Vec::new(),
                 is_async,
             }),
+            relationships: Default::default(),
         },
     )?;
 

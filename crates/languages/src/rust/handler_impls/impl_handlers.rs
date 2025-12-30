@@ -8,20 +8,20 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::common::import_map::{parse_file_imports, resolve_rust_reference, ImportMap};
+use crate::common::import_map::resolve_rust_reference;
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
     extract_local_var_types, extract_preceding_doc_comments, extract_type_alias_map,
     extract_type_references, extract_where_clause_bounds, find_capture_node, find_child_by_kind,
-    format_generic_param, merge_parsed_generics, node_to_text, require_capture_node,
-    resolve_type_alias_chain, RustResolutionContext,
+    format_generic_param, get_file_import_map, merge_parsed_generics, node_to_text,
+    require_capture_node, resolve_type_alias_chain, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
-    CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-    Visibility,
+    CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
+    Language, SourceLocation, SourceReference, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
@@ -219,25 +219,27 @@ pub fn handle_impl_impl(
         .attributes
         .insert("for_type".to_string(), for_type.clone());
 
-    // Store the resolved type name for relationship resolution
-    metadata
-        .attributes
-        .insert("implements".to_string(), for_type_resolved.clone());
-
-    // Add trait bounds to uses_types for relationship resolution
-    if !parsed_generics.bound_trait_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
-
-    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    // Build typed relationship data for inherent impl
     let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
-    if !imports.is_empty() {
-        if let Ok(json) = serde_json::to_string(&imports) {
-            metadata.attributes.insert("imports".to_string(), json);
-        }
-    }
+
+    // Convert trait bound refs to SourceReference for uses_types
+    let impl_location = SourceLocation::from_tree_sitter_node(impl_node);
+    let uses_types: Vec<SourceReference> = parsed_generics
+        .bound_trait_refs
+        .iter()
+        .map(|trait_ref| SourceReference {
+            target: trait_ref.clone(),
+            location: impl_location.clone(),
+            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        })
+        .collect();
+
+    let relationships = EntityRelationshipData {
+        imports,
+        uses_types,
+        for_type: Some(for_type_resolved.clone()),
+        ..Default::default()
+    };
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -257,6 +259,7 @@ pub fn handle_impl_impl(
         .metadata(metadata)
         .language(Language::Rust)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build impl entity: {e}")))?;
 
@@ -417,28 +420,27 @@ pub fn handle_impl_trait_impl(
         .attributes
         .insert("for_type".to_string(), for_type.clone());
 
-    // Store the resolved names directly for relationship resolution
-    metadata
-        .attributes
-        .insert("implements".to_string(), for_type_resolved.clone());
-    metadata
-        .attributes
-        .insert("implements_trait".to_string(), trait_name_resolved.clone());
-
-    // Add trait bounds to uses_types for relationship resolution
-    if !parsed_generics.bound_trait_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
-
-    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    // Build typed relationship data for trait impl
     let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
-    if !imports.is_empty() {
-        if let Ok(json) = serde_json::to_string(&imports) {
-            metadata.attributes.insert("imports".to_string(), json);
-        }
-    }
+
+    // Convert trait bound refs to SourceReference for uses_types
+    let uses_types: Vec<SourceReference> = parsed_generics
+        .bound_trait_refs
+        .iter()
+        .map(|trait_ref| SourceReference {
+            target: trait_ref.clone(),
+            location: location.clone(),
+            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        })
+        .collect();
+
+    let relationships = EntityRelationshipData {
+        imports,
+        uses_types,
+        implements_trait: Some(trait_name_resolved.clone()),
+        for_type: Some(for_type_resolved.clone()),
+        ..Default::default()
+    };
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -458,6 +460,7 @@ pub fn handle_impl_trait_impl(
         .metadata(metadata)
         .language(Language::Rust)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build impl entity: {e}")))?;
 
@@ -539,6 +542,8 @@ struct ImplEntityComponents {
     metadata: EntityMetadata,
     /// Function signature if this is a method or associated function
     signature: Option<FunctionSignature>,
+    /// Typed relationship data (calls, uses_types, imports, call_aliases)
+    relationships: EntityRelationshipData,
 }
 
 /// Build a CodeEntity for impl block members (methods, associated constants)
@@ -578,6 +583,7 @@ fn build_impl_entity(
         .signature(components.signature)
         .language(Language::Rust)
         .file_path(file_path.to_path_buf())
+        .relationships(components.relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build entity: {e}")))
 }
@@ -689,6 +695,7 @@ fn extract_associated_constant(
             visibility,
             metadata,
             signature: None,
+            relationships: EntityRelationshipData::default(),
         },
     )
 }
@@ -794,27 +801,25 @@ fn extract_method(
             .insert("unsafe".to_string(), "true".to_string());
     }
 
-    // Store function calls if any exist
-    if !calls.is_empty() {
-        if let Ok(json) = serde_json::to_string(&calls) {
-            metadata.attributes.insert("calls".to_string(), json);
-        }
-    }
-
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
-
-    // Store imports for IMPORTS relationships (normalized to match entity qualified names)
+    // Build typed relationship data
     let imports = import_map.imported_paths_normalized(impl_ctx.package_name, impl_ctx.module_path);
-    if !imports.is_empty() {
-        if let Ok(json) = serde_json::to_string(&imports) {
-            metadata.attributes.insert("imports".to_string(), json);
-        }
-    }
+
+    // Compute call_aliases for trait impl methods
+    // For methods like "<TypeFQN as TraitFQN>::method", we add "TypeFQN::method" as an alias
+    // This enables UFCS resolution: calls like `type.method()` resolve to the trait impl method
+    let call_aliases = if impl_ctx.trait_name_resolved.is_some() {
+        vec![format!("{}::{}", impl_ctx.for_type_resolved, name)]
+    } else {
+        Vec::new()
+    };
+
+    let relationships = EntityRelationshipData {
+        calls,
+        uses_types: type_refs,
+        imports,
+        call_aliases,
+        ..Default::default()
+    };
 
     // Build signature
     let signature = FunctionSignature {
@@ -848,6 +853,7 @@ fn extract_method(
             visibility,
             metadata,
             signature: Some(signature),
+            relationships,
         },
     )
 }
@@ -897,20 +903,6 @@ fn extract_method_return_type(node: Node, source: &str) -> Option<String> {
         }
     }
     None
-}
-
-/// Get the ImportMap for a file by walking up to the AST root
-fn get_file_import_map(node: Node, source: &str) -> ImportMap {
-    // Walk up to the root node
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        current = parent;
-    }
-
-    // Parse imports from the root
-    // Note: Rust import parsing already stores absolute paths (crate::, std::, etc.)
-    // so no module_path resolution is needed
-    parse_file_imports(current, source, Language::Rust, None)
 }
 
 #[cfg(test)]

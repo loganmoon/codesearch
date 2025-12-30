@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::rust::handler_impls::function_handlers::handle_function_impl;
-use codesearch_core::entities::{EntityType, SourceReference, Visibility};
+use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
 fn test_simple_function() {
@@ -330,11 +330,9 @@ fn process<T: Clone + Send, U>(item: T, other: U) -> T {
     // U has no bounds, so should not be in generic_bounds
     assert!(!bounds.contains_key("U"));
 
-    // Check uses_types includes bound traits
-    let uses_types_json = entity.metadata.attributes.get("uses_types");
-    assert!(uses_types_json.is_some(), "Should have uses_types");
-    let uses_types: Vec<SourceReference> =
-        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    // Check uses_types includes bound traits (now in typed relationships)
+    let uses_types = &entity.relationships.uses_types;
+    assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
         uses_types.iter().any(|t| t.target.contains("Clone")),
         "uses_types should include Clone"
@@ -388,11 +386,9 @@ where
         "U should have Sync bound"
     );
 
-    // Check uses_types
-    let uses_types_json = entity.metadata.attributes.get("uses_types");
-    assert!(uses_types_json.is_some());
-    let uses_types: Vec<SourceReference> =
-        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    // Check uses_types (now in typed relationships)
+    let uses_types = &entity.relationships.uses_types;
+    assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
         uses_types.iter().any(|t| t.target.contains("Debug")),
         "uses_types should include Debug"
@@ -491,15 +487,12 @@ pub fn process_item<T: Processor>(item: &T) -> i32 {
         t_bounds
     );
 
-    // KEY TEST: Check that calls attribute contains a call to Processor::process
-    let calls_json = process_item
-        .metadata
-        .attributes
-        .get("calls")
-        .expect("process_item should have calls attribute - this is the bug!");
-
-    let calls: Vec<SourceReference> =
-        serde_json::from_str(calls_json).expect("calls should be valid JSON");
+    // KEY TEST: Check that calls (now in typed relationships) contains a call to Processor::process
+    let calls = &process_item.relationships.calls;
+    assert!(
+        !calls.is_empty(),
+        "process_item should have calls - this is the bug!"
+    );
 
     assert!(
         calls
@@ -584,14 +577,9 @@ pub fn process_item<T: Processor>(item: &T) -> i32 {
         t_bounds
     );
 
-    // Check that calls resolves to test_crate::Processor::process
-    let calls_json = process_item
-        .metadata
-        .attributes
-        .get("calls")
-        .expect("Should have calls attribute");
-    let calls: Vec<SourceReference> =
-        serde_json::from_str(calls_json).expect("calls should be valid JSON");
+    // Check that calls (now in typed relationships) resolves to test_crate::Processor::process
+    let calls = &process_item.relationships.calls;
+    assert!(!calls.is_empty(), "Should have calls");
 
     eprintln!("DEBUG with package: calls = {:?}", calls);
 

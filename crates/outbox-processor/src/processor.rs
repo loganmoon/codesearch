@@ -1164,12 +1164,14 @@ impl OutboxProcessor {
                 }
             };
 
+            let entity_count = cache.all().len();
             info!(
                 "Loaded {} entities into cache for relationship resolution",
-                cache.all().len()
+                entity_count
             );
 
-            // Run all resolvers using cached entity data
+            // Run all resolvers using cached entity data, tracking failures
+            let mut failed_resolvers: Vec<&str> = Vec::new();
             for resolver in &resolvers {
                 if let Err(e) =
                     resolve_relationships_generic(&cache, neo4j_client.as_ref(), *resolver).await
@@ -1180,11 +1182,13 @@ impl OutboxProcessor {
                         repository_id,
                         e
                     );
+                    failed_resolvers.push(resolver.name());
                     // Continue with other resolvers even if one fails
                 }
             }
 
             // Resolve external references (creates External stub nodes)
+            let mut external_resolution_failed = false;
             if let Err(e) = crate::neo4j_relationship_resolver::resolve_external_references(
                 &cache,
                 neo4j_client.as_ref(),
@@ -1196,6 +1200,7 @@ impl OutboxProcessor {
                     "Failed to resolve external references for repository {}: {}",
                     repository_id, e
                 );
+                external_resolution_failed = true;
                 // Continue even if external resolution fails
             }
 
@@ -1222,10 +1227,37 @@ impl OutboxProcessor {
                 );
             }
 
-            info!(
-                "Completed relationship resolution for repository {}",
-                repository_id
-            );
+            // Log completion with summary
+            if failed_resolvers.is_empty() && !external_resolution_failed {
+                info!(
+                    "Completed relationship resolution for repository {} ({} entities)",
+                    repository_id, entity_count
+                );
+            } else {
+                let failure_summary = if !failed_resolvers.is_empty() {
+                    format!(
+                        "{} resolver(s) failed: {}",
+                        failed_resolvers.len(),
+                        failed_resolvers.join(", ")
+                    )
+                } else {
+                    String::new()
+                };
+                let external_summary = if external_resolution_failed {
+                    "external resolution failed"
+                } else {
+                    ""
+                };
+                let separator = if !failure_summary.is_empty() && external_resolution_failed {
+                    "; "
+                } else {
+                    ""
+                };
+                warn!(
+                    "Completed relationship resolution for repository {} with warnings: {}{}{}",
+                    repository_id, failure_summary, separator, external_summary
+                );
+            }
         }
 
         Ok(())

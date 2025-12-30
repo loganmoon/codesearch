@@ -93,7 +93,7 @@ pub fn handle_module_impl(
         if has_body { "true" } else { "false" }.to_string(),
     );
 
-    // Store imports as JSON array (expected by ImportsResolver)
+    // Store imports as JSON array (used by imports_resolver)
     if !imports.is_empty() {
         if let Ok(imports_json) = serde_json::to_string(&imports) {
             metadata

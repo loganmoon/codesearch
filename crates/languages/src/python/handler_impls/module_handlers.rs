@@ -132,7 +132,7 @@ pub fn handle_module_impl(
     // Build metadata
     let mut metadata = EntityMetadata::default();
 
-    // Store imports as JSON array (expected by ImportsResolver)
+    // Store imports as JSON array (used by imports_resolver)
     if let Ok(imports_json) = serde_json::to_string(&imports) {
         metadata
             .attributes

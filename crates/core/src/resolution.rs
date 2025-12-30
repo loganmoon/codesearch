@@ -22,7 +22,8 @@ pub enum LookupStrategy {
     CallAliases,
     /// Match by simple name only if unambiguous (exactly one entity with that name)
     UniqueSimpleName,
-    /// Match by simple name (first match wins, may be ambiguous)
+    /// Match by simple name when multiple entities share the name.
+    /// First match wins; logs a warning on ambiguity but still creates the relationship.
     SimpleName,
 }
 
@@ -65,6 +66,28 @@ impl RelationshipDef {
             reciprocal_rel,
             lookup_strategies,
         }
+    }
+
+    /// Validate the relationship definition
+    ///
+    /// Returns an error message if the definition is invalid.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.name.is_empty() {
+            return Err("RelationshipDef name cannot be empty");
+        }
+        if self.source_types.is_empty() {
+            return Err("RelationshipDef source_types cannot be empty");
+        }
+        if self.target_types.is_empty() {
+            return Err("RelationshipDef target_types cannot be empty");
+        }
+        if self.forward_rel.is_empty() {
+            return Err("RelationshipDef forward_rel cannot be empty");
+        }
+        if self.lookup_strategies.is_empty() {
+            return Err("RelationshipDef lookup_strategies cannot be empty");
+        }
+        Ok(())
     }
 }
 
@@ -253,5 +276,60 @@ mod tests {
 
         // USES should target type entities
         assert!(!definitions::USES.target_types.is_empty());
+    }
+
+    #[test]
+    fn test_validation_valid() {
+        let def = RelationshipDef::new(
+            "test",
+            &[EntityType::Function],
+            &[EntityType::Method],
+            "TEST_REL",
+            None,
+            &[LookupStrategy::QualifiedName],
+        );
+        assert!(def.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_empty_name() {
+        let def = RelationshipDef::new(
+            "",
+            &[EntityType::Function],
+            &[EntityType::Method],
+            "TEST_REL",
+            None,
+            &[LookupStrategy::QualifiedName],
+        );
+        assert_eq!(def.validate(), Err("RelationshipDef name cannot be empty"));
+    }
+
+    #[test]
+    fn test_validation_empty_source_types() {
+        let def = RelationshipDef::new(
+            "test",
+            &[],
+            &[EntityType::Method],
+            "TEST_REL",
+            None,
+            &[LookupStrategy::QualifiedName],
+        );
+        assert_eq!(
+            def.validate(),
+            Err("RelationshipDef source_types cannot be empty")
+        );
+    }
+
+    #[test]
+    fn test_validation_all_standard_definitions() {
+        // All standard definitions should be valid
+        assert!(definitions::CALLS.validate().is_ok());
+        assert!(definitions::USES.validate().is_ok());
+        assert!(definitions::IMPLEMENTS.validate().is_ok());
+        assert!(definitions::ASSOCIATES.validate().is_ok());
+        assert!(definitions::EXTENDS.validate().is_ok());
+        assert!(definitions::INHERITS.validate().is_ok());
+        assert!(definitions::IMPORTS.validate().is_ok());
+        assert!(definitions::CONTAINS.validate().is_ok());
     }
 }

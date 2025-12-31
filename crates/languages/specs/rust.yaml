@@ -301,17 +301,24 @@ qualified_name_rules:
     tested_by: [basic_mod]
 
   - id: Q-MODULE
-    description: "Modules use double-colon separator"
+    description: "Modules are qualified under their parent module"
     pattern: "{parent}::{name}"
-    example: "test_crate::foo::bar"
+    examples:
+      - "test_crate::foo"  # direct child of crate root
+      - "test_crate::foo::bar"  # nested module (grandchild of crate root)
+    note: "{parent} is the full path of the parent module, recursively building the path"
     tested_by: [basic_mod, deep_module_nesting]
 
   - id: Q-ITEM
-    description: "Top-level items are qualified under their module"
+    description: "Top-level items are qualified under their full module path"
     pattern: "{module}::{name}"
     applies_to: [Function, Struct, Enum, Trait, Constant, TypeAlias, Macro]
-    example: "test_crate::MyStruct"
-    tested_by: [structs, free_functions]
+    examples:
+      - "test_crate::MyStruct"  # item at crate root
+      - "test_crate::submod::MyStruct"  # item in submodule
+      - "test_crate::a::b::MyStruct"  # item in nested submodule
+    note: "{module} is the full module path from crate root, not just the immediate parent"
+    tested_by: [structs, free_functions, deep_module_nesting]
 
   # ---------------------------------------------------------------------------
   # Impl block qualified names
@@ -319,13 +326,19 @@ qualified_name_rules:
   - id: Q-IMPL-INHERENT
     description: "Inherent impl blocks include 'impl' keyword"
     pattern: "{module}::impl {type_fqn}"
-    example: "test_crate::impl test_crate::Foo"
+    examples:
+      - "test_crate::impl test_crate::Foo"  # impl in crate root
+      - "test_crate::submod::impl test_crate::submod::Foo"  # impl in submodule
+    note: "{module} is where the impl is defined; {type_fqn} is the type's full path"
     tested_by: [methods]
 
   - id: Q-IMPL-TRAIT
     description: "Trait impl blocks use angle bracket notation"
     pattern: "{module}::<{type_fqn} as {trait_fqn}>"
-    example: "test_crate::<test_crate::MyHandler as test_crate::Handler>"
+    examples:
+      - "test_crate::<test_crate::MyHandler as test_crate::Handler>"
+      - "test_crate::submod::<test_crate::submod::Foo as test_crate::Handler>"  # impl in submodule
+    note: "{module} is where the impl is defined; {type_fqn} and {trait_fqn} are full paths"
     tested_by: [trait_impl]
 
   # ---------------------------------------------------------------------------
@@ -334,21 +347,28 @@ qualified_name_rules:
   - id: Q-INHERENT-METHOD
     description: "Inherent impl methods use Type::method format"
     pattern: "{type_fqn}::{name}"
-    example: "test_crate::Foo::method"
+    examples:
+      - "test_crate::Foo::method"  # method on type at crate root
+      - "test_crate::submod::Foo::method"  # method on type in submodule
+    note: "{type_fqn} includes full module path to the type"
     tested_by: [methods]
 
   - id: Q-TRAIT-IMPL-METHOD
     description: "Trait impl methods use UFCS format without module prefix"
     pattern: "<{type_fqn} as {trait_fqn}>::{name}"
-    example: "<test_crate::MyHandler as test_crate::Handler>::handle"
-    note: "No module prefix on the angle bracket expression"
+    examples:
+      - "<test_crate::MyHandler as test_crate::Handler>::handle"
+      - "<test_crate::submod::Foo as test_crate::Handler>::process"  # type in submodule
+    note: "No module prefix on the angle bracket expression; type/trait FQNs include full paths"
     tested_by: [trait_impl]
 
   - id: Q-ASSOC-TYPE
     description: "Associated types use Type::AssocType format"
     pattern: "{type_fqn}::{name}"
-    example: "test_crate::Counter::Item"
-    note: "Not UFCS format, even in trait impls"
+    examples:
+      - "test_crate::Counter::Item"
+      - "test_crate::submod::Counter::Item"  # associated type on type in submodule
+    note: "Not UFCS format, even in trait impls. {type_fqn} includes full module path."
     tested_by: [associated_types]
 
   # ---------------------------------------------------------------------------
@@ -357,7 +377,10 @@ qualified_name_rules:
   - id: Q-TRAIT-METHOD-DEF
     description: "Trait method definitions are qualified under the trait"
     pattern: "{trait_fqn}::{name}"
-    example: "test_crate::Handler::handle"
+    examples:
+      - "test_crate::Handler::handle"  # trait at crate root
+      - "test_crate::submod::Handler::handle"  # trait in submodule
+    note: "{trait_fqn} includes full module path to the trait"
     tested_by: [trait_def]
 
 

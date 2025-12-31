@@ -221,7 +221,8 @@ pub fn handle_impl_impl(
         .insert("for_type".to_string(), for_type.clone());
 
     // Build typed relationship data for inherent impl
-    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+    // a module-level relationship. They are collected by module_handlers.
 
     // Convert trait bound refs to SourceReference for uses_types
     let impl_location = SourceLocation::from_tree_sitter_node(impl_node);
@@ -236,7 +237,6 @@ pub fn handle_impl_impl(
         .collect();
 
     let relationships = EntityRelationshipData {
-        imports,
         uses_types,
         for_type: Some(for_type_resolved.clone()),
         ..Default::default()
@@ -422,7 +422,8 @@ pub fn handle_impl_trait_impl(
         .insert("for_type".to_string(), for_type.clone());
 
     // Build typed relationship data for trait impl
-    let imports = import_map.imported_paths_normalized(package_name, module_path.as_deref());
+    // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+    // a module-level relationship. They are collected by module_handlers.
 
     // Convert trait bound refs to SourceReference for uses_types
     let uses_types: Vec<SourceReference> = parsed_generics
@@ -436,7 +437,6 @@ pub fn handle_impl_trait_impl(
         .collect();
 
     let relationships = EntityRelationshipData {
-        imports,
         uses_types,
         implements_trait: Some(trait_name_resolved.clone()),
         for_type: Some(for_type_resolved.clone()),
@@ -654,7 +654,8 @@ fn extract_associated_constant(
                 impl_ctx.for_type_resolved
             )
         } else {
-            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
+            // Inherent impl uses UFCS format: <Type>::constant
+            format!("<{}>{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
         }
     };
 
@@ -710,8 +711,7 @@ fn extract_associated_constant(
 
 /// Extract an associated type from a trait impl block
 ///
-/// Associated types are extracted with a qualified name relative to the implementing type
-/// (e.g., `Counter::Item`), not using UFCS notation like methods.
+/// Associated types are extracted using UFCS notation: `<Type as Trait>::AssocType`
 fn extract_associated_type(
     type_node: Node,
     source: &str,
@@ -725,9 +725,13 @@ fn extract_associated_type(
         .and_then(|n| node_to_text(n, source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
-    // Build qualified name relative to the implementing type
-    // Associated types use Type::AssocType format, not UFCS
-    let qualified_name = format!("{}::{name}", impl_ctx.for_type_resolved);
+    // Build qualified name using UFCS format for trait impls
+    let qualified_name = if let Some(trait_name) = impl_ctx.trait_name_resolved {
+        format!("<{} as {trait_name}>::{name}", impl_ctx.for_type_resolved)
+    } else {
+        // Inherent type aliases (rare) use <Type>::Name format
+        format!("<{}>::{name}", impl_ctx.for_type_resolved)
+    };
 
     // Associated types in trait impls are effectively public
     // (they can only appear in trait impls, and trait impl items are public)
@@ -757,8 +761,8 @@ fn extract_associated_type(
         .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
 
-    // Associated types belong to the implementing type, not the impl block
-    let parent_scope = impl_ctx.for_type_resolved.to_string();
+    // Associated types belong to the impl block (for CONTAINS relationship)
+    let parent_scope = impl_ctx.qualified_name.to_string();
 
     CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -812,7 +816,8 @@ fn extract_method(
                 impl_ctx.for_type_resolved
             )
         } else {
-            format!("{}{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
+            // Inherent impl uses UFCS format: <Type>::method
+            format!("<{}>{bounds_suffix}::{name}", impl_ctx.for_type_resolved)
         }
     };
 
@@ -889,7 +894,8 @@ fn extract_method(
     }
 
     // Build typed relationship data
-    let imports = import_map.imported_paths_normalized(impl_ctx.package_name, impl_ctx.module_path);
+    // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+    // a module-level relationship. They are collected by module_handlers.
 
     // Compute call_aliases for trait impl methods
     // For methods like "<TypeFQN as TraitFQN>::method", we add "TypeFQN::method" as an alias
@@ -903,7 +909,6 @@ fn extract_method(
     let relationships = EntityRelationshipData {
         calls,
         uses_types: type_refs,
-        imports,
         call_aliases,
         ..Default::default()
     };

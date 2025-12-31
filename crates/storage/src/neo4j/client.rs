@@ -819,6 +819,9 @@ impl Neo4jClient {
             EntityType::TypeAlias => &["Entity", "TypeAlias"],
             EntityType::Macro => &["Entity", "Macro"],
             EntityType::Impl => &["Entity", "ImplBlock"],
+            EntityType::Static => &["Entity", "Static"],
+            EntityType::Union => &["Entity", "Union"],
+            EntityType::ExternBlock => &["Entity", "ExternBlock"],
         }
     }
 

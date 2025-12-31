@@ -1,7 +1,8 @@
-//! Tests for constant and static extraction handler
+//! Tests for constant and static extraction handlers
 
 use super::*;
 use crate::rust::handler_impls::constant_handlers::handle_constant_impl;
+use crate::rust::handler_impls::static_handlers::handle_static_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
 #[test]
@@ -48,13 +49,13 @@ fn test_static_item() {
 static GLOBAL: AtomicI32 = AtomicI32::new(0);
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
+    let entities = extract_with_handler(source, queries::STATIC_QUERY, handle_static_impl)
         .expect("Failed to extract static");
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "GLOBAL");
-    assert_eq!(entity.entity_type, EntityType::Constant);
+    assert_eq!(entity.entity_type, EntityType::Static);
     assert!(!entity.metadata.is_const);
     assert!(entity.metadata.is_static);
 }
@@ -65,13 +66,13 @@ fn test_static_mut() {
 static mut COUNTER: i32 = 0;
 "#;
 
-    let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
+    let entities = extract_with_handler(source, queries::STATIC_QUERY, handle_static_impl)
         .expect("Failed to extract static mut");
 
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "COUNTER");
-    assert_eq!(entity.entity_type, EntityType::Constant);
+    assert_eq!(entity.entity_type, EntityType::Static);
     assert!(entity.metadata.is_static);
 
     // Check mutable attribute
@@ -167,27 +168,45 @@ fn test_multiple_constants() {
     let source = r#"
 const A: i32 = 1;
 const B: i32 = 2;
-static C: i32 = 3;
 pub const D: i32 = 4;
 "#;
 
     let entities = extract_with_handler(source, queries::CONSTANT_QUERY, handle_constant_impl)
         .expect("Failed to extract multiple constants");
 
-    assert_eq!(entities.len(), 4);
+    assert_eq!(entities.len(), 3);
+
+    let names: Vec<&str> = entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(names.contains(&"A"));
+    assert!(names.contains(&"B"));
+    assert!(names.contains(&"D"));
+
+    // All are const items
+    let const_count = entities.iter().filter(|e| e.metadata.is_const).count();
+    assert_eq!(const_count, 3);
+}
+
+#[test]
+fn test_multiple_statics() {
+    let source = r#"
+static A: i32 = 1;
+static mut B: i32 = 2;
+pub static C: i32 = 3;
+"#;
+
+    let entities = extract_with_handler(source, queries::STATIC_QUERY, handle_static_impl)
+        .expect("Failed to extract multiple statics");
+
+    assert_eq!(entities.len(), 3);
 
     let names: Vec<&str> = entities.iter().map(|e| e.name.as_str()).collect();
     assert!(names.contains(&"A"));
     assert!(names.contains(&"B"));
     assert!(names.contains(&"C"));
-    assert!(names.contains(&"D"));
 
-    // Check const vs static
-    let const_count = entities.iter().filter(|e| e.metadata.is_const).count();
-    assert_eq!(const_count, 3); // A, B, D
-
+    // All are static items
     let static_count = entities.iter().filter(|e| e.metadata.is_static).count();
-    assert_eq!(static_count, 1); // C
+    assert_eq!(static_count, 3);
 }
 
 #[test]

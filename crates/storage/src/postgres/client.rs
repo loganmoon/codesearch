@@ -2131,6 +2131,9 @@ impl PostgresClient {
             EntityType::TypeAlias => vec!["TypeAlias"],
             EntityType::Macro => vec!["Macro"],
             EntityType::Impl => vec!["ImplBlock"],
+            EntityType::Static => vec!["Static"],
+            EntityType::Union => vec!["Union"],
+            EntityType::ExternBlock => vec!["ExternBlock"],
         };
 
         // Extract CONTAINS relationships using O(1) HashMap lookup

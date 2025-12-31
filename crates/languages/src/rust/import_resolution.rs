@@ -151,6 +151,65 @@ fn resolve_ufcs_call(
     format!("<{resolved_type} as {resolved_trait}>::{method_name}")
 }
 
+/// Well-known std types that should never be prefixed with a local crate name.
+/// These are foreign types from the standard library.
+const STD_TYPES: &[&str] = &[
+    // Primitive types (not really std but also shouldn't be prefixed)
+    "bool",
+    "char",
+    "str",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "f32",
+    "f64",
+    // Common std types
+    "String",
+    "Vec",
+    "Box",
+    "Rc",
+    "Arc",
+    "Cell",
+    "RefCell",
+    "Option",
+    "Result",
+    "Some",
+    "None",
+    "Ok",
+    "Err",
+    "HashMap",
+    "HashSet",
+    "BTreeMap",
+    "BTreeSet",
+    "Path",
+    "PathBuf",
+    "OsStr",
+    "OsString",
+    "Cow",
+    "Mutex",
+    "RwLock",
+    "Pin",
+    "PhantomData",
+    "Ordering",
+    "Duration",
+    "Instant",
+    "SystemTime",
+];
+
+/// Check if a type name is a well-known std type that shouldn't be prefixed
+fn is_std_type(name: &str) -> bool {
+    STD_TYPES.contains(&name)
+}
+
 /// Resolve a Rust reference with path normalization
 ///
 /// This extends resolve_reference() to handle crate::, self::, super:: prefixes.
@@ -172,6 +231,11 @@ pub fn resolve_rust_reference(
     // Handle UFCS (Universal Function Call Syntax) patterns: <Type as Trait>::method
     if name.starts_with('<') {
         return resolve_ufcs_call(name, import_map, package_name, current_module);
+    }
+
+    // Check if this is a well-known std type - don't prefix with local crate name
+    if is_std_type(name) {
+        return name.to_string();
     }
 
     // First normalize any Rust-relative paths

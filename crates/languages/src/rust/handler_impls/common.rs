@@ -46,6 +46,7 @@ pub fn extract_visibility(query_match: &QueryMatch, query: &Query) -> Visibility
 /// - `pub(crate)` -> Internal
 /// - `pub(super)` -> Internal (restricted to parent module)
 /// - `pub(in path)` -> Internal (restricted to specific path)
+/// - `pub(self)` -> Private (only visible in current module = effectively private)
 /// - No visibility modifier -> Private
 pub fn extract_visibility_from_node(vis_node: Node) -> Visibility {
     // Check if this is a visibility_modifier node
@@ -56,24 +57,29 @@ pub fn extract_visibility_from_node(vis_node: Node) -> Visibility {
     // Walk through the visibility modifier's children to determine the type
     let mut cursor = vis_node.walk();
     let mut has_pub = false;
-    let mut has_restriction = false;
+    let mut has_self = false;
+    let mut has_other_restriction = false;
 
     for child in vis_node.children(&mut cursor) {
         match child.kind() {
             visibility_keywords::PUB => has_pub = true,
-            // Any of these indicate a restricted visibility: pub(crate), pub(super), pub(in path)
+            // pub(self) means visibility restricted to current module = effectively private
+            visibility_keywords::SELF => has_self = true,
+            // These indicate broader restricted visibility: pub(crate), pub(super), pub(in path)
             visibility_keywords::CRATE
             | visibility_keywords::SUPER
-            | visibility_keywords::SELF
             | visibility_keywords::IN
             | node_kinds::SCOPED_IDENTIFIER
-            | node_kinds::IDENTIFIER => has_restriction = true,
+            | node_kinds::IDENTIFIER => has_other_restriction = true,
             _ => {}
         }
     }
 
     if has_pub {
-        if has_restriction {
+        if has_self {
+            // pub(self) -> Private (only visible in current module)
+            Visibility::Private
+        } else if has_other_restriction {
             // pub(crate), pub(super), pub(in path) -> Internal
             Visibility::Internal
         } else {

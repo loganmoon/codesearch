@@ -148,19 +148,11 @@ pub fn handle_struct_impl(
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
-
         // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
             uses_types: strings_to_source_refs(&uses_types_strs),
-            imports: imports.clone(),
             ..Default::default()
         };
 
@@ -259,19 +251,11 @@ pub fn handle_enum_impl(
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
-
         // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
             uses_types: strings_to_source_refs(&uses_types_strs),
-            imports: imports.clone(),
             ..Default::default()
         };
 
@@ -401,20 +385,12 @@ pub fn handle_trait_impl(
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
-
         // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
             uses_types: strings_to_source_refs(&uses_types_strs),
             supertraits: supertraits.clone(),
-            imports: imports.clone(),
             ..Default::default()
         };
 

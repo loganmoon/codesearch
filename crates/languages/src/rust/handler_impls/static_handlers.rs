@@ -1,6 +1,6 @@
-//! Handler for extracting Rust constant and static items
+//! Handler for extracting Rust static items
 //!
-//! This module processes tree-sitter query matches for Rust const and static
+//! This module processes tree-sitter query matches for Rust static
 //! declarations and builds EntityData instances.
 
 #![deny(warnings)]
@@ -14,16 +14,15 @@ use crate::rust::handler_impls::common::{
     extract_preceding_doc_comments, extract_visibility, find_capture_node, node_to_text,
     require_capture_node,
 };
-use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
-/// Process a constant or static query match and extract entity data
+/// Process a static query match and extract entity data
 #[allow(clippy::too_many_arguments)]
-pub fn handle_constant_impl(
+pub fn handle_static_impl(
     query_match: &QueryMatch,
     query: &Query,
     source: &str,
@@ -33,11 +32,11 @@ pub fn handle_constant_impl(
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
-    // Get the constant node
-    let constant_node = require_capture_node(query_match, query, "constant")?;
+    // Get the static node
+    let static_node = require_capture_node(query_match, query, "static")?;
 
-    // Skip constants inside impl blocks - those are handled by the impl extractor
-    if let Some(parent) = constant_node.parent() {
+    // Skip statics inside impl blocks - those are handled by the impl extractor
+    if let Some(parent) = static_node.parent() {
         if parent.kind() == "declaration_list" {
             // Check if the declaration_list is inside an impl_item
             if let Some(grandparent) = parent.parent() {
@@ -61,33 +60,32 @@ pub fn handle_constant_impl(
     };
 
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, constant_node, "rust")?;
+    let components = extract_common_components(&ctx, "name", static_node, "rust")?;
 
     // Extract Rust-specific: visibility, documentation, content
     let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(constant_node, source);
-    let content = node_to_text(constant_node, source).ok();
+    let documentation = extract_preceding_doc_comments(static_node, source);
+    let content = node_to_text(static_node, source).ok();
 
-    // Determine if this is a const item (always true for this handler)
-    let is_const = find_capture_node(query_match, query, "const_kw").is_some();
+    // Check for mutable_specifier (static mut)
+    let is_mut = find_capture_node(query_match, query, "mut").is_some();
 
     // Extract type
-    let const_type = find_capture_node(query_match, query, "type")
+    let static_type = find_capture_node(query_match, query, "type")
         .and_then(|node| node_to_text(node, source).ok());
 
     // Extract value
     let value = find_capture_node(query_match, query, "value")
         .and_then(|node| node_to_text(node, source).ok());
 
-    // Build metadata (is_const should be true for const items)
+    // Build metadata
     let mut metadata = EntityMetadata {
-        is_const,
-        is_static: false,
+        is_static: true,
         ..Default::default()
     };
 
     // Add type if present
-    if let Some(ty) = const_type {
+    if let Some(ty) = static_type {
         metadata.attributes.insert("type".to_string(), ty);
     }
 
@@ -96,11 +94,18 @@ pub fn handle_constant_impl(
         metadata.attributes.insert("value".to_string(), val);
     }
 
+    // Add mutable flag for static mut
+    if is_mut {
+        metadata
+            .attributes
+            .insert("mutable".to_string(), "true".to_string());
+    }
+
     // Build the entity using the shared helper
     let entity = build_entity(
         components,
         EntityDetails {
-            entity_type: EntityType::Constant,
+            entity_type: EntityType::Static,
             language: Language::Rust,
             visibility: Some(visibility),
             documentation,

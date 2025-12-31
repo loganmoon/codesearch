@@ -90,25 +90,49 @@ pub const MODULE_QUERY: &str = r#"
 ) @module
 "#;
 
-/// Query for extracting constant and static items
+/// Query for extracting constant items
 pub const CONSTANT_QUERY: &str = r#"
-[
-  (const_item
-    (visibility_modifier)? @vis
-    "const" @const
-    name: (identifier) @name
-    type: (_) @type
-    value: (_) @value
-  ) @constant
-  (static_item
-    (visibility_modifier)? @vis
-    "static" @static
-    (mutable_specifier)? @mut
-    name: (identifier) @name
-    type: (_) @type
-    value: (_) @value
-  ) @constant
-]
+(const_item
+  (visibility_modifier)? @vis
+  "const" @const_kw
+  name: (identifier) @name
+  type: (_) @type
+  value: (_) @value
+) @constant
+"#;
+
+/// Query for extracting static items
+pub const STATIC_QUERY: &str = r#"
+(static_item
+  (visibility_modifier)? @vis
+  "static" @static_kw
+  (mutable_specifier)? @mut
+  name: (identifier) @name
+  type: (_) @type
+  value: (_) @value
+) @static
+"#;
+
+/// Query for extracting union definitions
+pub const UNION_QUERY: &str = r#"
+(union_item
+  (visibility_modifier)? @vis
+  "union"
+  name: (type_identifier) @name
+  type_parameters: (type_parameters)? @generics
+  (where_clause)? @where
+  body: (field_declaration_list) @fields
+) @union
+"#;
+
+/// Query for extracting extern blocks
+pub const EXTERN_BLOCK_QUERY: &str = r#"
+(extern_block
+  (extern_modifier
+    (string_literal)? @abi
+  )
+  body: (declaration_list) @extern_body
+) @extern_block
 "#;
 
 /// Query for extracting type aliases

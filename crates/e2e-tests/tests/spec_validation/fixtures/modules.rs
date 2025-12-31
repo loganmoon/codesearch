@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 /// Basic module declaration with file-based module
@@ -15,14 +16,17 @@ pub static BASIC_MOD: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::foo",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::foo::bar",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -56,18 +60,22 @@ fn private_fn() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::public_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::crate_fn",
+            visibility: Some(Visibility::Internal),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::private_fn",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
@@ -105,18 +113,22 @@ pub static USE_IMPORTS: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::utils::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -151,14 +163,17 @@ pub static REEXPORTS: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::internal::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -200,22 +215,27 @@ pub mod level1 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1::level2",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1::level2::level3",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::level1::level2::level3::deep_function",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -275,30 +295,37 @@ pub fn handle_request() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::api",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::api::handlers",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::api::api_root",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::api::handlers::handle_request",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::utils::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -368,26 +395,32 @@ pub mod child {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::child",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::child::grandchild",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::root_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::child::child_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::child::grandchild::grandchild_fn",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

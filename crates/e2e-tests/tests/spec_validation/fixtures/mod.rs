@@ -10,6 +10,7 @@
 //! - edge_cases: Edge cases (UFCS, const generics, closures, etc.)
 //! - workspace: Multi-crate workspace scenarios
 
+use codesearch_core::entities::Visibility;
 use codesearch_e2e_tests::common::spec_validation::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
 };

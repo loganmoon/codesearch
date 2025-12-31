@@ -1,5 +1,7 @@
 //! Schema types for specification-based graph validation tests
 
+use codesearch_core::entities::Visibility;
+
 /// Entity type for graph validation tests
 ///
 /// This enum provides compile-time type safety for entity types,
@@ -45,17 +47,11 @@ pub enum RelationshipKind {
     Contains,
     Calls,
     Implements,
-    ImplementedBy,
     Associates,
-    AssociatedWith,
     ExtendsInterface,
-    ExtendedBy,
     InheritsFrom,
-    HasSubclass,
     Uses,
-    UsedBy,
     Imports,
-    ImportedBy,
 }
 
 impl RelationshipKind {
@@ -65,17 +61,11 @@ impl RelationshipKind {
             RelationshipKind::Contains => "CONTAINS",
             RelationshipKind::Calls => "CALLS",
             RelationshipKind::Implements => "IMPLEMENTS",
-            RelationshipKind::ImplementedBy => "IMPLEMENTED_BY",
             RelationshipKind::Associates => "ASSOCIATES",
-            RelationshipKind::AssociatedWith => "ASSOCIATED_WITH",
             RelationshipKind::ExtendsInterface => "EXTENDS_INTERFACE",
-            RelationshipKind::ExtendedBy => "EXTENDED_BY",
             RelationshipKind::InheritsFrom => "INHERITS_FROM",
-            RelationshipKind::HasSubclass => "HAS_SUBCLASS",
             RelationshipKind::Uses => "USES",
-            RelationshipKind::UsedBy => "USED_BY",
             RelationshipKind::Imports => "IMPORTS",
-            RelationshipKind::ImportedBy => "IMPORTED_BY",
         }
     }
 }
@@ -116,12 +106,14 @@ pub struct Fixture {
 /// An expected entity in the graph
 ///
 /// Uses strongly-typed `EntityKind` to prevent typos in test specifications.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpectedEntity {
     /// Entity type (e.g., Function, Struct, Trait)
     pub kind: EntityKind,
     /// Fully qualified name (e.g., "test_crate::module::function")
     pub qualified_name: &'static str,
+    /// Expected visibility (None = don't validate, Some = must match)
+    pub visibility: Option<Visibility>,
 }
 
 /// An expected relationship in the graph
@@ -144,6 +136,7 @@ pub struct ActualEntity {
     pub entity_type: String,
     pub qualified_name: String,
     pub name: String,
+    pub visibility: Option<Visibility>,
 }
 
 /// An actual relationship retrieved from Neo4j

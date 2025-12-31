@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 /// Free functions with calls between them
@@ -21,14 +22,17 @@ pub fn callee() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::callee",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -71,22 +75,27 @@ impl Foo {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Foo",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::impl test_crate::Foo",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Foo::method",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::Foo::associated",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -135,18 +144,22 @@ pub fn main_caller() {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::main_caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::utils::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -216,31 +229,38 @@ impl Counter {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Counter",
+            visibility: Some(Visibility::Public),
         },
         // Both impl blocks merge into a single ImplBlock entity
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::impl test_crate::Counter",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Counter::new",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Counter::with_value",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Counter::increment",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Counter::get",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -304,22 +324,27 @@ impl AsyncService {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::async_caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::async_callee",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::AsyncService",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::AsyncService::process",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -404,34 +429,42 @@ pub fn create_config() -> Config {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::ConfigBuilder",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Config",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::ConfigBuilder::new",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::ConfigBuilder::name",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::ConfigBuilder::value",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::ConfigBuilder::build",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_config",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -502,18 +535,22 @@ pub fn mutually_recursive_b(n: u32) -> u32 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::factorial",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::mutually_recursive_a",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::mutually_recursive_b",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

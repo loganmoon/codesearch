@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 pub static CONSTANTS: Fixture = Fixture {
@@ -17,14 +18,17 @@ pub static GLOBAL_VALUE: i32 = 42;
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
             qualified_name: "test_crate::MAX_SIZE",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
             qualified_name: "test_crate::GLOBAL_VALUE",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -60,10 +64,12 @@ macro_rules! my_macro {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Macro,
             qualified_name: "test_crate::my_macro",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[ExpectedRelationship {

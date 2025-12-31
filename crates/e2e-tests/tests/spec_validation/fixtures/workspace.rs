@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 pub static WORKSPACE_BASIC: Fixture = Fixture {
@@ -56,23 +57,28 @@ pub fn process_core(ct: CoreType) -> i32 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "my_core",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "my_core::CoreType",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "my_core::core_function",
+            visibility: Some(Visibility::Public),
         },
         // Utils crate entities
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "my_utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "my_utils::process_core",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

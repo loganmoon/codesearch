@@ -369,16 +369,7 @@ pub async fn resolve_external_references(
                 let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
-                relationships.push((
-                    entity.entity_id.clone(),
-                    ext_id.clone(),
-                    "IMPLEMENTS".to_string(),
-                ));
-                relationships.push((
-                    ext_id,
-                    entity.entity_id.clone(),
-                    "IMPLEMENTED_BY".to_string(),
-                ));
+                relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
             }
         }
 
@@ -390,10 +381,9 @@ pub async fn resolve_external_references(
                 external_refs.insert(ext_ref);
                 relationships.push((
                     entity.entity_id.clone(),
-                    ext_id.clone(),
+                    ext_id,
                     "INHERITS_FROM".to_string(),
                 ));
-                relationships.push((ext_id, entity.entity_id.clone(), "HAS_SUBCLASS".to_string()));
             }
         }
 
@@ -405,16 +395,7 @@ pub async fn resolve_external_references(
                         let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref.target));
                         let ext_id = ext_ref.entity_id();
                         external_refs.insert(ext_ref);
-                        relationships.push((
-                            entity.entity_id.clone(),
-                            ext_id.clone(),
-                            "USES".to_string(),
-                        ));
-                        relationships.push((
-                            ext_id,
-                            entity.entity_id.clone(),
-                            "USED_BY".to_string(),
-                        ));
+                        relationships.push((entity.entity_id.clone(), ext_id, "USES".to_string()));
                     }
                 }
             }
@@ -428,16 +409,7 @@ pub async fn resolve_external_references(
                         let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref.target));
                         let ext_id = ext_ref.entity_id();
                         external_refs.insert(ext_ref);
-                        relationships.push((
-                            entity.entity_id.clone(),
-                            ext_id.clone(),
-                            "CALLS".to_string(),
-                        ));
-                        relationships.push((
-                            ext_id,
-                            entity.entity_id.clone(),
-                            "CALLED_BY".to_string(),
-                        ));
+                        relationships.push((entity.entity_id.clone(), ext_id, "CALLS".to_string()));
                     }
                 }
             }
@@ -453,13 +425,8 @@ pub async fn resolve_external_references(
                         external_refs.insert(ext_ref);
                         relationships.push((
                             entity.entity_id.clone(),
-                            ext_id.clone(),
-                            "IMPORTS".to_string(),
-                        ));
-                        relationships.push((
                             ext_id,
-                            entity.entity_id.clone(),
-                            "IMPORTED_BY".to_string(),
+                            "IMPORTS".to_string(),
                         ));
                     }
                 }

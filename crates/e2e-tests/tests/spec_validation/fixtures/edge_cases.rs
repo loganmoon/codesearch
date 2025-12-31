@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 /// Tests that `<Type as Trait>::method()` syntax creates proper impl block structure
@@ -35,26 +36,32 @@ pub fn use_ufcs(data: &Data) -> i32 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Processor",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_ufcs",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Data as test_crate::Processor>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::Data as test_crate::Processor>::process",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -127,18 +134,22 @@ pub fn create_large() -> FixedArray<1000> {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::FixedArray",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_small",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_large",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -199,29 +210,35 @@ impl Debug for MyType {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Printable",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Debug",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MyType",
+            visibility: Some(Visibility::Public),
         },
         // Blanket impl creates an impl block with generic parameter in name
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name:
                 "test_crate::<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
+            visibility: Some(Visibility::Public),
         },
         // Concrete impl for MyType
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::MyType as test_crate::Debug>",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -286,18 +303,22 @@ pub fn is_quit(msg: &Message) -> bool {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Message",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::process_message",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::is_quit",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -360,22 +381,27 @@ pub fn create_special() -> SpecialType {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::special",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::impl::special::SpecialType",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::impl::special::create_special",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_special",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -425,18 +451,22 @@ pub fn with_captured() -> i32 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::apply",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::with_captured",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

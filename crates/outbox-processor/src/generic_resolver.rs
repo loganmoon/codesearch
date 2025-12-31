@@ -370,18 +370,9 @@ impl RelationshipResolver for GenericResolver {
                     // Forward edge
                     relationships.push((
                         source.entity_id.clone(),
-                        target_id.clone(),
+                        target_id,
                         self.def.forward_rel.to_string(),
                     ));
-
-                    // Reciprocal edge (if defined)
-                    if let Some(reciprocal) = self.def.reciprocal_rel {
-                        relationships.push((
-                            target_id,
-                            source.entity_id.clone(),
-                            reciprocal.to_string(),
-                        ));
-                    }
                 } else {
                     debug!(
                         "GenericResolver[{}]: unresolved reference {} -> {}",

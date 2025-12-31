@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 pub static STRUCTS: Fixture = Fixture {
@@ -22,14 +23,17 @@ pub struct Wrapper {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Config",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Wrapper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -70,10 +74,12 @@ pub enum Status {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Status",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[ExpectedRelationship {
@@ -99,14 +105,17 @@ pub type Result<T> = std::result::Result<T, Error>;
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Error",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Result",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -160,22 +169,27 @@ pub struct NamedPoint {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::UnitMarker",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Point",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::UserId",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::NamedPoint",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -239,18 +253,22 @@ pub enum Message {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::RequestData",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::ErrorDetails",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Message",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -315,22 +333,27 @@ where
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Container",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Pair",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::BoundedContainer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleConstraints",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -387,22 +410,27 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Borrowed",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleBorrows",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::borrow_data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::longest",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

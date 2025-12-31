@@ -3,7 +3,9 @@
 use super::super::containers::TestNeo4j;
 use super::schema::{ActualEntity, ActualRelationship};
 use anyhow::{anyhow, Context, Result};
+use codesearch_core::entities::Visibility;
 use neo4rs::{query, Graph};
+use std::str::FromStr;
 
 /// Query all entities from Neo4j for a given repository
 pub async fn get_all_entities(neo4j: &TestNeo4j, repository_id: &str) -> Result<Vec<ActualEntity>> {
@@ -18,7 +20,8 @@ pub async fn get_all_entities(neo4j: &TestNeo4j, repository_id: &str) -> Result<
         RETURN n.id AS entity_id,
                labels(n) AS labels,
                n.qualified_name AS qualified_name,
-               n.name AS name
+               n.name AS name,
+               n.visibility AS visibility
         "#,
     )
     .param("repository_id", repository_id);
@@ -42,6 +45,10 @@ pub async fn get_all_entities(neo4j: &TestNeo4j, repository_id: &str) -> Result<
                 let name: String = row
                     .get::<String>("name")
                     .with_context(|| format!("Failed to get name for entity {entity_id}"))?;
+                let visibility_str: Option<String> = row.get::<String>("visibility").ok();
+                let visibility = visibility_str
+                    .as_ref()
+                    .and_then(|s| Visibility::from_str(s).ok());
 
                 // Extract entity type from labels (skip "Entity" label)
                 let entity_type = labels.into_iter().find(|l| l != "Entity").ok_or_else(|| {
@@ -56,6 +63,7 @@ pub async fn get_all_entities(neo4j: &TestNeo4j, repository_id: &str) -> Result<
                     entity_type,
                     qualified_name,
                     name,
+                    visibility,
                 });
             }
             Ok(None) => break, // Normal end of results

@@ -163,37 +163,37 @@ pub struct EntityMetadata {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EntityRelationshipData {
     /// Function/method calls made by this entity.
-    /// Resolved to CALLS/CALLED_BY relationships in Neo4j.
+    /// Resolved to CALLS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<SourceReference>,
 
     /// Type references used by this entity (parameters, return types, field types).
-    /// Resolved to USES/USED_BY relationships in Neo4j.
+    /// Resolved to USES relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uses_types: Vec<SourceReference>,
 
     /// Imported modules/entities.
-    /// Resolved to IMPORTS/IMPORTED_BY relationships in Neo4j.
+    /// Resolved to IMPORTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<String>,
 
     /// Trait/interface being implemented (for impl blocks).
-    /// Resolved to IMPLEMENTS/IMPLEMENTED_BY relationships in Neo4j.
+    /// Resolved to IMPLEMENTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implements_trait: Option<String>,
 
     /// Type this impl block is for (for ASSOCIATES relationship).
-    /// Resolved to ASSOCIATES/ASSOCIATED_WITH relationships in Neo4j.
+    /// Resolved to ASSOCIATES relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub for_type: Option<String>,
 
     /// Parent class/interface for inheritance (JS/TS extends, Python bases).
-    /// Resolved to INHERITS_FROM/HAS_SUBCLASS relationships in Neo4j.
+    /// Resolved to INHERITS_FROM relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extends: Vec<String>,
 
     /// Trait supertraits (Rust trait bounds like `trait Foo: Bar`).
-    /// Resolved to EXTENDS_INTERFACE/EXTENDED_BY relationships in Neo4j.
+    /// Resolved to EXTENDS_INTERFACE relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supertraits: Vec<String>,
 

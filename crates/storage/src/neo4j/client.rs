@@ -17,19 +17,12 @@ pub enum Neo4jEdition {
 pub const ALLOWED_RELATIONSHIP_TYPES: &[&str] = &[
     "CONTAINS",
     "IMPLEMENTS",
-    "IMPLEMENTED_BY",
     "ASSOCIATES",
-    "ASSOCIATED_WITH",
     "EXTENDS_INTERFACE",
-    "EXTENDED_BY",
     "INHERITS_FROM",
-    "HAS_SUBCLASS",
     "USES",
-    "USED_BY",
     "CALLS",
-    "CALLED_BY",
     "IMPORTS",
-    "IMPORTED_BY",
     // Resolution graph relationships
     "RESOLVES_TO",  // Reference -> Import (same file resolution)
     "IMPORTS_FROM", // Import -> Entity (cross-file resolution)

@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 pub static MULTI_HOP_REEXPORTS: Fixture = Fixture {
@@ -36,22 +37,27 @@ pub fn actual_function() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal::deep",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::internal::deep::actual_function",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
@@ -114,22 +120,27 @@ pub fn helper_b() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::helpers",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::helpers::helper_a",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::helpers::helper_b",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
@@ -208,22 +219,27 @@ pub fn call_trait(d: &Data) -> String {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Formatter",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::call_inherent",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::call_trait",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -319,34 +335,42 @@ impl Widget {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::types",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::widget_display",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::widget_builder",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::types::Widget",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::types::Widget::display",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::types::Widget::new",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -418,26 +442,32 @@ pub fn use_string_producer(p: &StringProducer) -> String {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Producer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::IntProducer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::StringProducer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_int_producer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_string_producer",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -513,22 +543,27 @@ pub fn create_unknown() -> Option<i32> {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Option",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_some",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_none",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_unknown",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -616,30 +651,37 @@ pub fn process_and_validate<T: Processor + Validator>(item: &T) -> (i32, bool) {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Processor",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Validator",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::process_item",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::validate_item",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::process_and_validate",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -736,39 +778,48 @@ pub fn create_with_value() -> AppConfig {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::RawConfig",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Config",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::AppConfig",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Settings",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_settings",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_with_value",
+            visibility: Some(Visibility::Public),
         },
         // Methods are on RawConfig, accessed through aliases
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::RawConfig::new",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::RawConfig::with_value",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -864,34 +915,42 @@ pub fn connect() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network::http",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network::tcp",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::http::get",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::http::post",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::tcp::connect",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::make_requests",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -997,22 +1056,27 @@ pub fn count_words_string(s: String) -> usize {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::StringExt",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::check_string",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::check_str",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::count_words_string",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

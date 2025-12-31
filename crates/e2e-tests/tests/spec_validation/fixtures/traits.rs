@@ -2,6 +2,7 @@
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 pub static TRAIT_DEF: Fixture = Fixture {
@@ -19,18 +20,22 @@ pub trait Handler {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Handler",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::handle",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::with_default",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -75,22 +80,27 @@ impl Handler for MyHandler {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Handler",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MyHandler",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::MyHandler as test_crate::Handler>::handle",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -143,14 +153,17 @@ pub trait Extended: Base {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Base",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Extended",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -207,26 +220,32 @@ impl Iterator for Counter {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Iterator",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Counter",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Counter as test_crate::Iterator>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::Counter as test_crate::Iterator>::next",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Counter::Item",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -310,46 +329,57 @@ impl Clone for Value {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Display",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Debug",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Clone",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Value",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Display>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Debug>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Clone>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::Value as test_crate::Display>::display",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::Value as test_crate::Debug>::debug",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::Value as test_crate::Clone>::clone",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -450,26 +480,32 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Transformer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::BoundedTransformer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::StringToInt",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "<test_crate::StringToInt as test_crate::Transformer>::transform",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

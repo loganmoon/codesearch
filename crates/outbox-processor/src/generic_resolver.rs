@@ -27,6 +27,18 @@ use tracing::{debug, trace, warn};
 
 use crate::neo4j_relationship_resolver::{EntityCache, RelationshipResolver};
 
+/// Extract the simple name (last segment) from a qualified reference.
+///
+/// Handles both Rust-style `::` separators and dot notation `.` separators.
+/// Returns the original reference if no separator is found.
+fn extract_simple_name(reference: &str) -> &str {
+    reference
+        .rsplit("::")
+        .next()
+        .or_else(|| reference.rsplit('.').next())
+        .unwrap_or(reference)
+}
+
 /// Lookup maps for resolving entity references
 ///
 /// Contains multiple lookup strategies for finding target entities
@@ -270,26 +282,14 @@ impl GenericResolver {
                     }
                 }
                 LookupStrategy::UniqueSimpleName => {
-                    // Extract simple name (last segment after :: or .)
-                    let simple_name = reference
-                        .rsplit("::")
-                        .next()
-                        .or_else(|| reference.rsplit('.').next())
-                        .unwrap_or(reference);
-
+                    let simple_name = extract_simple_name(reference);
                     if let Some(id) = maps.unique_simple_name.get(simple_name) {
                         trace!("  [UniqueSimpleName] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::SimpleName => {
-                    // Extract simple name (last segment after :: or .)
-                    let simple_name = reference
-                        .rsplit("::")
-                        .next()
-                        .or_else(|| reference.rsplit('.').next())
-                        .unwrap_or(reference);
-
+                    let simple_name = extract_simple_name(reference);
                     // First match wins (may be ambiguous)
                     if let Some(ids) = maps.all_simple_names.get(simple_name) {
                         if !ids.is_empty() {

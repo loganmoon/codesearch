@@ -551,7 +551,16 @@ fn extract_call_path_from_scoped_identifier(node: Node, source: &str) -> Option<
     "#;
 
     let language = tree_sitter_rust::LANGUAGE.into();
-    let query = Query::new(&language, query_source).ok()?;
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(e) => {
+            warn!(
+                "Failed to compile hardcoded tree-sitter query for scoped_identifier: {}",
+                e
+            );
+            return None;
+        }
+    };
 
     let mut cursor = tree_sitter::QueryCursor::new();
     let mut segments = Vec::new();

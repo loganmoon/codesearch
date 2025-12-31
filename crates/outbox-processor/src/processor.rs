@@ -1137,10 +1137,16 @@ impl OutboxProcessor {
                         repository_id
                     );
                     // Clear the flag since we can't resolve without a database
-                    let _ = self
+                    if let Err(e) = self
                         .postgres_client
                         .set_pending_relationship_resolution(repository_id, false)
-                        .await;
+                        .await
+                    {
+                        warn!(
+                            "Failed to clear pending_relationship_resolution flag for repository {}: {}",
+                            repository_id, e
+                        );
+                    }
                     continue;
                 }
             };
@@ -1156,10 +1162,16 @@ impl OutboxProcessor {
                         repository_id, e
                     );
                     // Clear the pending flag to prevent infinite retry loops
-                    let _ = self
+                    if let Err(e) = self
                         .postgres_client
                         .set_pending_relationship_resolution(repository_id, false)
-                        .await;
+                        .await
+                    {
+                        warn!(
+                            "Failed to clear pending_relationship_resolution flag for repository {}: {}",
+                            repository_id, e
+                        );
+                    }
                     continue;
                 }
             };

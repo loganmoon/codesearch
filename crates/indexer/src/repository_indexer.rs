@@ -427,7 +427,13 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
     // Read file content
     let content = match std::fs::read_to_string(file_path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            debug!(
+                "Failed to read file for import extraction {:?}: {}",
+                file_path, e
+            );
+            return Vec::new();
+        }
     };
 
     // Parse with tree-sitter
@@ -436,12 +442,16 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
         .set_language(&tree_sitter_rust::LANGUAGE.into())
         .is_err()
     {
+        debug!("Failed to set parser language for {:?}", file_path);
         return Vec::new();
     }
 
     let tree = match parser.parse(&content, None) {
         Some(t) => t,
-        None => return Vec::new(),
+        None => {
+            debug!("Failed to parse file for import extraction {:?}", file_path);
+            return Vec::new();
+        }
     };
 
     let root = tree.root_node();

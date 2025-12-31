@@ -660,7 +660,13 @@ fn extract_associated_constant(
     };
 
     // Extract visibility
-    let visibility = extract_method_visibility(const_node);
+    // Trait impl constants are effectively public (they can't have visibility modifiers)
+    // Inherent impl constants use the explicit visibility or default to private
+    let visibility = if impl_ctx.trait_name_resolved.is_some() {
+        Visibility::Public
+    } else {
+        extract_method_visibility(const_node)
+    };
 
     // Extract type
     let const_type = const_node
@@ -898,10 +904,11 @@ fn extract_method(
     // a module-level relationship. They are collected by module_handlers.
 
     // Compute call_aliases for trait impl methods
-    // For methods like "<TypeFQN as TraitFQN>::method", we add "TypeFQN::method" as an alias
+    // For methods like "<TypeFQN as TraitFQN>::method", we add "<TypeFQN>::method" as an alias
     // This enables UFCS resolution: calls like `type.method()` resolve to the trait impl method
+    // when there's no inherent method with the same name
     let call_aliases = if impl_ctx.trait_name_resolved.is_some() {
-        vec![format!("{}::{}", impl_ctx.for_type_resolved, name)]
+        vec![format!("<{}>::{}", impl_ctx.for_type_resolved, name)]
     } else {
         Vec::new()
     };

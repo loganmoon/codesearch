@@ -4,6 +4,8 @@ use super::*;
 use crate::rust::handler_impls::macro_handlers::handle_macro_impl;
 use codesearch_core::entities::EntityType;
 
+use codesearch_core::entities::Visibility;
+
 #[test]
 fn test_simple_macro() {
     let source = r#"
@@ -21,6 +23,9 @@ macro_rules! simple {
     let entity = &entities[0];
     assert_eq!(entity.name, "simple");
     assert_eq!(entity.entity_type, EntityType::Macro);
+
+    // Non-exported macros should be private
+    assert_eq!(entity.visibility, Some(Visibility::Private));
 
     // Check macro type
     let macro_type = entity
@@ -65,6 +70,13 @@ macro_rules! exported {
         .get("exported")
         .expect("Should have exported attribute");
     assert_eq!(exported, "true");
+
+    // Check visibility is Public
+    assert_eq!(
+        entity.visibility,
+        Some(Visibility::Public),
+        "Exported macro should have Public visibility"
+    );
 }
 
 #[test]
@@ -230,6 +242,24 @@ macro_rules! third {
             .get("exported")
             .map(|s| s.as_str()),
         Some("false")
+    );
+
+    // Check visibility: second (exported) should be Public, first and third (not exported) should be Private
+    assert_eq!(
+        second_macro.visibility,
+        Some(Visibility::Public),
+        "Exported macro should be Public"
+    );
+    assert_eq!(
+        first_macro.visibility,
+        Some(Visibility::Private),
+        "Non-exported macro 'first' should be Private"
+    );
+    let third_macro = entities.iter().find(|e| e.name == "third").unwrap();
+    assert_eq!(
+        third_macro.visibility,
+        Some(Visibility::Private),
+        "Non-exported macro 'third' should be Private"
     );
 }
 

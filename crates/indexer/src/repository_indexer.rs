@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::entities::{
-    CodeEntityBuilder, EntityType, Language, SourceLocation, Visibility,
+    CodeEntityBuilder, EntityRelationshipData, EntityType, Language, SourceLocation, Visibility,
 };
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
@@ -328,6 +328,13 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
 
                         let entity_id = uuid::Uuid::new_v4().to_string();
 
+                        // Extract file-level imports for IMPORTS relationships
+                        let imports = extract_file_level_imports(&crate_info.entry_path);
+                        let relationships = EntityRelationshipData {
+                            imports,
+                            ..Default::default()
+                        };
+
                         match CodeEntityBuilder::default()
                             .entity_id(entity_id)
                             .repository_id(repo_id.to_string())
@@ -343,6 +350,7 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
                             })
                             .visibility(Some(Visibility::Public))
                             .language(Language::Rust)
+                            .relationships(relationships)
                             .build()
                         {
                             Ok(entity) => Some(entity),
@@ -375,6 +383,13 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
 
                 let entity_id = uuid::Uuid::new_v4().to_string();
 
+                // Extract file-level imports for IMPORTS relationships
+                let imports = extract_file_level_imports(&crate_root_file);
+                let relationships = EntityRelationshipData {
+                    imports,
+                    ..Default::default()
+                };
+
                 match CodeEntityBuilder::default()
                     .entity_id(entity_id)
                     .repository_id(repo_id.to_string())
@@ -390,6 +405,7 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
                     })
                     .visibility(Some(Visibility::Public))
                     .language(Language::Rust)
+                    .relationships(relationships)
                     .build()
                 {
                     Ok(entity) => vec![entity],
@@ -401,6 +417,49 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
             }
         })
         .collect()
+}
+
+/// Extract file-level use declarations from a Rust source file
+///
+/// This extracts imports that are direct children of the source_file (not nested in mod blocks).
+/// Uses tree-sitter queries to properly parse the file structure.
+fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
+    // Read file content
+    let content = match std::fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    // Parse with tree-sitter
+    let mut parser = tree_sitter::Parser::new();
+    if parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .is_err()
+    {
+        return Vec::new();
+    }
+
+    let tree = match parser.parse(&content, None) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let root = tree.root_node();
+    let mut imports = Vec::new();
+
+    // Iterate through direct children of source_file looking for use_declaration
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "use_declaration" {
+            // Extract the use path from the declaration
+            if let Some(argument) = child.child_by_field_name("argument") {
+                let import_text = &content[argument.byte_range()];
+                imports.push(import_text.to_string());
+            }
+        }
+    }
+
+    imports
 }
 
 /// Stage 2: Extract entities from files in parallel

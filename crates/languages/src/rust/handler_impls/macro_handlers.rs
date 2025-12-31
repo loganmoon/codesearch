@@ -24,6 +24,8 @@ use std::path::Path;
 use tree_sitter::{Query, QueryMatch};
 
 /// Process a macro definition query match and extract entity data
+///
+/// Detects #[macro_export] by checking the immediate preceding sibling node.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_macro_impl(
     query_match: &QueryMatch,
@@ -37,6 +39,9 @@ pub fn handle_macro_impl(
 ) -> Result<Vec<CodeEntity>> {
     // Extract the main macro node
     let main_node = require_capture_node(query_match, query, "macro")?;
+
+    // Check if immediate preceding sibling is #[macro_export] attribute
+    let is_exported = check_immediate_macro_export(main_node, source);
 
     // Create extraction context
     let ctx = ExtractionContext {
@@ -54,18 +59,8 @@ pub fn handle_macro_impl(
     let components = extract_common_components(&ctx, capture_names::NAME, main_node, "rust")?;
 
     // Extract Rust-specific: documentation, content
-    // Macros use #[macro_export] for visibility, not pub keyword
     let documentation = extract_preceding_doc_comments(main_node, source);
     let content = node_to_text(main_node, source).ok();
-
-    // Check for #[macro_export] attribute
-    // Use the first capture node like extract_derives does
-    let check_node = query_match
-        .captures
-        .first()
-        .map(|c| c.node)
-        .unwrap_or(main_node);
-    let is_exported = check_macro_export(check_node, source);
 
     // Macros with #[macro_export] are effectively public
     let visibility = if is_exported {
@@ -105,39 +100,15 @@ pub fn handle_macro_impl(
     Ok(vec![entity])
 }
 
-/// Check if a macro has the #[macro_export] attribute
-fn check_macro_export(node: tree_sitter::Node, source: &str) -> bool {
-    // First try walking backwards through siblings
-    let mut current = node.prev_sibling();
-    while let Some(sibling) = current {
+/// Check if a macro has #[macro_export] as its immediate preceding sibling
+fn check_immediate_macro_export(node: tree_sitter::Node, source: &str) -> bool {
+    // Check only the immediately preceding sibling
+    if let Some(sibling) = node.prev_sibling() {
         if sibling.kind() == "attribute_item" {
             if let Ok(text) = node_to_text(sibling, source) {
-                if text.contains("macro_export") {
-                    return true;
-                }
-            }
-        }
-        current = sibling.prev_sibling();
-    }
-
-    // If that didn't work, try checking the parent's children
-    if let Some(parent) = node.parent() {
-        let mut cursor = parent.walk();
-        for child in parent.children(&mut cursor) {
-            // Stop when we reach this node
-            if child.id() == node.id() {
-                break;
-            }
-            // Check if this child is an attribute_item with macro_export
-            if child.kind() == "attribute_item" {
-                if let Ok(text) = node_to_text(child, source) {
-                    if text.contains("macro_export") {
-                        return true;
-                    }
-                }
+                return text.contains("macro_export");
             }
         }
     }
-
     false
 }

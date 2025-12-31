@@ -148,6 +148,7 @@ pub const TYPE_ALIAS_QUERY: &str = r#"
 "#;
 
 /// Query for extracting macro definitions
+/// Single pattern - attribute detection is done in the handler by checking immediate sibling
 pub const MACRO_QUERY: &str = r#"
 (macro_definition
   name: (identifier) @name

@@ -700,9 +700,11 @@ pub fn extract_function_calls(
                         }
                     } else {
                         // Not a generic type parameter, resolve through imports
+                        // Use UFCS format <Type>::method to match inherent methods directly.
+                        // Trait methods have call_aliases that will also match this format.
                         let resolved_type = ctx.resolve(recv_type);
                         calls.push(SourceReference {
-                            target: format!("{resolved_type}::{method_name}"),
+                            target: format!("<{resolved_type}>::{method_name}"),
                             location: SourceLocation::from_tree_sitter_node(method_cap.node),
                             ref_type: ReferenceType::Call,
                         });
@@ -718,9 +720,10 @@ pub fn extract_function_calls(
                 // Try to extract the chain head type from the receiver expression
                 match extract_method_chain_head_type(chain_recv_cap.node, source, local_vars) {
                     Some(chain_head_type) => {
+                        // Use UFCS format <Type>::method to match inherent methods directly
                         let resolved_type = ctx.resolve(&chain_head_type);
                         calls.push(SourceReference {
-                            target: format!("{resolved_type}::{method_name}"),
+                            target: format!("<{resolved_type}>::{method_name}"),
                             location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
                             ref_type: ReferenceType::Call,
                         });

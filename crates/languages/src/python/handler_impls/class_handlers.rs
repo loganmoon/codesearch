@@ -95,7 +95,7 @@ pub fn handle_class_impl(
         EntityDetails {
             entity_type: EntityType::Class,
             language: Language::Python,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation,
             content: node_to_text(class_node, source).ok(),
             metadata,
@@ -235,7 +235,7 @@ pub fn handle_method_impl(
         EntityDetails {
             entity_type: EntityType::Method,
             language: Language::Python,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation,
             content: node_to_text(method_node, source).ok(),
             metadata,

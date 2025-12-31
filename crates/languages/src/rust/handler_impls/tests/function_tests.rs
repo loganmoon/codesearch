@@ -284,9 +284,9 @@ pub(crate) fn crate_public() {}
     assert_eq!(entities.len(), 3);
 
     // Check visibility is properly extracted
-    assert_eq!(entities[0].visibility, Visibility::Public);
-    assert_eq!(entities[1].visibility, Visibility::Private);
-    assert_eq!(entities[2].visibility, Visibility::Public); // pub(crate) is still public
+    assert_eq!(entities[0].visibility, Some(Visibility::Public));
+    assert_eq!(entities[1].visibility, Some(Visibility::Private));
+    assert_eq!(entities[2].visibility, Some(Visibility::Internal)); // pub(crate) is now Internal
 }
 
 // ============================================================================

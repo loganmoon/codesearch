@@ -165,7 +165,7 @@ mod tests {
             content: Some("x".repeat(content_size)),
             signature: None,
             documentation_summary: None,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             score: 0.95,
             reranked: false,
             reasoning: Some("Test match".to_string()),

@@ -118,7 +118,7 @@ pub fn handle_function_impl(
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::Python,
-            visibility: Visibility::Public, // Python doesn't have visibility keywords
+            visibility: Some(Visibility::Public), // Python doesn't have visibility keywords
             documentation,
             content: node_to_text(function_node, source).ok(),
             metadata,

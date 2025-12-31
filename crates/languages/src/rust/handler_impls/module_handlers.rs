@@ -114,7 +114,7 @@ pub fn handle_module_impl(
         EntityDetails {
             entity_type: EntityType::Module,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

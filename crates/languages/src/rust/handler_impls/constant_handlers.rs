@@ -113,7 +113,7 @@ pub fn handle_constant_impl(
         EntityDetails {
             entity_type: EntityType::Constant,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

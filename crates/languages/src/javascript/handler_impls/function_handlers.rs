@@ -119,7 +119,7 @@ pub fn handle_function_impl(
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::JavaScript,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation,
             content: node_to_text(function_node, source).ok(),
             metadata,
@@ -281,7 +281,7 @@ pub fn handle_arrow_function_impl(
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::JavaScript,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation,
             content: node_to_text(arrow_function_node, source).ok(),
             metadata,

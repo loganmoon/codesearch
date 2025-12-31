@@ -97,7 +97,7 @@ pub const MAX: usize = 100;
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "MAX");
-    assert_eq!(entity.visibility, Visibility::Public);
+    assert_eq!(entity.visibility, Some(Visibility::Public));
 }
 
 #[test]

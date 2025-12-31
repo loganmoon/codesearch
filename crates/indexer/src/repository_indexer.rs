@@ -341,7 +341,7 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
                     end_line: 1,
                     end_column: 1,
                 })
-                .visibility(Visibility::Public)
+                .visibility(Some(Visibility::Public))
                 .language(Language::Rust)
                 .build()
             {
@@ -1372,7 +1372,7 @@ mod tests {
                 start_column: 0,
                 end_column: 10,
             },
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             parent_scope: None,
             dependencies: Vec::new(),
             signature: None,

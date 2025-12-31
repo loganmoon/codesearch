@@ -127,7 +127,7 @@ pub type PublicAlias = String;
     let entity = &entities[0];
     assert_eq!(entity.name, "PublicAlias");
     assert_eq!(entity.entity_type, EntityType::TypeAlias);
-    assert_eq!(entity.visibility, Visibility::Public);
+    assert_eq!(entity.visibility, Some(Visibility::Public));
 
     // Check aliased type
     let aliased_type = entity

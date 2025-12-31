@@ -494,7 +494,7 @@ fn test_visibility_extraction() {
     // Most functions should be public
     let public_count = function_entities
         .iter()
-        .filter(|e| e.visibility == Visibility::Public)
+        .filter(|e| e.visibility == Some(Visibility::Public))
         .count();
 
     assert!(public_count > 0);
@@ -580,13 +580,13 @@ fn test_large_file_module_extraction() {
         .iter()
         .find(|e| e.name == "utils")
         .expect("Should find utils module");
-    assert_eq!(utils_module.visibility, Visibility::Public);
+    assert_eq!(utils_module.visibility, Some(Visibility::Public));
 
     let tests_module = module_entities
         .iter()
         .find(|e| e.name == "tests")
         .expect("Should find tests module");
-    assert_eq!(tests_module.visibility, Visibility::Private);
+    assert_eq!(tests_module.visibility, Some(Visibility::Private));
 }
 
 #[test]

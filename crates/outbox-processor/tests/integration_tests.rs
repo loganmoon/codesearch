@@ -29,7 +29,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
             start_column: 0,
             end_column: 10,
         },
-        visibility: Visibility::Public,
+        visibility: Some(Visibility::Public),
         parent_scope: None,
         dependencies: Vec::new(),
         signature: None,

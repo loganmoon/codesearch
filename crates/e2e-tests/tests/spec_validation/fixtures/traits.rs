@@ -30,12 +30,12 @@ pub trait Handler {
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::handle",
-            visibility: Some(Visibility::Public),
+            visibility: None, // Trait method definitions don't have visibility
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::with_default",
-            visibility: Some(Visibility::Public),
+            visibility: None, // Trait method definitions don't have visibility
         },
     ],
     relationships: &[
@@ -95,7 +95,7 @@ impl Handler for MyHandler {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::MyHandler as test_crate::Handler>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
@@ -235,7 +235,7 @@ impl Iterator for Counter {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Counter as test_crate::Iterator>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
@@ -354,17 +354,17 @@ impl Clone for Value {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Display>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Debug>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Value as test_crate::Clone>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
@@ -500,7 +500,7 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::StringToInt as test_crate::Transformer>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,

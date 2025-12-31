@@ -145,7 +145,7 @@ pub fn handle_module_impl(
         EntityDetails {
             entity_type: EntityType::Module,
             language: Language::Python,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation: None,
             content: node_to_text(module_node, source).ok(),
             metadata,

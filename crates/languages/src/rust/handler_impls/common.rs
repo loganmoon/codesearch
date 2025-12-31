@@ -36,28 +36,50 @@ pub fn extract_visibility(query_match: &QueryMatch, query: &Query) -> Visibility
         return Visibility::Private;
     };
 
+    extract_visibility_from_node(vis_node)
+}
+
+/// Extract visibility from a visibility_modifier tree-sitter node
+///
+/// Handles:
+/// - `pub` -> Public
+/// - `pub(crate)` -> Internal
+/// - `pub(super)` -> Internal (restricted to parent module)
+/// - `pub(in path)` -> Internal (restricted to specific path)
+/// - No visibility modifier -> Private
+pub fn extract_visibility_from_node(vis_node: Node) -> Visibility {
     // Check if this is a visibility_modifier node
     if vis_node.kind() != node_kinds::VISIBILITY_MODIFIER {
         return Visibility::Private;
     }
 
-    // Walk through the visibility modifier's children
+    // Walk through the visibility modifier's children to determine the type
     let mut cursor = vis_node.walk();
-    let has_public_keyword = vis_node.children(&mut cursor).any(|child| {
-        matches!(
-            child.kind(),
-            visibility_keywords::PUB
-                | visibility_keywords::CRATE
-                | visibility_keywords::SUPER
-                | visibility_keywords::SELF
-                | visibility_keywords::IN
-                | node_kinds::SCOPED_IDENTIFIER
-                | node_kinds::IDENTIFIER
-        )
-    });
+    let mut has_pub = false;
+    let mut has_restriction = false;
 
-    if has_public_keyword {
-        Visibility::Public
+    for child in vis_node.children(&mut cursor) {
+        match child.kind() {
+            visibility_keywords::PUB => has_pub = true,
+            // Any of these indicate a restricted visibility: pub(crate), pub(super), pub(in path)
+            visibility_keywords::CRATE
+            | visibility_keywords::SUPER
+            | visibility_keywords::SELF
+            | visibility_keywords::IN
+            | node_kinds::SCOPED_IDENTIFIER
+            | node_kinds::IDENTIFIER => has_restriction = true,
+            _ => {}
+        }
+    }
+
+    if has_pub {
+        if has_restriction {
+            // pub(crate), pub(super), pub(in path) -> Internal
+            Visibility::Internal
+        } else {
+            // Just pub -> Public
+            Visibility::Public
+        }
     } else {
         Visibility::Private
     }

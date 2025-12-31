@@ -291,7 +291,7 @@ pub struct MixedVisibility {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.entity_type, EntityType::Struct);
-    assert_eq!(entity.visibility, Visibility::Public);
+    assert_eq!(entity.visibility, Some(Visibility::Public));
 
     // Check fields
     let fields_str = entity
@@ -311,7 +311,7 @@ pub struct MixedVisibility {
     assert_eq!(private_field.visibility, Visibility::Private);
 
     let crate_field = fields.iter().find(|f| f.name == "crate_field").unwrap();
-    assert_eq!(crate_field.visibility, Visibility::Public); // pub(crate) is captured as Public
+    assert_eq!(crate_field.visibility, Visibility::Internal); // pub(crate) is captured as Internal
 }
 
 // ============================================================================

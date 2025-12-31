@@ -56,7 +56,7 @@ pub fn use_ufcs(data: &Data) -> i32 {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::Data as test_crate::Processor>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
@@ -232,13 +232,13 @@ impl Debug for MyType {
             kind: EntityKind::ImplBlock,
             qualified_name:
                 "test_crate::<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         // Concrete impl for MyType
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::<test_crate::MyType as test_crate::Debug>",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
     ],
     relationships: &[

@@ -85,7 +85,7 @@ impl Foo {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::impl test_crate::Foo",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
@@ -240,7 +240,7 @@ impl Counter {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name: "test_crate::impl test_crate::Counter",
-            visibility: Some(Visibility::Public),
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,

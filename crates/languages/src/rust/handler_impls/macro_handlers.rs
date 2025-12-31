@@ -93,7 +93,7 @@ pub fn handle_macro_impl(
         EntityDetails {
             entity_type: EntityType::Macro,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

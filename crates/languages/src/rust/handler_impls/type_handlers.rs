@@ -13,10 +13,10 @@ use crate::common::entity_building::{
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
-    extract_preceding_doc_comments, extract_visibility, extract_where_clause_bounds,
-    find_capture_node, find_child_by_kind, format_generic_param, get_file_import_map,
-    is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
-    RustResolutionContext,
+    extract_preceding_doc_comments, extract_visibility, extract_visibility_from_node,
+    extract_where_clause_bounds, find_capture_node, find_child_by_kind, format_generic_param,
+    get_file_import_map, is_primitive_type, merge_parsed_generics, node_to_text,
+    require_capture_node, ParsedGenerics, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{
@@ -464,7 +464,7 @@ fn build_entity_data(
         EntityDetails {
             entity_type,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,
@@ -568,8 +568,13 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
         .filter_map(|child| {
             // Get the full field text and parse it
             node_to_text(child, source).ok().and_then(|text| {
-                // Check for visibility
-                let visibility = if text.trim_start().starts_with("pub") {
+                // Check for visibility - distinguish pub, pub(crate), pub(super), etc.
+                let trimmed = text.trim_start();
+                let visibility = if trimmed.starts_with("pub(") {
+                    // pub(crate), pub(super), pub(in path) -> Internal
+                    Visibility::Internal
+                } else if trimmed.starts_with("pub") {
+                    // Just pub -> Public
                     Visibility::Public
                 } else {
                     Visibility::Private
@@ -615,7 +620,7 @@ fn parse_tuple_fields(node: Node, source: &str) -> Vec<FieldInfo> {
 
             // Track visibility for next field
             node_kinds::VISIBILITY_MODIFIER => {
-                next_visibility = Visibility::Public;
+                next_visibility = extract_visibility_from_node(child);
             }
 
             // Process type nodes
@@ -936,7 +941,7 @@ fn extract_single_trait_method(
         content,
         metadata,
         signature: Some(signature),
-        visibility: Visibility::Public, // Trait methods are always public
+        visibility: None, // Trait methods don't have visibility - it's derived from the trait
         location,
         relationships: Default::default(), // Trait method signatures don't have relationship data
     })

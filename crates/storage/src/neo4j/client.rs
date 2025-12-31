@@ -279,7 +279,10 @@ impl Neo4jClient {
             )
             .param("name", entity.name.clone())
             .param("language", entity.language.to_string())
-            .param("visibility", entity.visibility.to_string())
+            .param(
+                "visibility",
+                entity.visibility.map(|v| v.to_string()).unwrap_or_default(),
+            )
             .param("is_async", entity.metadata.is_async)
             .param("is_generic", entity.metadata.is_generic)
             .param("is_static", entity.metadata.is_static)
@@ -349,7 +352,13 @@ impl Neo4jClient {
                         );
                         map.insert("name".to_string(), e.name.clone().into());
                         map.insert("language".to_string(), e.language.to_string().into());
-                        map.insert("visibility".to_string(), e.visibility.to_string().into());
+                        map.insert(
+                            "visibility".to_string(),
+                            e.visibility
+                                .map(|v| v.to_string())
+                                .unwrap_or_default()
+                                .into(),
+                        );
                         map.insert("is_async".to_string(), e.metadata.is_async.into());
                         map.insert("is_generic".to_string(), e.metadata.is_generic.into());
                         map.insert("is_static".to_string(), e.metadata.is_static.into());

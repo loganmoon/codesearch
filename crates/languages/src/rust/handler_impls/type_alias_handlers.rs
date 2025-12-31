@@ -41,6 +41,17 @@ pub fn handle_type_alias_impl(
     // Extract the main type_alias node
     let main_node = require_capture_node(query_match, query, "type_alias")?;
 
+    // Skip type aliases inside impl blocks - those are handled by the impl extractor
+    if let Some(parent) = main_node.parent() {
+        if parent.kind() == "declaration_list" {
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "impl_item" {
+                    return Ok(Vec::new());
+                }
+            }
+        }
+    }
+
     // Create extraction context
     let ctx = ExtractionContext {
         query_match,
@@ -130,7 +141,7 @@ pub fn handle_type_alias_impl(
         EntityDetails {
             entity_type: EntityType::TypeAlias,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

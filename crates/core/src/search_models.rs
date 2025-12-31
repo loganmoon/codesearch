@@ -64,7 +64,7 @@ pub struct EntityResult {
     pub content: Option<String>,
     pub signature: Option<FunctionSignature>,
     pub documentation_summary: Option<String>,
-    pub visibility: Visibility,
+    pub visibility: Option<Visibility>,
     pub score: f32,
     pub reranked: bool,
     /// Optional reasoning from agentic search explaining relevance

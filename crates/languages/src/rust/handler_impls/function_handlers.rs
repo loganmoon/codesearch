@@ -206,7 +206,7 @@ pub fn handle_function_impl(
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

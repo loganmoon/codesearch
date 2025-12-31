@@ -14,9 +14,10 @@ use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_from_node, extract_generics_with_bounds,
     extract_local_var_types, extract_preceding_doc_comments, extract_type_alias_map,
-    extract_type_references, extract_where_clause_bounds, find_capture_node, find_child_by_kind,
-    format_generic_param, get_file_import_map, merge_parsed_generics, node_to_text,
-    require_capture_node, resolve_type_alias_chain, RustResolutionContext,
+    extract_type_references, extract_visibility_from_node, extract_where_clause_bounds,
+    find_capture_node, find_child_by_kind, format_generic_param, get_file_import_map,
+    merge_parsed_generics, node_to_text, require_capture_node, resolve_type_alias_chain,
+    RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -253,7 +254,7 @@ pub fn handle_impl_impl(
         })
         .entity_type(EntityType::Impl)
         .location(location)
-        .visibility(Visibility::Private) // Impl blocks don't have visibility
+        .visibility(None) // Impl blocks don't have visibility
         .documentation_summary(documentation)
         .content(content)
         .metadata(metadata)
@@ -454,7 +455,7 @@ pub fn handle_impl_trait_impl(
         })
         .entity_type(EntityType::Impl)
         .location(location)
-        .visibility(Visibility::Private) // Impl blocks don't have visibility
+        .visibility(None) // Impl blocks don't have visibility
         .documentation_summary(documentation)
         .content(content)
         .metadata(metadata)
@@ -497,6 +498,13 @@ fn extract_impl_methods(
                     entities.push(constant);
                 }
             }
+            "type_item" => {
+                if let Ok(type_alias) =
+                    extract_associated_type(child, source, file_path, repository_id, impl_ctx)
+                {
+                    entities.push(type_alias);
+                }
+            }
             _ => {}
         }
     }
@@ -536,8 +544,8 @@ struct ImplEntityComponents {
     qualified_name: String,
     /// The type of entity (Method, Function, or Constant)
     entity_type: EntityType,
-    /// The visibility of the entity
-    visibility: Visibility,
+    /// The visibility of the entity (None for entities where visibility doesn't apply)
+    visibility: Option<Visibility>,
     /// Entity-specific metadata (async, const, generics, etc.)
     metadata: EntityMetadata,
     /// Function signature if this is a method or associated function
@@ -692,12 +700,85 @@ fn extract_associated_constant(
             name,
             qualified_name,
             entity_type: EntityType::Constant,
-            visibility,
+            visibility: Some(visibility),
             metadata,
             signature: None,
             relationships: EntityRelationshipData::default(),
         },
     )
+}
+
+/// Extract an associated type from a trait impl block
+///
+/// Associated types are extracted with a qualified name relative to the implementing type
+/// (e.g., `Counter::Item`), not using UFCS notation like methods.
+fn extract_associated_type(
+    type_node: Node,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    impl_ctx: &ImplContext,
+) -> Result<CodeEntity> {
+    // Extract type alias name
+    let name = type_node
+        .child_by_field_name("name")
+        .and_then(|n| node_to_text(n, source).ok())
+        .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
+
+    // Build qualified name relative to the implementing type
+    // Associated types use Type::AssocType format, not UFCS
+    let qualified_name = format!("{}::{name}", impl_ctx.for_type_resolved);
+
+    // Associated types in trait impls are effectively public
+    // (they can only appear in trait impls, and trait impl items are public)
+    let visibility = Visibility::Public;
+
+    // Extract the aliased type
+    let aliased_type = type_node
+        .child_by_field_name("type")
+        .and_then(|n| node_to_text(n, source).ok());
+
+    // Build metadata
+    let mut metadata = EntityMetadata::default();
+    if let Some(aliased_type_str) = &aliased_type {
+        metadata
+            .attributes
+            .insert("aliased_type".to_string(), aliased_type_str.clone());
+    }
+
+    // Get documentation and content
+    let documentation = extract_preceding_doc_comments(type_node, source);
+    let location = SourceLocation::from_tree_sitter_node(type_node);
+    let content = node_to_text(type_node, source).ok();
+
+    // Generate entity_id
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    // Associated types belong to the implementing type, not the impl block
+    let parent_scope = impl_ctx.for_type_resolved.to_string();
+
+    CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(Some(parent_scope))
+        .entity_type(EntityType::TypeAlias)
+        .location(location)
+        .visibility(Some(visibility))
+        .documentation_summary(documentation)
+        .content(content)
+        .metadata(metadata)
+        .language(Language::Rust)
+        .file_path(file_path.to_path_buf())
+        .relationships(EntityRelationshipData::default())
+        .build()
+        .map_err(|e| {
+            Error::entity_extraction(format!("Failed to build associated type entity: {e}"))
+        })
 }
 
 /// Extract a single method from an impl block
@@ -736,7 +817,13 @@ fn extract_method(
     };
 
     // Extract visibility
-    let visibility = extract_method_visibility(method_node);
+    // Trait impl methods are effectively public (they can't have visibility modifiers)
+    // Inherent impl methods use the explicit visibility or default to private
+    let visibility = if impl_ctx.trait_name_resolved.is_some() {
+        Visibility::Public
+    } else {
+        extract_method_visibility(method_node)
+    };
 
     // Extract modifiers by finding the function_modifiers node
     let (is_async, is_unsafe, is_const) = find_child_by_kind(method_node, "function_modifiers")
@@ -850,7 +937,7 @@ fn extract_method(
             name,
             qualified_name,
             entity_type,
-            visibility,
+            visibility: Some(visibility),
             metadata,
             signature: Some(signature),
             relationships,
@@ -874,7 +961,7 @@ fn extract_method_visibility(node: Node) -> Visibility {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == node_kinds::VISIBILITY_MODIFIER {
-            return Visibility::Public;
+            return extract_visibility_from_node(child);
         }
     }
     Visibility::Private

@@ -263,9 +263,9 @@ pub struct CodeEntity {
     /// Source location in the file
     pub location: SourceLocation,
 
-    /// Visibility modifier
-    #[builder(default = "Visibility::Public")]
-    pub visibility: Visibility,
+    /// Visibility modifier (None means visibility doesn't apply to this entity type)
+    #[builder(default = "None")]
+    pub visibility: Option<Visibility>,
 
     /// Programming language
     pub language: Language,

@@ -55,7 +55,7 @@ pub struct ExtractionContext<'a> {
 pub struct EntityDetails {
     pub entity_type: EntityType,
     pub language: Language,
-    pub visibility: Visibility,
+    pub visibility: Option<Visibility>,
     pub documentation: Option<String>,
     pub content: Option<String>,
     pub metadata: EntityMetadata,

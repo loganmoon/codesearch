@@ -1405,7 +1405,7 @@ mod tests {
             content: Some(format!("fn {name}() {{}}")),
             signature: None,
             documentation_summary: None,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             score: 0.9,
             reranked: false,
             reasoning: None,

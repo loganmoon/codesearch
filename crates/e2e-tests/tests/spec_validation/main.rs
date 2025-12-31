@@ -102,6 +102,30 @@ async fn test_spec_validation_constants() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
+async fn test_spec_validation_statics() -> Result<()> {
+    run_spec_validation(&STATICS).await
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_spec_validation_unions() -> Result<()> {
+    run_spec_validation(&UNIONS).await
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_spec_validation_extern_blocks() -> Result<()> {
+    run_spec_validation(&EXTERN_BLOCKS).await
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_spec_validation_associated_constants() -> Result<()> {
+    run_spec_validation(&ASSOCIATED_CONSTANTS).await
+}
+
+#[tokio::test]
+#[ignore]
 async fn test_spec_validation_macro_rules() -> Result<()> {
     run_spec_validation(&MACRO_RULES).await
 }

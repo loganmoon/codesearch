@@ -1,10 +1,41 @@
 //! traits fixtures for spec validation tests
+//!
+//! Validates rules:
+//! - E-TRAIT: trait definitions produce Trait entities
+//! - E-METHOD-TRAIT-DEF: trait method definitions produce Method entities
+//! - E-METHOD-TRAIT-IMPL: trait method implementations produce Method entities
+//! - E-IMPL-TRAIT: trait impl blocks produce ImplBlock entities
+//! - E-TYPE-ALIAS-ASSOC: associated type definitions produce TypeAlias entities
+//! - V-TRAIT-METHOD-DEF: trait method definitions have no visibility (None)
+//! - V-TRAIT-IMPL-METHOD: trait impl methods are effectively Public
+//! - V-TRAIT-IMPL-ASSOC-TYPE: associated types in impls are effectively Public
+//! - Q-IMPL-TRAIT: trait impls use "<{type_fqn} as {trait_fqn}>" format
+//! - Q-TRAIT-IMPL-METHOD: trait impl methods use "<{type_fqn} as {trait_fqn}>::{name}" format
+//! - Q-ASSOC-TYPE: associated types use "<{type_fqn} as {trait_fqn}>::{name}" format
+//! - Q-TRAIT-METHOD-DEF: trait method definitions use "{trait_fqn}::{name}" format
+//! - R-IMPLEMENTS: impl block IMPLEMENTS trait
+//! - R-EXTENDS-INTERFACE: subtrait EXTENDS_INTERFACE supertrait
+//! - R-CONTAINS-TRAIT-MEMBER: trait CONTAINS method definitions
+//! - R-CONTAINS-IMPL-MEMBER: impl block CONTAINS method implementations
+//! - R-CONTAINS-ASSOC-TYPE: trait/impl CONTAINS associated types
+//! - M-TRAIT-BOUNDS: trait includes supertrait bounds metadata
+//! - M-TRAIT-METHODS: trait includes method definition metadata
+//! - M-TRAIT-ASSOC-TYPES: trait includes associated type metadata
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
     Visibility,
 };
 
+/// Trait definitions with method declarations
+///
+/// Validates:
+/// - E-TRAIT: trait definition produces Trait entity
+/// - E-METHOD-TRAIT-DEF: trait method definition produces Method entity
+/// - V-TRAIT-METHOD-DEF: trait method definitions have no visibility (None)
+/// - Q-TRAIT-METHOD-DEF: trait methods use "{trait_fqn}::{name}" format
+/// - R-CONTAINS-TRAIT-MEMBER: Trait CONTAINS Method
+/// - M-TRAIT-METHODS: trait includes method definition metadata
 pub static TRAIT_DEF: Fixture = Fixture {
     name: "trait_def",
     files: &[(
@@ -27,15 +58,17 @@ pub trait Handler {
             qualified_name: "test_crate::Handler",
             visibility: Some(Visibility::Public),
         },
+        // V-TRAIT-METHOD-DEF: trait method definitions have no visibility
+        // Q-TRAIT-METHOD-DEF: trait methods use "{trait_fqn}::{name}" format
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::handle",
-            visibility: None, // Trait method definitions don't have visibility
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Method,
             qualified_name: "test_crate::Handler::with_default",
-            visibility: None, // Trait method definitions don't have visibility
+            visibility: None,
         },
     ],
     relationships: &[
@@ -44,6 +77,7 @@ pub trait Handler {
             from: "test_crate",
             to: "test_crate::Handler",
         },
+        // R-CONTAINS-TRAIT-MEMBER: Trait CONTAINS method definitions
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate::Handler",
@@ -60,6 +94,15 @@ pub trait Handler {
 };
 
 /// Trait implementations
+///
+/// Validates:
+/// - E-IMPL-TRAIT: trait impl block produces ImplBlock entity
+/// - E-METHOD-TRAIT-IMPL: trait method implementation produces Method entity
+/// - V-TRAIT-IMPL-METHOD: trait impl methods are effectively Public
+/// - Q-IMPL-TRAIT: impl block uses "{module}::<{type_fqn} as {trait_fqn}>" format
+/// - Q-TRAIT-IMPL-METHOD: impl methods use "<{type_fqn} as {trait_fqn}>::{name}" format
+/// - R-IMPLEMENTS: impl block IMPLEMENTS trait
+/// - R-CONTAINS-IMPL-MEMBER: impl block CONTAINS method implementations
 pub static TRAIT_IMPL: Fixture = Fixture {
     name: "trait_impl",
     files: &[(
@@ -135,6 +178,10 @@ impl Handler for MyHandler {
 };
 
 /// Supertraits (trait bounds)
+///
+/// Validates:
+/// - R-EXTENDS-INTERFACE: subtrait EXTENDS_INTERFACE supertrait
+/// - M-TRAIT-BOUNDS: trait includes supertrait bounds metadata
 pub static SUPERTRAITS: Fixture = Fixture {
     name: "supertraits",
     files: &[(
@@ -192,6 +239,13 @@ pub trait Extended: Base {
 // =============================================================================
 
 /// Traits with associated types
+///
+/// Validates:
+/// - E-TYPE-ALIAS-ASSOC: associated type definition produces TypeAlias entity
+/// - V-TRAIT-IMPL-ASSOC-TYPE: associated types in trait impls are effectively Public
+/// - Q-ASSOC-TYPE: associated types use "<{type_fqn} as {trait_fqn}>::{name}" format
+/// - R-CONTAINS-ASSOC-TYPE: impl block CONTAINS associated type definition
+/// - M-TRAIT-ASSOC-TYPES: trait includes associated type metadata
 pub static ASSOCIATED_TYPES: Fixture = Fixture {
     name: "associated_types",
     files: &[(
@@ -242,9 +296,11 @@ impl Iterator for Counter {
             qualified_name: "<test_crate::Counter as test_crate::Iterator>::next",
             visibility: Some(Visibility::Public),
         },
+        // Q-ASSOC-TYPE: associated types use UFCS format
+        // V-TRAIT-IMPL-ASSOC-TYPE: effectively Public
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test_crate::Counter::Item",
+            qualified_name: "<test_crate::Counter as test_crate::Iterator>::Item",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -269,10 +325,11 @@ impl Iterator for Counter {
             from: "test_crate::<test_crate::Counter as test_crate::Iterator>",
             to: "<test_crate::Counter as test_crate::Iterator>::next",
         },
+        // R-CONTAINS-ASSOC-TYPE: impl block contains associated type
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::Counter",
-            to: "test_crate::Counter::Item",
+            from: "test_crate::<test_crate::Counter as test_crate::Iterator>",
+            to: "<test_crate::Counter as test_crate::Iterator>::Item",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
@@ -285,6 +342,11 @@ impl Iterator for Counter {
 };
 
 /// Multiple trait implementations for one type
+///
+/// Validates:
+/// - Multiple impl blocks for same type implementing different traits
+/// - Each impl block produces distinct ImplBlock entity
+/// - Each impl block has separate IMPLEMENTS relationship
 pub static MULTIPLE_TRAIT_IMPLS: Fixture = Fixture {
     name: "multiple_trait_impls",
     files: &[(
@@ -454,6 +516,11 @@ impl Clone for Value {
 };
 
 /// Generic trait with bounds
+///
+/// Validates:
+/// - E-TRAIT: generic traits produce Trait entities
+/// - M-GENERIC: trait includes generic parameter information
+/// - M-TRAIT-BOUNDS: trait parameter bounds are tracked
 pub static GENERIC_TRAIT: Fixture = Fixture {
     name: "generic_trait",
     files: &[(

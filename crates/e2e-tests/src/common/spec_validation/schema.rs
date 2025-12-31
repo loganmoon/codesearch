@@ -16,6 +16,9 @@ pub enum EntityKind {
     Trait,
     ImplBlock,
     Constant,
+    Static,
+    Union,
+    ExternBlock,
     TypeAlias,
     Macro,
 }
@@ -32,6 +35,9 @@ impl EntityKind {
             EntityKind::Trait => "Trait",
             EntityKind::ImplBlock => "ImplBlock",
             EntityKind::Constant => "Constant",
+            EntityKind::Static => "Static",
+            EntityKind::Union => "Union",
+            EntityKind::ExternBlock => "ExternBlock",
             EntityKind::TypeAlias => "TypeAlias",
             EntityKind::Macro => "Macro",
         }

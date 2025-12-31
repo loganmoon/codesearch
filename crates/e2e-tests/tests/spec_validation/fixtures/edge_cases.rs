@@ -1,4 +1,13 @@
 //! edge_cases fixtures for spec validation tests
+//!
+//! Validates rules:
+//! - Q-TRAIT-IMPL-METHOD: UFCS <Type as Trait>::method format
+//! - M-GENERIC: const generic type parameters
+//! - E-IMPL-TRAIT: blanket impls produce ImplBlock entities
+//! - R-IMPLEMENTS: impl blocks implement traits
+//! - E-ENUM: enum definitions produce Enum entities
+//! - E-FN-FREE: functions produce Function entities
+//! - R-CALLS-FUNCTION: function calls produce Calls relationships
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
@@ -7,6 +16,12 @@ use super::{
 
 /// Tests that `<Type as Trait>::method()` syntax creates proper impl block structure
 /// and that UFCS calls are resolved to the correct trait impl method.
+///
+/// Validates:
+/// - Q-TRAIT-IMPL-METHOD: uses "<{type_fqn} as {trait_fqn}>::{name}" format
+/// - E-IMPL-TRAIT: trait impls produce ImplBlock entities
+/// - R-IMPLEMENTS: impl blocks implement their trait
+/// - R-CALLS-FUNCTION: UFCS calls resolve to trait impl method
 pub static UFCS_EXPLICIT: Fixture = Fixture {
     name: "ufcs_explicit",
     files: &[(
@@ -102,6 +117,10 @@ pub fn use_ufcs(data: &Data) -> i32 {
 };
 
 /// Const generics: types parameterized by constant values
+///
+/// Validates:
+/// - E-STRUCT: struct with const generic produces Struct entity
+/// - M-GENERIC: struct includes const generic parameter information
 pub static CONST_GENERICS: Fixture = Fixture {
     name: "const_generics",
     files: &[(
@@ -175,6 +194,11 @@ pub fn create_large() -> FixedArray<1000> {
 
 /// Blanket impl declarations: impl<T> Trait for T where T: OtherTrait
 /// Tests that blanket impls and concrete impls create proper impl block structures
+///
+/// Validates:
+/// - E-IMPL-TRAIT: blanket impls produce ImplBlock entities
+/// - Q-TRAIT-IMPL-BLOCK: blanket impl uses generic parameter in qualified name
+/// - R-IMPLEMENTS: blanket impl block implements trait
 pub static BLANKET_IMPL: Fixture = Fixture {
     name: "blanket_impl",
     files: &[(
@@ -275,6 +299,11 @@ impl Debug for MyType {
 };
 
 /// Pattern matching on enum variants in function bodies
+///
+/// Validates:
+/// - E-ENUM: enum definitions produce Enum entities
+/// - E-FN-FREE: functions produce Function entities
+/// - R-CONTAINS-ITEM: module contains enum and functions
 pub static PATTERN_MATCHING: Fixture = Fixture {
     name: "pattern_matching",
     files: &[(
@@ -346,6 +375,11 @@ pub fn is_quit(msg: &Message) -> bool {
 /// Note: Current behavior derives qualified names from physical file paths,
 /// not from the logical module path declared by #[path]. This documents the
 /// actual system behavior.
+///
+/// Validates:
+/// - E-MOD: module declarations produce Module entities
+/// - R-CALLS-FUNCTION: calls resolve through custom module paths
+/// - Note: This documents current behavior for #[path] attribute handling
 pub static CUSTOM_MODULE_PATHS: Fixture = Fixture {
     name: "custom_module_paths",
     files: &[
@@ -428,6 +462,10 @@ pub fn create_special() -> SpecialType {
 
 /// Closures as syntactic entities in function calls
 /// Tests that functions accepting closures and closure usage are properly modeled
+///
+/// Validates:
+/// - E-FN-FREE: functions with closure parameters produce Function entities
+/// - R-CALLS-FUNCTION: calls to functions with closure arguments create Calls relationships
 pub static CLOSURES: Fixture = Fixture {
     name: "closures",
     files: &[(

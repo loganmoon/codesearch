@@ -149,20 +149,71 @@ entity_rules:
     tested_by: [trait_impl, multiple_trait_impls, blanket_impl]
 
   # ---------------------------------------------------------------------------
-  # Constants and Macros
+  # Constants and Statics
   # ---------------------------------------------------------------------------
   - id: E-CONST
     description: "A const declaration produces a Constant entity"
     construct: "const NAME: Type = value;"
     produces: Constant
+    note: "Constants are inlined at compile time and have no memory address"
+    reference: "https://doc.rust-lang.org/reference/items/constant-items.html"
     tested_by: [constants]
 
   - id: E-STATIC
-    description: "A static declaration produces a Constant entity"
+    description: "A static declaration produces a Static entity"
     construct: "static NAME: Type = value;"
-    produces: Constant
-    tested_by: [constants]
+    produces: Static
+    note: "Statics have a fixed memory address and can be mutable (static mut)"
+    reference: "https://doc.rust-lang.org/reference/items/static-items.html"
+    tested_by: [statics]
 
+  - id: E-CONST-ASSOC
+    description: "An associated constant in trait or impl produces Constant"
+    construct: "impl Type { const NAME: Type = value; }"
+    produces: Constant
+    note: "Can appear in traits (with or without default) and in impls"
+    reference: "https://doc.rust-lang.org/reference/items/associated-items.html#associated-constants"
+    tested_by: [associated_constants]
+
+  # ---------------------------------------------------------------------------
+  # Unions
+  # ---------------------------------------------------------------------------
+  - id: E-UNION
+    description: "A union declaration produces a Union entity"
+    construct: "union Name { ... }"
+    produces: Union
+    note: "Unions are similar to structs but all fields share the same memory"
+    reference: "https://doc.rust-lang.org/reference/items/unions.html"
+    tested_by: [unions]
+
+  # ---------------------------------------------------------------------------
+  # Extern Blocks
+  # ---------------------------------------------------------------------------
+  - id: E-EXTERN-BLOCK
+    description: "An extern block produces an ExternBlock entity"
+    construct: 'extern "C" { ... }'
+    produces: ExternBlock
+    note: "Contains FFI declarations for functions and statics from other languages"
+    reference: "https://doc.rust-lang.org/reference/items/external-blocks.html"
+    tested_by: [extern_blocks]
+
+  - id: E-EXTERN-FN
+    description: "A function declaration in extern block produces Function"
+    construct: 'extern "C" { fn name(); }'
+    produces: Function
+    note: "FFI function declaration without body"
+    tested_by: [extern_blocks]
+
+  - id: E-EXTERN-STATIC
+    description: "A static declaration in extern block produces Static"
+    construct: 'extern "C" { static NAME: Type; }'
+    produces: Static
+    note: "FFI static declaration"
+    tested_by: [extern_blocks]
+
+  # ---------------------------------------------------------------------------
+  # Macros
+  # ---------------------------------------------------------------------------
   - id: E-MACRO-RULES
     description: "A macro_rules! declaration produces a Macro entity"
     construct: "macro_rules! name { ... }"
@@ -274,6 +325,30 @@ visibility_rules:
     note: "Visible within the specified ancestor module path"
     precedence: 10
 
+  - id: V-PUB-SELF
+    description: "pub(self) modifier results in Private visibility"
+    applies_to: "*"
+    condition: "has `pub(self)` modifier"
+    result: Private
+    note: "Equivalent to no visibility modifier; visible only to current module"
+    reference: "https://doc.rust-lang.org/reference/visibility-and-privacy.html"
+    precedence: 10
+
+  # ---------------------------------------------------------------------------
+  # Inherited visibility
+  # ---------------------------------------------------------------------------
+  - id: V-ENUM-VARIANT
+    description: "Enum variants inherit visibility from parent enum"
+    applies_to: EnumVariant
+    condition: "variant is inside a pub enum"
+    result: "inherits from parent"
+    reason: |
+      Enum variants in a pub enum are public by default.
+      This is one of only two exceptions to the default-private rule.
+    reference: "https://doc.rust-lang.org/reference/visibility-and-privacy.html"
+    precedence: 5
+    tested_by: [enums]
+
   - id: V-PRIVATE
     description: "No visibility modifier results in Private visibility"
     applies_to: "*"
@@ -298,6 +373,11 @@ qualified_name_rules:
     description: "Crate root module is named after the package"
     pattern: "{crate_name}"
     example: "test_crate"
+    divergence: |
+      The Rust Reference states that the crate root module does not have a name,
+      but can be referred to with path qualifiers like `crate::`.
+      We use the package name for cross-crate searchability.
+    reference: "https://doc.rust-lang.org/reference/names.html"
     tested_by: [basic_mod]
 
   - id: Q-MODULE
@@ -330,6 +410,11 @@ qualified_name_rules:
       - "test_crate::impl test_crate::Foo"  # impl in crate root
       - "test_crate::submod::impl test_crate::submod::Foo"  # impl in submodule
     note: "{module} is where the impl is defined; {type_fqn} is the type's full path"
+    divergence: |
+      The Rust Reference states that implementations do not have canonical paths.
+      We assign qualified names to impl blocks for searchability and to establish
+      containment relationships with their associated items.
+    reference: "https://doc.rust-lang.org/reference/paths.html#canonical-paths"
     tested_by: [methods]
 
   - id: Q-IMPL-TRAIT
@@ -339,18 +424,24 @@ qualified_name_rules:
       - "test_crate::<test_crate::MyHandler as test_crate::Handler>"
       - "test_crate::submod::<test_crate::submod::Foo as test_crate::Handler>"  # impl in submodule
     note: "{module} is where the impl is defined; {type_fqn} and {trait_fqn} are full paths"
+    divergence: |
+      The Rust Reference states that implementations do not have canonical paths.
+      We assign qualified names to impl blocks for searchability and to establish
+      containment relationships with their associated items.
+    reference: "https://doc.rust-lang.org/reference/paths.html#canonical-paths"
     tested_by: [trait_impl]
 
   # ---------------------------------------------------------------------------
   # Impl member qualified names
   # ---------------------------------------------------------------------------
   - id: Q-INHERENT-METHOD
-    description: "Inherent impl methods use Type::method format"
-    pattern: "{type_fqn}::{name}"
+    description: "Inherent impl methods use angle bracket UFCS format"
+    pattern: "<{type_fqn}>::{name}"
     examples:
-      - "test_crate::Foo::method"  # method on type at crate root
-      - "test_crate::submod::Foo::method"  # method on type in submodule
-    note: "{type_fqn} includes full module path to the type"
+      - "<test_crate::Foo>::method"  # method on type at crate root
+      - "<test_crate::submod::Foo>::method"  # method on type in submodule
+    note: "Matches Rust's canonical path format for inherent impl items"
+    reference: "https://doc.rust-lang.org/reference/paths.html#canonical-paths"
     tested_by: [methods]
 
   - id: Q-TRAIT-IMPL-METHOD
@@ -363,12 +454,13 @@ qualified_name_rules:
     tested_by: [trait_impl]
 
   - id: Q-ASSOC-TYPE
-    description: "Associated types use Type::AssocType format"
-    pattern: "{type_fqn}::{name}"
+    description: "Associated types use angle bracket UFCS format"
+    pattern: "<{type_fqn} as {trait_fqn}>::{name}"
     examples:
-      - "test_crate::Counter::Item"
-      - "test_crate::submod::Counter::Item"  # associated type on type in submodule
-    note: "Not UFCS format, even in trait impls. {type_fqn} includes full module path."
+      - "<test_crate::Counter as test_crate::Iterator>::Item"
+      - "<test_crate::submod::Counter as test_crate::Iterator>::Item"
+    note: "Uses UFCS format since associated types only exist in trait impls"
+    reference: "https://doc.rust-lang.org/reference/paths.html#canonical-paths"
     tested_by: [associated_types]
 
   # ---------------------------------------------------------------------------
@@ -405,8 +497,8 @@ relationship_rules:
     description: "Module CONTAINS top-level items"
     kind: Contains
     from: Module
-    to: [Function, Struct, Enum, Trait, Constant, TypeAlias, Macro, ImplBlock]
-    tested_by: [free_functions, structs, trait_def]
+    to: [Function, Struct, Enum, Union, Trait, Constant, Static, TypeAlias, Macro, ImplBlock, ExternBlock]
+    tested_by: [free_functions, structs, trait_def, unions, statics, extern_blocks]
 
   - id: R-CONTAINS-TRAIT-MEMBER
     description: "Trait CONTAINS its method definitions"
@@ -430,6 +522,14 @@ relationship_rules:
     condition: "associated type from trait impl"
     note: "Associated types are children of the type, not the impl block"
     tested_by: [associated_types]
+
+  - id: R-CONTAINS-EXTERN-ITEM
+    description: "ExternBlock CONTAINS its FFI declarations"
+    kind: Contains
+    from: ExternBlock
+    to: [Function, Static]
+    note: "Extern blocks contain function and static declarations for FFI"
+    tested_by: [extern_blocks]
 
   # ---------------------------------------------------------------------------
   # Trait relationships
@@ -479,7 +579,7 @@ relationship_rules:
     description: "Module IMPORTS items via use statements"
     kind: Imports
     from: Module
-    to: [Function, Struct, Enum, Trait, Constant, TypeAlias, Macro, Module]
+    to: [Function, Struct, Enum, Union, Trait, Constant, Static, TypeAlias, Macro, Module]
     condition: "use statement brings item into scope"
     tested_by: [use_imports, reexports]
 
@@ -514,6 +614,29 @@ metadata_rules:
     condition: "function has `unsafe` keyword"
 
   # ---------------------------------------------------------------------------
+  # Static metadata
+  # ---------------------------------------------------------------------------
+  - id: M-STATIC-MUTABILITY
+    description: "Static items track mutability"
+    applies_to: Static
+    field: is_mutable
+    condition: "static has `mut` keyword (static mut)"
+    note: "Mutable statics require unsafe to access"
+    reference: "https://doc.rust-lang.org/reference/items/static-items.html#mutable-statics"
+    tested_by: [statics]
+
+  # ---------------------------------------------------------------------------
+  # Trait constraints
+  # ---------------------------------------------------------------------------
+  - id: M-TRAIT-NO-CONST-FN
+    description: "Trait functions cannot be const"
+    applies_to: Method
+    condition: "method is defined inside a trait"
+    constraint: "const keyword not allowed"
+    reference: "https://doc.rust-lang.org/reference/items/traits.html"
+    note: "This is a validation rule, not metadata extraction"
+
+  # ---------------------------------------------------------------------------
   # Generic metadata
   # ---------------------------------------------------------------------------
   - id: M-GENERIC
@@ -539,6 +662,14 @@ metadata_rules:
     field: attributes.fields
     format: "JSON array of {name, type, visibility}"
     tested_by: [structs, tuple_and_unit_structs]
+
+  - id: M-UNION-FIELDS
+    description: "Unions include field information"
+    applies_to: Union
+    field: attributes.fields
+    format: "JSON array of {name, type}"
+    note: "Union fields share the same memory; accessing requires unsafe"
+    tested_by: [unions]
 
   - id: M-ENUM-VARIANTS
     description: "Enums include variant information"
@@ -594,7 +725,7 @@ fixtures:
     tests: [E-FN-ASSOC, E-METHOD-SELF, E-IMPL-INHERENT, V-IMPL-BLOCK, Q-IMPL-INHERENT, Q-INHERENT-METHOD]
 
   trait_def:
-    tests: [E-TRAIT, E-METHOD-TRAIT-DEF, V-TRAIT-METHOD-DEF, Q-TRAIT-METHOD-DEF, R-CONTAINS-TRAIT-MEMBER]
+    tests: [E-TRAIT, E-METHOD-TRAIT-DEF, V-TRAIT-METHOD-DEF, Q-TRAIT-METHOD-DEF, R-CONTAINS-TRAIT-MEMBER, M-TRAIT-NO-CONST-FN]
 
   trait_impl:
     tests: [E-IMPL-TRAIT, E-METHOD-TRAIT-IMPL, V-IMPL-BLOCK, V-TRAIT-IMPL-METHOD, Q-IMPL-TRAIT, Q-TRAIT-IMPL-METHOD, R-IMPLEMENTS]
@@ -605,8 +736,11 @@ fixtures:
   associated_types:
     tests: [E-TYPE-ALIAS-ASSOC, V-TRAIT-IMPL-ASSOC-TYPE, Q-ASSOC-TYPE, R-CONTAINS-ASSOC-TYPE]
 
+  associated_constants:
+    tests: [E-CONST-ASSOC, V-TRAIT-IMPL-CONST]
+
   visibility:
-    tests: [V-PUB, V-PUB-CRATE, V-PRIVATE]
+    tests: [V-PUB, V-PUB-CRATE, V-PUB-SELF, V-PRIVATE]
 
   basic_mod:
     tests: [E-MOD-CRATE, E-MOD-DECL, Q-CRATE-ROOT, Q-MODULE, R-CONTAINS-MODULE]
@@ -615,10 +749,19 @@ fixtures:
     tests: [E-STRUCT, V-PUB, Q-ITEM, M-STRUCT-FIELDS]
 
   enums:
-    tests: [E-ENUM, M-ENUM-VARIANTS]
+    tests: [E-ENUM, V-ENUM-VARIANT, M-ENUM-VARIANTS]
+
+  unions:
+    tests: [E-UNION, M-UNION-FIELDS]
 
   constants:
-    tests: [E-CONST, E-STATIC]
+    tests: [E-CONST]
+
+  statics:
+    tests: [E-STATIC, M-STATIC-MUTABILITY]
+
+  extern_blocks:
+    tests: [E-EXTERN-BLOCK, E-EXTERN-FN, E-EXTERN-STATIC, R-CONTAINS-EXTERN-ITEM]
 
   type_aliases:
     tests: [E-TYPE-ALIAS, M-TYPE-ALIAS-TARGET]

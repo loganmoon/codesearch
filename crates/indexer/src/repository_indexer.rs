@@ -303,52 +303,100 @@ async fn stage_file_discovery(
 
 /// Create crate root module entities from the project manifest
 ///
-/// This creates a Module entity for each package/crate in the project.
+/// This creates a Module entity for each crate in the project.
 /// The crate root is the top-level module that contains all other modules.
+/// Uses the `CrateInfo` from the manifest when available (Rust projects),
+/// otherwise falls back to file-based discovery for non-Rust projects.
 fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<CodeEntity> {
     package_map
         .iter()
-        .filter_map(|(_pkg_dir, info)| {
-            // Determine the crate root file (lib.rs or main.rs)
-            let lib_rs = info.source_root.join("lib.rs");
-            let main_rs = info.source_root.join("main.rs");
-            let crate_root_file = if lib_rs.exists() {
-                lib_rs
-            } else if main_rs.exists() {
-                main_rs
+        .flat_map(|(_pkg_dir, info)| {
+            // Use crate info from manifest when available (Rust projects)
+            if !info.crates.is_empty() {
+                info.crates
+                    .iter()
+                    .filter_map(|crate_info| {
+                        // Only create entity if the entry file exists
+                        if !crate_info.entry_path.exists() {
+                            debug!(
+                                "Crate entry file {} does not exist for crate {}",
+                                crate_info.entry_path.display(),
+                                crate_info.name
+                            );
+                            return None;
+                        }
+
+                        let entity_id = uuid::Uuid::new_v4().to_string();
+
+                        match CodeEntityBuilder::default()
+                            .entity_id(entity_id)
+                            .repository_id(repo_id.to_string())
+                            .name(crate_info.name.clone())
+                            .qualified_name(crate_info.name.clone())
+                            .entity_type(EntityType::Module)
+                            .file_path(crate_info.entry_path.clone())
+                            .location(SourceLocation {
+                                start_line: 1,
+                                start_column: 1,
+                                end_line: 1,
+                                end_column: 1,
+                            })
+                            .visibility(Some(Visibility::Public))
+                            .language(Language::Rust)
+                            .build()
+                        {
+                            Ok(entity) => Some(entity),
+                            Err(e) => {
+                                warn!(
+                                    "Failed to build crate root entity for {}: {}",
+                                    crate_info.name, e
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>()
             } else {
-                // No crate root file found, skip this package
-                debug!(
-                    "No lib.rs or main.rs found in {} for package {}",
-                    info.source_root.display(),
-                    info.name
-                );
-                return None;
-            };
+                // Fallback for non-Rust projects: check for lib.rs or main.rs
+                let lib_rs = info.source_root.join("lib.rs");
+                let main_rs = info.source_root.join("main.rs");
+                let crate_root_file = if lib_rs.exists() {
+                    lib_rs
+                } else if main_rs.exists() {
+                    main_rs
+                } else {
+                    debug!(
+                        "No lib.rs or main.rs found in {} for package {}",
+                        info.source_root.display(),
+                        info.name
+                    );
+                    return vec![];
+                };
 
-            let entity_id = uuid::Uuid::new_v4().to_string();
+                let entity_id = uuid::Uuid::new_v4().to_string();
 
-            match CodeEntityBuilder::default()
-                .entity_id(entity_id)
-                .repository_id(repo_id.to_string())
-                .name(info.name.clone())
-                .qualified_name(info.name.clone())
-                .entity_type(EntityType::Module)
-                .file_path(crate_root_file)
-                .location(SourceLocation {
-                    start_line: 1,
-                    start_column: 1,
-                    end_line: 1,
-                    end_column: 1,
-                })
-                .visibility(Some(Visibility::Public))
-                .language(Language::Rust)
-                .build()
-            {
-                Ok(entity) => Some(entity),
-                Err(e) => {
-                    warn!("Failed to build crate root entity for {}: {}", info.name, e);
-                    None
+                match CodeEntityBuilder::default()
+                    .entity_id(entity_id)
+                    .repository_id(repo_id.to_string())
+                    .name(info.name.clone())
+                    .qualified_name(info.name.clone())
+                    .entity_type(EntityType::Module)
+                    .file_path(crate_root_file)
+                    .location(SourceLocation {
+                        start_line: 1,
+                        start_column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                    })
+                    .visibility(Some(Visibility::Public))
+                    .language(Language::Rust)
+                    .build()
+                {
+                    Ok(entity) => vec![entity],
+                    Err(e) => {
+                        warn!("Failed to build crate root entity for {}: {}", info.name, e);
+                        vec![]
+                    }
                 }
             }
         })
@@ -1812,6 +1860,7 @@ mod tests {
                 PackageInfo {
                     name: name.to_string(),
                     source_root,
+                    crates: Vec::new(), // Empty for fallback file-based discovery
                 },
             )
         }

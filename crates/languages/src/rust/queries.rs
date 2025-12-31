@@ -125,9 +125,9 @@ pub const UNION_QUERY: &str = r#"
 ) @union
 "#;
 
-/// Query for extracting extern blocks
+/// Query for extracting extern blocks (foreign_mod_item in tree-sitter-rust)
 pub const EXTERN_BLOCK_QUERY: &str = r#"
-(extern_block
+(foreign_mod_item
   (extern_modifier
     (string_literal)? @abi
   )

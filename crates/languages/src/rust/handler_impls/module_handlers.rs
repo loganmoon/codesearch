@@ -44,24 +44,42 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
                     continue;
                 }
 
-                // Use RustPath for proper parsing
+                // Use RustPath for proper parsing - encapsulates path logic
                 let rust_path = RustPath::parse(import_path);
 
                 // Extract simple name using RustPath
-                let simple_name = rust_path.simple_name().unwrap_or(import_path).to_string();
+                let simple_name = rust_path
+                    .simple_name()
+                    .unwrap_or_else(|| {
+                        rust_path
+                            .segments()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("")
+                    })
+                    .to_string();
+
+                // Skip if simple_name is empty (shouldn't happen with valid imports)
+                if simple_name.is_empty() {
+                    continue;
+                }
 
                 // Determine if external: relative paths (crate::, self::, super::) are internal
                 let is_external = !rust_path.is_relative();
 
                 let location = SourceLocation::from_tree_sitter_node(child);
 
-                imports.push(SourceReference::new(
-                    import_path,
-                    simple_name,
-                    is_external,
-                    location,
-                    ReferenceType::Import,
-                ));
+                // Use rust_path.to_qualified_name() to ensure consistency with RustPath parsing
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(rust_path.to_qualified_name())
+                    .simple_name(simple_name)
+                    .is_external(is_external)
+                    .location(location)
+                    .ref_type(ReferenceType::Import)
+                    .build()
+                {
+                    imports.push(source_ref);
+                }
             }
         }
     }
@@ -118,15 +136,6 @@ pub fn handle_module_impl(
         "is_inline".to_string(),
         if has_body { "true" } else { "false" }.to_string(),
     );
-
-    // Store imports as JSON array (used by imports_resolver)
-    if !imports.is_empty() {
-        if let Ok(imports_json) = serde_json::to_string(&imports) {
-            metadata
-                .attributes
-                .insert("imports".to_string(), imports_json);
-        }
-    }
 
     // Build typed relationships
     let relationships = EntityRelationshipData {

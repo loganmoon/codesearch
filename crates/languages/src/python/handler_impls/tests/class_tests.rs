@@ -475,5 +475,5 @@ class MyService:
     let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should capture the print call
-    assert!(calls.iter().any(|c| c.target.contains("print")));
+    assert!(calls.iter().any(|c| c.target().contains("print")));
 }

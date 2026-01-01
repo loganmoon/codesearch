@@ -79,13 +79,16 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference::new(
-                                resolved,
-                                type_name, // simple_name from AST node
-                                false,     // TS doesn't track external refs
-                                SourceLocation::from_tree_sitter_node(capture.node),
-                                ReferenceType::TypeUsage,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(resolved)
+                                .simple_name(type_name) // simple_name from AST node
+                                .is_external(false) // TS doesn't track external refs
+                                .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                            {
+                                type_refs.push(source_ref);
+                            }
                         }
                     }
                 }
@@ -99,13 +102,16 @@ pub fn extract_type_references(
                             .unwrap_or(&full_path)
                             .to_string();
                         if seen.insert(full_path.clone()) {
-                            type_refs.push(SourceReference::new(
-                                full_path,
-                                simple_name, // last segment of path
-                                false,       // TS doesn't track external refs
-                                SourceLocation::from_tree_sitter_node(capture.node),
-                                ReferenceType::TypeUsage,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(full_path)
+                                .simple_name(simple_name) // last segment of path
+                                .is_external(false) // TS doesn't track external refs
+                                .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                            {
+                                type_refs.push(source_ref);
+                            }
                         }
                     }
                 }

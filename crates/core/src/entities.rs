@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use derive_builder::Builder;
 use im::HashMap as ImHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -92,62 +93,148 @@ fn compute_simple_name(target: &str) -> String {
 /// contains the best-effort qualified name, which may be:
 /// - Fully resolved for internal references (e.g., "crate::module::function")
 /// - Partially resolved or external for cross-crate references
+///
+/// Use [`SourceReferenceBuilder`] to construct instances.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceReference {
     /// Qualified name of the target entity.
     /// May be fully resolved (internal) or partial/external (cross-crate).
-    pub target: String,
+    target: String,
 
     /// Pre-computed simple name (last path segment, without generics).
     /// For "std::collections::HashMap<K, V>", this would be "HashMap".
     /// For "external.lodash.debounce", this would be "debounce".
     #[serde(default)]
-    pub simple_name: String,
+    simple_name: String,
 
     /// Whether this references an external dependency (outside the repository).
     /// Set during extraction based on import resolution context.
     #[serde(default)]
-    pub is_external: bool,
+    is_external: bool,
 
     /// Location of the reference in source (line/column)
-    pub location: SourceLocation,
+    location: SourceLocation,
     /// Type of reference
-    pub ref_type: ReferenceType,
+    ref_type: ReferenceType,
 }
 
 impl SourceReference {
-    /// Create a new SourceReference with all fields explicitly provided.
+    /// Create a new builder for SourceReference.
+    pub fn builder() -> SourceReferenceBuilder {
+        SourceReferenceBuilder::default()
+    }
+
+    /// Get the qualified name of the target entity.
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    /// Get the pre-computed simple name (last path segment).
+    pub fn simple_name(&self) -> &str {
+        &self.simple_name
+    }
+
+    /// Check if this references an external dependency.
+    pub fn is_external(&self) -> bool {
+        self.is_external
+    }
+
+    /// Get the source location of the reference.
+    pub fn location(&self) -> &SourceLocation {
+        &self.location
+    }
+
+    /// Get the type of reference.
+    pub fn ref_type(&self) -> ReferenceType {
+        self.ref_type
+    }
+}
+
+/// Builder for constructing [`SourceReference`] with validation.
+#[derive(Debug, Default)]
+pub struct SourceReferenceBuilder {
+    target: Option<String>,
+    simple_name: Option<String>,
+    is_external: bool,
+    location: Option<SourceLocation>,
+    ref_type: Option<ReferenceType>,
+}
+
+impl SourceReferenceBuilder {
+    /// Set the qualified name of the target entity (required).
+    pub fn target(mut self, target: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self
+    }
+
+    /// Set the simple name (required).
+    /// Should be extracted directly from the AST node.
+    pub fn simple_name(mut self, simple_name: impl Into<String>) -> Self {
+        self.simple_name = Some(simple_name.into());
+        self
+    }
+
+    /// Set whether this is an external reference (default: false).
+    pub fn is_external(mut self, is_external: bool) -> Self {
+        self.is_external = is_external;
+        self
+    }
+
+    /// Set the source location (required).
+    pub fn location(mut self, location: SourceLocation) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    /// Set the reference type (required).
+    pub fn ref_type(mut self, ref_type: ReferenceType) -> Self {
+        self.ref_type = Some(ref_type);
+        self
+    }
+
+    /// Build the SourceReference, validating all required fields.
     ///
-    /// This is the primary constructor - `simple_name` should be extracted
-    /// directly from the AST node (not computed from the target string).
-    ///
-    /// # Panics
-    /// Panics if `target` or `simple_name` is empty after trimming whitespace.
-    pub fn new(
-        target: impl Into<String>,
-        simple_name: impl Into<String>,
-        is_external: bool,
-        location: SourceLocation,
-        ref_type: ReferenceType,
-    ) -> Self {
-        let target = target.into();
-        let simple_name = simple_name.into();
-        assert!(
-            !target.trim().is_empty(),
-            "SourceReference target must be non-empty"
-        );
-        assert!(
-            !simple_name.trim().is_empty(),
-            "SourceReference simple_name must be non-empty"
-        );
-        Self {
+    /// # Errors
+    /// Returns `Error::InvalidInput` if:
+    /// - `target` is missing or empty
+    /// - `simple_name` is missing or empty
+    /// - `location` is missing
+    /// - `ref_type` is missing
+    pub fn build(self) -> Result<SourceReference> {
+        let target = self
+            .target
+            .ok_or_else(|| Error::invalid_input("SourceReference target is required"))?;
+        if target.trim().is_empty() {
+            return Err(Error::invalid_input(
+                "SourceReference target must be non-empty",
+            ));
+        }
+
+        let simple_name = self
+            .simple_name
+            .ok_or_else(|| Error::invalid_input("SourceReference simple_name is required"))?;
+        if simple_name.trim().is_empty() {
+            return Err(Error::invalid_input(
+                "SourceReference simple_name must be non-empty",
+            ));
+        }
+
+        let location = self
+            .location
+            .ok_or_else(|| Error::invalid_input("SourceReference location is required"))?;
+
+        let ref_type = self
+            .ref_type
+            .ok_or_else(|| Error::invalid_input("SourceReference ref_type is required"))?;
+
+        Ok(SourceReference {
             target,
             simple_name,
-            is_external,
+            is_external: self.is_external,
             location,
             ref_type,
-        }
+        })
     }
 }
 
@@ -155,7 +242,7 @@ impl SourceReference {
 /// if it's missing or empty. This ensures backward compatibility with older
 /// serialized data that didn't include simple_name.
 impl<'de> Deserialize<'de> for SourceReference {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -414,4 +501,123 @@ pub struct CodeRelationship {
     pub from_entity_id: String,
     pub to_entity_id: String,
     pub properties: ImHashMap<String, String>,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_source_reference_builder_success() {
+        let sr = SourceReference::builder()
+            .target("std::collections::HashMap")
+            .simple_name("HashMap")
+            .is_external(true)
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::TypeUsage)
+            .build()
+            .unwrap();
+
+        assert_eq!(sr.target(), "std::collections::HashMap");
+        assert_eq!(sr.simple_name(), "HashMap");
+        assert!(sr.is_external());
+    }
+
+    #[test]
+    fn test_source_reference_builder_missing_target() {
+        let result = SourceReference::builder()
+            .simple_name("HashMap")
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::TypeUsage)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_source_reference_builder_empty_target() {
+        let result = SourceReference::builder()
+            .target("")
+            .simple_name("HashMap")
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::TypeUsage)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_source_reference_builder_missing_simple_name() {
+        let result = SourceReference::builder()
+            .target("std::collections::HashMap")
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::TypeUsage)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_with_missing_simple_name() {
+        // Test backward compatibility: simple_name is derived from target if missing
+        let json = r#"{
+            "target": "std::collections::HashMap",
+            "is_external": false,
+            "location": {"start_line": 1, "end_line": 1, "start_column": 0, "end_column": 10},
+            "ref_type": "call"
+        }"#;
+
+        let sr: SourceReference = serde_json::from_str(json).unwrap();
+        assert_eq!(sr.target(), "std::collections::HashMap");
+        assert_eq!(sr.simple_name(), "HashMap");
+    }
+
+    #[test]
+    fn test_deserialize_with_empty_simple_name() {
+        // Test backward compatibility: empty simple_name is derived from target
+        let json = r#"{
+            "target": "foo::Bar",
+            "simple_name": "",
+            "is_external": false,
+            "location": {"start_line": 1, "end_line": 1, "start_column": 0, "end_column": 5},
+            "ref_type": "type_usage"
+        }"#;
+
+        let sr: SourceReference = serde_json::from_str(json).unwrap();
+        assert_eq!(sr.target(), "foo::Bar");
+        assert_eq!(sr.simple_name(), "Bar");
+    }
+
+    #[test]
+    fn test_deserialize_with_existing_simple_name() {
+        // When simple_name is provided, it should be used as-is
+        let json = r#"{
+            "target": "foo::Bar",
+            "simple_name": "CustomName",
+            "is_external": true,
+            "location": {"start_line": 1, "end_line": 1, "start_column": 0, "end_column": 5},
+            "ref_type": "import"
+        }"#;
+
+        let sr: SourceReference = serde_json::from_str(json).unwrap();
+        assert_eq!(sr.target(), "foo::Bar");
+        assert_eq!(sr.simple_name(), "CustomName");
+        assert!(sr.is_external());
+    }
+
+    #[test]
+    fn test_deserialize_simple_target() {
+        // When target has no ::, simple_name should be the target itself
+        let json = r#"{
+            "target": "HashMap",
+            "is_external": false,
+            "location": {"start_line": 1, "end_line": 1, "start_column": 0, "end_column": 7},
+            "ref_type": "call"
+        }"#;
+
+        let sr: SourceReference = serde_json::from_str(json).unwrap();
+        assert_eq!(sr.target(), "HashMap");
+        assert_eq!(sr.simple_name(), "HashMap");
+    }
 }

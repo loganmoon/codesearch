@@ -128,14 +128,15 @@ pub fn handle_type_alias_impl(
     let relationships = EntityRelationshipData {
         uses_types: uses_types_refs
             .iter()
-            .map(|r| {
-                SourceReference::new(
-                    r.target.clone(),
-                    r.simple_name.clone(),
-                    r.is_external,
-                    SourceLocation::default(),
-                    ReferenceType::TypeUsage,
-                )
+            .filter_map(|r| {
+                SourceReference::builder()
+                    .target(r.target.clone())
+                    .simple_name(r.simple_name.clone())
+                    .is_external(r.is_external)
+                    .location(SourceLocation::default())
+                    .ref_type(ReferenceType::TypeUsage)
+                    .build()
+                    .ok()
             })
             .collect(),
         ..Default::default()

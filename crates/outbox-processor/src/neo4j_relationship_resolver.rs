@@ -268,8 +268,8 @@ pub async fn resolve_external_references(
     for entity in entities {
         // Check implements_trait (typed SourceReference with is_external flag)
         if let Some(ref trait_ref) = entity.relationships.implements_trait {
-            if trait_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&trait_ref.target));
+            if trait_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
@@ -278,8 +278,8 @@ pub async fn resolve_external_references(
 
         // Check for_type (for Associates relationships on impl blocks)
         if let Some(ref for_type_ref) = entity.relationships.for_type {
-            if for_type_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&for_type_ref.target));
+            if for_type_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(for_type_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "ASSOCIATES".to_string()));
@@ -288,8 +288,8 @@ pub async fn resolve_external_references(
 
         // Check extends (for classes/interfaces - typed SourceReference)
         for extend_ref in &entity.relationships.extends {
-            if extend_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&extend_ref.target));
+            if extend_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(extend_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((
@@ -302,8 +302,8 @@ pub async fn resolve_external_references(
 
         // Check supertraits (for Rust traits - typed SourceReference)
         for supertrait_ref in &entity.relationships.supertraits {
-            if supertrait_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&supertrait_ref.target));
+            if supertrait_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(supertrait_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((
@@ -316,8 +316,8 @@ pub async fn resolve_external_references(
 
         // Check uses_types (typed SourceReference with is_external flag)
         for type_ref in &entity.relationships.uses_types {
-            if type_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref.target));
+            if type_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(type_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "USES".to_string()));
@@ -326,8 +326,8 @@ pub async fn resolve_external_references(
 
         // Check calls (typed SourceReference with is_external flag)
         for call_ref in &entity.relationships.calls {
-            if call_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref.target));
+            if call_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(call_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "CALLS".to_string()));
@@ -336,8 +336,8 @@ pub async fn resolve_external_references(
 
         // Check imports (typed SourceReference with is_external flag)
         for import_ref in &entity.relationships.imports {
-            if import_ref.is_external {
-                let ext_ref = ExternalRef::new(normalize_external_ref(&import_ref.target));
+            if import_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(import_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "IMPORTS".to_string()));

@@ -796,11 +796,11 @@ impl<T: Clone + Send> Container<T> {
     let uses_types = &impl_entity.relationships.uses_types;
     assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Clone")),
+        uses_types.iter().any(|t| t.target().contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Send")),
+        uses_types.iter().any(|t| t.target().contains("Send")),
         "uses_types should include Send"
     );
 }

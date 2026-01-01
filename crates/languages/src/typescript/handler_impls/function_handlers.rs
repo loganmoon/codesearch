@@ -134,9 +134,9 @@ fn enhance_with_type_annotations(
 
             // Add TypeScript type references (deduplicating by target)
             let mut seen: std::collections::HashSet<String> =
-                all_refs.iter().map(|r| r.target.clone()).collect();
+                all_refs.iter().map(|r| r.target().to_string()).collect();
             for type_ref in ts_type_refs.iter() {
-                if seen.insert(type_ref.target.clone()) {
+                if seen.insert(type_ref.target().to_string()) {
                     all_refs.push(type_ref.clone());
                 }
             }
@@ -159,8 +159,8 @@ fn enhance_with_type_annotations(
             let mut seen_targets: std::collections::HashSet<_> =
                 all_type_targets.iter().cloned().collect();
             for type_ref in &ts_type_refs {
-                if seen_targets.insert(type_ref.target.clone()) {
-                    all_type_targets.push(type_ref.target.clone());
+                if seen_targets.insert(type_ref.target().to_string()) {
+                    all_type_targets.push(type_ref.target().to_string());
                 }
             }
             if let Ok(json) = serde_json::to_string(&all_type_targets) {

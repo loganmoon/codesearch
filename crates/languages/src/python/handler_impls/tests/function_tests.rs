@@ -244,8 +244,8 @@ def process():
     let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should extract both function calls
-    assert!(calls.iter().any(|c| c.target.contains("helper")));
-    assert!(calls.iter().any(|c| c.target.contains("print")));
+    assert!(calls.iter().any(|c| c.target().contains("helper")));
+    assert!(calls.iter().any(|c| c.target().contains("print")));
 }
 
 #[test]
@@ -269,7 +269,7 @@ def process():
     let calls: Vec<SourceReference> =
         serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
     // Should resolve through import - absolute imports are marked with external. prefix
-    assert!(calls.iter().any(|c| c.target == "external.utils.helper"));
+    assert!(calls.iter().any(|c| c.target() == "external.utils.helper"));
 }
 
 // ============================================================================
@@ -299,9 +299,9 @@ def process_user(user: User, request: Request) -> Response:
         serde_json::from_str(uses_types_attr.unwrap()).expect("Should parse uses_types JSON");
 
     // Should extract non-primitive types from type hints
-    assert!(uses_types.iter().any(|t| t.target.contains("User")));
-    assert!(uses_types.iter().any(|t| t.target.contains("Request")));
-    assert!(uses_types.iter().any(|t| t.target.contains("Response")));
+    assert!(uses_types.iter().any(|t| t.target().contains("User")));
+    assert!(uses_types.iter().any(|t| t.target().contains("Request")));
+    assert!(uses_types.iter().any(|t| t.target().contains("Response")));
 }
 
 #[test]

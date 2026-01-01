@@ -1,27 +1,25 @@
-# Language Onboarding and Relationship Extraction Guide
+# Language Onboarding Guide
 
-This document provides a comprehensive guide for adding new language support to codesearch,
-with Rust as the canonical example. It covers the complete pipeline from AST parsing to
-Neo4j graph creation.
+This guide covers adding new language support to codesearch, using Rust as the canonical example.
 
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Entity Identifiers](#entity-identifiers)
+2. [Specification Files](#specification-files)
 3. [Directory Structure](#directory-structure)
 4. [Step 1: Language Module Setup](#step-1-language-module-setup)
 5. [Step 2: Tree-Sitter Queries](#step-2-tree-sitter-queries)
 6. [Step 3: Handler Implementations](#step-3-handler-implementations)
-7. [Step 4: Import Map Support](#step-4-import-map-support)
-8. [Step 5: Relationship Resolution](#step-5-relationship-resolution)
+7. [Step 4: Relationship Data Extraction](#step-4-relationship-data-extraction)
+8. [Step 5: Import Resolution](#step-5-import-resolution)
 9. [Testing](#testing)
-10. [Metadata Attributes Reference](#metadata-attributes-reference)
+10. [Checklist](#checklist)
 
 ---
 
 ## Architecture Overview
 
-The relationship extraction pipeline has two stages:
+The extraction and resolution pipeline:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
@@ -35,14 +33,15 @@ The relationship extraction pipeline has two stages:
 │                        │  Language Extractor              │                │
 │                        │  - Queries match AST patterns    │                │
 │                        │  - Handlers build CodeEntity     │                │
+│                        │  - EntityRelationshipData typed  │                │
 │                        │  - Import map resolves refs      │                │
 │                        └──────────────────────────────────┘                │
 │                                           │                                │
 │                                           ▼                                │
 │                        ┌──────────────────────────────────┐                │
 │                        │  PostgreSQL (entity_metadata)    │                │
-│                        │  - entity_data JSON              │                │
-│                        │  - metadata.attributes           │                │
+│                        │  - Typed EntityRelationshipData  │                │
+│                        │  - SourceReference with is_ext   │                │
 │                        └──────────────────────────────────┘                │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -53,10 +52,10 @@ The relationship extraction pipeline has two stages:
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
 │                        ┌──────────────────────────────────┐                │
-│                        │  Relationship Resolvers          │                │
-│                        │  - Query entity_metadata         │                │
-│                        │  - Match references to defs      │                │
-│                        │  - Create Neo4j edges            │                │
+│                        │  GenericResolver                 │                │
+│                        │  - RelationshipDef config        │                │
+│                        │  - LookupStrategy chains         │                │
+│                        │  - Typed field extractors        │                │
 │                        └──────────────────────────────────┘                │
 │                                           │                                │
 │                                           ▼                                │
@@ -69,112 +68,147 @@ The relationship extraction pipeline has two stages:
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Key Concepts
+
+**EntityRelationshipData**: Typed struct on each entity containing relationship references:
+- `calls: Vec<SourceReference>` - Function/method calls
+- `uses_types: Vec<SourceReference>` - Type references
+- `imports: Vec<SourceReference>` - Import statements
+- `implements_trait: Option<SourceReference>` - Trait being implemented
+- `for_type: Option<SourceReference>` - Type for impl block
+- `extends: Vec<SourceReference>` - Parent class/interface
+- `supertraits: Vec<SourceReference>` - Trait supertraits
+- `call_aliases: Vec<String>` - UFCS aliases for Rust
+
+**SourceReference**: Reference with resolution metadata:
+- `target: String` - Qualified name of target
+- `simple_name: String` - Last path segment
+- `is_external: bool` - Whether target is outside repository
+- `location: SourceLocation` - Source position
+- `ref_type: ReferenceType` - Call, TypeUsage, Import, Extends, Uses
+
+**GenericResolver**: Configurable resolver using `RelationshipDef`:
+- Source/target entity types
+- `RelationshipType` enum value
+- `LookupStrategy` chain (QualifiedName, PathEntityIdentifier, CallAliases, UniqueSimpleName, SimpleName)
+
 ---
 
-## Entity Identifiers
+## Specification Files
 
-Each entity has two identifier fields for different lookup scenarios:
+Each language should have a specification file defining extraction rules. See `crates/languages/specs/rust.yaml` as the canonical example.
 
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `qualified_name` | Semantic, package-relative | `mypackage.utils.formatNumber` |
-| `path_entity_identifier` | File-path-based, always repo-relative | `packages.mypackage.src.utils.formatNumber` |
+### Spec File Structure
 
-### qualified_name (Semantic)
+```yaml
+version: "1.0"
+language: rust
 
-This is the primary identifier used for:
-- LSP validation (matching IDE go-to-definition results)
-- Graph edge resolution (CALLS, USES, IMPLEMENTS, etc.)
-- Semantic lookups across the codebase
+# Entity extraction rules
+entity_rules:
+  - id: E-FN-FREE
+    description: "A free function produces a Function entity"
+    construct: "fn name() { ... }"
+    produces: Function
+    tested_by: [free_functions, visibility]
 
-Format: `package_name + module_path + scope + entity_name`
+# Visibility rules (precedence-ordered)
+visibility_rules:
+  - id: V-PUB
+    description: "pub modifier results in Public visibility"
+    applies_to: "*"
+    result: Public
+    precedence: 10
 
-Example: In an npm package called `jotai`, a function in `src/utils/helpers.ts`:
-- `qualified_name`: `jotai.utils.helpers.formatNumber`
+# Qualified name rules
+qualified_name_rules:
+  - id: Q-ITEM
+    description: "Top-level items are qualified under their module path"
+    pattern: "{module}::{name}"
+    applies_to: [Function, Struct, Enum, Trait]
 
-### path_entity_identifier (File-based)
+# Relationship rules
+relationship_rules:
+  - id: R-CALLS-FUNCTION
+    description: "Function/Method CALLS another function/method"
+    kind: Calls
+    from: [Function, Method]
+    to: [Function, Method]
 
-This is used for:
-- Resolving relative imports (`./utils`, `../core`)
-- File-based lookups where structure matters
+# Metadata rules
+metadata_rules:
+  - id: M-FN-ASYNC
+    description: "Async functions have is_async=true"
+    applies_to: [Function, Method]
+    field: is_async
 
-Format: Always repo-relative: `repo_relative_path + scope + entity_name`
+# Test fixture mapping
+fixtures:
+  free_functions:
+    tests: [E-FN-FREE, V-PUB, Q-ITEM, R-CALLS-FUNCTION]
+```
 
-Example: Same function as above:
-- `path_entity_identifier`: `packages.jotai.src.utils.helpers.formatNumber`
+### Rule ID Conventions
 
-### Why Two Identifiers?
-
-The semantic `qualified_name` matches what language servers and IDEs use (e.g., "go to definition"). However, relative import resolution needs to understand file structure, which is why `path_entity_identifier` exists.
-
-Without workspace detection (Phase 1), `qualified_name` would incorrectly use file paths, causing mismatches with LSP results.
+| Prefix | Category |
+|--------|----------|
+| E-xxx | Entity extraction |
+| V-xxx | Visibility |
+| Q-xxx | Qualified names |
+| R-xxx | Relationships |
+| M-xxx | Metadata |
 
 ---
 
 ## Directory Structure
 
-Each language follows this structure (using Rust as example):
-
 ```
-crates/languages/src/
-├── rust/                           # Language module
-│   ├── mod.rs                      # Module root with define_language_extractor! macro
-│   ├── queries.rs                  # Tree-sitter query patterns
-│   ├── module_path.rs              # Module path resolution logic
-│   ├── entities.rs                 # (optional) Language-specific entity types
-│   └── handler_impls/              # Entity extraction handlers
-│       ├── mod.rs                  # Handler exports
-│       ├── common.rs               # Shared extraction utilities
-│       ├── function_handlers.rs    # Function/method extraction
-│       ├── type_handlers.rs        # Struct/enum/trait extraction
-│       ├── impl_handlers.rs        # Impl block extraction
-│       ├── module_handlers.rs      # Module extraction
-│       ├── constant_handlers.rs    # Const/static extraction
-│       ├── type_alias_handlers.rs  # Type alias extraction
-│       ├── macro_handlers.rs       # Macro extraction
-│       └── tests/                  # Handler unit tests
-│
-├── common/                         # Shared utilities (language-agnostic)
-│   ├── mod.rs
-│   ├── import_map.rs               # Import resolution (per-language parsers)
-│   └── entity_building.rs          # Common entity construction helpers
-│
-├── javascript/
-│   ├── ...
-│   └── utils.rs                    # JS/TS shared utilities (imported by TypeScript)
-│
-├── python/
-│   ├── ...
-│   └── utils.rs                    # Python-specific utilities
-│
-└── typescript/
-    ├── ...
-    └── utils.rs                    # TypeScript-specific utilities
+crates/languages/
+├── specs/
+│   └── rust.yaml                   # Language specification
+├── src/
+│   ├── rust/                       # Language module
+│   │   ├── mod.rs                  # define_language_extractor! macro
+│   │   ├── queries.rs              # Tree-sitter queries
+│   │   ├── module_path.rs          # Module path resolution
+│   │   ├── rust_path.rs            # Rust path parsing utilities
+│   │   └── handler_impls/          # Entity extraction handlers
+│   │       ├── mod.rs
+│   │       ├── common.rs           # Shared utilities
+│   │       ├── function_handlers.rs
+│   │       ├── type_handlers.rs
+│   │       ├── impl_handlers.rs
+│   │       ├── module_handlers.rs
+│   │       └── tests/              # Handler unit tests
+│   │
+│   ├── common/                     # Shared utilities
+│   │   ├── import_map.rs           # Import resolution
+│   │   └── entity_building.rs      # Entity construction
+│   │
+│   └── {language}/                 # Other languages follow same structure
 ```
 
 ---
 
 ## Step 1: Language Module Setup
 
-### 1.1 Create the module root (`mod.rs`)
-
-The module root uses the `define_language_extractor!` macro:
+### 1.1 Create module root (`mod.rs`)
 
 ```rust
 // crates/languages/src/rust/mod.rs
 
 pub(crate) mod handler_impls;
 pub mod module_path;
+pub mod rust_path;
 pub(crate) mod queries;
 
 use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
 
-/// Scope patterns define how qualified names are built from AST nesting
 const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
     ScopePattern {
-        node_kind: "mod_item",      // AST node type
-        field_name: "name",          // Field containing the scope name
+        node_kind: "mod_item",
+        field_name: "name",
     },
     ScopePattern {
         node_kind: "impl_item",
@@ -182,23 +216,20 @@ const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
     },
 ];
 
-// Register scope configuration globally
 inventory::submit! {
     ScopeConfiguration {
         language: "rust",
-        separator: "::",            // Rust uses :: as namespace separator
+        separator: "::",
         patterns: RUST_SCOPE_PATTERNS,
     }
 }
 
-// Define the extractor
 define_language_extractor! {
-    language: Rust,                              // codesearch_core::Language variant
-    tree_sitter: tree_sitter_rust::LANGUAGE,     // Tree-sitter grammar
-    extensions: ["rs"],                          // File extensions
+    language: Rust,
+    tree_sitter: tree_sitter_rust::LANGUAGE,
+    extensions: ["rs"],
 
     entities: {
-        // Each entity type maps a query to a handler
         function => {
             query: queries::FUNCTION_QUERY,
             handler: handler_impls::handle_function_impl
@@ -207,38 +238,7 @@ define_language_extractor! {
             query: queries::STRUCT_QUERY,
             handler: handler_impls::handle_struct_impl
         },
-        r#enum => {
-            query: queries::ENUM_QUERY,
-            handler: handler_impls::handle_enum_impl
-        },
-        r#trait => {
-            query: queries::TRAIT_QUERY,
-            handler: handler_impls::handle_trait_impl
-        },
-        r#impl => {
-            query: queries::IMPL_QUERY,
-            handler: handler_impls::handle_impl_impl
-        },
-        impl_trait => {
-            query: queries::IMPL_TRAIT_QUERY,
-            handler: handler_impls::handle_impl_trait_impl
-        },
-        module => {
-            query: queries::MODULE_QUERY,
-            handler: handler_impls::handle_module_impl
-        },
-        constant => {
-            query: queries::CONSTANT_QUERY,
-            handler: handler_impls::handle_constant_impl
-        },
-        type_alias => {
-            query: queries::TYPE_ALIAS_QUERY,
-            handler: handler_impls::handle_type_alias_impl
-        },
-        r#macro => {
-            query: queries::MACRO_QUERY,
-            handler: handler_impls::handle_macro_impl
-        }
+        // ... other entities
     }
 }
 ```
@@ -251,97 +251,61 @@ Update `crates/languages/src/lib.rs` to include your language module.
 
 ## Step 2: Tree-Sitter Queries
 
-Queries use tree-sitter's S-expression syntax to match AST patterns.
-
-### 2.1 Query file structure (`queries.rs`)
+### 2.1 Query file (`queries.rs`)
 
 ```rust
-// crates/languages/src/rust/queries.rs
-
-/// Query for function definitions
 pub const FUNCTION_QUERY: &str = r#"
 (function_item
-  (visibility_modifier)? @vis        ; Optional visibility (pub, pub(crate), etc.)
-  (function_modifiers)? @modifiers   ; async, const, unsafe, extern
-  name: (identifier) @name           ; Function name (required)
-  type_parameters: (type_parameters)? @generics  ; Generic parameters
-  parameters: (parameters) @params   ; Parameter list
-  return_type: (_)? @return          ; Return type annotation
-  body: (block) @body                ; Function body
-) @function                          ; Capture entire node
-"#;
-
-/// Query for struct definitions
-pub const STRUCT_QUERY: &str = r#"
-(struct_item
   (visibility_modifier)? @vis
-  "struct"
-  name: (type_identifier) @name
+  (function_modifiers)? @modifiers
+  name: (identifier) @name
   type_parameters: (type_parameters)? @generics
-  (where_clause)? @where
-  body: [
-    (field_declaration_list) @fields     ; Named fields: struct Foo { x: i32 }
-    (ordered_field_declaration_list) @fields  ; Tuple fields: struct Foo(i32)
-  ]?
-) @struct
+  parameters: (parameters) @params
+  return_type: (_)? @return
+  body: (block) @body
+) @function
 "#;
 
-/// Query for trait implementation blocks
 pub const IMPL_TRAIT_QUERY: &str = r#"
 (impl_item
   type_parameters: (type_parameters)? @generics
-  trait: (_) @trait                  ; Trait being implemented
+  trait: (_) @trait
   "for"
-  type: (_) @type                    ; Type implementing the trait
+  type: (_) @type
   body: (declaration_list) @impl_body
 ) @impl_trait
 "#;
 ```
 
-### 2.2 Query design principles
+### 2.2 Design Principles
 
-1. **Capture names must match handler expectations**: Handlers use `require_capture_node()` and `find_capture_node()` to access captures
-2. **Use `?` for optional captures**: Handlers check for presence with `find_capture_node()`
-3. **Capture the entire node**: Always capture the root node (e.g., `@function`, `@struct`) for span information
-4. **Use field names when available**: `name: (identifier)` is more precise than just `(identifier)`
+1. Capture names must match handler expectations
+2. Use `?` for optional captures
+3. Always capture the root node for span information
+4. Use field names when available: `name: (identifier)` not just `(identifier)`
 
 ---
 
 ## Step 3: Handler Implementations
 
-Handlers extract `CodeEntity` objects from query matches.
-
-### 3.1 Handler signature
+### 3.1 Handler Signature
 
 ```rust
 pub fn handle_function_impl(
-    query_match: &QueryMatch,           // Tree-sitter query match
-    query: &Query,                      // The query object (for capture indices)
-    source: &str,                       // Full source code
-    file_path: &Path,                   // File being processed
-    repository_id: &str,                // Repository UUID
-    package_name: Option<&str>,         // Package/crate name
-    source_root: Option<&Path>,         // Source root for relative paths (package-specific)
-    repo_root: &Path,                   // Repository root for path_entity_identifier
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>>
 ```
 
-### 3.2 Example handler (simplified from Rust)
+### 3.2 Basic Handler Pattern
 
 ```rust
-// crates/languages/src/rust/handler_impls/function_handlers.rs
-
-use crate::common::{
-    entity_building::{build_entity, extract_common_components, EntityDetails, ExtractionContext},
-    find_capture_node, import_map::{parse_file_imports, resolve_reference},
-    node_to_text, require_capture_node,
-};
-use codesearch_core::{
-    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
-    error::Result,
-    CodeEntity,
-};
-
 pub fn handle_function_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -352,68 +316,32 @@ pub fn handle_function_impl(
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
-    // Get required captures
     let function_node = require_capture_node(query_match, query, "function")?;
     let name_node = require_capture_node(query_match, query, "name")?;
 
-    // Create extraction context
     let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,  // Required for generating path_entity_identifier
+        query_match, query, source, file_path,
+        repository_id, package_name, source_root, repo_root,
     };
 
-    // Extract common components (name, qualified_name, parent_scope, etc.)
     let components = extract_common_components(&ctx, "name", function_node, "rust")?;
 
     // Parse imports for reference resolution
     let import_map = parse_file_imports(function_node.parent().unwrap(), source, Language::Rust);
 
-    // Extract parameters
-    let params_node = find_capture_node(query_match, query, "params");
-    let parameters = extract_parameters(params_node, source, &import_map)?;
+    // Extract relationship data (see Step 4)
+    let relationships = extract_function_relationships(
+        query_match, query, source, &import_map
+    )?;
 
-    // Extract return type
-    let return_type = find_capture_node(query_match, query, "return")
-        .and_then(|n| node_to_text(n, source).ok());
-
-    // Extract type references for USES relationships
-    let uses_types = extract_type_references(&parameters, &return_type, &import_map);
-
-    // Build metadata
-    let mut metadata = EntityMetadata {
-        is_async: has_modifier(query_match, query, "async"),
-        ..EntityMetadata::default()
-    };
-
-    // Store uses_types as JSON array for TypeUsageResolver
-    if !uses_types.is_empty() {
-        if let Ok(json) = serde_json::to_string(&uses_types) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
-
-    // Build entity
     let entity = build_entity(
         components,
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::Rust,
             visibility: extract_visibility(query_match, query),
-            documentation: extract_doc_comments(function_node, source),
-            content: node_to_text(function_node, source).ok(),
-            metadata,
-            signature: Some(FunctionSignature {
-                parameters,
-                return_type,
-                generics: extract_generics(query_match, query, source),
-                is_async: has_modifier(query_match, query, "async"),
-            }),
+            relationships,  // Typed EntityRelationshipData
+            // ...
         },
     )?;
 
@@ -421,263 +349,264 @@ pub fn handle_function_impl(
 }
 ```
 
-### 3.3 Handler module exports (`handler_impls/mod.rs`)
+---
+
+## Step 4: Relationship Data Extraction
+
+**Key change from legacy approach**: Relationship data is now stored in typed `EntityRelationshipData` fields, not as JSON strings in `metadata.attributes`.
+
+### 4.1 Using SourceReference
 
 ```rust
-// crates/languages/src/rust/handler_impls/mod.rs
+use codesearch_core::entities::{
+    EntityRelationshipData, SourceReference, SourceLocation, ReferenceType
+};
 
-pub(crate) mod common;
-pub(crate) mod function_handlers;
-pub(crate) mod type_handlers;
-pub(crate) mod impl_handlers;
-// ... other handler modules
+// Create a SourceReference for a function call
+let call_ref = SourceReference::new(
+    "crate::utils::process",    // target (qualified name)
+    "process",                   // simple_name
+    false,                       // is_external
+    SourceLocation { start_line: 10, end_line: 10, start_column: 4, end_column: 11 },
+    ReferenceType::Call,
+);
 
-#[cfg(test)]
-mod tests;
-
-// Re-export handlers for use in mod.rs
-pub use function_handlers::handle_function_impl;
-pub use type_handlers::{handle_struct_impl, handle_enum_impl, handle_trait_impl};
-pub use impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
-// ... other exports
+// Build EntityRelationshipData
+let relationships = EntityRelationshipData {
+    calls: vec![call_ref],
+    uses_types: extract_type_references(params, return_type, &import_map),
+    ..Default::default()
+};
 ```
+
+### 4.2 Determining is_external
+
+The `is_external` flag indicates whether a reference targets code outside the repository:
+
+```rust
+use crate::rust::rust_path::RustPath;
+
+fn create_source_reference(
+    resolved: &ResolvedReference,
+    ref_type: ReferenceType,
+) -> SourceReference {
+    SourceReference::new(
+        resolved.target.clone(),
+        resolved.simple_name.clone(),
+        resolved.is_external,  // Set at resolution time
+        SourceLocation::default(),
+        ref_type,
+    )
+}
+
+// For Rust, use RustPath to parse and determine externality
+let rust_path = RustPath::parse(&import_path);
+let is_external = !rust_path.is_relative();  // External if not crate-relative
+```
+
+### 4.3 Relationship Field Usage
+
+| Field | Entity Types | Relationship |
+|-------|--------------|--------------|
+| `calls` | Function, Method | CALLS |
+| `uses_types` | Function, Method, Struct, Enum, etc. | USES |
+| `imports` | Module, Function, etc. | IMPORTS |
+| `implements_trait` | Impl | IMPLEMENTS |
+| `for_type` | Impl | ASSOCIATES |
+| `extends` | Class | INHERITS_FROM |
+| `supertraits` | Trait | EXTENDS_INTERFACE |
+| `call_aliases` | Method | (UFCS resolution) |
 
 ---
 
-## Step 4: Import Map Support
+## Step 5: Import Resolution
 
-The import map enables resolving references to qualified names.
-
-### 4.1 Add language support in `import_map.rs`
+### 5.1 Import Map
 
 ```rust
-// crates/languages/src/common/import_map.rs
+use crate::common::import_map::{parse_file_imports, resolve_reference};
 
-/// Parse imports from a file's AST root
-///
-/// The `current_module_path` parameter enables resolution of relative imports:
-/// - For JS/TS: `./utils` resolves to `myapp.utils` if current file is `myapp.main.ts`
-/// - For Python: `.models` resolves to `myapp.models` if current file is `myapp/__init__.py`
-///
-/// If `current_module_path` is None, relative imports are stored as-is.
+// Parse imports from file
+let import_map = parse_file_imports(root_node, source, Language::Rust);
+
+// Resolve a reference
+let resolved = resolve_reference(
+    "HashMap",              // Name to resolve
+    &import_map,            // Import map
+    Some("crate::utils"),   // Parent scope
+    "::",                   // Separator
+);
+// Returns ResolvedReference with target, simple_name, is_external
+```
+
+### 5.2 ResolvedReference
+
+```rust
+pub struct ResolvedReference {
+    pub target: String,       // Fully qualified name
+    pub simple_name: String,  // Last path segment
+    pub is_external: bool,    // Outside repository
+}
+```
+
+### 5.3 Adding Language Support
+
+```rust
+// In common/import_map.rs
+
 pub fn parse_file_imports(
     root: Node,
     source: &str,
     language: Language,
-    current_module_path: Option<&str>,  // Enables relative import resolution when provided
 ) -> ImportMap {
     match language {
         Language::Rust => parse_rust_imports(root, source),
-        Language::JavaScript => parse_js_imports(root, source, current_module_path),
-        Language::TypeScript => parse_ts_imports(root, source, current_module_path),
-        Language::Python => parse_python_imports(root, source, current_module_path),
-        Language::NewLang => parse_newlang_imports(root, source, current_module_path),
+        Language::JavaScript => parse_js_imports(root, source),
+        Language::NewLang => parse_newlang_imports(root, source),
         _ => ImportMap::new("."),
     }
 }
-
-/// Parse imports for your language
-fn parse_newlang_imports(
-    root: Node,
-    source: &str,
-    current_module_path: Option<&str>,
-) -> ImportMap {
-    let mut map = ImportMap::new("::");  // Use appropriate separator
-
-    // Walk AST to find import statements
-    let mut cursor = root.walk();
-    for node in root.children(&mut cursor) {
-        if node.kind() == "import_statement" {
-            // Extract imported name and source path
-            // Resolve relative imports using current_module_path if needed
-            // Add to map: map.add("LocalName", "module.path.LocalName");
-        }
-    }
-
-    map
-}
-```
-
-### 4.2 Using resolve_reference
-
-```rust
-use crate::common::import_map::{parse_file_imports, resolve_reference};
-use crate::javascript::module_path::derive_module_path;
-
-// In a handler, derive the current module path first:
-let module_path = derive_module_path(file_path, source_root);
-
-// Parse imports with module path for relative import resolution
-let import_map = parse_file_imports(
-    file_root,
-    source,
-    Language::JavaScript,
-    module_path.as_deref(),  // Pass the module path
-);
-
-// Resolve a reference like "Config" to its qualified name
-let resolved = resolve_reference(
-    "Config",            // Name to resolve
-    &import_map,         // Import map
-    Some("myapp.main"),  // Parent scope (for local resolution)
-    "."                  // Namespace separator (JS/Python use ".", Rust uses "::")
-);
-// Returns:
-// - "myapp.config.Config" if imported from ./config
-// - "myapp.main.Config" if defined locally
-// - "external.Config" if unresolved (external dependency)
-```
-
-### 4.3 Relative Import Resolution
-
-For languages with relative imports (JS/TS, Python), the `current_module_path` is used
-to convert relative paths to absolute qualified names at extraction time:
-
-```rust
-// JS/TS: resolve_relative_import converts "./core" based on importer location
-// If current file is "vanilla/atom.ts" (module_path = "vanilla.atom"):
-//   "./core" → "vanilla.core"
-//   "../utils" → "utils"
-
-// Python: resolve_python_relative_import handles "." and ".." syntax
-// If current file is "myapp/models/__init__.py" (module_path = "myapp.models"):
-//   ".base" → "myapp.models.base"
-//   "..utils" → "myapp.utils"
-```
-
-This ensures that references stored in entity attributes (e.g., `calls`, `uses_types`,
-`extends`, `bases`, `implements_trait`) match the `qualified_name` format used by entity definitions,
-enabling proper relationship resolution in Neo4j.
-
----
-
-## Step 5: Relationship Resolution
-
-Resolvers in `crates/outbox-processor/src/neo4j_relationship_resolver.rs` create
-Neo4j edges from entity metadata.
-
-### 5.1 Available Resolvers
-
-| Resolver | Relationships | Required Attributes |
-|----------|--------------|---------------------|
-| `ContainsResolver` | CONTAINS | `parent_scope` (automatic) |
-| `TraitImplResolver` | IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE | `implements_trait`, `for_type`, `extends` |
-| `InheritanceResolver` | INHERITS_FROM, HAS_SUBCLASS | `extends`, `bases` |
-| `TypeUsageResolver` | USES, USED_BY | `fields`, `uses_types` |
-| `CallGraphResolver` | CALLS, CALLED_BY | `calls` |
-| `ImportsResolver` | IMPORTS, IMPORTED_BY | `imports` |
-| `ExternalResolver` | Creates External nodes | All unresolved refs |
-
-### 5.2 Adding Metadata for Resolution
-
-Handlers must populate specific metadata attributes for resolvers to work.
-
-**Important:** The resolvers use the base attribute names shown in section 5.1 (e.g., `implements_trait`, `uses_types`, `calls`). Store qualified/resolved names directly in these attributes at extraction time.
-
-```rust
-// In impl_handlers.rs - for TraitImplResolver
-// Resolve the trait name through imports, then store in base attribute
-let resolved_trait = resolve_reference(&trait_name, &import_map, None, "::");
-metadata.attributes.insert("implements_trait".to_string(), resolved_trait);
-metadata.attributes.insert("for_type".to_string(), for_type.clone());
-
-// In type_handlers.rs - for TypeUsageResolver (fields)
-// Store as JSON array of resolved type names
-metadata.attributes.insert("fields".to_string(), serde_json::to_string(&fields)?);
-
-// In function_handlers.rs - for TypeUsageResolver (signatures)
-// uses_types: JSON array of resolved/qualified type names from parameters and return types
-metadata.attributes.insert("uses_types".to_string(), serde_json::to_string(&type_refs)?);
-
-// For CallGraphResolver - JSON array of resolved/qualified function names
-metadata.attributes.insert("calls".to_string(), serde_json::to_string(&call_names)?);
 ```
 
 ---
 
 ## Testing
 
-### Unit Tests for Handlers
-
-Each handler module should have unit tests:
+### Handler Unit Tests
 
 ```rust
-// crates/languages/src/rust/handler_impls/tests/function_tests.rs
-
 #[test]
-fn test_function_extracts_uses_types() {
+fn test_function_extracts_calls() {
     let source = r#"
-        use std::collections::HashMap;
-
-        fn process(map: HashMap<String, i32>) -> Option<i32> {
-            map.get("key").copied()
+        fn caller() {
+            helper();
         }
+
+        fn helper() {}
     "#;
 
     let entities = extract_entities(source, Language::Rust);
-    let func = entities.iter().find(|e| e.name == "process").unwrap();
+    let caller = entities.iter().find(|e| e.name == "caller").unwrap();
 
-    let uses_types: Vec<String> = serde_json::from_str(
-        func.metadata.attributes.get("uses_types").unwrap()
-    ).unwrap();
+    assert_eq!(caller.relationships.calls.len(), 1);
+    assert_eq!(caller.relationships.calls[0].simple_name, "helper");
+}
 
-    assert!(uses_types.contains(&"std::collections::HashMap".to_string()));
-    assert!(uses_types.contains(&"Option".to_string()));
+#[test]
+fn test_impl_extracts_implements_trait() {
+    let source = r#"
+        trait Display {}
+        struct Foo;
+        impl Display for Foo {}
+    "#;
+
+    let entities = extract_entities(source, Language::Rust);
+    let impl_entity = entities.iter()
+        .find(|e| e.entity_type == EntityType::Impl)
+        .unwrap();
+
+    let implements = impl_entity.relationships.implements_trait.as_ref().unwrap();
+    assert!(implements.target.contains("Display"));
+}
+```
+
+### Spec Validation
+
+Tests should reference spec rule IDs:
+
+```rust
+/// Tests rule E-FN-FREE: Free functions produce Function entity
+#[test]
+fn test_free_function_extraction() {
+    // ...
 }
 ```
 
 ---
 
-## Metadata Attributes Reference
+## Entity Identifiers
 
-### Automatic Attributes
+Each entity has two identifier fields:
 
-| Attribute | Description | Set By |
-|-----------|-------------|--------|
-| `parent_scope` | Qualified name of containing entity | Qualified name builder |
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `qualified_name` | Semantic, package-relative | `mypackage::utils::format` |
+| `path_entity_identifier` | File-path-based | `packages.mypackage.src.utils.format` |
 
-### Relationship Attributes
+### qualified_name (Semantic)
+- Used for graph edge resolution
+- Matches LSP go-to-definition results
+- Format: `package_name + module_path + scope + entity_name`
 
-All relationship attributes store **qualified names** (resolved through imports) for correct relationship resolution.
-
-| Attribute | Format | Used By | Example |
-|-----------|--------|---------|---------|
-| `implements_trait` | String | TraitImplResolver | `"std::fmt::Display"` (qualified) |
-| `for_type` | String | TraitImplResolver | `"MyStruct"` |
-| `implements` | String | TraitImplResolver | `"crate::module::MyStruct"` (qualified) |
-| `extends` | String | InheritanceResolver | `"module.BaseClass"` (qualified) |
-| `bases` | JSON array | InheritanceResolver | `["mod.Base1", "mod.Base2"]` (qualified) |
-| `fields` | JSON array | TypeUsageResolver | `[{"name": "x", "field_type": "i32"}]` |
-| `uses_types` | JSON array | TypeUsageResolver | `["module.Config", "module.Result"]` (qualified) |
-| `calls` | JSON array | CallGraphResolver | `["module.process", "module.validate"]` (qualified) |
-| `imports` | JSON array | ImportsResolver | `["std::io", "crate::utils"]` |
-
-### Current Language Support Status
-
-| Language | Extraction | Resolution | Notes |
-|----------|-----------|------------|-------|
-| **Rust** | Full | Full | Canonical implementation |
-| **JavaScript** | Full | Full | Complete with `calls`, `uses_types`, `extends` (qualified) |
-| **TypeScript** | Full | Full | Complete with `calls`, `uses_types`, `extends`, `implements_trait` (qualified) |
-| **Python** | Full | Full | Complete with `calls`, `uses_types`, `bases` (qualified) |
-| **Go** | Infrastructure | None | Grammar exists, handlers not implemented |
-
-All languages (except Go) now support:
-- Relative import resolution at extraction time
-- `calls` attribute for function/method calls (qualified names)
-- `uses_types` attribute for type references (qualified names)
-- Qualified names in relationship attributes for correct Neo4j resolution
+### path_entity_identifier (File-based)
+- Used for resolving relative imports
+- Always repo-relative
+- Format: `repo_relative_path + scope + entity_name`
 
 ---
 
-## Checklist for Adding a New Language
+## Resolution Phase (outbox-processor)
 
-1. [ ] Create language directory: `crates/languages/src/newlang/`
-2. [ ] Add `mod.rs` with `define_language_extractor!` macro
-3. [ ] Create `queries.rs` with tree-sitter queries
-4. [ ] Create `handler_impls/` directory with handlers
-5. [ ] Add import parser in `common/import_map.rs`
-6. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
-7. [ ] Add file extension mapping
-8. [ ] Write handler unit tests
-9. [ ] Test with e2e resolution tests
+The `GenericResolver` handles all relationship types using configuration:
+
+```rust
+// In crates/core/src/resolution.rs
+
+pub struct RelationshipDef {
+    pub name: &'static str,
+    pub source_types: &'static [EntityType],
+    pub target_types: &'static [EntityType],
+    pub forward_rel: RelationshipType,
+    pub lookup_strategies: &'static [LookupStrategy],
+}
+
+// Example: CALLS relationship
+pub const CALLS: RelationshipDef = RelationshipDef::new(
+    "calls",
+    CALLABLE_TYPES,           // Function, Method
+    CALLABLE_TYPES,
+    RelationshipType::Calls,
+    &[
+        LookupStrategy::QualifiedName,
+        LookupStrategy::CallAliases,
+        LookupStrategy::UniqueSimpleName,
+    ],
+);
+```
+
+### Lookup Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `QualifiedName` | Match by fully qualified name |
+| `PathEntityIdentifier` | Match by file-path-based identifier |
+| `CallAliases` | Match by pre-computed aliases (Rust UFCS) |
+| `UniqueSimpleName` | Match if only one entity has that simple name |
+| `SimpleName` | First match wins (logs warning on ambiguity) |
+
+---
+
+## Checklist
+
+1. [ ] Create spec file: `crates/languages/specs/{language}.yaml`
+2. [ ] Create language directory: `crates/languages/src/{language}/`
+3. [ ] Add `mod.rs` with `define_language_extractor!` macro
+4. [ ] Create `queries.rs` with tree-sitter queries
+5. [ ] Create `handler_impls/` with handlers
+6. [ ] Populate `EntityRelationshipData` fields (not metadata.attributes)
+7. [ ] Use `SourceReference` with `is_external` flag
+8. [ ] Add import parser in `common/import_map.rs`
+9. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
+10. [ ] Write handler unit tests referencing spec rule IDs
+11. [ ] Test with e2e resolution tests
+
+---
+
+## Current Language Support
+
+| Language | Extraction | Resolution | Notes |
+|----------|-----------|------------|-------|
+| **Rust** | Full | Full | Canonical implementation with spec file |
+| **JavaScript** | Full | Full | Complete with typed relationships |
+| **TypeScript** | Full | Full | Complete with typed relationships |
+| **Python** | Full | Full | Complete with typed relationships |

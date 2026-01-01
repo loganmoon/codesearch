@@ -485,7 +485,9 @@ mod tests {
             EntityRelationshipData {
                 calls: vec![
                     SourceReference::new(
-                        "crate::bar".to_string(),
+                        "crate::bar",
+                        "bar",
+                        false,
                         SourceLocation {
                             start_line: 5,
                             end_line: 5,
@@ -495,7 +497,9 @@ mod tests {
                         codesearch_core::ReferenceType::Call,
                     ),
                     SourceReference::new(
-                        "crate::baz".to_string(),
+                        "crate::baz",
+                        "baz",
+                        false,
                         SourceLocation {
                             start_line: 6,
                             end_line: 6,
@@ -524,7 +528,9 @@ mod tests {
             "crate::foo",
             EntityRelationshipData {
                 uses_types: vec![SourceReference::new(
-                    "crate::MyStruct".to_string(),
+                    "crate::MyStruct",
+                    "MyStruct",
+                    false,
                     SourceLocation {
                         start_line: 2,
                         end_line: 2,
@@ -613,7 +619,9 @@ mod tests {
             "crate::factorial",
             EntityRelationshipData {
                 calls: vec![SourceReference::new(
-                    "crate::factorial".to_string(), // Self-call
+                    "crate::factorial", // Self-call
+                    "factorial",
+                    false,
                     SourceLocation {
                         start_line: 5,
                         end_line: 5,

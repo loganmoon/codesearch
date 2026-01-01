@@ -171,8 +171,11 @@ pub fn extract_function_calls(
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = resolve_reference(&name, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
+                    // simple_name is the bare identifier from the AST node
                     calls.push(SourceReference::new(
                         resolved,
+                        name,  // simple_name from AST
+                        false, // JS doesn't track external refs
                         SourceLocation::from_tree_sitter_node(bare_cap.node),
                         ReferenceType::Call,
                     ));
@@ -190,8 +193,11 @@ pub fn extract_function_calls(
                 let call_ref = format!("{resolved_recv}.{method_name}");
                 if seen.insert(call_ref.clone()) {
                     // Use method node for the location (more specific than receiver)
+                    // simple_name is the method name from the AST node
                     calls.push(SourceReference::new(
                         call_ref,
+                        method_name, // simple_name from AST
+                        false,       // JS doesn't track external refs
                         SourceLocation::from_tree_sitter_node(method_cap.node),
                         ReferenceType::Call,
                     ));
@@ -284,6 +290,8 @@ fn extract_types_from_jsdoc_string(
                 if seen.insert(resolved.clone()) {
                     type_refs.push(SourceReference::new(
                         resolved,
+                        base_type, // simple_name from JSDoc string
+                        false,     // JS doesn't track external refs
                         SourceLocation::default(),
                         ReferenceType::TypeUsage,
                     ));
@@ -301,6 +309,8 @@ fn extract_types_from_jsdoc_string(
                         if seen.insert(resolved.clone()) {
                             type_refs.push(SourceReference::new(
                                 resolved,
+                                generic_type, // simple_name from JSDoc string
+                                false,        // JS doesn't track external refs
                                 SourceLocation::default(),
                                 ReferenceType::TypeUsage,
                             ));
@@ -315,6 +325,8 @@ fn extract_types_from_jsdoc_string(
                 if seen.insert(resolved.clone()) {
                     type_refs.push(SourceReference::new(
                         resolved,
+                        part,  // simple_name from JSDoc string
+                        false, // JS doesn't track external refs
                         SourceLocation::default(),
                         ReferenceType::TypeUsage,
                     ));

@@ -1175,11 +1175,13 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference(
                 "crate::utils::helper",
+                "helper",
                 &map,
                 None,
                 Some("mypackage"),
                 Some("network")
-            ),
+            )
+            .target,
             "mypackage::utils::helper"
         );
     }
@@ -1191,11 +1193,13 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference(
                 "self::helper",
+                "helper",
                 &map,
                 None,
                 Some("mypackage"),
                 Some("utils::network")
-            ),
+            )
+            .target,
             "mypackage::utils::network::helper"
         );
     }
@@ -1207,11 +1211,13 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference(
                 "super::other",
+                "other",
                 &map,
                 None,
                 Some("mypackage"),
                 Some("utils::network")
-            ),
+            )
+            .target,
             "mypackage::utils::other"
         );
     }
@@ -1223,7 +1229,8 @@ import lodash from 'lodash';
 
         // Non-relative paths should use standard resolution
         assert_eq!(
-            resolve_rust_reference("Read", &map, None, Some("mypackage"), Some("utils")),
+            resolve_rust_reference("Read", "Read", &map, None, Some("mypackage"), Some("utils"))
+                .target,
             "std::io::Read"
         );
 
@@ -1231,11 +1238,13 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference(
                 "std::fmt::Display",
+                "Display",
                 &map,
                 None,
                 Some("mypackage"),
                 Some("utils")
-            ),
+            )
+            .target,
             "std::fmt::Display"
         );
     }
@@ -1248,11 +1257,13 @@ import lodash from 'lodash';
         assert_eq!(
             resolve_rust_reference(
                 "MyType",
+                "MyType",
                 &map,
                 Some("parent::module"),
                 Some("pkg"),
                 Some("mod")
-            ),
+            )
+            .target,
             "parent::module::MyType"
         );
     }
@@ -1317,7 +1328,8 @@ import lodash from 'lodash';
         map.add("Error", "crate::Error");
 
         assert_eq!(
-            resolve_rust_reference("Error", &map, None, Some("anyhow"), Some("error")),
+            resolve_rust_reference("Error", "Error", &map, None, Some("anyhow"), Some("error"))
+                .target,
             "anyhow::Error"
         );
     }
@@ -1330,7 +1342,15 @@ import lodash from 'lodash';
         map.add("helper", "self::helper");
 
         assert_eq!(
-            resolve_rust_reference("helper", &map, None, Some("mypackage"), Some("utils")),
+            resolve_rust_reference(
+                "helper",
+                "helper",
+                &map,
+                None,
+                Some("mypackage"),
+                Some("utils")
+            )
+            .target,
             "mypackage::utils::helper"
         );
     }
@@ -1343,7 +1363,15 @@ import lodash from 'lodash';
         map.add("Foo", "super::types::Foo");
 
         assert_eq!(
-            resolve_rust_reference("Foo", &map, None, Some("mypackage"), Some("utils::helpers")),
+            resolve_rust_reference(
+                "Foo",
+                "Foo",
+                &map,
+                None,
+                Some("mypackage"),
+                Some("utils::helpers")
+            )
+            .target,
             "mypackage::utils::types::Foo"
         );
     }
@@ -1356,7 +1384,8 @@ import lodash from 'lodash';
         map.add("Read", "std::io::Read");
 
         assert_eq!(
-            resolve_rust_reference("Read", &map, None, Some("mypackage"), Some("utils")),
+            resolve_rust_reference("Read", "Read", &map, None, Some("mypackage"), Some("utils"))
+                .target,
             "std::io::Read"
         );
     }
@@ -1404,10 +1433,16 @@ import lodash from 'lodash';
         map.add("Serialize", "serde::Serialize");
 
         // This should NOT be prefixed with my_crate since serde is a known external
-        assert_eq!(
-            resolve_rust_reference("serde::Deserialize", &map, None, Some("my_crate"), None),
-            "serde::Deserialize"
+        let resolved = resolve_rust_reference(
+            "serde::Deserialize",
+            "Deserialize",
+            &map,
+            None,
+            Some("my_crate"),
+            None,
         );
+        assert_eq!(resolved.target, "serde::Deserialize");
+        assert!(resolved.is_external);
     }
 
     #[test]
@@ -1415,10 +1450,16 @@ import lodash from 'lodash';
         // Unknown scoped paths like `utils::helper` should get package prefix
         let map = ImportMap::new("::");
 
-        assert_eq!(
-            resolve_rust_reference("utils::helper", &map, None, Some("my_crate"), None),
-            "my_crate::utils::helper"
+        let resolved = resolve_rust_reference(
+            "utils::helper",
+            "helper",
+            &map,
+            None,
+            Some("my_crate"),
+            None,
         );
+        assert_eq!(resolved.target, "my_crate::utils::helper");
+        assert!(!resolved.is_external);
     }
 
     #[test]
@@ -1426,16 +1467,16 @@ import lodash from 'lodash';
         // Paths already starting with the package name should stay as-is
         let map = ImportMap::new("::");
 
-        assert_eq!(
-            resolve_rust_reference(
-                "my_crate::utils::helper",
-                &map,
-                None,
-                Some("my_crate"),
-                None
-            ),
-            "my_crate::utils::helper"
+        let resolved = resolve_rust_reference(
+            "my_crate::utils::helper",
+            "helper",
+            &map,
+            None,
+            Some("my_crate"),
+            None,
         );
+        assert_eq!(resolved.target, "my_crate::utils::helper");
+        assert!(!resolved.is_external);
     }
 
     #[test]
@@ -1443,10 +1484,10 @@ import lodash from 'lodash';
         // std paths are always external
         let map = ImportMap::new("::");
 
-        assert_eq!(
-            resolve_rust_reference("std::io::Read", &map, None, Some("my_crate"), None),
-            "std::io::Read"
-        );
+        let resolved =
+            resolve_rust_reference("std::io::Read", "Read", &map, None, Some("my_crate"), None);
+        assert_eq!(resolved.target, "std::io::Read");
+        assert!(resolved.is_external);
     }
 
     #[test]
@@ -1454,10 +1495,16 @@ import lodash from 'lodash';
         // core paths are always external
         let map = ImportMap::new("::");
 
-        assert_eq!(
-            resolve_rust_reference("core::fmt::Display", &map, None, Some("my_crate"), None),
-            "core::fmt::Display"
+        let resolved = resolve_rust_reference(
+            "core::fmt::Display",
+            "Display",
+            &map,
+            None,
+            Some("my_crate"),
+            None,
         );
+        assert_eq!(resolved.target, "core::fmt::Display");
+        assert!(resolved.is_external);
     }
 
     // =========================================================================

@@ -81,6 +81,8 @@ pub fn extract_type_references(
                         if seen.insert(resolved.clone()) {
                             type_refs.push(SourceReference::new(
                                 resolved,
+                                type_name, // simple_name from AST node
+                                false,     // TS doesn't track external refs
                                 SourceLocation::from_tree_sitter_node(capture.node),
                                 ReferenceType::TypeUsage,
                             ));
@@ -90,9 +92,17 @@ pub fn extract_type_references(
                 "scoped_type_ref" => {
                     if let Ok(full_path) = node_to_text(capture.node, source) {
                         // Scoped types are already qualified
+                        // Extract simple name from the last segment of the path
+                        let simple_name = full_path
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or(&full_path)
+                            .to_string();
                         if seen.insert(full_path.clone()) {
                             type_refs.push(SourceReference::new(
                                 full_path,
+                                simple_name, // last segment of path
+                                false,       // TS doesn't track external refs
                                 SourceLocation::from_tree_sitter_node(capture.node),
                                 ReferenceType::TypeUsage,
                             ));

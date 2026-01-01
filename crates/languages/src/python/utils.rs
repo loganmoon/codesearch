@@ -312,6 +312,8 @@ pub fn extract_function_calls(
                 if seen.insert(resolved.clone()) {
                     calls.push(SourceReference::new(
                         resolved,
+                        name,  // simple_name from AST node
+                        false, // Python doesn't track external refs
                         SourceLocation::from_tree_sitter_node(bare_cap.node),
                         ReferenceType::Call,
                     ));
@@ -329,6 +331,8 @@ pub fn extract_function_calls(
                 if seen.insert(call_ref.clone()) {
                     calls.push(SourceReference::new(
                         call_ref,
+                        method_name, // simple_name from AST node
+                        false,       // Python doesn't track external refs
                         SourceLocation::from_tree_sitter_node(method_cap.node),
                         ReferenceType::Call,
                     ));
@@ -387,6 +391,8 @@ pub fn extract_type_references(
                         if seen.insert(resolved.clone()) {
                             type_refs.push(SourceReference::new(
                                 resolved,
+                                type_name, // simple_name from AST node
+                                false,     // Python doesn't track external refs
                                 SourceLocation::from_tree_sitter_node(capture.node),
                                 ReferenceType::TypeUsage,
                             ));
@@ -403,6 +409,8 @@ pub fn extract_type_references(
                             if seen.insert(resolved.clone()) {
                                 type_refs.push(SourceReference::new(
                                     resolved,
+                                    type_name, // simple_name from AST node
+                                    false,     // Python doesn't track external refs
                                     SourceLocation::from_tree_sitter_node(capture.node),
                                     ReferenceType::TypeUsage,
                                 ));

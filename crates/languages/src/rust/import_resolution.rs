@@ -11,6 +11,7 @@
 #![deny(clippy::expect_used)]
 
 use crate::common::import_map::ImportMap;
+use crate::rust::rust_path::{resolve_rust_path, RustPath};
 
 /// Result of resolving a Rust reference.
 ///
@@ -49,60 +50,25 @@ pub fn normalize_rust_path(
     package_name: Option<&str>,
     current_module: Option<&str>,
 ) -> String {
-    if let Some(rest) = path.strip_prefix("crate::") {
-        // crate:: -> package_name::rest
-        match package_name {
-            Some(pkg) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-            _ => rest.to_string(),
-        }
-    } else if let Some(rest) = path.strip_prefix("self::") {
-        // self:: -> package_name::current_module::rest
-        match (package_name, current_module) {
-            (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-                format!("{pkg}::{module}::{rest}")
-            }
-            (Some(pkg), _) if !pkg.is_empty() => format!("{pkg}::{rest}"),
-            (_, Some(module)) if !module.is_empty() => format!("{module}::{rest}"),
-            _ => rest.to_string(),
-        }
-    } else if path.starts_with("super::") {
-        // super:: -> navigate up from current_module (supports chained super::super::)
-        let mut remaining = path;
-        let mut levels_up = 0;
+    let parsed = RustPath::parse(path);
 
-        // Count how many super:: prefixes we have
-        while let Some(rest) = remaining.strip_prefix("super::") {
-            levels_up += 1;
-            remaining = rest;
-        }
-
-        if let Some(module) = current_module {
-            let parts: Vec<&str> = module.split("::").collect();
-            if parts.len() > levels_up {
-                // Navigate up by levels_up
-                let parent = parts[..parts.len() - levels_up].join("::");
-                match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{parent}::{remaining}"),
-                    _ => format!("{parent}::{remaining}"),
-                }
-            } else {
-                // At or beyond root level, super:: goes to package root
-                match package_name {
-                    Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
-                    _ => remaining.to_string(),
-                }
-            }
-        } else {
-            // No module context, return with package prefix if available
-            match package_name {
-                Some(pkg) if !pkg.is_empty() => format!("{pkg}::{remaining}"),
-                _ => remaining.to_string(),
-            }
-        }
-    } else {
-        // Not a relative path, return as-is
-        path.to_string()
+    // If not a relative path, return as-is
+    if !parsed.is_relative() {
+        return path.to_string();
     }
+
+    // Parse module path if provided
+    let module = current_module
+        .filter(|m| !m.is_empty())
+        .map(RustPath::parse);
+
+    // Resolve relative path to absolute
+    resolve_rust_path(
+        &parsed,
+        package_name.filter(|p| !p.is_empty()),
+        module.as_ref(),
+    )
+    .to_qualified_name()
 }
 
 /// Resolve a UFCS (Universal Function Call Syntax) call pattern.
@@ -307,6 +273,7 @@ pub fn resolve_rust_reference(
     current_module: Option<&str>,
 ) -> ResolvedReference {
     let simple = simple_name.to_string();
+
     // Handle UFCS (Universal Function Call Syntax) patterns: <Type as Trait>::method
     if name.starts_with('<') {
         return resolve_ufcs_call(name, &simple, import_map, package_name, current_module);
@@ -322,8 +289,11 @@ pub fn resolve_rust_reference(
         };
     }
 
+    // Parse the name into a structured path
+    let name_path = RustPath::parse(name);
+
     // First normalize any Rust-relative paths (these are internal references)
-    if name.starts_with("crate::") || name.starts_with("self::") || name.starts_with("super::") {
+    if name_path.is_relative() {
         return ResolvedReference {
             target: normalize_rust_path(name, package_name, current_module),
             simple_name: simple,
@@ -332,9 +302,9 @@ pub fn resolve_rust_reference(
     }
 
     // Already scoped paths need special handling
-    if ImportMap::is_scoped(name, "::") {
+    if name_path.is_qualified() {
         // Check if it looks like an external path
-        if is_external_path(name) {
+        if name_path.is_external() {
             return resolved_external(name.to_string(), simple);
         }
         // Try to resolve through import map first
@@ -345,49 +315,66 @@ pub fn resolve_rust_reference(
         // Handle Type::method patterns where the first segment is an imported type
         // For example: Widget::new where Widget is imported from types::Widget
         // Should resolve to types::Widget::new
-        let segments: Vec<&str> = name.split("::").collect();
+        let segments = name_path.segments();
         if segments.len() >= 2 {
-            let first_segment = segments[0];
-            if let Some(resolved_type) = import_map.resolve(first_segment) {
-                // The first segment was in the import map
-                // Build the resolved path: resolved_type::remaining_segments
-                let remaining = segments[1..].join("::");
-                let resolved_path = format!("{resolved_type}::{remaining}");
+            if let Some(first_segment) = name_path.first_segment() {
+                if let Some(resolved_type) = import_map.resolve(first_segment) {
+                    let resolved_type_path = RustPath::parse(resolved_type);
 
-                // If the resolved type has Rust-relative prefixes, normalize
-                if resolved_type.starts_with("crate::")
-                    || resolved_type.starts_with("self::")
-                    || resolved_type.starts_with("super::")
-                {
-                    let normalized_type =
-                        normalize_rust_path(resolved_type, package_name, current_module);
-                    return resolved_internal(format!("{normalized_type}::{remaining}"), simple);
-                }
+                    // If the resolved type has Rust-relative prefixes, normalize
+                    if resolved_type_path.is_relative() {
+                        let normalized_type =
+                            normalize_rust_path(resolved_type, package_name, current_module);
+                        let result = RustPath::builder()
+                            .segments(RustPath::parse(&normalized_type).segments().iter().cloned())
+                            .segments(segments[1..].iter().cloned())
+                            .build();
+                        return resolved_internal(result.to_qualified_name(), simple);
+                    }
 
-                // If the resolved type is a scoped path (e.g., types::Widget),
-                // prepend package name to make it absolute
-                if ImportMap::is_scoped(resolved_type, "::") {
+                    // Build the resolved path: resolved_type::remaining_segments
+                    let resolved_path = RustPath::builder()
+                        .segments(resolved_type_path.segments().iter().cloned())
+                        .segments(segments[1..].iter().cloned())
+                        .build()
+                        .to_qualified_name();
+
+                    // If the resolved type is a scoped path (e.g., types::Widget),
+                    // prepend package name to make it absolute
+                    if resolved_type_path.is_qualified() {
+                        if let Some(pkg) = package_name {
+                            if !pkg.is_empty() {
+                                if let Some(first) = resolved_type_path.first_segment() {
+                                    if first != pkg && !resolved_type_path.is_external() {
+                                        let result = RustPath::builder()
+                                            .segment(pkg)
+                                            .segments(resolved_type_path.segments().iter().cloned())
+                                            .segments(segments[1..].iter().cloned())
+                                            .build();
+                                        return resolved_internal(
+                                            result.to_qualified_name(),
+                                            simple,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        return resolved(resolved_path, simple);
+                    }
+
+                    // Otherwise prepend package if available
                     if let Some(pkg) = package_name {
                         if !pkg.is_empty() {
-                            let first = resolved_type.split("::").next().unwrap_or(resolved_type);
-                            if first != pkg && !is_external_path(resolved_type) {
-                                return resolved_internal(
-                                    format!("{pkg}::{resolved_path}"),
-                                    simple,
-                                );
-                            }
+                            let result = RustPath::builder()
+                                .segment(pkg)
+                                .segments(resolved_type_path.segments().iter().cloned())
+                                .segments(segments[1..].iter().cloned())
+                                .build();
+                            return resolved_internal(result.to_qualified_name(), simple);
                         }
                     }
                     return resolved(resolved_path, simple);
                 }
-
-                // Otherwise prepend package if available
-                if let Some(pkg) = package_name {
-                    if !pkg.is_empty() {
-                        return resolved_internal(format!("{pkg}::{resolved_path}"), simple);
-                    }
-                }
-                return resolved(resolved_path, simple);
             }
         }
 
@@ -397,21 +384,26 @@ pub fn resolve_rust_reference(
         if let Some(pkg) = package_name {
             if !pkg.is_empty() {
                 // Extract the first path segment
-                let first_segment = name.split("::").next().unwrap_or(name);
-                // If the first segment matches the package name, it's already
-                // absolute within this crate - return as-is
-                if first_segment == pkg {
-                    return resolved_internal(name.to_string(), simple);
-                }
-                // Check if any import in the map starts with this segment.
-                // If so, it's a known external crate (e.g., `serde::Deserialize`
-                // when we have `use serde::Serialize;`).
-                if import_map.has_crate_import(first_segment, "::") {
-                    return resolved_external(name.to_string(), simple);
+                if let Some(first_segment) = name_path.first_segment() {
+                    // If the first segment matches the package name, it's already
+                    // absolute within this crate - return as-is
+                    if first_segment == pkg {
+                        return resolved_internal(name.to_string(), simple);
+                    }
+                    // Check if any import in the map starts with this segment.
+                    // If so, it's a known external crate (e.g., `serde::Deserialize`
+                    // when we have `use serde::Serialize;`).
+                    if import_map.has_crate_import(first_segment, "::") {
+                        return resolved_external(name.to_string(), simple);
+                    }
                 }
                 // Otherwise, assume it's a relative internal path and prepend
                 // the package name (e.g., `utils::helper` -> `my_crate::utils::helper`)
-                return resolved_internal(format!("{pkg}::{name}"), simple);
+                let result = RustPath::builder()
+                    .segment(pkg)
+                    .segments(name_path.segments().iter().cloned())
+                    .build();
+                return resolved_internal(result.to_qualified_name(), simple);
             }
         }
         return resolved(name.to_string(), simple);
@@ -419,11 +411,10 @@ pub fn resolve_rust_reference(
 
     // Try import map
     if let Some(resolved_path) = import_map.resolve(name) {
+        let resolved_path_parsed = RustPath::parse(resolved_path);
+
         // Normalize result if it contains Rust-relative prefixes
-        if resolved_path.starts_with("crate::")
-            || resolved_path.starts_with("self::")
-            || resolved_path.starts_with("super::")
-        {
+        if resolved_path_parsed.is_relative() {
             return resolved_internal(
                 normalize_rust_path(resolved_path, package_name, current_module),
                 simple,
@@ -435,21 +426,26 @@ pub fn resolve_rust_reference(
         // Note: Unlike the scoped path handling above (for direct input), we don't use
         // has_crate_import here because the path already came from the import map.
         // Import map paths are typically internal module paths that need the package prefix.
-        if ImportMap::is_scoped(resolved_path, "::") {
+        if resolved_path_parsed.is_qualified() {
             // Check if it looks like an external path (known std lib prefixes)
-            if is_external_path(resolved_path) {
+            if resolved_path_parsed.is_external() {
                 return resolved_external(resolved_path.to_string(), simple);
             }
             // For relative scoped paths, prepend package name
             if let Some(pkg) = package_name {
                 if !pkg.is_empty() {
-                    let first_segment = resolved_path.split("::").next().unwrap_or(resolved_path);
-                    // If first segment matches package name, it's already absolute
-                    if first_segment == pkg {
-                        return resolved_internal(resolved_path.to_string(), simple);
+                    if let Some(first_segment) = resolved_path_parsed.first_segment() {
+                        // If first segment matches package name, it's already absolute
+                        if first_segment == pkg {
+                            return resolved_internal(resolved_path.to_string(), simple);
+                        }
                     }
                     // Prepend package name for relative internal paths
-                    return resolved_internal(format!("{pkg}::{resolved_path}"), simple);
+                    let result = RustPath::builder()
+                        .segment(pkg)
+                        .segments(resolved_path_parsed.segments().iter().cloned())
+                        .build();
+                    return resolved_internal(result.to_qualified_name(), simple);
                 }
             }
         }
@@ -464,27 +460,44 @@ pub fn resolve_rust_reference(
     // We use the first glob import as a best-effort resolution since we cannot verify
     // at extraction time which module actually exports the symbol.
     if let Some(glob_path) = import_map.glob_imports().first() {
+        let glob_path_parsed = RustPath::parse(glob_path);
+
         // Build the potential qualified path from glob import
-        let candidate = format!("{glob_path}::{name}");
+        let candidate = RustPath::builder()
+            .segments(glob_path_parsed.segments().iter().cloned())
+            .segment(name)
+            .build();
 
         // Normalize with package name if available
         if let Some(pkg) = package_name {
             if !pkg.is_empty() {
-                // Check if glob_path is already absolute
-                if glob_path.starts_with(pkg) {
-                    return resolved_internal(format!("{glob_path}::{name}"), simple);
+                // Check if glob_path is already absolute (starts with package name)
+                if glob_path_parsed
+                    .first_segment()
+                    .is_some_and(|first| first == pkg)
+                {
+                    return resolved_internal(candidate.to_qualified_name(), simple);
                 }
                 // Otherwise prepend package name
-                return resolved_internal(format!("{pkg}::{candidate}"), simple);
+                let result = RustPath::builder()
+                    .segment(pkg)
+                    .segments(candidate.segments().iter().cloned())
+                    .build();
+                return resolved_internal(result.to_qualified_name(), simple);
             }
         }
-        return resolved(candidate, simple);
+        return resolved(candidate.to_qualified_name(), simple);
     }
 
     // Try parent scope
     if let Some(scope) = parent_scope {
         if !scope.is_empty() {
-            return resolved_internal(format!("{scope}::{name}"), simple);
+            let scope_path = RustPath::parse(scope);
+            let result = RustPath::builder()
+                .segments(scope_path.segments().iter().cloned())
+                .segment(name)
+                .build();
+            return resolved_internal(result.to_qualified_name(), simple);
         }
     }
 
@@ -492,15 +505,26 @@ pub fn resolve_rust_reference(
     // This handles types defined in the same module that aren't imported
     match (package_name, current_module) {
         (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-            resolved_internal(format!("{pkg}::{module}::{name}"), simple)
+            let module_path = RustPath::parse(module);
+            let result = RustPath::builder()
+                .segment(pkg)
+                .segments(module_path.segments().iter().cloned())
+                .segment(name)
+                .build();
+            resolved_internal(result.to_qualified_name(), simple)
         }
         (Some(pkg), _) if !pkg.is_empty() => {
             // At crate root (no module path)
-            resolved_internal(format!("{pkg}::{name}"), simple)
+            let result = RustPath::builder().segment(pkg).segment(name).build();
+            resolved_internal(result.to_qualified_name(), simple)
         }
         _ => {
             // No package context available, mark as external
-            resolved_external(format!("external::{name}"), simple)
+            let result = RustPath::builder()
+                .segment("external")
+                .segment(name)
+                .build();
+            resolved_external(result.to_qualified_name(), simple)
         }
     }
 }
@@ -579,11 +603,17 @@ pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
                 "scoped_path" => {
                     // use std::io::Read - extract the last segment as simple name
                     if let Ok(full_path) = capture.node.utf8_text(source.as_bytes()) {
-                        if let Some(simple_name) = full_path.rsplit("::").next() {
+                        let parsed = RustPath::parse(full_path);
+                        if let Some(simple_name) = parsed.simple_name() {
                             if simple_name == "*" {
                                 // Store glob import base path for fallback resolution
-                                if let Some(base) = full_path.strip_suffix("::*") {
-                                    import_map.add_glob(base);
+                                // The base path is all segments except the last (*)
+                                let segments = parsed.segments();
+                                if segments.len() > 1 {
+                                    let base = RustPath::builder()
+                                        .segments(segments[..segments.len() - 1].iter().cloned())
+                                        .build();
+                                    import_map.add_glob(&base.to_qualified_name());
                                 }
                             } else {
                                 import_map.add(simple_name, full_path);
@@ -629,14 +659,18 @@ pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
 
 /// Parse items in a Rust use list (e.g., `{Read, Write, BufReader as BR}`)
 fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_map: &mut ImportMap) {
+    let base_path_parsed = RustPath::parse(base_path);
     let mut cursor = list_node.walk();
 
     for child in list_node.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
                 if let Ok(name) = child.utf8_text(source.as_bytes()) {
-                    let full_path = format!("{base_path}::{name}");
-                    import_map.add(name, &full_path);
+                    let full_path = RustPath::builder()
+                        .segments(base_path_parsed.segments().iter().cloned())
+                        .segment(name)
+                        .build();
+                    import_map.add(name, &full_path.to_qualified_name());
                 }
             }
             "use_as_clause" => {
@@ -650,23 +684,31 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
                         p_node.utf8_text(source.as_bytes()),
                         a_node.utf8_text(source.as_bytes()),
                     ) {
-                        let full_path = format!("{base_path}::{path_text}");
-                        import_map.add(alias_text, &full_path);
+                        let path_parsed = RustPath::parse(path_text);
+                        let full_path = RustPath::builder()
+                            .segments(base_path_parsed.segments().iter().cloned())
+                            .segments(path_parsed.segments().iter().cloned())
+                            .build();
+                        import_map.add(alias_text, &full_path.to_qualified_name());
                     }
                 }
             }
             "scoped_identifier" => {
                 // Handle nested paths like `io::Read` within a use list
                 if let Ok(scoped_path) = child.utf8_text(source.as_bytes()) {
-                    let full_path = format!("{base_path}::{scoped_path}");
-                    if let Some(simple_name) = scoped_path.rsplit("::").next() {
-                        import_map.add(simple_name, &full_path);
+                    let scoped_parsed = RustPath::parse(scoped_path);
+                    let full_path = RustPath::builder()
+                        .segments(base_path_parsed.segments().iter().cloned())
+                        .segments(scoped_parsed.segments().iter().cloned())
+                        .build();
+                    if let Some(simple_name) = scoped_parsed.simple_name() {
+                        import_map.add(simple_name, &full_path.to_qualified_name());
                     }
                 }
             }
             "self" => {
                 // Handle `use foo::{self}` - imports the base path itself
-                if let Some(simple_name) = base_path.rsplit("::").next() {
+                if let Some(simple_name) = base_path_parsed.simple_name() {
                     import_map.add(simple_name, base_path);
                 }
             }
@@ -678,8 +720,17 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
                     child.child_by_field_name("list"),
                 ) {
                     if let Ok(path_text) = path_node.utf8_text(source.as_bytes()) {
-                        let nested_base = format!("{base_path}::{path_text}");
-                        parse_rust_use_list(nested_list_node, source, &nested_base, import_map);
+                        let path_parsed = RustPath::parse(path_text);
+                        let nested_base = RustPath::builder()
+                            .segments(base_path_parsed.segments().iter().cloned())
+                            .segments(path_parsed.segments().iter().cloned())
+                            .build();
+                        parse_rust_use_list(
+                            nested_list_node,
+                            source,
+                            &nested_base.to_qualified_name(),
+                            import_map,
+                        );
                     }
                 }
             }

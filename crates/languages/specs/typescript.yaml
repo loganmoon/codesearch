@@ -1,0 +1,1025 @@
+# TypeScript Entity Extraction Specification
+# ==========================================
+#
+# This specification defines the rules for extracting entities, relationships,
+# and metadata from TypeScript source code. Rules are identified by unique IDs
+# and can be referenced by test fixtures.
+#
+# Rule ID Format:
+#   E-xxx  = Entity extraction rules
+#   V-xxx  = Visibility rules
+#   Q-xxx  = Qualified name rules
+#   R-xxx  = Relationship rules
+#   M-xxx  = Metadata rules
+#
+# Reference: https://www.typescriptlang.org/docs/handbook/
+#
+# Last validated against TypeScript Handbook: 2025-12-31
+
+version: "1.0"
+language: typescript
+
+# =============================================================================
+# ENTITY TYPES
+# =============================================================================
+# Defines which TypeScript constructs produce which entity types.
+
+entity_rules:
+
+  # ---------------------------------------------------------------------------
+  # Modules (ES Modules)
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/modules.html
+  # ---------------------------------------------------------------------------
+  - id: E-MOD-FILE
+    description: "A file with import/export statements produces a Module entity"
+    construct: "file with `import` or `export` at top level"
+    produces: Module
+    note: |
+      In TypeScript, any file containing a top-level `import` or `export` is
+      considered a module. Files without these are scripts in the global scope.
+      The module is identified by its file path relative to the project root.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html#how-javascript-modules-are-defined"
+    tested_by: [basic_module, imports_exports]
+
+  - id: E-MOD-NAMESPACE
+    description: "A namespace declaration produces a Module entity"
+    construct: "namespace Foo { ... }"
+    produces: Module
+    note: |
+      Namespaces (formerly "internal modules") provide a way to organize code.
+      The `namespace` keyword is preferred over the older `module` keyword for
+      internal modules to avoid confusion with ES modules.
+    reference: "https://www.typescriptlang.org/docs/handbook/namespaces.html"
+    tested_by: [namespaces, nested_namespaces]
+
+  - id: E-MOD-NAMESPACE-MERGED
+    description: "Multiple namespace declarations with same name merge into one Module"
+    construct: "namespace Foo { ... } namespace Foo { ... }"
+    produces: Module
+    note: |
+      TypeScript supports declaration merging for namespaces. Multiple namespace
+      declarations with the same name contribute to a single merged namespace.
+      Non-exported members remain private to their original declaration.
+    reference: "https://www.typescriptlang.org/docs/handbook/declaration-merging.html#merging-namespaces"
+    tested_by: [namespace_merging]
+
+  # ---------------------------------------------------------------------------
+  # Classes
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/classes.html
+  # ---------------------------------------------------------------------------
+  - id: E-CLASS
+    description: "A class declaration produces a Class entity"
+    construct: "class Name { ... }"
+    produces: Class
+    tested_by: [classes, generic_classes]
+
+  - id: E-CLASS-ABSTRACT
+    description: "An abstract class declaration produces a Class entity"
+    construct: "abstract class Name { ... }"
+    produces: Class
+    condition: "class has `abstract` modifier"
+    note: |
+      Abstract classes cannot be instantiated directly and serve as base classes.
+      They may contain abstract methods that must be implemented by subclasses.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#abstract-classes-and-members"
+    tested_by: [abstract_classes]
+
+  - id: E-CLASS-EXPR
+    description: "A class expression assigned to a variable produces a Class entity"
+    construct: "const Foo = class { ... }"
+    produces: Class
+    note: |
+      Class expressions can be anonymous or named. When assigned to a variable,
+      the entity name is derived from the variable name.
+    tested_by: [class_expressions]
+
+  # ---------------------------------------------------------------------------
+  # Interfaces
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/objects.html
+  # ---------------------------------------------------------------------------
+  - id: E-INTERFACE
+    description: "An interface declaration produces an Interface entity"
+    construct: "interface Name { ... }"
+    produces: Interface
+    note: |
+      Interfaces define the shape of objects. Unlike type aliases, interfaces
+      can be extended and participate in declaration merging.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/objects.html"
+    tested_by: [interfaces, interface_extends]
+
+  - id: E-INTERFACE-MERGED
+    description: "Multiple interface declarations with same name merge into one Interface"
+    construct: "interface Foo { a: string } interface Foo { b: number }"
+    produces: Interface
+    note: |
+      Interfaces with the same name automatically merge. Non-function members
+      must be unique or have identical types. Function members become overloads.
+    reference: "https://www.typescriptlang.org/docs/handbook/declaration-merging.html#merging-interfaces"
+    tested_by: [interface_merging]
+
+  # ---------------------------------------------------------------------------
+  # Type Aliases
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-aliases
+  # ---------------------------------------------------------------------------
+  - id: E-TYPE-ALIAS
+    description: "A type alias declaration produces a TypeAlias entity"
+    construct: "type Name = ...;"
+    produces: TypeAlias
+    note: |
+      Type aliases create a new name for any type. Unlike interfaces, type
+      aliases cannot participate in declaration merging and can represent
+      primitives, unions, tuples, and other complex types.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-aliases"
+    tested_by: [type_aliases, generic_type_aliases]
+
+  # ---------------------------------------------------------------------------
+  # Enums
+  # Reference: https://www.typescriptlang.org/docs/handbook/enums.html
+  # ---------------------------------------------------------------------------
+  - id: E-ENUM
+    description: "An enum declaration produces an Enum entity"
+    construct: "enum Name { ... }"
+    produces: Enum
+    note: |
+      Enums allow defining a set of named constants. TypeScript provides both
+      numeric and string-based enums. Enums are both a type and a value.
+    reference: "https://www.typescriptlang.org/docs/handbook/enums.html"
+    tested_by: [enums, const_enums]
+
+  - id: E-ENUM-CONST
+    description: "A const enum declaration produces an Enum entity"
+    construct: "const enum Name { ... }"
+    produces: Enum
+    condition: "enum has `const` modifier"
+    note: |
+      Const enums are completely removed during compilation and inlined at
+      use sites. They cannot have computed members.
+    tested_by: [const_enums]
+
+  # ---------------------------------------------------------------------------
+  # Functions
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/functions.html
+  # ---------------------------------------------------------------------------
+  - id: E-FN-DECL
+    description: "A function declaration produces a Function entity"
+    construct: "function name() { ... }"
+    produces: Function
+    tested_by: [functions, async_functions, generator_functions]
+
+  - id: E-FN-EXPR
+    description: "A function expression assigned to a variable produces a Function entity"
+    construct: "const foo = function() { ... }"
+    produces: Function
+    note: "Named function expressions use the function's name; anonymous ones use the variable name"
+    tested_by: [function_expressions]
+
+  - id: E-FN-ARROW
+    description: "An arrow function assigned to a const/let produces a Function entity"
+    construct: "const foo = () => { ... }"
+    produces: Function
+    note: |
+      Arrow functions have lexical `this` binding and cannot be used as
+      constructors. When assigned to a const/let at module level, they
+      produce a Function entity.
+    tested_by: [arrow_functions]
+
+  - id: E-FN-GENERATOR
+    description: "A generator function produces a Function entity"
+    construct: "function* name() { ... }"
+    produces: Function
+    condition: "function has `*` generator modifier"
+    tested_by: [generator_functions]
+
+  # ---------------------------------------------------------------------------
+  # Methods
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/classes.html#methods
+  # ---------------------------------------------------------------------------
+  - id: E-METHOD-CLASS
+    description: "A class method produces a Method entity"
+    construct: "class C { method() { ... } }"
+    produces: Method
+    tested_by: [methods, static_methods]
+
+  - id: E-METHOD-STATIC
+    description: "A static class method produces a Method entity"
+    construct: "class C { static method() { ... } }"
+    produces: Method
+    condition: "method has `static` modifier"
+    note: |
+      Static methods are called on the class itself, not on instances.
+      They cannot access `this` as an instance reference.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#static-members"
+    tested_by: [static_methods]
+
+  - id: E-METHOD-ABSTRACT
+    description: "An abstract method signature produces a Method entity"
+    construct: "abstract class C { abstract method(): void; }"
+    produces: Method
+    condition: "method is in abstract class and has `abstract` modifier"
+    note: "Abstract methods have no implementation and must be implemented by subclasses"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#abstract-classes-and-members"
+    tested_by: [abstract_classes]
+
+  - id: E-METHOD-INTERFACE
+    description: "An interface method signature produces a Method entity"
+    construct: "interface I { method(): void; }"
+    produces: Method
+    note: "Interface methods are always signatures without implementation"
+    tested_by: [interfaces]
+
+  - id: E-METHOD-GETTER
+    description: "A getter accessor produces a Method entity"
+    construct: "class C { get prop() { ... } }"
+    produces: Method
+    note: |
+      Getters are accessor properties that allow computed property access.
+      A getter without a setter creates a readonly property.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#getters--setters"
+    tested_by: [accessors]
+
+  - id: E-METHOD-SETTER
+    description: "A setter accessor produces a Method entity"
+    construct: "class C { set prop(value) { ... } }"
+    produces: Method
+    note: "Setters allow intercepting property assignment"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#getters--setters"
+    tested_by: [accessors]
+
+  # ---------------------------------------------------------------------------
+  # Variables and Constants
+  # ---------------------------------------------------------------------------
+  - id: E-CONST
+    description: "A const declaration at module level produces a Constant entity"
+    construct: "const NAME = value;"
+    produces: Constant
+    condition: "const declaration at module/namespace scope (not in function body)"
+    note: |
+      Module-level constants are typically exported values or configuration.
+      Only top-level const declarations become entities; block-scoped ones do not.
+    tested_by: [constants, exported_constants]
+
+  - id: E-VAR-LET
+    description: "A let/var declaration at module level produces a Variable entity"
+    construct: "let name = value;"
+    produces: Variable
+    condition: "let/var declaration at module/namespace scope (not in function body)"
+    note: "Only module-level variable declarations become entities"
+    tested_by: [variables]
+
+  # ---------------------------------------------------------------------------
+  # Properties (Class Fields)
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/classes.html#fields
+  # ---------------------------------------------------------------------------
+  - id: E-PROPERTY-FIELD
+    description: "A class field declaration produces a Property entity"
+    construct: "class C { field: Type; }"
+    produces: Property
+    note: |
+      Class fields can have type annotations, initializers, and modifiers
+      (public, private, protected, readonly, static).
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#fields"
+    tested_by: [class_fields, private_fields]
+
+  - id: E-PROPERTY-PARAM
+    description: "A parameter property produces a Property entity"
+    construct: "class C { constructor(public field: Type) {} }"
+    produces: Property
+    condition: "constructor parameter has visibility modifier (public, private, protected) or readonly"
+    note: |
+      Parameter properties are a TypeScript shorthand that declares and
+      initializes a class field from a constructor parameter.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#parameter-properties"
+    tested_by: [parameter_properties]
+
+  - id: E-PROPERTY-PRIVATE-FIELD
+    description: "A private class field (#field) produces a Property entity"
+    construct: "class C { #field: Type; }"
+    produces: Property
+    note: |
+      ECMAScript private fields use the # prefix and provide hard runtime
+      privacy, unlike TypeScript's `private` keyword which is compile-time only.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#caveats"
+    tested_by: [private_fields]
+
+
+# =============================================================================
+# VISIBILITY RULES
+# =============================================================================
+# Defines how visibility is determined for entities.
+# Rules are evaluated in precedence order; first matching rule wins.
+#
+# TypeScript has TWO visibility systems:
+# 1. Module-level: export vs no export (applies to ES module members)
+# 2. Class-level: public/private/protected (applies to class members)
+#
+# For code search, we map these to our standard visibility model:
+# - Public: Accessible from anywhere (exported module members, public class members)
+# - Private: Accessible only within defining scope (non-exported, private class members)
+# - Protected: Accessible to subclasses (protected class members)
+# - Internal: Not used in TypeScript (TypeScript has no crate-level visibility)
+
+visibility_rules:
+
+  # ---------------------------------------------------------------------------
+  # Special cases (visibility determined by context)
+  # ---------------------------------------------------------------------------
+  - id: V-INTERFACE-MEMBER
+    description: "Interface members have no visibility (None)"
+    applies_to: [Method, Property]
+    condition: "member is defined inside an interface"
+    result: null  # None
+    reason: |
+      Interface members define a contract and don't have visibility modifiers.
+      The visibility of interface members is determined by the interface itself.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/objects.html"
+    precedence: 1
+    tested_by: [interfaces]
+
+  - id: V-TYPE-ALIAS
+    description: "Type aliases have no visibility modifier (treated as module export)"
+    applies_to: TypeAlias
+    condition: "type alias visibility follows module export rules"
+    result: null  # Visibility determined by export keyword at module level
+    reason: "Type aliases themselves don't have visibility modifiers; they use export"
+    precedence: 1
+    tested_by: [type_aliases]
+
+  # ---------------------------------------------------------------------------
+  # Class member visibility
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/classes.html#member-visibility
+  # ---------------------------------------------------------------------------
+  - id: V-CLASS-PUBLIC
+    description: "Public class members (explicit or default) have Public visibility"
+    applies_to: [Method, Property]
+    condition: "has `public` modifier OR no visibility modifier on class member"
+    result: Public
+    note: |
+      In TypeScript classes, members without a visibility modifier are public
+      by default. The `public` modifier can be explicitly added for clarity.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#public"
+    precedence: 10
+    tested_by: [classes, methods]
+
+  - id: V-CLASS-PRIVATE
+    description: "Private class members have Private visibility"
+    applies_to: [Method, Property]
+    condition: "has `private` modifier"
+    result: Private
+    note: |
+      TypeScript's `private` is compile-time only and can be accessed at
+      runtime via bracket notation. Use # for hard runtime privacy.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#private"
+    precedence: 10
+    tested_by: [private_members]
+
+  - id: V-CLASS-PROTECTED
+    description: "Protected class members have Protected visibility"
+    applies_to: [Method, Property]
+    condition: "has `protected` modifier"
+    result: Protected
+    note: |
+      Protected members are visible to the defining class and its subclasses.
+      A derived class can expose a protected member as public.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#protected"
+    precedence: 10
+    tested_by: [protected_members]
+
+  - id: V-CLASS-PRIVATE-FIELD
+    description: "ECMAScript private fields (#) have Private visibility"
+    applies_to: Property
+    condition: "field name starts with #"
+    result: Private
+    note: "ECMAScript private fields provide hard runtime privacy"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#caveats"
+    precedence: 5
+    tested_by: [private_fields]
+
+  # ---------------------------------------------------------------------------
+  # Module-level visibility (export)
+  # ---------------------------------------------------------------------------
+  - id: V-EXPORT
+    description: "Exported module members have Public visibility"
+    applies_to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable, Module]
+    condition: "has `export` keyword"
+    result: Public
+    note: |
+      The export keyword makes a declaration available for import by other
+      modules. This is the primary visibility mechanism for ES modules.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html"
+    precedence: 20
+    tested_by: [exports, reexports]
+
+  - id: V-EXPORT-DEFAULT
+    description: "Default exported members have Public visibility"
+    applies_to: [Function, Class, Interface, TypeAlias, Constant, Variable]
+    condition: "has `export default`"
+    result: Public
+    note: "Default exports are a special case of exports, one per module"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html#default-exports"
+    precedence: 20
+    tested_by: [default_exports]
+
+  - id: V-NAMESPACE-EXPORT
+    description: "Exported namespace members have Public visibility"
+    applies_to: "*"
+    condition: "member inside namespace has `export` keyword"
+    result: Public
+    note: |
+      Within namespaces, members must be explicitly exported to be visible
+      outside the namespace. Non-exported members are private to that namespace.
+    reference: "https://www.typescriptlang.org/docs/handbook/namespaces.html#namespacing"
+    precedence: 20
+    tested_by: [namespaces]
+
+  # ---------------------------------------------------------------------------
+  # Default visibility (no modifier)
+  # ---------------------------------------------------------------------------
+  - id: V-MODULE-PRIVATE
+    description: "Non-exported module members have Private visibility"
+    applies_to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable]
+    condition: "no `export` keyword on module-level declaration"
+    result: Private
+    note: |
+      Module-level declarations without export are private to the module.
+      They cannot be imported by other modules.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html"
+    precedence: 100  # lowest precedence (default)
+    tested_by: [modules, visibility]
+
+
+# =============================================================================
+# QUALIFIED NAME RULES
+# =============================================================================
+# Defines how qualified names are constructed for entities.
+#
+# TypeScript qualified names follow these patterns:
+# - ES Modules: File path based (module path + entity name)
+# - Namespaces: Dot-separated (Namespace.SubNamespace.Entity)
+# - Classes: ClassName.memberName
+
+qualified_name_rules:
+
+  # ---------------------------------------------------------------------------
+  # Module-level qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-MODULE-FILE
+    description: "ES module is named after its file path"
+    pattern: "{relative_path_without_extension}"
+    examples:
+      - "src/utils/helpers"  # from src/utils/helpers.ts
+      - "components/Button"  # from components/Button.tsx
+    note: |
+      ES module names are derived from their file paths relative to the
+      project root, without the file extension.
+    tested_by: [basic_module]
+
+  - id: Q-MODULE-NAMESPACE
+    description: "Namespace is named by its declaration"
+    pattern: "{parent_namespace}.{name}"
+    examples:
+      - "Validation"  # top-level namespace
+      - "Shapes.Polygons"  # nested namespace
+    note: "Namespaces use dot notation for nesting"
+    tested_by: [namespaces, nested_namespaces]
+
+  - id: Q-ITEM-MODULE
+    description: "Module-level items are qualified under their module"
+    pattern: "{module}.{name}"
+    applies_to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable]
+    examples:
+      - "src/utils/helpers.formatDate"  # function in module
+      - "src/models/User.User"  # class in module
+    note: "Items at module level are qualified with the module path"
+    tested_by: [functions, classes, interfaces]
+
+  - id: Q-ITEM-NAMESPACE
+    description: "Namespace-level items are qualified under their namespace"
+    pattern: "{namespace}.{name}"
+    applies_to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable]
+    examples:
+      - "Validation.StringValidator"  # interface in namespace
+      - "Shapes.Polygons.Triangle"  # class in nested namespace
+    note: "Items in namespaces use dot-separated paths"
+    tested_by: [namespaces]
+
+  # ---------------------------------------------------------------------------
+  # Class member qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-METHOD-INSTANCE
+    description: "Instance methods use dot notation from class"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.getName"  # instance method
+      - "Validation.ZipCodeValidator.isAcceptable"  # method in namespace class
+    note: "Instance methods are qualified as Class.methodName"
+    tested_by: [methods]
+
+  - id: Q-METHOD-STATIC
+    description: "Static methods include 'static' qualifier"
+    pattern: "{class_fqn}.static.{name}"
+    examples:
+      - "src/models/User.User.static.create"  # static method
+    note: "Static methods are distinguished from instance methods"
+    divergence: |
+      TypeScript doesn't have a canonical path format for static vs instance.
+      We use .static. to distinguish for searchability.
+    tested_by: [static_methods]
+
+  - id: Q-PROPERTY-INSTANCE
+    description: "Instance properties use dot notation from class"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.email"  # instance property
+    tested_by: [class_fields]
+
+  - id: Q-PROPERTY-STATIC
+    description: "Static properties include 'static' qualifier"
+    pattern: "{class_fqn}.static.{name}"
+    examples:
+      - "src/models/User.User.static.DEFAULT_ROLE"
+    tested_by: [static_properties]
+
+  # ---------------------------------------------------------------------------
+  # Interface member qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-INTERFACE-METHOD
+    description: "Interface methods are qualified under the interface"
+    pattern: "{interface_fqn}.{name}"
+    examples:
+      - "src/types.Comparable.compareTo"
+      - "Validation.StringValidator.isAcceptable"
+    tested_by: [interfaces]
+
+  - id: Q-INTERFACE-PROPERTY
+    description: "Interface properties are qualified under the interface"
+    pattern: "{interface_fqn}.{name}"
+    examples:
+      - "src/types.User.id"
+      - "src/types.User.name"
+    tested_by: [interfaces]
+
+
+# =============================================================================
+# RELATIONSHIP RULES
+# =============================================================================
+# Defines what relationships are created between entities.
+
+relationship_rules:
+
+  # ---------------------------------------------------------------------------
+  # Containment (structural hierarchy)
+  # ---------------------------------------------------------------------------
+  - id: R-CONTAINS-MODULE-ITEM
+    description: "Module CONTAINS its top-level declarations"
+    kind: Contains
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable, Module]
+    tested_by: [basic_module, namespaces]
+
+  - id: R-CONTAINS-CLASS-MEMBER
+    description: "Class CONTAINS its methods and properties"
+    kind: Contains
+    from: Class
+    to: [Method, Property]
+    tested_by: [classes, methods, class_fields]
+
+  - id: R-CONTAINS-INTERFACE-MEMBER
+    description: "Interface CONTAINS its method and property signatures"
+    kind: Contains
+    from: Interface
+    to: [Method, Property]
+    tested_by: [interfaces]
+
+  - id: R-CONTAINS-ENUM-MEMBER
+    description: "Enum CONTAINS its variants"
+    kind: Contains
+    from: Enum
+    to: EnumVariant
+    note: "Enum members are contained by their parent enum"
+    tested_by: [enums]
+
+  - id: R-CONTAINS-NAMESPACE-ITEM
+    description: "Namespace CONTAINS its exported members"
+    kind: Contains
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable, Module]
+    condition: "namespace contains exported members"
+    tested_by: [namespaces]
+
+  # ---------------------------------------------------------------------------
+  # Inheritance and Implementation
+  # ---------------------------------------------------------------------------
+  - id: R-INHERITS-FROM
+    description: "Class INHERITS_FROM its base class"
+    kind: InheritsFrom
+    from: Class
+    to: Class
+    condition: "class uses `extends` clause"
+    note: |
+      TypeScript supports single inheritance for classes. A class can only
+      extend one other class, but can implement multiple interfaces.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#extends-clauses"
+    tested_by: [class_inheritance]
+
+  - id: R-IMPLEMENTS
+    description: "Class IMPLEMENTS an interface"
+    kind: Implements
+    from: Class
+    to: Interface
+    condition: "class uses `implements` clause"
+    note: |
+      A class can implement multiple interfaces. The implements clause is a
+      check that the class satisfies the interface, but doesn't change the
+      class's type.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#implements-clauses"
+    tested_by: [class_implements]
+
+  - id: R-EXTENDS-INTERFACE
+    description: "Interface EXTENDS_INTERFACE another interface"
+    kind: ExtendsInterface
+    from: Interface
+    to: Interface
+    condition: "interface uses `extends` clause"
+    note: |
+      Interfaces can extend multiple other interfaces, combining their
+      members into a single interface.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/objects.html#extending-types"
+    tested_by: [interface_extends]
+
+  # ---------------------------------------------------------------------------
+  # Import relationships
+  # ---------------------------------------------------------------------------
+  - id: R-IMPORTS-NAMED
+    description: "Module IMPORTS specific named exports"
+    kind: Imports
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable]
+    condition: "import { name } from 'module'"
+    tested_by: [imports]
+
+  - id: R-IMPORTS-DEFAULT
+    description: "Module IMPORTS default export"
+    kind: Imports
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Constant]
+    condition: "import name from 'module'"
+    tested_by: [default_exports]
+
+  - id: R-IMPORTS-NAMESPACE
+    description: "Module IMPORTS entire module as namespace"
+    kind: Imports
+    from: Module
+    to: Module
+    condition: "import * as name from 'module'"
+    tested_by: [namespace_imports]
+
+  - id: R-IMPORTS-TYPE
+    description: "Module IMPORTS type-only import"
+    kind: Imports
+    from: Module
+    to: [Interface, TypeAlias, Class]
+    condition: "import type { name } from 'module'"
+    note: |
+      Type-only imports are erased at compile time and don't create
+      runtime dependencies.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html#typescript-specific-es-module-syntax"
+    tested_by: [type_imports]
+
+  # ---------------------------------------------------------------------------
+  # Call relationships
+  # ---------------------------------------------------------------------------
+  - id: R-CALLS-FUNCTION
+    description: "Function/Method CALLS another function/method"
+    kind: Calls
+    from: [Function, Method]
+    to: [Function, Method]
+    condition: "function call expression in body"
+    tested_by: [function_calls, method_calls]
+
+  # ---------------------------------------------------------------------------
+  # Type usage relationships
+  # ---------------------------------------------------------------------------
+  - id: R-USES-TYPE
+    description: "Entity USES a type it references"
+    kind: Uses
+    from: [Function, Method, Class, Interface, TypeAlias, Property, Constant, Variable]
+    to: [Class, Interface, TypeAlias, Enum]
+    condition: "type appears in signature, field, or type expression"
+    tested_by: [type_usage, generic_constraints]
+
+
+# =============================================================================
+# METADATA RULES
+# =============================================================================
+# Defines what metadata is captured for entities.
+
+metadata_rules:
+
+  # ---------------------------------------------------------------------------
+  # Function/Method metadata
+  # ---------------------------------------------------------------------------
+  - id: M-FN-ASYNC
+    description: "Async functions have is_async=true"
+    applies_to: [Function, Method]
+    field: is_async
+    condition: "function has `async` keyword"
+    tested_by: [async_functions]
+
+  - id: M-FN-GENERATOR
+    description: "Generator functions have is_generator=true"
+    applies_to: [Function, Method]
+    field: is_generator
+    condition: "function has `*` modifier"
+    tested_by: [generator_functions]
+
+  - id: M-FN-ARROW
+    description: "Arrow functions have is_arrow=true"
+    applies_to: Function
+    field: is_arrow
+    condition: "function uses arrow syntax"
+    tested_by: [arrow_functions]
+
+  # ---------------------------------------------------------------------------
+  # Class metadata
+  # ---------------------------------------------------------------------------
+  - id: M-CLASS-ABSTRACT
+    description: "Abstract classes have is_abstract=true"
+    applies_to: Class
+    field: is_abstract
+    condition: "class has `abstract` keyword"
+    tested_by: [abstract_classes]
+
+  # ---------------------------------------------------------------------------
+  # Method metadata
+  # ---------------------------------------------------------------------------
+  - id: M-METHOD-STATIC
+    description: "Static methods have is_static=true"
+    applies_to: Method
+    field: is_static
+    condition: "method has `static` keyword"
+    tested_by: [static_methods]
+
+  - id: M-METHOD-ACCESSOR-GET
+    description: "Getter methods have is_getter=true"
+    applies_to: Method
+    field: is_getter
+    condition: "method has `get` keyword"
+    tested_by: [accessors]
+
+  - id: M-METHOD-ACCESSOR-SET
+    description: "Setter methods have is_setter=true"
+    applies_to: Method
+    field: is_setter
+    condition: "method has `set` keyword"
+    tested_by: [accessors]
+
+  - id: M-METHOD-ABSTRACT
+    description: "Abstract methods have is_abstract=true"
+    applies_to: Method
+    field: is_abstract
+    condition: "method has `abstract` keyword"
+    tested_by: [abstract_classes]
+
+  # ---------------------------------------------------------------------------
+  # Property metadata
+  # ---------------------------------------------------------------------------
+  - id: M-PROPERTY-STATIC
+    description: "Static properties have is_static=true"
+    applies_to: Property
+    field: is_static
+    condition: "property has `static` keyword"
+    tested_by: [static_properties]
+
+  - id: M-PROPERTY-READONLY
+    description: "Readonly properties have is_readonly=true"
+    applies_to: Property
+    field: is_readonly
+    condition: "property has `readonly` keyword"
+    tested_by: [readonly_properties]
+
+  - id: M-PROPERTY-OPTIONAL
+    description: "Optional properties have is_optional=true"
+    applies_to: Property
+    field: is_optional
+    condition: "property has `?` modifier"
+    tested_by: [optional_properties]
+
+  # ---------------------------------------------------------------------------
+  # Enum metadata
+  # ---------------------------------------------------------------------------
+  - id: M-ENUM-CONST
+    description: "Const enums have is_const=true"
+    applies_to: Enum
+    field: is_const
+    condition: "enum has `const` keyword"
+    tested_by: [const_enums]
+
+  # ---------------------------------------------------------------------------
+  # Generic metadata
+  # ---------------------------------------------------------------------------
+  - id: M-GENERIC
+    description: "Generic items have is_generic=true and generic_params list"
+    applies_to: [Function, Method, Class, Interface, TypeAlias]
+    fields: [is_generic, generic_params]
+    condition: "item has type parameters"
+    tested_by: [generic_classes, generic_functions, generic_interfaces]
+
+  - id: M-GENERIC-CONSTRAINT
+    description: "Type parameters may have constraints"
+    applies_to: [Function, Method, Class, Interface, TypeAlias]
+    field: generic_params
+    condition: "type parameter has `extends` constraint"
+    note: "Constraints limit what types can be used as type arguments"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/generics.html#generic-constraints"
+    tested_by: [generic_constraints]
+
+  - id: M-GENERIC-DEFAULT
+    description: "Type parameters may have default values"
+    applies_to: [Function, Method, Class, Interface, TypeAlias]
+    field: generic_params
+    condition: "type parameter has `= DefaultType` syntax"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/generics.html#generic-parameter-defaults"
+    tested_by: [generic_defaults]
+
+  # ---------------------------------------------------------------------------
+  # Class field metadata
+  # ---------------------------------------------------------------------------
+  - id: M-FIELD-INITIALIZER
+    description: "Fields with initializers track their initial value"
+    applies_to: Property
+    field: has_initializer
+    condition: "field has `= value` initializer"
+    tested_by: [class_fields]
+
+  # ---------------------------------------------------------------------------
+  # Decorator metadata
+  # ---------------------------------------------------------------------------
+  - id: M-DECORATOR
+    description: "Decorated items track their decorators"
+    applies_to: [Class, Method, Property]
+    field: decorators
+    condition: "item has `@decorator` syntax"
+    note: |
+      TypeScript supports decorators for classes, methods, accessors, properties,
+      and parameters. They are metadata annotations that can modify behavior.
+    tested_by: [decorators]
+
+
+# =============================================================================
+# TEST FIXTURE MAPPING
+# =============================================================================
+# Maps test fixtures to the rules they verify.
+
+fixtures:
+  basic_module:
+    tests: [E-MOD-FILE, V-EXPORT, Q-MODULE-FILE, R-CONTAINS-MODULE-ITEM]
+
+  imports_exports:
+    tests: [E-MOD-FILE, R-IMPORTS-NAMED, R-IMPORTS-DEFAULT, R-IMPORTS-NAMESPACE, R-IMPORTS-TYPE]
+
+  namespaces:
+    tests: [E-MOD-NAMESPACE, V-NAMESPACE-EXPORT, Q-MODULE-NAMESPACE, Q-ITEM-NAMESPACE, R-CONTAINS-NAMESPACE-ITEM]
+
+  nested_namespaces:
+    tests: [E-MOD-NAMESPACE, Q-MODULE-NAMESPACE]
+
+  namespace_merging:
+    tests: [E-MOD-NAMESPACE-MERGED]
+
+  classes:
+    tests: [E-CLASS, V-CLASS-PUBLIC, Q-ITEM-MODULE, R-CONTAINS-CLASS-MEMBER]
+
+  abstract_classes:
+    tests: [E-CLASS-ABSTRACT, E-METHOD-ABSTRACT, M-CLASS-ABSTRACT, M-METHOD-ABSTRACT]
+
+  class_expressions:
+    tests: [E-CLASS-EXPR]
+
+  class_inheritance:
+    tests: [E-CLASS, R-INHERITS-FROM]
+
+  class_implements:
+    tests: [E-CLASS, E-INTERFACE, R-IMPLEMENTS]
+
+  class_fields:
+    tests: [E-PROPERTY-FIELD, Q-PROPERTY-INSTANCE, M-FIELD-INITIALIZER]
+
+  parameter_properties:
+    tests: [E-PROPERTY-PARAM]
+
+  private_fields:
+    tests: [E-PROPERTY-PRIVATE-FIELD, V-CLASS-PRIVATE-FIELD]
+
+  interfaces:
+    tests: [E-INTERFACE, V-INTERFACE-MEMBER, Q-INTERFACE-METHOD, R-CONTAINS-INTERFACE-MEMBER]
+
+  interface_extends:
+    tests: [E-INTERFACE, R-EXTENDS-INTERFACE]
+
+  interface_merging:
+    tests: [E-INTERFACE-MERGED]
+
+  type_aliases:
+    tests: [E-TYPE-ALIAS, V-TYPE-ALIAS]
+
+  generic_type_aliases:
+    tests: [E-TYPE-ALIAS, M-GENERIC]
+
+  enums:
+    tests: [E-ENUM, R-CONTAINS-ENUM-MEMBER]
+
+  const_enums:
+    tests: [E-ENUM-CONST, M-ENUM-CONST]
+
+  functions:
+    tests: [E-FN-DECL, Q-ITEM-MODULE]
+
+  function_expressions:
+    tests: [E-FN-EXPR]
+
+  arrow_functions:
+    tests: [E-FN-ARROW, M-FN-ARROW]
+
+  async_functions:
+    tests: [E-FN-DECL, M-FN-ASYNC]
+
+  generator_functions:
+    tests: [E-FN-GENERATOR, M-FN-GENERATOR]
+
+  methods:
+    tests: [E-METHOD-CLASS, V-CLASS-PUBLIC, Q-METHOD-INSTANCE, R-CONTAINS-CLASS-MEMBER]
+
+  static_methods:
+    tests: [E-METHOD-STATIC, Q-METHOD-STATIC, M-METHOD-STATIC]
+
+  accessors:
+    tests: [E-METHOD-GETTER, E-METHOD-SETTER, M-METHOD-ACCESSOR-GET, M-METHOD-ACCESSOR-SET]
+
+  private_members:
+    tests: [V-CLASS-PRIVATE]
+
+  protected_members:
+    tests: [V-CLASS-PROTECTED]
+
+  constants:
+    tests: [E-CONST]
+
+  exported_constants:
+    tests: [E-CONST, V-EXPORT]
+
+  variables:
+    tests: [E-VAR-LET]
+
+  static_properties:
+    tests: [E-PROPERTY-FIELD, Q-PROPERTY-STATIC, M-PROPERTY-STATIC]
+
+  readonly_properties:
+    tests: [M-PROPERTY-READONLY]
+
+  optional_properties:
+    tests: [M-PROPERTY-OPTIONAL]
+
+  exports:
+    tests: [V-EXPORT]
+
+  reexports:
+    tests: [V-EXPORT, R-IMPORTS-NAMED]
+
+  default_exports:
+    tests: [V-EXPORT-DEFAULT, R-IMPORTS-DEFAULT]
+
+  type_imports:
+    tests: [R-IMPORTS-TYPE]
+
+  namespace_imports:
+    tests: [R-IMPORTS-NAMESPACE]
+
+  visibility:
+    tests: [V-CLASS-PUBLIC, V-CLASS-PRIVATE, V-CLASS-PROTECTED, V-MODULE-PRIVATE, V-EXPORT]
+
+  function_calls:
+    tests: [R-CALLS-FUNCTION]
+
+  method_calls:
+    tests: [R-CALLS-FUNCTION]
+
+  type_usage:
+    tests: [R-USES-TYPE]
+
+  generic_classes:
+    tests: [E-CLASS, M-GENERIC]
+
+  generic_functions:
+    tests: [E-FN-DECL, M-GENERIC]
+
+  generic_interfaces:
+    tests: [E-INTERFACE, M-GENERIC]
+
+  generic_constraints:
+    tests: [M-GENERIC-CONSTRAINT, R-USES-TYPE]
+
+  generic_defaults:
+    tests: [M-GENERIC-DEFAULT]
+
+  decorators:
+    tests: [M-DECORATOR]

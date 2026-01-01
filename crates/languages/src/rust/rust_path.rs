@@ -1,8 +1,12 @@
 //! Structured representation of Rust paths
 //!
 //! This module provides `RustPath`, an immutable type that eliminates string manipulation
-//! for path handling in import resolution. Instead of `split("::")`, `join("::")`, and
-//! `strip_prefix()`, paths are represented as structured data with typed path kinds.
+//! for consumers when handling paths in import resolution. Instead of callers using
+//! `split("::")`, `join("::")`, and `strip_prefix()`, paths are represented as structured
+//! data with typed path kinds and accessed via methods like `segments()` and `simple_name()`.
+//!
+//! Note: The `parse()` constructor still uses string operations internally, but consumers
+//! work with structured data thereafter.
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]
@@ -17,7 +21,8 @@ const EXTERNAL_PREFIXES: &[&str] = &["std", "core", "alloc", "external"];
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum RustPathKind {
     /// Absolute path (e.g., `std::collections::HashMap`, `mypackage::module::Type`)
-    /// These paths are already fully qualified and need no resolution.
+    /// Also used for simple names without prefixes (e.g., `HashMap`), which may still
+    /// need resolution through import maps or scope lookup.
     #[default]
     Absolute,
 
@@ -173,7 +178,7 @@ impl RustPath {
     ///
     /// Returns true if:
     /// - The kind is `RustPathKind::External`
-    /// - The first segment is a known external prefix (`std`, `core`, `alloc`)
+    /// - The first segment is a known external prefix (`std`, `core`, `alloc`, `external`)
     pub fn is_external(&self) -> bool {
         if matches!(self.kind, RustPathKind::External) {
             return true;
@@ -305,8 +310,9 @@ impl RustPathBuilder {
 
     /// Prepend a package name as the first segment.
     ///
-    /// This also sets the kind to `Absolute` since the result will be
-    /// a fully qualified path.
+    /// **Important:** This method also sets the kind to `Absolute`, overriding any
+    /// previously set kind. This is intentional since prepending a package name
+    /// produces a fully qualified path.
     pub fn with_package(mut self, package: &str) -> Self {
         if !package.is_empty() {
             self.segments.insert(0, package.to_string());
@@ -811,5 +817,67 @@ mod tests {
 
         // Navigate up 3 from 2-segment module -> nothing from module
         assert_eq!(resolved.to_string(), "pkg::root");
+    }
+
+    // ========================================================================
+    // Edge case tests (added per PR review)
+    // ========================================================================
+
+    #[test]
+    fn test_builder_navigate_up_from_zero_levels() {
+        let module = RustPath::parse("a::b::c");
+
+        // Navigate up 0 levels: keep all segments
+        let path = RustPath::builder()
+            .navigate_up_from(&module, 0)
+            .segment("child")
+            .build();
+
+        assert_eq!(path.segments(), &["a", "b", "c", "child"]);
+    }
+
+    #[test]
+    fn test_parse_bare_crate_keyword() {
+        // Just "crate" without :: should parse as a single-segment Absolute path
+        let path = RustPath::parse("crate");
+        assert_eq!(path.kind(), RustPathKind::Absolute);
+        assert_eq!(path.segments(), &["crate"]);
+    }
+
+    #[test]
+    fn test_parse_bare_self_keyword() {
+        // Just "self" without :: should parse as a single-segment Absolute path
+        let path = RustPath::parse("self");
+        assert_eq!(path.kind(), RustPathKind::Absolute);
+        assert_eq!(path.segments(), &["self"]);
+    }
+
+    #[test]
+    fn test_parse_bare_super_keyword() {
+        // Just "super" without :: should parse as a single-segment Absolute path
+        let path = RustPath::parse("super");
+        assert_eq!(path.kind(), RustPathKind::Absolute);
+        assert_eq!(path.segments(), &["super"]);
+    }
+
+    #[test]
+    fn test_to_qualified_name_empty_segments() {
+        // Builder can produce empty segments - test to_qualified_name handles it
+        let path = RustPath::builder().kind(RustPathKind::Crate).build();
+        assert_eq!(path.to_qualified_name(), "crate");
+
+        let path = RustPath::builder().kind(RustPathKind::SelfRelative).build();
+        assert_eq!(path.to_qualified_name(), "self");
+
+        let path = RustPath::builder()
+            .kind(RustPathKind::Super { levels: 2 })
+            .build();
+        assert_eq!(path.to_qualified_name(), "super::super");
+
+        let path = RustPath::builder().kind(RustPathKind::External).build();
+        assert_eq!(path.to_qualified_name(), "external");
+
+        let path = RustPath::builder().kind(RustPathKind::Absolute).build();
+        assert_eq!(path.to_qualified_name(), "");
     }
 }

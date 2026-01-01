@@ -208,10 +208,7 @@ fn is_std_type(name: &str) -> bool {
 
 /// Check if a path is an external reference (outside this repository)
 fn is_external_path(path: &str) -> bool {
-    path.starts_with("std::")
-        || path.starts_with("core::")
-        || path.starts_with("alloc::")
-        || path.starts_with("external::")
+    RustPath::parse(path).is_external()
 }
 
 /// Helper to create a ResolvedReference with automatic external detection

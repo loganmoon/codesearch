@@ -22,14 +22,15 @@ pub enum LookupStrategy {
     CallAliases,
     /// Match by simple name only if unambiguous (exactly one entity with that name)
     UniqueSimpleName,
-    /// Match by simple name (first match wins, may be ambiguous)
+    /// Match by simple name when multiple entities share the name.
+    /// First match wins; logs a warning on ambiguity but still creates the relationship.
     SimpleName,
 }
 
 /// Definition of a relationship type for resolution
 ///
 /// This struct configures how a specific relationship type is resolved,
-/// including source/target entity types, forward/reciprocal relationship names,
+/// including source/target entity types, relationship name,
 /// and the lookup strategy chain to use.
 #[derive(Debug, Clone)]
 pub struct RelationshipDef {
@@ -39,10 +40,8 @@ pub struct RelationshipDef {
     pub source_types: &'static [EntityType],
     /// Entity types that can be targets of this relationship
     pub target_types: &'static [EntityType],
-    /// The forward relationship type (e.g., "CALLS")
+    /// The relationship type (e.g., "CALLS")
     pub forward_rel: &'static str,
-    /// Optional reciprocal relationship type (e.g., "CALLED_BY")
-    pub reciprocal_rel: Option<&'static str>,
     /// Ordered list of lookup strategies to try
     pub lookup_strategies: &'static [LookupStrategy],
 }
@@ -54,7 +53,6 @@ impl RelationshipDef {
         source_types: &'static [EntityType],
         target_types: &'static [EntityType],
         forward_rel: &'static str,
-        reciprocal_rel: Option<&'static str>,
         lookup_strategies: &'static [LookupStrategy],
     ) -> Self {
         Self {
@@ -62,9 +60,30 @@ impl RelationshipDef {
             source_types,
             target_types,
             forward_rel,
-            reciprocal_rel,
             lookup_strategies,
         }
+    }
+
+    /// Validate the relationship definition
+    ///
+    /// Returns an error message if the definition is invalid.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.name.is_empty() {
+            return Err("RelationshipDef name cannot be empty");
+        }
+        if self.source_types.is_empty() {
+            return Err("RelationshipDef source_types cannot be empty");
+        }
+        if self.target_types.is_empty() {
+            return Err("RelationshipDef target_types cannot be empty");
+        }
+        if self.forward_rel.is_empty() {
+            return Err("RelationshipDef forward_rel cannot be empty");
+        }
+        if self.lookup_strategies.is_empty() {
+            return Err("RelationshipDef lookup_strategies cannot be empty");
+        }
+        Ok(())
     }
 }
 
@@ -97,7 +116,6 @@ pub mod definitions {
         CALLABLE_TYPES,
         CALLABLE_TYPES,
         "CALLS",
-        Some("CALLED_BY"),
         &[
             LookupStrategy::QualifiedName,
             LookupStrategy::CallAliases,
@@ -121,7 +139,6 @@ pub mod definitions {
         ],
         TYPE_TYPES,
         "USES",
-        Some("USED_BY"),
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
@@ -131,7 +148,6 @@ pub mod definitions {
         IMPL_TYPES,
         &[EntityType::Trait, EntityType::Interface],
         "IMPLEMENTS",
-        Some("IMPLEMENTED_BY"),
         &[LookupStrategy::QualifiedName],
     );
 
@@ -141,7 +157,6 @@ pub mod definitions {
         IMPL_TYPES,
         TYPE_TYPES,
         "ASSOCIATES",
-        Some("ASSOCIATED_WITH"),
         &[LookupStrategy::QualifiedName],
     );
 
@@ -151,7 +166,6 @@ pub mod definitions {
         &[EntityType::Trait, EntityType::Interface],
         &[EntityType::Trait, EntityType::Interface],
         "EXTENDS_INTERFACE",
-        Some("EXTENDED_BY"),
         &[LookupStrategy::QualifiedName],
     );
 
@@ -161,14 +175,27 @@ pub mod definitions {
         &[EntityType::Class],
         &[EntityType::Class],
         "INHERITS_FROM",
-        Some("HAS_SUBCLASS"),
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
-    /// IMPORTS relationship: Module imports another entity
+    /// IMPORTS relationship: Entity imports another entity
+    ///
+    /// Note: The old ImportsResolver processed any entity with an `imports` attribute,
+    /// not just modules. We maintain that behavior for backward compatibility.
     pub const IMPORTS: RelationshipDef = RelationshipDef::new(
         "imports",
-        MODULE_TYPES,
+        &[
+            EntityType::Module,
+            EntityType::Function,
+            EntityType::Method,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::TypeAlias,
+            EntityType::Impl,
+        ],
         &[
             EntityType::Module,
             EntityType::Function,
@@ -181,7 +208,6 @@ pub mod definitions {
             EntityType::Constant,
         ],
         "IMPORTS",
-        Some("IMPORTED_BY"),
         &[
             LookupStrategy::QualifiedName,
             LookupStrategy::PathEntityIdentifier,
@@ -214,7 +240,6 @@ pub mod definitions {
             EntityType::Module,
         ],
         "CONTAINS",
-        None, // No reciprocal - CONTAINS is directional only
         &[LookupStrategy::QualifiedName],
     );
 }
@@ -230,7 +255,6 @@ mod tests {
             &[EntityType::Function],
             &[EntityType::Method],
             "TEST_REL",
-            Some("TESTED_BY"),
             &[LookupStrategy::QualifiedName],
         );
 
@@ -238,20 +262,67 @@ mod tests {
         assert_eq!(def.source_types, &[EntityType::Function]);
         assert_eq!(def.target_types, &[EntityType::Method]);
         assert_eq!(def.forward_rel, "TEST_REL");
-        assert_eq!(def.reciprocal_rel, Some("TESTED_BY"));
         assert_eq!(def.lookup_strategies, &[LookupStrategy::QualifiedName]);
     }
 
     #[test]
     fn test_standard_definitions() {
-        // CALLS should have reciprocal
-        assert!(definitions::CALLS.reciprocal_rel.is_some());
+        // CALLS should have the right forward relationship
         assert_eq!(definitions::CALLS.forward_rel, "CALLS");
-
-        // CONTAINS should not have reciprocal
-        assert!(definitions::CONTAINS.reciprocal_rel.is_none());
 
         // USES should target type entities
         assert!(!definitions::USES.target_types.is_empty());
+    }
+
+    #[test]
+    fn test_validation_valid() {
+        let def = RelationshipDef::new(
+            "test",
+            &[EntityType::Function],
+            &[EntityType::Method],
+            "TEST_REL",
+            &[LookupStrategy::QualifiedName],
+        );
+        assert!(def.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_empty_name() {
+        let def = RelationshipDef::new(
+            "",
+            &[EntityType::Function],
+            &[EntityType::Method],
+            "TEST_REL",
+            &[LookupStrategy::QualifiedName],
+        );
+        assert_eq!(def.validate(), Err("RelationshipDef name cannot be empty"));
+    }
+
+    #[test]
+    fn test_validation_empty_source_types() {
+        let def = RelationshipDef::new(
+            "test",
+            &[],
+            &[EntityType::Method],
+            "TEST_REL",
+            &[LookupStrategy::QualifiedName],
+        );
+        assert_eq!(
+            def.validate(),
+            Err("RelationshipDef source_types cannot be empty")
+        );
+    }
+
+    #[test]
+    fn test_validation_all_standard_definitions() {
+        // All standard definitions should be valid
+        assert!(definitions::CALLS.validate().is_ok());
+        assert!(definitions::USES.validate().is_ok());
+        assert!(definitions::IMPLEMENTS.validate().is_ok());
+        assert!(definitions::ASSOCIATES.validate().is_ok());
+        assert!(definitions::EXTENDS.validate().is_ok());
+        assert!(definitions::INHERITS.validate().is_ok());
+        assert!(definitions::IMPORTS.validate().is_ok());
+        assert!(definitions::CONTAINS.validate().is_ok());
     }
 }

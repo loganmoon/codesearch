@@ -26,7 +26,7 @@ pub fn create_test_entity(name: &str, entity_type: EntityType, repository_id: &s
             end_column: 0,
         })
         .language(Language::Rust)
-        .visibility(Visibility::Public)
+        .visibility(Some(Visibility::Public))
         .content(Some(format!("fn {name}() {{}}")))
         .build()
         .expect("Failed to build test entity")
@@ -110,7 +110,7 @@ pub fn create_test_entity_with_file(
             end_column: 0,
         })
         .language(Language::Rust)
-        .visibility(Visibility::Public)
+        .visibility(Some(Visibility::Public))
         .content(Some(format!("fn {name}() {{}}")))
         .build()
         .expect("Failed to build test entity")

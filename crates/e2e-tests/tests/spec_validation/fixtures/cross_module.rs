@@ -1,9 +1,26 @@
 //! cross_module fixtures for spec validation tests
+//!
+//! Validates complex cross-module scenarios:
+//! - Multi-hop re-exports (pub use chains)
+//! - Glob re-exports (pub use path::*)
+//! - Trait method vs inherent method priority
+//! - Scattered impl blocks across modules
+//! - Associated types resolution
+//! - Prelude shadowing
+//! - Generic bounds resolution
+//! - Type alias chains
+//! - Nested use declarations with renaming
+//! - Extension traits on foreign types
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
+/// Multi-hop re-exports: resolving symbols through re-export chains
+///
+/// Validates:
+/// - R-CALLS-FUNCTION: calls through re-export chains resolve to original definition
 pub static MULTI_HOP_REEXPORTS: Fixture = Fixture {
     name: "multi_hop_reexports",
     files: &[
@@ -36,22 +53,27 @@ pub fn actual_function() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal::deep",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::internal::deep::actual_function",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
@@ -87,6 +109,9 @@ pub fn actual_function() {}
 };
 
 /// Glob re-exports: resolving symbols imported via *
+///
+/// Validates:
+/// - R-CALLS-FUNCTION: calls through glob imports resolve to original definition
 pub static GLOB_REEXPORTS: Fixture = Fixture {
     name: "glob_reexports",
     files: &[
@@ -114,22 +139,27 @@ pub fn helper_b() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::helpers",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::helpers::helper_a",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::helpers::helper_b",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
@@ -170,6 +200,11 @@ pub fn helper_b() {}
 };
 
 /// Trait method vs inherent method priority
+///
+/// Validates:
+/// - R-CALLS-FUNCTION: inherent methods take priority over trait methods for method syntax
+/// - R-CALLS-FUNCTION: explicit Trait::method() syntax calls trait method
+/// - Q-INHERENT-METHOD: inherent methods use <Type>::method format
 pub static TRAIT_VS_INHERENT_METHOD: Fixture = Fixture {
     name: "trait_vs_inherent_method",
     files: &[(
@@ -208,22 +243,27 @@ pub fn call_trait(d: &Data) -> String {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Formatter",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::call_inherent",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::call_trait",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -248,10 +288,11 @@ pub fn call_trait(d: &Data) -> String {
             to: "test_crate::call_trait",
         },
         // Key tests: different CALLS targets for same method name
+        // Q-INHERENT-METHOD: inherent method uses UFCS format
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::call_inherent",
-            to: "test_crate::Data::format",
+            to: "<test_crate::Data>::format",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
@@ -264,6 +305,11 @@ pub fn call_trait(d: &Data) -> String {
 };
 
 /// Impl blocks scattered across multiple modules
+///
+/// Validates:
+/// - Methods from scattered impl blocks belong to same logical type
+/// - Q-INHERENT-METHOD: methods use UFCS format regardless of definition location
+/// - R-CALLS-FUNCTION: calls resolve to correct method definition
 pub static SCATTERED_IMPL_BLOCKS: Fixture = Fixture {
     name: "scattered_impl_blocks",
     files: &[
@@ -319,34 +365,43 @@ impl Widget {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::types",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::widget_display",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::widget_builder",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::types::Widget",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
+        },
+        // Q-INHERENT-METHOD: methods use UFCS format
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<test_crate::types::Widget>::display",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test_crate::types::Widget::display",
-        },
-        ExpectedEntity {
-            kind: EntityKind::Method,
-            qualified_name: "test_crate::types::Widget::new",
+            qualified_name: "<test_crate::types::Widget>::new",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -369,12 +424,12 @@ impl Widget {
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::caller",
-            to: "test_crate::types::Widget::new",
+            to: "<test_crate::types::Widget>::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::caller",
-            to: "test_crate::types::Widget::display",
+            to: "<test_crate::types::Widget>::display",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -382,6 +437,10 @@ impl Widget {
 };
 
 /// Associated types in trait implementations
+///
+/// Validates:
+/// - Calls to trait methods resolve to specific impl when type is known
+/// - Q-TRAIT-IMPL-METHOD: uses "<{type_fqn} as {trait_fqn}>::{name}" format
 pub static ASSOCIATED_TYPES_RESOLUTION: Fixture = Fixture {
     name: "associated_types_resolution",
     files: &[(
@@ -418,26 +477,32 @@ pub fn use_string_producer(p: &StringProducer) -> String {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Producer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::IntProducer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::StringProducer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_int_producer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::use_string_producer",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -484,6 +549,10 @@ pub fn use_string_producer(p: &StringProducer) -> String {
 };
 
 /// Prelude shadowing: local definitions shadow std prelude
+///
+/// Validates:
+/// - Local type definitions shadow prelude types
+/// - R-USES-TYPE: uses of shadowed types point to local definition
 pub static PRELUDE_SHADOWING: Fixture = Fixture {
     name: "prelude_shadowing",
     files: &[(
@@ -513,22 +582,27 @@ pub fn create_unknown() -> Option<i32> {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Option",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_some",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_none",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_unknown",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -574,6 +648,10 @@ pub fn create_unknown() -> Option<i32> {
 };
 
 /// Generic trait bounds affecting method resolution
+///
+/// Validates:
+/// - Calls on generic types with trait bounds resolve to trait method definitions
+/// - Not to specific impl methods (since concrete type is unknown at call site)
 pub static GENERIC_BOUNDS_RESOLUTION: Fixture = Fixture {
     name: "generic_bounds_resolution",
     files: &[(
@@ -616,30 +694,37 @@ pub fn process_and_validate<T: Processor + Validator>(item: &T) -> (i32, bool) {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Processor",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::Validator",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::process_item",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::validate_item",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::process_and_validate",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -700,6 +785,11 @@ pub fn process_and_validate<T: Processor + Validator>(item: &T) -> (i32, bool) {
 };
 
 /// Type alias chains
+///
+/// Validates:
+/// - E-TYPE-ALIAS: type aliases produce TypeAlias entities
+/// - Calls through type aliases resolve to the underlying type's methods
+/// - Q-INHERENT-METHOD: methods use UFCS format on underlying type
 pub static TYPE_ALIAS_CHAINS: Fixture = Fixture {
     name: "type_alias_chains",
     files: &[(
@@ -736,39 +826,49 @@ pub fn create_with_value() -> AppConfig {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::RawConfig",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Config",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::AppConfig",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Settings",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_settings",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::create_with_value",
+            visibility: Some(Visibility::Public),
         },
         // Methods are on RawConfig, accessed through aliases
+        // Q-INHERENT-METHOD: use UFCS format
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test_crate::RawConfig::new",
+            qualified_name: "<test_crate::RawConfig>::new",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test_crate::RawConfig::with_value",
+            qualified_name: "<test_crate::RawConfig>::with_value",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -806,12 +906,12 @@ pub fn create_with_value() -> AppConfig {
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_settings",
-            to: "test_crate::RawConfig::new",
+            to: "<test_crate::RawConfig>::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_with_value",
-            to: "test_crate::RawConfig::with_value",
+            to: "<test_crate::RawConfig>::with_value",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -819,6 +919,10 @@ pub fn create_with_value() -> AppConfig {
 };
 
 /// Nested use declarations with renaming
+///
+/// Validates:
+/// - R-CALLS-FUNCTION: calls through renamed imports resolve to original definitions
+/// - R-IMPORTS: use declarations create Imports relationships
 pub static NESTED_USE_RENAMING: Fixture = Fixture {
     name: "nested_use_renaming",
     files: &[
@@ -864,34 +968,42 @@ pub fn connect() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network::http",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::network::tcp",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::http::get",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::http::post",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::network::tcp::connect",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::make_requests",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -952,6 +1064,12 @@ pub fn connect() {}
 };
 
 /// Extension traits: adding methods to foreign types
+///
+/// Validates:
+/// - E-IMPL-TRAIT: trait impls on foreign types produce ImplBlock entities
+/// - Calls to extension trait methods resolve correctly based on receiver type
+/// - Q-TRAIT-IMPL-METHOD: uses "<{type_fqn} as {trait_fqn}>::{name}" format
+/// - Note: String and str are foreign types (from std), not test_crate types
 pub static EXTENSION_TRAITS: Fixture = Fixture {
     name: "extension_traits",
     files: &[(
@@ -997,22 +1115,59 @@ pub fn count_words_string(s: String) -> usize {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Trait,
             qualified_name: "test_crate::StringExt",
+            visibility: Some(Visibility::Public),
+        },
+        // Impl blocks for foreign types
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<String as test_crate::StringExt>",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::ImplBlock,
+            qualified_name: "test_crate::<str as test_crate::StringExt>",
+            visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::check_string",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::check_str",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::count_words_string",
+            visibility: Some(Visibility::Public),
+        },
+        // Trait impl methods - String is a foreign type, not test_crate::String
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<String as test_crate::StringExt>::is_blank",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<String as test_crate::StringExt>::word_count",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<str as test_crate::StringExt>::is_blank",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Method,
+            qualified_name: "<str as test_crate::StringExt>::word_count",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -1020,6 +1175,16 @@ pub fn count_words_string(s: String) -> usize {
             kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::StringExt",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<String as test_crate::StringExt>",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::<str as test_crate::StringExt>",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
@@ -1036,22 +1201,31 @@ pub fn count_words_string(s: String) -> usize {
             from: "test_crate",
             to: "test_crate::count_words_string",
         },
-        // Key test: CALLS should distinguish between impls for String vs str
-        // Methods are named with full <Type as Trait>::method syntax
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::<String as test_crate::StringExt>",
+            to: "test_crate::StringExt",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Implements,
+            from: "test_crate::<str as test_crate::StringExt>",
+            to: "test_crate::StringExt",
+        },
+        // Key test: CALLS distinguish between impls for String vs str
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::check_string",
-            to: "<test_crate::String as test_crate::StringExt>::is_blank",
+            to: "<String as test_crate::StringExt>::is_blank",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::check_str",
-            to: "<test_crate::str as test_crate::StringExt>::is_blank",
+            to: "<str as test_crate::StringExt>::is_blank",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::count_words_string",
-            to: "<test_crate::String as test_crate::StringExt>::word_count",
+            to: "<String as test_crate::StringExt>::word_count",
         },
     ],
     project_type: ProjectType::SingleCrate,

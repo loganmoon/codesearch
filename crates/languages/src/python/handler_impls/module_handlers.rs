@@ -132,7 +132,7 @@ pub fn handle_module_impl(
     // Build metadata
     let mut metadata = EntityMetadata::default();
 
-    // Store imports as JSON array (expected by ImportsResolver)
+    // Store imports as JSON array (used by imports_resolver)
     if let Ok(imports_json) = serde_json::to_string(&imports) {
         metadata
             .attributes
@@ -145,7 +145,7 @@ pub fn handle_module_impl(
         EntityDetails {
             entity_type: EntityType::Module,
             language: Language::Python,
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             documentation: None,
             content: node_to_text(module_node, source).ok(),
             metadata,

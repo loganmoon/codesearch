@@ -5,11 +5,13 @@ use super::schema::{
     RelationshipKind,
 };
 use anyhow::{bail, Result};
-use std::collections::HashSet;
+use codesearch_core::entities::Visibility;
+use std::collections::{HashMap, HashSet};
 
 /// Assert that all expected entities are present in the actual entities
 ///
 /// Returns an error with detailed diff if any expected entities are missing.
+/// Also validates visibility when expected.visibility is Some.
 /// Does not fail on extra entities (subset matching).
 pub fn assert_entities_match(expected: &[ExpectedEntity], actual: &[ActualEntity]) -> Result<()> {
     let expected_set: HashSet<(&str, &str)> = expected
@@ -36,6 +38,40 @@ pub fn assert_entities_match(expected: &[ExpectedEntity], actual: &[ActualEntity
             msg.push_str(&format!("  - {entity_type} {qname}\n"));
         }
 
+        bail!("{}", msg);
+    }
+
+    // Build a map of actual entities by (type, qualified_name) for visibility lookup
+    let actual_by_key: HashMap<(&str, &str), &ActualEntity> = actual
+        .iter()
+        .map(|e| ((e.entity_type.as_str(), e.qualified_name.as_str()), e))
+        .collect();
+
+    // Check visibility mismatches for entities that specify expected visibility
+    let mut visibility_mismatches: Vec<(&str, Option<Visibility>, Option<Visibility>)> = Vec::new();
+    for exp in expected {
+        if let Some(expected_vis) = exp.visibility {
+            let key = (exp.kind.as_neo4j_label(), exp.qualified_name);
+            if let Some(actual_entity) = actual_by_key.get(&key) {
+                if actual_entity.visibility != Some(expected_vis) {
+                    visibility_mismatches.push((
+                        exp.qualified_name,
+                        Some(expected_vis),
+                        actual_entity.visibility,
+                    ));
+                }
+            }
+        }
+    }
+
+    if !visibility_mismatches.is_empty() {
+        let mut msg = String::from("Visibility mismatch:\n\n");
+        for (qname, expected_vis, actual_vis) in &visibility_mismatches {
+            msg.push_str(&format!(
+                "  - {qname}: expected {:?}, got {:?}\n",
+                expected_vis, actual_vis
+            ));
+        }
         bail!("{}", msg);
     }
 
@@ -95,6 +131,7 @@ mod tests {
         let expected = vec![ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test::foo",
+            visibility: None,
         }];
         let actual = vec![
             ActualEntity {
@@ -102,12 +139,14 @@ mod tests {
                 entity_type: "Function".to_string(),
                 qualified_name: "test::foo".to_string(),
                 name: "foo".to_string(),
+                visibility: Some(Visibility::Public),
             },
             ActualEntity {
                 entity_id: "id2".to_string(),
                 entity_type: "Module".to_string(),
                 qualified_name: "test".to_string(),
                 name: "test".to_string(),
+                visibility: Some(Visibility::Public),
             },
         ];
 
@@ -120,10 +159,12 @@ mod tests {
             ExpectedEntity {
                 kind: EntityKind::Function,
                 qualified_name: "test::foo",
+                visibility: None,
             },
             ExpectedEntity {
                 kind: EntityKind::Struct,
                 qualified_name: "test::Bar",
+                visibility: None,
             },
         ];
         let actual = vec![ActualEntity {
@@ -131,6 +172,7 @@ mod tests {
             entity_type: "Function".to_string(),
             qualified_name: "test::foo".to_string(),
             name: "foo".to_string(),
+            visibility: Some(Visibility::Public),
         }];
 
         let result = assert_entities_match(&expected, &actual);
@@ -147,6 +189,7 @@ mod tests {
             entity_type: "Function".to_string(),
             qualified_name: "test::foo".to_string(),
             name: "foo".to_string(),
+            visibility: Some(Visibility::Public),
         }];
 
         // Empty expected should always pass (subset matching)
@@ -158,16 +201,57 @@ mod tests {
         let expected = vec![ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test::foo",
+            visibility: None,
         }];
         let actual = vec![ActualEntity {
             entity_id: "id1".to_string(),
             entity_type: "Struct".to_string(), // Wrong type
             qualified_name: "test::foo".to_string(),
             name: "foo".to_string(),
+            visibility: Some(Visibility::Public),
         }];
 
         let result = assert_entities_match(&expected, &actual);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_entities_visibility_match() {
+        let expected = vec![ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test::foo",
+            visibility: Some(Visibility::Public),
+        }];
+        let actual = vec![ActualEntity {
+            entity_id: "id1".to_string(),
+            entity_type: "Function".to_string(),
+            qualified_name: "test::foo".to_string(),
+            name: "foo".to_string(),
+            visibility: Some(Visibility::Public),
+        }];
+
+        assert!(assert_entities_match(&expected, &actual).is_ok());
+    }
+
+    #[test]
+    fn test_entities_visibility_mismatch() {
+        let expected = vec![ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test::foo",
+            visibility: Some(Visibility::Public),
+        }];
+        let actual = vec![ActualEntity {
+            entity_id: "id1".to_string(),
+            entity_type: "Function".to_string(),
+            qualified_name: "test::foo".to_string(),
+            name: "foo".to_string(),
+            visibility: Some(Visibility::Private),
+        }];
+
+        let result = assert_entities_match(&expected, &actual);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Visibility mismatch"));
     }
 
     #[test]

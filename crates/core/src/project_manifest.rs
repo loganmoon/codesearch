@@ -1,7 +1,8 @@
 //! Project manifest detection and parsing
 //!
 //! This module provides functionality for detecting and parsing project manifests
-//! (Cargo.toml, pyproject.toml, package.json) to extract package names and source roots.
+//! (Cargo.toml, pyproject.toml, package.json) to extract package names, source roots,
+//! and crate information.
 
 use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
@@ -25,11 +26,34 @@ pub enum ProjectType {
     Unknown,
 }
 
+/// Type of crate within a Rust package
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrateType {
+    /// Library crate (lib.rs)
+    Library,
+    /// Binary crate (main.rs or src/bin/*.rs)
+    Binary,
+}
+
+/// Information about a single crate within a package
+#[derive(Debug, Clone)]
+pub struct CrateInfo {
+    /// Crate name (may differ from package name for binaries)
+    pub name: String,
+    /// Type of crate
+    pub crate_type: CrateType,
+    /// Path to the crate's root module file
+    pub entry_path: PathBuf,
+}
+
 /// Information about a single package/crate
 #[derive(Debug, Clone)]
 pub struct PackageInfo {
     pub name: String,
     pub source_root: PathBuf,
+    /// Crates contained in this package (Rust-specific)
+    /// For non-Rust packages, this will be empty.
+    pub crates: Vec<CrateInfo>,
 }
 
 /// Maps file paths to their containing package
@@ -123,21 +147,16 @@ pub fn detect_manifest(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     Ok(None)
 }
 
-/// Parse Cargo.toml for Rust projects
+/// Parse Cargo.toml for Rust projects using the cargo_toml crate
 fn try_parse_cargo(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     let cargo_path = repo_root.join("Cargo.toml");
     if !cargo_path.exists() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&cargo_path).map_err(|e| {
-        Error::config(format!(
-            "Failed to read Cargo.toml at {}: {e}",
-            cargo_path.display()
-        ))
-    })?;
-
-    let cargo: toml::Value = content.parse().map_err(|e| {
+    // Use cargo_toml to parse the manifest with proper handling of
+    // workspace inheritance, autobins, and other Cargo features
+    let manifest = cargo_toml::Manifest::from_path(&cargo_path).map_err(|e| {
         Error::config(format!(
             "Failed to parse Cargo.toml at {}: {e}",
             cargo_path.display()
@@ -147,42 +166,41 @@ fn try_parse_cargo(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     let mut packages = PackageMap::new();
 
     // Check for workspace
-    if let Some(workspace) = cargo.get("workspace") {
-        // Workspace: expand member patterns and parse each member's Cargo.toml
-        if let Some(members) = workspace.get("members").and_then(|m| m.as_array()) {
-            let member_patterns: Vec<String> = members
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
+    if manifest.workspace.is_some() {
+        // Get workspace members from the manifest
+        let members = manifest
+            .workspace
+            .as_ref()
+            .map(|w| w.members.clone())
+            .unwrap_or_default();
 
-            for pattern in member_patterns {
-                let full_pattern = repo_root.join(&pattern);
-                let pattern_str = full_pattern.to_string_lossy();
+        for pattern in members {
+            let full_pattern = repo_root.join(&pattern);
+            let pattern_str = full_pattern.to_string_lossy();
 
-                // Expand glob pattern
-                let glob_results = glob::glob(&pattern_str)
-                    .map_err(|e| Error::config(format!("Invalid glob pattern '{pattern}': {e}")))?;
+            // Expand glob pattern
+            let glob_results = glob::glob(&pattern_str)
+                .map_err(|e| Error::config(format!("Invalid glob pattern '{pattern}': {e}")))?;
 
-                for entry in glob_results {
-                    let entry = match entry {
-                        Ok(path) => path,
-                        Err(e) => {
-                            debug!("Glob error while scanning workspace members: {e}");
-                            continue;
-                        }
-                    };
-                    if let Some(pkg_info) = parse_member_cargo_toml(&entry)? {
-                        // Use crate directory as map key (for file matching)
-                        // pkg_info.source_root contains the actual source root
-                        packages.add(entry, pkg_info);
+            for entry in glob_results {
+                let entry = match entry {
+                    Ok(path) => path,
+                    Err(e) => {
+                        debug!("Glob error while scanning workspace members: {e}");
+                        continue;
                     }
+                };
+                if let Some(pkg_info) = parse_cargo_package(&entry)? {
+                    packages.add(entry, pkg_info);
                 }
             }
         }
 
         // Also check if the workspace root has a [package] section
-        if let Some(pkg_info) = parse_package_section(&cargo, repo_root)? {
-            packages.add(repo_root.to_path_buf(), pkg_info);
+        if manifest.package.is_some() {
+            if let Some(pkg_info) = extract_package_info(&manifest, repo_root)? {
+                packages.add(repo_root.to_path_buf(), pkg_info);
+            }
         }
 
         return Ok(Some(ProjectManifest {
@@ -191,10 +209,8 @@ fn try_parse_cargo(repo_root: &Path) -> Result<Option<ProjectManifest>> {
         }));
     }
 
-    // Single crate: extract package name
-    if let Some(pkg_info) = parse_package_section(&cargo, repo_root)? {
-        // Use crate directory as map key (for file matching)
-        // pkg_info.source_root contains the actual source root
+    // Single package: extract package info with crates
+    if let Some(pkg_info) = extract_package_info(&manifest, repo_root)? {
         packages.add(repo_root.to_path_buf(), pkg_info);
 
         return Ok(Some(ProjectManifest {
@@ -206,49 +222,81 @@ fn try_parse_cargo(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     Ok(None)
 }
 
-/// Parse a member crate's Cargo.toml
-fn parse_member_cargo_toml(member_path: &Path) -> Result<Option<PackageInfo>> {
-    let cargo_path = member_path.join("Cargo.toml");
+/// Parse a member package's Cargo.toml
+fn parse_cargo_package(package_path: &Path) -> Result<Option<PackageInfo>> {
+    let cargo_path = package_path.join("Cargo.toml");
     if !cargo_path.exists() {
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&cargo_path).map_err(|e| {
-        Error::config(format!(
-            "Failed to read member Cargo.toml at {}: {e}",
-            cargo_path.display()
-        ))
-    })?;
-
-    let cargo: toml::Value = content.parse().map_err(|e| {
+    let manifest = cargo_toml::Manifest::from_path(&cargo_path).map_err(|e| {
         Error::config(format!(
             "Failed to parse member Cargo.toml at {}: {e}",
             cargo_path.display()
         ))
     })?;
 
-    parse_package_section(&cargo, member_path)
+    extract_package_info(&manifest, package_path)
 }
 
-/// Parse the [package] section from a Cargo.toml
-fn parse_package_section(cargo: &toml::Value, crate_root: &Path) -> Result<Option<PackageInfo>> {
-    let package = match cargo.get("package") {
+/// Extract package info including all crates from a parsed Cargo.toml manifest
+fn extract_package_info(
+    manifest: &cargo_toml::Manifest,
+    package_root: &Path,
+) -> Result<Option<PackageInfo>> {
+    let package = match &manifest.package {
         Some(p) => p,
         None => return Ok(None),
     };
 
-    let name = match package.get("name").and_then(|n| n.as_str()) {
-        Some(n) => n.to_string(),
-        None => return Ok(None),
-    };
-
-    // Normalize the crate name (replace hyphens with underscores)
+    // Normalize the package name (replace hyphens with underscores)
     // This matches how Rust normalizes crate names in the module system
-    let normalized_name = name.replace('-', "_");
+    let normalized_name = package.name.replace('-', "_");
+    let source_root = package_root.join("src");
+
+    // Extract crate information from [lib] and [[bin]] sections
+    let mut crates = Vec::new();
+
+    // Extract library crate if present
+    if let Some(lib) = &manifest.lib {
+        let lib_name = lib.name.clone().unwrap_or_else(|| normalized_name.clone());
+        let lib_path = lib
+            .path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("src/lib.rs"));
+
+        crates.push(CrateInfo {
+            name: lib_name,
+            crate_type: CrateType::Library,
+            entry_path: package_root.join(lib_path),
+        });
+    }
+
+    // Extract binary crates
+    for bin in &manifest.bin {
+        let bin_name = bin
+            .name
+            .clone()
+            .unwrap_or_else(|| normalized_name.clone())
+            .replace('-', "_"); // Normalize binary name for module path usage
+        let bin_path = bin
+            .path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("src/main.rs"));
+
+        crates.push(CrateInfo {
+            name: bin_name,
+            crate_type: CrateType::Binary,
+            entry_path: package_root.join(bin_path),
+        });
+    }
 
     Ok(Some(PackageInfo {
         name: normalized_name,
-        source_root: crate_root.join("src"),
+        source_root,
+        crates,
     }))
 }
 
@@ -313,6 +361,7 @@ fn try_parse_pyproject(repo_root: &Path) -> Result<Option<ProjectManifest>> {
         PackageInfo {
             name: name.clone(),
             source_root,
+            crates: Vec::new(),
         },
     );
 
@@ -398,7 +447,14 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     // Also add the root package if it has a name
     if let Some(name) = root_name {
         let source_root = determine_node_source_root(repo_root);
-        packages.add(repo_root.to_path_buf(), PackageInfo { name, source_root });
+        packages.add(
+            repo_root.to_path_buf(),
+            PackageInfo {
+                name,
+                source_root,
+                crates: Vec::new(),
+            },
+        );
     }
 
     if packages.is_empty() {
@@ -749,7 +805,11 @@ fn parse_member_package_json(member_path: &Path) -> Result<Option<PackageInfo>> 
 
     let source_root = determine_node_source_root(member_path);
 
-    Ok(Some(PackageInfo { name, source_root }))
+    Ok(Some(PackageInfo {
+        name,
+        source_root,
+        crates: Vec::new(),
+    }))
 }
 
 /// Determine the source root for a Node.js package
@@ -782,6 +842,7 @@ mod tests {
             PackageInfo {
                 name: "root".to_string(),
                 source_root: PathBuf::from("/repo/src"),
+                crates: Vec::new(),
             },
         );
         map.add(
@@ -789,6 +850,7 @@ mod tests {
             PackageInfo {
                 name: "core".to_string(),
                 source_root: PathBuf::from("/repo/crates/core/src"),
+                crates: Vec::new(),
             },
         );
 
@@ -1393,6 +1455,122 @@ packages:
         let pkg = manifest.packages.find_package_for_file(&utils_file);
         assert!(pkg.is_some());
         assert_eq!(pkg.map(|p| p.name.as_str()), Some("@ts/utils"));
+    }
+
+    #[test]
+    fn test_rust_crate_autodiscovery() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a Cargo.toml without explicit [lib] or [[bin]] sections
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
+[package]
+name = "auto-discover"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        // Create src/lib.rs for auto-discovery
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "// library crate").unwrap();
+
+        let manifest = detect_manifest(root).unwrap().unwrap();
+        assert_eq!(manifest.project_type, ProjectType::RustCrate);
+
+        let pkg = manifest
+            .packages
+            .find_package_for_file(&root.join("src/lib.rs"));
+        assert!(pkg.is_some());
+        let pkg = pkg.unwrap();
+
+        // Should have discovered the library crate
+        assert_eq!(pkg.crates.len(), 1);
+        assert_eq!(pkg.crates[0].crate_type, CrateType::Library);
+        assert_eq!(pkg.crates[0].name, "auto_discover");
+        assert!(pkg.crates[0].entry_path.ends_with("src/lib.rs"));
+    }
+
+    #[test]
+    fn test_rust_crate_with_binary() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a Cargo.toml without explicit [[bin]] section
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
+[package]
+name = "my-binary"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        // Create src/main.rs for auto-discovery
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let manifest = detect_manifest(root).unwrap().unwrap();
+        let pkg = manifest
+            .packages
+            .find_package_for_file(&root.join("src/main.rs"))
+            .unwrap();
+
+        // Should have discovered the binary crate
+        assert_eq!(pkg.crates.len(), 1);
+        assert_eq!(pkg.crates[0].crate_type, CrateType::Binary);
+        assert_eq!(pkg.crates[0].name, "my_binary");
+        assert!(pkg.crates[0].entry_path.ends_with("src/main.rs"));
+    }
+
+    #[test]
+    fn test_rust_crate_with_lib_and_bin() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a Cargo.toml with both lib and bin
+        fs::write(
+            root.join("Cargo.toml"),
+            r#"
+[package]
+name = "mixed-crate"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        // Create both src/lib.rs and src/main.rs
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "// library").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+
+        let manifest = detect_manifest(root).unwrap().unwrap();
+        let pkg = manifest
+            .packages
+            .find_package_for_file(&root.join("src/lib.rs"))
+            .unwrap();
+
+        // Should have discovered both crates
+        assert_eq!(pkg.crates.len(), 2);
+
+        // Check library crate
+        let lib = pkg
+            .crates
+            .iter()
+            .find(|c| c.crate_type == CrateType::Library);
+        assert!(lib.is_some());
+        assert_eq!(lib.unwrap().name, "mixed_crate");
+
+        // Check binary crate
+        let bin = pkg
+            .crates
+            .iter()
+            .find(|c| c.crate_type == CrateType::Binary);
+        assert!(bin.is_some());
+        assert_eq!(bin.unwrap().name, "mixed_crate");
     }
 
     #[test]

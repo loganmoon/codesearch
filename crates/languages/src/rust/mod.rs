@@ -67,6 +67,18 @@ define_language_extractor! {
             query: queries::CONSTANT_QUERY,
             handler: handler_impls::handle_constant_impl
         },
+        r#static => {
+            query: queries::STATIC_QUERY,
+            handler: handler_impls::handle_static_impl
+        },
+        r#union => {
+            query: queries::UNION_QUERY,
+            handler: handler_impls::handle_union_impl
+        },
+        extern_block => {
+            query: queries::EXTERN_BLOCK_QUERY,
+            handler: handler_impls::handle_extern_block_impl
+        },
         type_alias => {
             query: queries::TYPE_ALIAS_QUERY,
             handler: handler_impls::handle_type_alias_impl

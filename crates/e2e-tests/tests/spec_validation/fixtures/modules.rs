@@ -1,10 +1,27 @@
 //! modules fixtures for spec validation tests
+//!
+//! Validates rules:
+//! - E-MOD-CRATE: crate root produces Module entity
+//! - E-MOD-DECL: mod declarations produce Module entities
+//! - E-MOD-INLINE: inline mod blocks produce Module entities
+//! - V-PUB, V-PUB-CRATE, V-PUB-SUPER, V-PUB-IN-PATH, V-PUB-SELF, V-PRIVATE: visibility modifiers
+//! - Q-CRATE-ROOT, Q-MODULE, Q-ITEM: qualified name patterns
+//! - R-CONTAINS-MODULE: parent module CONTAINS child modules
+//! - R-IMPORTS: module IMPORTS items via use statements
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
 /// Basic module declaration with file-based module
+///
+/// Validates:
+/// - E-MOD-CRATE: crate root (lib.rs) produces Module entity
+/// - E-MOD-DECL: `mod foo;` produces Module entity
+/// - Q-CRATE-ROOT: crate root is named after the package
+/// - Q-MODULE: modules are qualified under their parent
+/// - R-CONTAINS-MODULE: parent module CONTAINS child modules
 pub static BASIC_MOD: Fixture = Fixture {
     name: "basic_mod",
     files: &[
@@ -15,14 +32,17 @@ pub static BASIC_MOD: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::foo",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::foo::bar",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -41,50 +61,108 @@ pub static BASIC_MOD: Fixture = Fixture {
     cargo_toml: None,
 };
 
-/// Visibility modifiers: pub, pub(crate), private
+/// Visibility modifiers: pub, pub(crate), pub(super), pub(in path), pub(self), private
+///
+/// Validates:
+/// - V-PUB: `pub` modifier results in Public visibility
+/// - V-PUB-CRATE: `pub(crate)` modifier results in Internal visibility
+/// - V-PUB-SUPER: `pub(super)` modifier results in Internal visibility
+/// - V-PUB-IN-PATH: `pub(in path)` modifier results in Internal visibility
+/// - V-PUB-SELF: `pub(self)` modifier results in Private visibility (equivalent to no modifier)
+/// - V-PRIVATE: no visibility modifier results in Private visibility
 pub static VISIBILITY: Fixture = Fixture {
     name: "visibility",
     files: &[(
         "lib.rs",
         r#"
-pub fn public_fn() {}
-pub(crate) fn crate_fn() {}
-fn private_fn() {}
+pub mod outer {
+    pub fn public_fn() {}
+    pub(crate) fn crate_fn() {}
+    pub(super) fn super_fn() {}
+    pub(in crate::outer) fn in_path_fn() {}
+    pub(self) fn self_fn() {}
+    fn private_fn() {}
+}
 "#,
     )],
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Module,
+            qualified_name: "test_crate::outer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test_crate::public_fn",
+            qualified_name: "test_crate::outer::public_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test_crate::crate_fn",
+            qualified_name: "test_crate::outer::crate_fn",
+            visibility: Some(Visibility::Internal),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test_crate::private_fn",
+            qualified_name: "test_crate::outer::super_fn",
+            visibility: Some(Visibility::Internal),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::outer::in_path_fn",
+            visibility: Some(Visibility::Internal),
+        },
+        // V-PUB-SELF: pub(self) is equivalent to private
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::outer::self_fn",
+            visibility: Some(Visibility::Private),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Function,
+            qualified_name: "test_crate::outer::private_fn",
+            visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate",
-            to: "test_crate::public_fn",
+            to: "test_crate::outer",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate",
-            to: "test_crate::crate_fn",
+            from: "test_crate::outer",
+            to: "test_crate::outer::public_fn",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate",
-            to: "test_crate::private_fn",
+            from: "test_crate::outer",
+            to: "test_crate::outer::crate_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::outer",
+            to: "test_crate::outer::super_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::outer",
+            to: "test_crate::outer::in_path_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::outer",
+            to: "test_crate::outer::self_fn",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::outer",
+            to: "test_crate::outer::private_fn",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -92,6 +170,10 @@ fn private_fn() {}
 };
 
 /// Use declarations and imports
+///
+/// Validates:
+/// - R-IMPORTS: module IMPORTS items via use statements
+/// - R-CALLS-FUNCTION: function CALLS another function
 pub static USE_IMPORTS: Fixture = Fixture {
     name: "use_imports",
     files: &[
@@ -105,18 +187,22 @@ pub static USE_IMPORTS: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::caller",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::utils::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -135,12 +221,26 @@ pub static USE_IMPORTS: Fixture = Fixture {
             from: "test_crate::utils",
             to: "test_crate::utils::helper",
         },
+        // R-IMPORTS: module imports item via use statement
+        ExpectedRelationship {
+            kind: RelationshipKind::Imports,
+            from: "test_crate",
+            to: "test_crate::utils::helper",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Calls,
+            from: "test_crate::caller",
+            to: "test_crate::utils::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
 };
 
 /// Re-exports with pub use
+///
+/// Validates:
+/// - R-IMPORTS: module IMPORTS items via use statements (including re-exports)
 pub static REEXPORTS: Fixture = Fixture {
     name: "reexports",
     files: &[
@@ -151,14 +251,17 @@ pub static REEXPORTS: Fixture = Fixture {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::internal",
+            visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::internal::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -172,6 +275,12 @@ pub static REEXPORTS: Fixture = Fixture {
             from: "test_crate::internal",
             to: "test_crate::internal::helper",
         },
+        // R-IMPORTS: re-export creates an import relationship
+        ExpectedRelationship {
+            kind: RelationshipKind::Imports,
+            from: "test_crate",
+            to: "test_crate::internal::helper",
+        },
     ],
     project_type: ProjectType::SingleCrate,
     cargo_toml: None,
@@ -182,6 +291,11 @@ pub static REEXPORTS: Fixture = Fixture {
 // =============================================================================
 
 /// Deep module nesting (3+ levels) with mixed inline and file-based modules
+///
+/// Validates:
+/// - E-MOD-INLINE: inline mod blocks produce Module entities
+/// - Q-MODULE: deeply nested modules use full path (test_crate::level1::level2::level3)
+/// - R-CONTAINS-MODULE: containment at each level
 pub static DEEP_MODULE_NESTING: Fixture = Fixture {
     name: "deep_module_nesting",
     files: &[(
@@ -200,22 +314,27 @@ pub mod level1 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1::level2",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::level1::level2::level3",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::level1::level2::level3::deep_function",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -245,6 +364,11 @@ pub mod level1 {
 };
 
 /// Mixed inline and file-based modules with directory structure
+///
+/// Validates:
+/// - E-MOD-DECL: file-based modules (mod api;)
+/// - E-MOD-INLINE: inline modules (mod utils { ... })
+/// - R-CONTAINS-MODULE: containment across both inline and file-based modules
 pub static MIXED_MODULE_STRUCTURE: Fixture = Fixture {
     name: "mixed_module_structure",
     files: &[
@@ -275,30 +399,37 @@ pub fn handle_request() {}
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::api",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::api::handlers",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::api::api_root",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::api::handlers::handle_request",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::utils::helper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -338,6 +469,10 @@ pub fn handle_request() {}
 };
 
 /// Self and super references in modules
+///
+/// Validates:
+/// - R-IMPORTS: use of super:: and super::super:: creates import relationships
+/// - R-CALLS-FUNCTION: calls through super references resolve correctly
 pub static SELF_SUPER_REFERENCES: Fixture = Fixture {
     name: "self_super_references",
     files: &[(
@@ -368,26 +503,32 @@ pub mod child {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::child",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate::child::grandchild",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::root_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::child::child_fn",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::child::grandchild::grandchild_fn",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

@@ -101,7 +101,7 @@ fn create_mock_entity(id: &str, name: &str, score: f32) -> EntityResult {
             generics: vec![],
         }),
         documentation_summary: Some(format!("Documentation for {name}")),
-        visibility: Visibility::Public,
+        visibility: Some(Visibility::Public),
         score,
         reranked: false,
         reasoning: None,

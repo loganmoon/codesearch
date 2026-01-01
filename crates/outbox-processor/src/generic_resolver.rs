@@ -19,13 +19,25 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use async_trait::async_trait;
-use codesearch_core::entities::{CodeEntity, SourceReference};
+use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use codesearch_core::resolution::{LookupStrategy, RelationshipDef};
 use std::collections::HashMap;
 use tracing::{debug, trace, warn};
 
 use crate::neo4j_relationship_resolver::{EntityCache, RelationshipResolver};
+
+/// Extract the simple name (last segment) from a qualified reference.
+///
+/// Handles both Rust-style `::` separators and dot notation `.` separators.
+/// Returns the original reference if no separator is found.
+fn extract_simple_name(reference: &str) -> &str {
+    reference
+        .rsplit("::")
+        .next()
+        .or_else(|| reference.rsplit('.').next())
+        .unwrap_or(reference)
+}
 
 /// Lookup maps for resolving entity references
 ///
@@ -44,132 +56,102 @@ struct TargetLookupMaps {
     all_simple_names: HashMap<String, Vec<String>>,
 }
 
-/// A relationship reference extracted from an entity
-#[derive(Debug, Clone)]
-pub struct RelationshipRef {
-    /// Target reference (qualified name or partial reference to resolve)
-    pub target: String,
-}
-
-impl From<&SourceReference> for RelationshipRef {
-    fn from(sr: &SourceReference) -> Self {
-        Self {
-            target: sr.target.clone(),
-        }
-    }
-}
-
-impl From<&String> for RelationshipRef {
-    fn from(s: &String) -> Self {
-        Self { target: s.clone() }
-    }
-}
-
-/// Trait for extracting relationship references from entities
+/// Trait for extracting relationship target references from entities
 ///
 /// Implementations handle the mapping from specific relationship kinds
 /// to the appropriate field in `EntityRelationshipData`.
-pub trait ReferenceExtractor: Send + Sync {
-    /// Extract references for this relationship type from the entity
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef>;
+trait ReferenceExtractor: Send + Sync {
+    /// Extract target references for this relationship type from the entity.
+    /// Returns qualified names or partial references to resolve.
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String>;
 }
 
 /// Extractor for CALLS relationships
-pub struct CallsExtractor;
+struct CallsExtractor;
 
 impl ReferenceExtractor for CallsExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
         entity
             .relationships
             .calls
             .iter()
-            .map(RelationshipRef::from)
+            .map(|sr| sr.target.clone())
             .collect()
     }
 }
 
 /// Extractor for USES relationships
-pub struct UsesExtractor;
+struct UsesExtractor;
 
 impl ReferenceExtractor for UsesExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
         entity
             .relationships
             .uses_types
             .iter()
-            .map(RelationshipRef::from)
+            .map(|sr| sr.target.clone())
             .collect()
     }
 }
 
 /// Extractor for IMPLEMENTS relationships
-pub struct ImplementsExtractor;
+struct ImplementsExtractor;
 
 impl ReferenceExtractor for ImplementsExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
         entity
             .relationships
             .implements_trait
             .as_ref()
-            .map(|t| vec![RelationshipRef::from(t)])
+            .map(|t| vec![t.clone()])
             .unwrap_or_default()
     }
 }
 
 /// Extractor for ASSOCIATES relationships
-pub struct AssociatesExtractor;
+struct AssociatesExtractor;
 
 impl ReferenceExtractor for AssociatesExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
         entity
             .relationships
             .for_type
             .as_ref()
-            .map(|t| vec![RelationshipRef::from(t)])
+            .map(|t| vec![t.clone()])
             .unwrap_or_default()
     }
 }
 
 /// Extractor for EXTENDS (supertraits) relationships
-pub struct SupertraitsExtractor;
+struct SupertraitsExtractor;
 
 impl ReferenceExtractor for SupertraitsExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
         entity
             .relationships
             .supertraits
             .iter()
             .filter(|s| !s.starts_with('\'')) // Skip lifetimes
-            .map(RelationshipRef::from)
+            .cloned()
             .collect()
     }
 }
 
 /// Extractor for INHERITS (class inheritance) relationships
-pub struct InheritsExtractor;
+struct InheritsExtractor;
 
 impl ReferenceExtractor for InheritsExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
-        entity
-            .relationships
-            .extends
-            .iter()
-            .map(RelationshipRef::from)
-            .collect()
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
+        entity.relationships.extends.clone()
     }
 }
 
 /// Extractor for IMPORTS relationships
-pub struct ImportsExtractor;
+struct ImportsExtractor;
 
 impl ReferenceExtractor for ImportsExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<RelationshipRef> {
-        entity
-            .relationships
-            .imports
-            .iter()
-            .map(RelationshipRef::from)
-            .collect()
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
+        entity.relationships.imports.clone()
     }
 }
 
@@ -186,8 +168,11 @@ pub struct GenericResolver {
 }
 
 impl GenericResolver {
-    /// Create a new generic resolver with the given definition and extractor
-    pub fn new(def: &'static RelationshipDef, extractor: Box<dyn ReferenceExtractor>) -> Self {
+    /// Create a new generic resolver with the given definition and extractor.
+    ///
+    /// This is private to ensure correct pairing of definitions and extractors.
+    /// Use the factory functions (e.g., `calls_resolver()`) instead.
+    fn new(def: &'static RelationshipDef, extractor: Box<dyn ReferenceExtractor>) -> Self {
         Self { def, extractor }
     }
 
@@ -269,50 +254,42 @@ impl GenericResolver {
 
     /// Resolve a reference using the configured lookup strategies
     fn resolve_reference(&self, reference: &str, maps: &TargetLookupMaps) -> Option<String> {
-        // Strip generics for lookup
-        let base_ref = reference.split('<').next().unwrap_or(reference).trim();
+        // References are already normalized at extraction time:
+        // - Turbofish generics stripped via tree-sitter query
+        // - UFCS syntax preserved (starts with '<')
+        // - Qualified names resolved via import maps
+        // No string manipulation needed here - just direct lookups.
+        let reference = reference.trim();
 
         for strategy in self.def.lookup_strategies {
             match strategy {
                 LookupStrategy::QualifiedName => {
-                    if let Some(id) = maps.qname.get(base_ref) {
+                    if let Some(id) = maps.qname.get(reference) {
                         trace!("  [QualifiedName] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::PathEntityIdentifier => {
-                    if let Some(id) = maps.path_id.get(base_ref) {
+                    if let Some(id) = maps.path_id.get(reference) {
                         trace!("  [PathEntityIdentifier] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::CallAliases => {
-                    if let Some(id) = maps.call_alias.get(base_ref) {
+                    if let Some(id) = maps.call_alias.get(reference) {
                         trace!("  [CallAliases] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::UniqueSimpleName => {
-                    // Extract simple name (last segment)
-                    let simple_name = base_ref
-                        .rsplit("::")
-                        .next()
-                        .or_else(|| base_ref.rsplit('.').next())
-                        .unwrap_or(base_ref);
-
+                    let simple_name = extract_simple_name(reference);
                     if let Some(id) = maps.unique_simple_name.get(simple_name) {
                         trace!("  [UniqueSimpleName] resolved {} -> {}", reference, id);
                         return Some(id.clone());
                     }
                 }
                 LookupStrategy::SimpleName => {
-                    // Extract simple name (last segment)
-                    let simple_name = base_ref
-                        .rsplit("::")
-                        .next()
-                        .or_else(|| base_ref.rsplit('.').next())
-                        .unwrap_or(base_ref);
-
+                    let simple_name = extract_simple_name(reference);
                     // First match wins (may be ambiguous)
                     if let Some(ids) = maps.all_simple_names.get(simple_name) {
                         if !ids.is_empty() {
@@ -383,32 +360,23 @@ impl RelationshipResolver for GenericResolver {
                 refs.len()
             );
 
-            for rel_ref in refs {
-                if let Some(target_id) = self.resolve_reference(&rel_ref.target, &maps) {
-                    // Skip self-references
-                    if target_id == source.entity_id {
+            for target_ref in refs {
+                if let Some(target_id) = self.resolve_reference(&target_ref, &maps) {
+                    // Skip self-references (except for CALLS - recursive functions are valid)
+                    if target_id == source.entity_id && self.def.forward_rel != "CALLS" {
                         continue;
                     }
 
                     // Forward edge
                     relationships.push((
                         source.entity_id.clone(),
-                        target_id.clone(),
+                        target_id,
                         self.def.forward_rel.to_string(),
                     ));
-
-                    // Reciprocal edge (if defined)
-                    if let Some(reciprocal) = self.def.reciprocal_rel {
-                        relationships.push((
-                            target_id,
-                            source.entity_id.clone(),
-                            reciprocal.to_string(),
-                        ));
-                    }
                 } else {
                     debug!(
                         "GenericResolver[{}]: unresolved reference {} -> {}",
-                        self.def.name, source.qualified_name, rel_ref.target
+                        self.def.name, source.qualified_name, target_ref
                     );
                 }
             }
@@ -547,8 +515,8 @@ mod tests {
 
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 2);
-        assert_eq!(refs[0].target, "crate::bar");
-        assert_eq!(refs[1].target, "crate::baz");
+        assert_eq!(refs[0], "crate::bar");
+        assert_eq!(refs[1], "crate::baz");
     }
 
     #[test]
@@ -575,7 +543,7 @@ mod tests {
 
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].target, "crate::MyStruct");
+        assert_eq!(refs[0], "crate::MyStruct");
     }
 
     #[test]
@@ -593,7 +561,7 @@ mod tests {
 
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].target, "crate::MyTrait");
+        assert_eq!(refs[0], "crate::MyTrait");
     }
 
     #[test]
@@ -615,7 +583,7 @@ mod tests {
 
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].target, "crate::BaseTrait");
+        assert_eq!(refs[0], "crate::BaseTrait");
     }
 
     #[test]
@@ -633,6 +601,36 @@ mod tests {
 
         let refs = extractor.extract_refs(&entity);
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].target, "crate::other::Thing");
+        assert_eq!(refs[0], "crate::other::Thing");
+    }
+
+    #[test]
+    fn test_calls_extractor_includes_recursive_self_calls() {
+        let extractor = CallsExtractor;
+        // A recursive function that calls itself
+        let entity = make_test_entity(
+            EntityType::Function,
+            "factorial",
+            "crate::factorial",
+            EntityRelationshipData {
+                calls: vec![SourceReference::new(
+                    "crate::factorial".to_string(), // Self-call
+                    SourceLocation {
+                        start_line: 5,
+                        end_line: 5,
+                        start_column: 0,
+                        end_column: 10,
+                    },
+                    codesearch_core::ReferenceType::Call,
+                )],
+                ..Default::default()
+            },
+        );
+
+        let refs = extractor.extract_refs(&entity);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0], "crate::factorial");
+        // The extractor should return the self-call; filtering happens in GenericResolver
+        // which now allows self-references for CALLS relationships
     }
 }

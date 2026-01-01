@@ -4,7 +4,9 @@
 //! including failure scenarios, DELETE operations, and mixed batch processing.
 
 use anyhow::Result;
-use codesearch_core::entities::{EntityMetadata, EntityType, Language, SourceLocation, Visibility};
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, EntityType, Language, SourceLocation, Visibility,
+};
 use codesearch_core::CodeEntity;
 use codesearch_e2e_tests::common::*;
 use codesearch_outbox_processor::OutboxProcessor;
@@ -33,13 +35,14 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
             start_column: 0,
             end_column: 10,
         },
-        visibility: Visibility::Public,
+        visibility: Some(Visibility::Public),
         parent_scope: None,
         dependencies: Vec::new(),
         signature: None,
         documentation_summary: None,
         content: Some(format!("fn {name}() {{}}")),
         metadata: EntityMetadata::default(),
+        relationships: EntityRelationshipData::default(),
     }
 }
 

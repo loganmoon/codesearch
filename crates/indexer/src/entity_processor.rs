@@ -704,7 +704,7 @@ mod tests {
                 start_column: 1,
                 end_column: 1,
             },
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             language: Language::Rust,
             signature: Some(FunctionSignature {
                 parameters: vec![
@@ -813,7 +813,7 @@ mod tests {
                 start_column: 1,
                 end_column: 1,
             },
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             language: Language::Rust,
             signature: None,
             documentation_summary: None,
@@ -858,7 +858,7 @@ mod tests {
                 start_column: 1,
                 end_column: 1,
             },
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             language: Language::Rust,
             signature: None,
             documentation_summary: Some("Test with \"quotes\" and\nnewlines".to_string()),

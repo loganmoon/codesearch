@@ -1068,7 +1068,7 @@ mod tests {
                 start_column: 0,
                 end_column: 10,
             },
-            visibility: Visibility::Public,
+            visibility: Some(Visibility::Public),
             parent_scope: None,
             dependencies: Vec::new(),
             signature: None,

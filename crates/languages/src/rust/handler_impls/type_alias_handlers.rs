@@ -17,7 +17,10 @@ use crate::rust::handler_impls::common::{
 };
 use crate::rust::handler_impls::constants::capture_names;
 use crate::rust::handler_impls::type_handlers::extract_type_refs_from_type_expr;
-use codesearch_core::entities::{EntityMetadata, EntityType, Language};
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
+    SourceReference,
+};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -37,6 +40,17 @@ pub fn handle_type_alias_impl(
 ) -> Result<Vec<CodeEntity>> {
     // Extract the main type_alias node
     let main_node = require_capture_node(query_match, query, "type_alias")?;
+
+    // Skip type aliases inside impl blocks - those are handled by the impl extractor
+    if let Some(parent) = main_node.parent() {
+        if parent.kind() == "declaration_list" {
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "impl_item" {
+                    return Ok(Vec::new());
+                }
+            }
+        }
+    }
 
     // Create extraction context
     let ctx = ExtractionContext {
@@ -108,18 +122,31 @@ pub fn handle_type_alias_impl(
         }
     }
 
+    // Build typed relationships
+    let relationships = EntityRelationshipData {
+        uses_types: uses_types
+            .iter()
+            .map(|t| SourceReference {
+                target: t.clone(),
+                location: SourceLocation::default(),
+                ref_type: ReferenceType::TypeUsage,
+            })
+            .collect(),
+        ..Default::default()
+    };
+
     // Build the entity using the shared helper
     let entity = build_entity(
         components,
         EntityDetails {
             entity_type: EntityType::TypeAlias,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,
             signature: None,
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 

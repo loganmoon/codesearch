@@ -1,9 +1,22 @@
 //! workspace fixtures for spec validation tests
+//!
+//! Validates rules:
+//! - E-MOD: crate root modules produce Module entities
+//! - R-CONTAINS-ITEM: modules contain their items
+//! - R-IMPORTS: use declarations create Imports relationships
+//! - Cross-crate dependency handling
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
+/// Basic workspace with cross-crate dependencies
+///
+/// Validates:
+/// - E-MOD: each crate root produces a Module entity
+/// - R-CONTAINS-ITEM: modules contain structs and functions
+/// - R-IMPORTS: use statements create Imports from module to imported entity
 pub static WORKSPACE_BASIC: Fixture = Fixture {
     name: "workspace_basic",
     files: &[
@@ -56,23 +69,28 @@ pub fn process_core(ct: CoreType) -> i32 {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "my_core",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "my_core::CoreType",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "my_core::core_function",
+            visibility: Some(Visibility::Public),
         },
         // Utils crate entities
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "my_utils",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "my_utils::process_core",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -91,10 +109,10 @@ pub fn process_core(ct: CoreType) -> i32 {
             from: "my_utils",
             to: "my_utils::process_core",
         },
-        // Cross-crate import
+        // Cross-crate import - R-IMPORTS: Module IMPORTS Entity
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "my_utils::process_core",
+            from: "my_utils",
             to: "my_core::CoreType",
         },
     ],

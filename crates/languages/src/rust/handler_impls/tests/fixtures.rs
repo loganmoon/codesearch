@@ -8,6 +8,7 @@ use crate::rust::handler_impls::function_handlers::handle_function_impl;
 use crate::rust::handler_impls::impl_handlers::{handle_impl_impl, handle_impl_trait_impl};
 use crate::rust::handler_impls::macro_handlers::handle_macro_impl;
 use crate::rust::handler_impls::module_handlers::handle_module_impl;
+use crate::rust::handler_impls::static_handlers::handle_static_impl;
 use crate::rust::handler_impls::type_alias_handlers::handle_type_alias_impl;
 use crate::rust::handler_impls::type_handlers::{
     handle_enum_impl, handle_struct_impl, handle_trait_impl,
@@ -494,7 +495,7 @@ fn test_visibility_extraction() {
     // Most functions should be public
     let public_count = function_entities
         .iter()
-        .filter(|e| e.visibility == Visibility::Public)
+        .filter(|e| e.visibility == Some(Visibility::Public))
         .count();
 
     assert!(public_count > 0);
@@ -580,17 +581,18 @@ fn test_large_file_module_extraction() {
         .iter()
         .find(|e| e.name == "utils")
         .expect("Should find utils module");
-    assert_eq!(utils_module.visibility, Visibility::Public);
+    assert_eq!(utils_module.visibility, Some(Visibility::Public));
 
     let tests_module = module_entities
         .iter()
         .find(|e| e.name == "tests")
         .expect("Should find tests module");
-    assert_eq!(tests_module.visibility, Visibility::Private);
+    assert_eq!(tests_module.visibility, Some(Visibility::Private));
 }
 
 #[test]
 fn test_large_file_constant_extraction() {
+    // Test const items
     let const_entities = extract_with_handler(
         LARGE_RUST_SAMPLE,
         queries::CONSTANT_QUERY,
@@ -598,24 +600,32 @@ fn test_large_file_constant_extraction() {
     )
     .expect("Failed to extract constants");
 
-    assert!(const_entities.len() >= 3); // MAX_CONNECTIONS, DEFAULT_TIMEOUT, CONFIG
+    assert!(const_entities.len() >= 2); // MAX_CONNECTIONS, DEFAULT_TIMEOUT
 
     let const_names: Vec<&str> = const_entities.iter().map(|e| e.name.as_str()).collect();
     assert!(const_names.contains(&"MAX_CONNECTIONS"));
     assert!(const_names.contains(&"DEFAULT_TIMEOUT"));
-    assert!(const_names.contains(&"CONFIG"));
 
-    // Verify const vs static distinction
+    // Verify const items have is_const = true
     let max_conn = const_entities
         .iter()
         .find(|e| e.name == "MAX_CONNECTIONS")
         .unwrap();
     assert!(max_conn.metadata.is_const);
     assert!(!max_conn.metadata.is_static);
+    assert_eq!(max_conn.entity_type, EntityType::Constant);
 
-    let config = const_entities.iter().find(|e| e.name == "CONFIG").unwrap();
+    // Test static items separately
+    let static_entities =
+        extract_with_handler(LARGE_RUST_SAMPLE, queries::STATIC_QUERY, handle_static_impl)
+            .expect("Failed to extract statics");
+
+    assert!(!static_entities.is_empty()); // CONFIG
+
+    let config = static_entities.iter().find(|e| e.name == "CONFIG").unwrap();
     assert!(!config.metadata.is_const);
     assert!(config.metadata.is_static);
+    assert_eq!(config.entity_type, EntityType::Static);
 }
 
 #[test]

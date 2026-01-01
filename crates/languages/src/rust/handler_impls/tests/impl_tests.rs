@@ -437,11 +437,11 @@ impl Public {
     // Check visibility is captured
     let public_methods: Vec<_> = entities
         .iter()
-        .filter(|e| e.visibility == Visibility::Public)
+        .filter(|e| e.visibility == Some(Visibility::Public))
         .collect();
     let private_methods: Vec<_> = entities
         .iter()
-        .filter(|e| e.visibility == Visibility::Private)
+        .filter(|e| e.visibility == Some(Visibility::Private))
         .collect();
 
     assert!(!public_methods.is_empty(), "Should have public methods");

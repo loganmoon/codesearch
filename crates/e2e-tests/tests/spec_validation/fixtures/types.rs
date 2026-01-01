@@ -1,9 +1,28 @@
 //! types fixtures for spec validation tests
+//!
+//! Validates rules:
+//! - E-STRUCT: struct definitions produce Struct entities
+//! - E-ENUM: enum definitions produce Enum entities
+//! - E-TYPE-ALIAS: type aliases produce TypeAlias entities
+//! - V-ENUM-VARIANT: enum variants inherit visibility from their enum
+//! - M-STRUCT-FIELDS: struct field metadata
+//! - M-ENUM-VARIANTS: enum variant metadata
+//! - M-GENERIC: generic type parameter metadata
+//! - M-LIFETIMES: lifetime parameter metadata
+//! - M-TYPE-ALIAS-TARGET: type alias target type metadata
+//! - R-USES-TYPE: type usage in fields/variants creates Uses relationships
 
 use super::{
     EntityKind, ExpectedEntity, ExpectedRelationship, Fixture, ProjectType, RelationshipKind,
+    Visibility,
 };
 
+/// Struct definitions with fields
+///
+/// Validates:
+/// - E-STRUCT: struct definitions produce Struct entities
+/// - M-STRUCT-FIELDS: structs include field information
+/// - R-USES-TYPE: field types create Uses relationships
 pub static STRUCTS: Fixture = Fixture {
     name: "structs",
     files: &[(
@@ -22,14 +41,17 @@ pub struct Wrapper {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Config",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Wrapper",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -54,6 +76,11 @@ pub struct Wrapper {
 };
 
 /// Enum definitions
+///
+/// Validates:
+/// - E-ENUM: enum definitions produce Enum entities
+/// - V-ENUM-VARIANT: enum variants inherit visibility from their enum
+/// - M-ENUM-VARIANTS: enums include variant information
 pub static ENUMS: Fixture = Fixture {
     name: "enums",
     files: &[(
@@ -70,10 +97,12 @@ pub enum Status {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Status",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[ExpectedRelationship {
@@ -86,6 +115,11 @@ pub enum Status {
 };
 
 /// Type aliases
+///
+/// Validates:
+/// - E-TYPE-ALIAS: type aliases produce TypeAlias entities
+/// - M-TYPE-ALIAS-TARGET: type alias tracks target type
+/// - R-USES-TYPE: type alias creates Uses relationship to target type components
 pub static TYPE_ALIASES: Fixture = Fixture {
     name: "type_aliases",
     files: &[(
@@ -99,14 +133,17 @@ pub type Result<T> = std::result::Result<T, Error>;
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Error",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
             qualified_name: "test_crate::Result",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -135,6 +172,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 // =============================================================================
 
 /// Tuple structs and unit structs
+///
+/// Validates:
+/// - E-STRUCT: all struct variants (named, tuple, unit) produce Struct entities
+/// - M-STRUCT-FIELDS: field metadata captures tuple vs named vs unit forms
 pub static TUPLE_AND_UNIT_STRUCTS: Fixture = Fixture {
     name: "tuple_and_unit_structs",
     files: &[(
@@ -160,22 +201,27 @@ pub struct NamedPoint {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::UnitMarker",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Point",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::UserId",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::NamedPoint",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -205,6 +251,11 @@ pub struct NamedPoint {
 };
 
 /// Complex enums with various variant types
+///
+/// Validates:
+/// - E-ENUM: enums with complex variants produce Enum entities
+/// - M-ENUM-VARIANTS: variant metadata captures different variant kinds (unit, tuple, struct)
+/// - R-USES-TYPE: enum variants using other types create Uses relationships
 pub static COMPLEX_ENUMS: Fixture = Fixture {
     name: "complex_enums",
     files: &[(
@@ -239,18 +290,22 @@ pub enum Message {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::RequestData",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::ErrorDetails",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Message",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -285,6 +340,10 @@ pub enum Message {
 };
 
 /// Generic structs with type parameters
+///
+/// Validates:
+/// - E-STRUCT: generic structs produce Struct entities
+/// - M-GENERIC: struct includes type parameter information
 pub static GENERIC_STRUCTS: Fixture = Fixture {
     name: "generic_structs",
     files: &[(
@@ -315,22 +374,27 @@ where
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Container",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Pair",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::BoundedContainer",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleConstraints",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
@@ -360,6 +424,11 @@ where
 };
 
 /// Lifetimes in struct definitions and functions
+///
+/// Validates:
+/// - M-LIFETIMES: entities include lifetime parameter information
+/// - E-STRUCT: structs with lifetimes produce Struct entities
+/// - E-FN-FREE: functions with lifetimes produce Function entities
 pub static LIFETIMES: Fixture = Fixture {
     name: "lifetimes",
     files: &[(
@@ -387,22 +456,27 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
         ExpectedEntity {
             kind: EntityKind::Module,
             qualified_name: "test_crate",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Borrowed",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleBorrows",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::borrow_data",
+            visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "test_crate::longest",
+            visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[

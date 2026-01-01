@@ -21,7 +21,7 @@ mod utils {
     let entity = &entities[0];
     assert_eq!(entity.name, "utils");
     assert_eq!(entity.entity_type, EntityType::Module);
-    assert_eq!(entity.visibility, Visibility::Private);
+    assert_eq!(entity.visibility, Some(Visibility::Private));
 }
 
 #[test]
@@ -56,7 +56,7 @@ pub mod api {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "api");
-    assert_eq!(entity.visibility, Visibility::Public);
+    assert_eq!(entity.visibility, Some(Visibility::Public));
 }
 
 #[test]
@@ -103,8 +103,8 @@ pub(crate) mod internal {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "internal");
-    // pub(crate) is treated as Public visibility
-    assert_eq!(entity.visibility, Visibility::Public);
+    // pub(crate) is treated as Internal visibility
+    assert_eq!(entity.visibility, Some(Visibility::Internal));
 }
 
 #[test]
@@ -188,7 +188,7 @@ pub mod module3;
     // Check visibility
     let public_count = entities
         .iter()
-        .filter(|e| e.visibility == Visibility::Public)
+        .filter(|e| e.visibility == Some(Visibility::Public))
         .count();
     assert_eq!(public_count, 1); // Only module3 is public
 }

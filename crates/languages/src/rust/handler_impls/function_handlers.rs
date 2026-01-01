@@ -192,11 +192,11 @@ pub fn handle_function_impl(
     }
 
     // Build typed relationship data
-    let imports = import_map.imported_paths_normalized(package_name, current_module.as_deref());
+    // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+    // a module-level relationship. They are collected by module_handlers.
     let relationships = EntityRelationshipData {
         calls,
         uses_types: type_refs,
-        imports,
         ..Default::default()
     };
 
@@ -206,7 +206,7 @@ pub fn handle_function_impl(
         EntityDetails {
             entity_type: EntityType::Function,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,

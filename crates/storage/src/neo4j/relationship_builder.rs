@@ -369,7 +369,7 @@ mod tests {
                 end_line: 10,
                 end_column: 0,
             })
-            .visibility(Visibility::Public)
+            .visibility(Some(Visibility::Public))
             .parent_scope(parent_scope);
         builder.build().expect("Failed to build test entity")
     }
@@ -454,7 +454,7 @@ mod tests {
                 end_line: 10,
                 end_column: 0,
             })
-            .visibility(Visibility::Public)
+            .visibility(Some(Visibility::Public))
             .metadata(metadata)
             .build()
             .expect("Failed to build test entity");
@@ -514,7 +514,7 @@ mod tests {
                 end_line: 10,
                 end_column: 0,
             })
-            .visibility(Visibility::Public)
+            .visibility(Some(Visibility::Public))
             .metadata(metadata)
             .build()
             .expect("Failed to build test entity");
@@ -567,7 +567,7 @@ mod tests {
                 end_line: 10,
                 end_column: 0,
             })
-            .visibility(Visibility::Public)
+            .visibility(Some(Visibility::Public))
             .metadata(metadata)
             .build()
             .expect("Failed to build test entity");

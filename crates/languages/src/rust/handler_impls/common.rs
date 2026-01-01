@@ -36,28 +36,56 @@ pub fn extract_visibility(query_match: &QueryMatch, query: &Query) -> Visibility
         return Visibility::Private;
     };
 
+    extract_visibility_from_node(vis_node)
+}
+
+/// Extract visibility from a visibility_modifier tree-sitter node
+///
+/// Handles:
+/// - `pub` -> Public
+/// - `pub(crate)` -> Internal
+/// - `pub(super)` -> Internal (restricted to parent module)
+/// - `pub(in path)` -> Internal (restricted to specific path)
+/// - `pub(self)` -> Private (only visible in current module = effectively private)
+/// - No visibility modifier -> Private
+pub fn extract_visibility_from_node(vis_node: Node) -> Visibility {
     // Check if this is a visibility_modifier node
     if vis_node.kind() != node_kinds::VISIBILITY_MODIFIER {
         return Visibility::Private;
     }
 
-    // Walk through the visibility modifier's children
+    // Walk through the visibility modifier's children to determine the type
     let mut cursor = vis_node.walk();
-    let has_public_keyword = vis_node.children(&mut cursor).any(|child| {
-        matches!(
-            child.kind(),
-            visibility_keywords::PUB
-                | visibility_keywords::CRATE
-                | visibility_keywords::SUPER
-                | visibility_keywords::SELF
-                | visibility_keywords::IN
-                | node_kinds::SCOPED_IDENTIFIER
-                | node_kinds::IDENTIFIER
-        )
-    });
+    let mut has_pub = false;
+    let mut has_self = false;
+    let mut has_other_restriction = false;
 
-    if has_public_keyword {
-        Visibility::Public
+    for child in vis_node.children(&mut cursor) {
+        match child.kind() {
+            visibility_keywords::PUB => has_pub = true,
+            // pub(self) means visibility restricted to current module = effectively private
+            visibility_keywords::SELF => has_self = true,
+            // These indicate broader restricted visibility: pub(crate), pub(super), pub(in path)
+            visibility_keywords::CRATE
+            | visibility_keywords::SUPER
+            | visibility_keywords::IN
+            | node_kinds::SCOPED_IDENTIFIER
+            | node_kinds::IDENTIFIER => has_other_restriction = true,
+            _ => {}
+        }
+    }
+
+    if has_pub {
+        if has_self {
+            // pub(self) -> Private (only visible in current module)
+            Visibility::Private
+        } else if has_other_restriction {
+            // pub(crate), pub(super), pub(in path) -> Internal
+            Visibility::Internal
+        } else {
+            // Just pub -> Public
+            Visibility::Public
+        }
     } else {
         Visibility::Private
     }
@@ -508,6 +536,51 @@ pub fn extract_function_modifiers(modifiers_node: Node) -> (bool, bool, bool) {
 
 use std::collections::HashMap;
 
+/// Extract the call path from a scoped_identifier node, excluding type arguments.
+///
+/// Uses tree-sitter queries to capture only identifier/type_identifier nodes,
+/// skipping type_arguments. This handles turbofish like `Vec::<String>::new`.
+fn extract_call_path_from_scoped_identifier(node: Node, source: &str) -> Option<String> {
+    // Query to capture the type name and method name from turbofish syntax.
+    // For `Vec::<String>::new`, this captures "Vec" from generic_type and "new" from identifier.
+    let query_source = r#"
+        (scoped_identifier
+          (generic_type
+            (type_identifier) @type_name)
+          (identifier) @method_name)
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(e) => {
+            warn!(
+                "Failed to compile hardcoded tree-sitter query for scoped_identifier: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut segments = Vec::new();
+
+    let mut matches = cursor.matches(&query, node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                segments.push(text.to_string());
+            }
+        }
+    }
+
+    if segments.is_empty() {
+        None
+    } else {
+        Some(segments.join("::"))
+    }
+}
+
 /// Extract function calls from a function body using tree-sitter queries
 ///
 /// This version resolves bare identifiers to qualified names using imports and scope.
@@ -594,10 +667,19 @@ pub fn extract_function_calls(
                 });
             }
         } else if let Some(scoped_cap) = scoped_callee {
-            // Scoped call like `std::io::read()` or `crate::utils::helper()`
-            if let Ok(full_path) = node_to_text(scoped_cap.node, source) {
-                // Resolve to normalize crate::, self::, super:: paths
-                let resolved = ctx.resolve(&full_path);
+            // Scoped call like `std::io::read()`, `Vec::<String>::new()`, or UFCS
+            if let Ok(full_text) = node_to_text(scoped_cap.node, source) {
+                // UFCS syntax like `<Type as Trait>::method` needs special handling
+                // by ctx.resolve() - pass the full text
+                let call_path = if full_text.starts_with('<') {
+                    full_text
+                } else {
+                    // For turbofish like `Vec::<String>::new`, extract path without generics
+                    // using tree-sitter query (not string manipulation)
+                    extract_call_path_from_scoped_identifier(scoped_cap.node, source)
+                        .unwrap_or(full_text)
+                };
+                let resolved = ctx.resolve(&call_path);
                 calls.push(SourceReference {
                     target: resolved,
                     location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
@@ -627,9 +709,11 @@ pub fn extract_function_calls(
                         }
                     } else {
                         // Not a generic type parameter, resolve through imports
+                        // Use UFCS format <Type>::method to match inherent methods directly.
+                        // Trait methods have call_aliases that will also match this format.
                         let resolved_type = ctx.resolve(recv_type);
                         calls.push(SourceReference {
-                            target: format!("{resolved_type}::{method_name}"),
+                            target: format!("<{resolved_type}>::{method_name}"),
                             location: SourceLocation::from_tree_sitter_node(method_cap.node),
                             ref_type: ReferenceType::Call,
                         });
@@ -645,9 +729,10 @@ pub fn extract_function_calls(
                 // Try to extract the chain head type from the receiver expression
                 match extract_method_chain_head_type(chain_recv_cap.node, source, local_vars) {
                     Some(chain_head_type) => {
+                        // Use UFCS format <Type>::method to match inherent methods directly
                         let resolved_type = ctx.resolve(&chain_head_type);
                         calls.push(SourceReference {
-                            target: format!("{resolved_type}::{method_name}"),
+                            target: format!("<{resolved_type}>::{method_name}"),
                             location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
                             ref_type: ReferenceType::Call,
                         });
@@ -1629,5 +1714,54 @@ pub fn make_requests() {
             calls[0].target,
             "<test_crate::Data as test_crate::Processor>::process"
         );
+    }
+
+    #[test]
+    fn test_extract_function_calls_turbofish_strips_generics() {
+        // Turbofish syntax like `Vec::<String>::new()` should extract as `Vec::new`
+        // without the generic arguments. Tree-sitter AST traversal handles this.
+        let source = r#"
+            fn caller() {
+                Vec::<String>::new();
+                HashMap::<String, i32>::with_capacity(10);
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: None,
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        let local_vars = std::collections::HashMap::new();
+        let generic_bounds = im::HashMap::new();
+        let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
+
+        eprintln!("Extracted calls (turbofish test):");
+        for call in &calls {
+            eprintln!("  target: {}", call.target);
+        }
+
+        // Verify NO calls contain generic brackets - tree-sitter AST traversal
+        // extracts just the path segments, skipping type_arguments nodes
+        for call in &calls {
+            assert!(
+                !call.target.contains('<'),
+                "Call target should not contain generics: {}",
+                call.target
+            );
+        }
+
+        // Verify we got the expected calls
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().any(|c| c.target == "test_crate::Vec::new"));
+        assert!(calls
+            .iter()
+            .any(|c| c.target == "test_crate::HashMap::with_capacity"));
     }
 }

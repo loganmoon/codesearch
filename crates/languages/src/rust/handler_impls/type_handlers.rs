@@ -13,14 +13,15 @@ use crate::common::entity_building::{
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
-    extract_preceding_doc_comments, extract_visibility, extract_where_clause_bounds,
-    find_capture_node, find_child_by_kind, format_generic_param, get_file_import_map,
-    is_primitive_type, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
-    RustResolutionContext,
+    extract_preceding_doc_comments, extract_visibility, extract_visibility_from_node,
+    extract_where_clause_bounds, find_capture_node, find_child_by_kind, format_generic_param,
+    get_file_import_map, is_primitive_type, merge_parsed_generics, node_to_text,
+    require_capture_node, ParsedGenerics, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{
-    EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+    EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature, Language, ReferenceType,
+    SourceLocation, SourceReference, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::Result;
@@ -39,11 +40,11 @@ fn extract_type_entity(
     ctx: &ExtractionContext,
     capture_name: &str,
     entity_type: EntityType,
-    build_metadata: impl FnOnce(&ExtractionContext) -> EntityMetadata,
+    build_metadata: impl FnOnce(&ExtractionContext) -> (EntityMetadata, EntityRelationshipData),
 ) -> Result<CodeEntity> {
     let main_node = require_capture_node(ctx.query_match, ctx.query, capture_name)?;
-    let metadata = build_metadata(ctx);
-    build_entity_data(ctx, main_node, entity_type, metadata)
+    let (metadata, relationships) = build_metadata(ctx);
+    build_entity_data(ctx, main_node, entity_type, metadata, relationships)
 }
 
 // ============================================================================
@@ -122,44 +123,40 @@ pub fn handle_struct_impl(
                 .insert("struct_type".to_string(), "tuple".to_string());
         }
 
-        // Store field info as JSON in attributes
-        if !fields.is_empty() {
+        // Extract uses_types for relationships
+        let mut uses_types_strs = if !fields.is_empty() {
+            // Store field info as JSON in attributes
             if let Ok(json) = serde_json::to_string(&fields) {
                 metadata.attributes.insert("fields".to_string(), json);
             }
+            extract_field_type_refs(&fields, &resolution_ctx)
+        } else {
+            Vec::new()
+        };
 
-            // Extract and resolve field types for USES relationships
-            let mut uses_types = extract_field_type_refs(&fields, &resolution_ctx);
-
-            // Add trait bounds to uses_types
-            for trait_ref in &parsed_generics.bound_trait_refs {
-                if !uses_types.contains(trait_ref) {
-                    uses_types.push(trait_ref.clone());
-                }
+        // Add trait bounds to uses_types
+        for trait_ref in &parsed_generics.bound_trait_refs {
+            if !uses_types_strs.contains(trait_ref) {
+                uses_types_strs.push(trait_ref.clone());
             }
+        }
 
-            if !uses_types.is_empty() {
-                if let Ok(json) = serde_json::to_string(&uses_types) {
-                    metadata.attributes.insert("uses_types".to_string(), json);
-                }
-            }
-        } else if !parsed_generics.bound_trait_refs.is_empty() {
-            // No fields but has trait bounds
-            if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+        // Store in attributes for backward compatibility
+        if !uses_types_strs.is_empty() {
+            if let Ok(json) = serde_json::to_string(&uses_types_strs) {
                 metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
+        // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
+        let relationships = EntityRelationshipData {
+            uses_types: strings_to_source_refs(&uses_types_strs),
+            ..Default::default()
+        };
 
-        metadata
+        (metadata, relationships)
     })
     .map(|data| vec![data])
 }
@@ -229,44 +226,40 @@ pub fn handle_enum_impl(
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.decorators = derives;
 
-        // Store variant info as JSON in attributes
-        if !variants.is_empty() {
+        // Extract uses_types for relationships
+        let mut uses_types_strs = if !variants.is_empty() {
+            // Store variant info as JSON in attributes
             if let Ok(json) = serde_json::to_string(&variants) {
                 metadata.attributes.insert("variants".to_string(), json);
             }
+            extract_variant_type_refs(&variants, &resolution_ctx)
+        } else {
+            Vec::new()
+        };
 
-            // Extract and resolve field types from variants for USES relationships
-            let mut uses_types = extract_variant_type_refs(&variants, &resolution_ctx);
-
-            // Add trait bounds to uses_types
-            for trait_ref in &parsed_generics.bound_trait_refs {
-                if !uses_types.contains(trait_ref) {
-                    uses_types.push(trait_ref.clone());
-                }
+        // Add trait bounds to uses_types
+        for trait_ref in &parsed_generics.bound_trait_refs {
+            if !uses_types_strs.contains(trait_ref) {
+                uses_types_strs.push(trait_ref.clone());
             }
+        }
 
-            if !uses_types.is_empty() {
-                if let Ok(json) = serde_json::to_string(&uses_types) {
-                    metadata.attributes.insert("uses_types".to_string(), json);
-                }
-            }
-        } else if !parsed_generics.bound_trait_refs.is_empty() {
-            // No variants but has trait bounds
-            if let Ok(json) = serde_json::to_string(&parsed_generics.bound_trait_refs) {
+        // Store in attributes for backward compatibility
+        if !uses_types_strs.is_empty() {
+            if let Ok(json) = serde_json::to_string(&uses_types_strs) {
                 metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
+        // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
+        let relationships = EntityRelationshipData {
+            uses_types: strings_to_source_refs(&uses_types_strs),
+            ..Default::default()
+        };
 
-        metadata
+        (metadata, relationships)
     })
     .map(|data| vec![data])
 }
@@ -380,9 +373,9 @@ pub fn handle_trait_impl(
         }
 
         // Build uses_types from generic bounds only (supertraits are stored separately)
-        let uses_types: Vec<String> = parsed_generics.bound_trait_refs.clone();
-        if !uses_types.is_empty() {
-            match serde_json::to_string(&uses_types) {
+        let uses_types_strs: Vec<String> = parsed_generics.bound_trait_refs.clone();
+        if !uses_types_strs.is_empty() {
+            match serde_json::to_string(&uses_types_strs) {
                 Ok(json) => {
                     metadata.attributes.insert("uses_types".to_string(), json);
                 }
@@ -392,16 +385,16 @@ pub fn handle_trait_impl(
             }
         }
 
-        // Store imports for IMPORTS relationships (normalized to match entity qualified names)
-        let imports =
-            import_map.imported_paths_normalized(ctx.package_name, module_path.as_deref());
-        if !imports.is_empty() {
-            if let Ok(json) = serde_json::to_string(&imports) {
-                metadata.attributes.insert("imports".to_string(), json);
-            }
-        }
+        // Build typed relationships
+        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+        // a module-level relationship. They are collected by module_handlers.
+        let relationships = EntityRelationshipData {
+            uses_types: strings_to_source_refs(&uses_types_strs),
+            supertraits: supertraits.clone(),
+            ..Default::default()
+        };
 
-        metadata
+        (metadata, relationships)
     })?;
 
     let mut entities = vec![trait_entity.clone()];
@@ -431,6 +424,7 @@ fn build_entity_data(
     main_node: Node,
     entity_type: EntityType,
     metadata: EntityMetadata,
+    relationships: EntityRelationshipData,
 ) -> Result<CodeEntity> {
     // Extract common components using the shared helper
     let components = extract_common_components(ctx, capture_names::NAME, main_node, "rust")?;
@@ -446,12 +440,12 @@ fn build_entity_data(
         EntityDetails {
             entity_type,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,
             signature: None,
-            relationships: Default::default(),
+            relationships,
         },
     )
 }
@@ -550,8 +544,13 @@ fn parse_named_fields(node: Node, source: &str) -> Vec<FieldInfo> {
         .filter_map(|child| {
             // Get the full field text and parse it
             node_to_text(child, source).ok().and_then(|text| {
-                // Check for visibility
-                let visibility = if text.trim_start().starts_with("pub") {
+                // Check for visibility - distinguish pub, pub(crate), pub(super), etc.
+                let trimmed = text.trim_start();
+                let visibility = if trimmed.starts_with("pub(") {
+                    // pub(crate), pub(super), pub(in path) -> Internal
+                    Visibility::Internal
+                } else if trimmed.starts_with("pub") {
+                    // Just pub -> Public
                     Visibility::Public
                 } else {
                     Visibility::Private
@@ -597,7 +596,7 @@ fn parse_tuple_fields(node: Node, source: &str) -> Vec<FieldInfo> {
 
             // Track visibility for next field
             node_kinds::VISIBILITY_MODIFIER => {
-                next_visibility = Visibility::Public;
+                next_visibility = extract_visibility_from_node(child);
             }
 
             // Process type nodes
@@ -918,7 +917,7 @@ fn extract_single_trait_method(
         content,
         metadata,
         signature: Some(signature),
-        visibility: Visibility::Public, // Trait methods are always public
+        visibility: None, // Trait methods don't have visibility - it's derived from the trait
         location,
         relationships: Default::default(), // Trait method signatures don't have relationship data
     })
@@ -947,6 +946,22 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
 // ============================================================================
 // Type Resolution Helpers
 // ============================================================================
+
+/// Convert a list of type name strings to SourceReferences
+///
+/// Used to populate the typed `uses_types` field in EntityRelationshipData.
+/// Location is set to a default value since we don't have precise source locations
+/// for field types in the current extraction.
+fn strings_to_source_refs(types: &[String]) -> Vec<SourceReference> {
+    types
+        .iter()
+        .map(|t| SourceReference {
+            target: t.clone(),
+            location: SourceLocation::default(),
+            ref_type: ReferenceType::TypeUsage,
+        })
+        .collect()
+}
 
 /// Extract and resolve field types for USES relationships
 fn extract_field_type_refs(fields: &[FieldInfo], ctx: &RustResolutionContext) -> Vec<String> {

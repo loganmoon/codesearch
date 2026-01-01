@@ -20,9 +20,8 @@ pub use generic_resolver::{
     inherits_resolver, uses_resolver, GenericResolver,
 };
 pub use neo4j_relationship_resolver::{
-    resolve_external_references, resolve_relationships_generic, CallGraphResolver,
-    ContainsResolver, EntityCache, ImportsResolver, InheritanceResolver, RelationshipResolver,
-    TraitImplResolver, TypeUsageResolver,
+    resolve_external_references, resolve_relationships_generic, ContainsResolver, EntityCache,
+    RelationshipResolver,
 };
 pub use processor::OutboxProcessor;
 

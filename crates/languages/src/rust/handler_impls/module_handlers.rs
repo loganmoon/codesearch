@@ -15,7 +15,7 @@ use crate::rust::handler_impls::common::{
     require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityType, Language};
+use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
@@ -93,7 +93,7 @@ pub fn handle_module_impl(
         if has_body { "true" } else { "false" }.to_string(),
     );
 
-    // Store imports as JSON array (expected by ImportsResolver)
+    // Store imports as JSON array (used by imports_resolver)
     if !imports.is_empty() {
         if let Ok(imports_json) = serde_json::to_string(&imports) {
             metadata
@@ -102,18 +102,24 @@ pub fn handle_module_impl(
         }
     }
 
+    // Build typed relationships
+    let relationships = EntityRelationshipData {
+        imports: imports.clone(),
+        ..Default::default()
+    };
+
     // Build the entity using the shared helper
     let entity = build_entity(
         components,
         EntityDetails {
             entity_type: EntityType::Module,
             language: Language::Rust,
-            visibility,
+            visibility: Some(visibility),
             documentation,
             content,
             metadata,
             signature: None,
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 

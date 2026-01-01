@@ -1316,7 +1316,7 @@ impl PostgresClient {
                     .push_bind(entity.entity_type.to_string())
                     .push_bind(entity.language.to_string())
                     .push_bind(*file_path_str)
-                    .push_bind(entity.visibility.to_string())
+                    .push_bind(entity.visibility.map(|v| v.to_string()).unwrap_or_default())
                     .push_bind(entity_json)
                     .push_bind(git_commit)
                     .push_bind(point_id)
@@ -2107,7 +2107,7 @@ impl PostgresClient {
             qualified_name: entity.qualified_name.clone(),
             name: entity.name.clone(),
             language: entity.language.to_string(),
-            visibility: entity.visibility.to_string(),
+            visibility: entity.visibility.map(|v| v.to_string()).unwrap_or_default(),
             is_async: entity.metadata.is_async,
             is_generic: entity.metadata.is_generic,
             is_static: entity.metadata.is_static,
@@ -2131,6 +2131,9 @@ impl PostgresClient {
             EntityType::TypeAlias => vec!["TypeAlias"],
             EntityType::Macro => vec!["Macro"],
             EntityType::Impl => vec!["ImplBlock"],
+            EntityType::Static => vec!["Static"],
+            EntityType::Union => vec!["Union"],
+            EntityType::ExternBlock => vec!["ExternBlock"],
         };
 
         // Extract CONTAINS relationships using O(1) HashMap lookup

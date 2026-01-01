@@ -584,11 +584,251 @@ pub const CALLS: RelationshipDef = RelationshipDef::new(
 | `UniqueSimpleName` | Match if only one entity has that simple name |
 | `SimpleName` | First match wins (logs warning on ambiguity) |
 
+### Adding a New Resolver (if needed)
+
+Most relationships use the standard `RelationshipDef` definitions in `crates/core/src/resolution.rs`. If your language needs custom resolution logic:
+
+1. **Add a new `RelationshipDef`** in `crates/core/src/resolution.rs`:
+
+```rust
+/// CUSTOM relationship for NewLang-specific behavior
+pub const CUSTOM_REL: RelationshipDef = RelationshipDef::new(
+    "custom",
+    &[EntityType::Function],           // Source types
+    &[EntityType::Class],              // Target types
+    RelationshipType::Uses,            // Relationship type
+    &[
+        LookupStrategy::QualifiedName,
+        LookupStrategy::SimpleName,
+    ],
+);
+```
+
+2. **Create a ReferenceExtractor** in `crates/outbox-processor/src/generic_resolver.rs`:
+
+```rust
+/// Extractor for custom NewLang relationships
+pub struct CustomExtractor;
+
+impl ReferenceExtractor for CustomExtractor {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
+        // Extract from entity.relationships fields
+        entity.relationships.some_field
+            .iter()
+            .map(|src_ref| ExtractedRef {
+                target: src_ref.target.clone(),
+                simple_name: src_ref.simple_name.clone(),
+            })
+            .collect()
+    }
+}
+```
+
+3. **Add factory function** in `generic_resolver.rs`:
+
+```rust
+pub fn custom_resolver() -> GenericResolver {
+    GenericResolver::new(
+        &codesearch_core::resolution::definitions::CUSTOM_REL,
+        Box::new(CustomExtractor),
+    )
+}
+```
+
+4. **Register in processor** in `crates/outbox-processor/src/processor.rs`:
+
+```rust
+// In resolve_relationships_for_repository()
+let resolvers: Vec<Box<dyn RelationshipResolver>> = vec![
+    // ... existing resolvers
+    Box::new(custom_resolver()),
+];
+```
+
+---
+
+## E2E Spec Validation Tests
+
+Each language requires E2E tests that validate extraction against the spec file rules.
+
+### Test Structure
+
+```
+crates/e2e-tests/
+├── Cargo.toml
+├── src/
+│   └── lib.rs
+└── tests/
+    ├── rust_spec_validation.rs      # Rust spec validation
+    ├── javascript_spec_validation.rs
+    ├── typescript_spec_validation.rs
+    ├── python_spec_validation.rs
+    └── fixtures/
+        ├── rust/                     # Test fixtures per language
+        │   ├── free_functions.rs
+        │   ├── methods.rs
+        │   ├── trait_impl.rs
+        │   └── ...
+        ├── javascript/
+        ├── typescript/
+        └── python/
+```
+
+### Writing Spec Validation Tests
+
+Tests should validate each rule in the spec file:
+
+```rust
+// crates/e2e-tests/tests/rust_spec_validation.rs
+
+use codesearch_languages::extract_entities;
+use codesearch_core::entities::{EntityType, Language, Visibility};
+
+/// Fixture: free_functions
+/// Tests: E-FN-FREE, V-PUB, Q-ITEM, R-CALLS-FUNCTION
+mod free_functions {
+    use super::*;
+
+    const FIXTURE: &str = include_str!("fixtures/rust/free_functions.rs");
+
+    #[test]
+    fn e_fn_free_produces_function_entity() {
+        // Rule E-FN-FREE: A free function produces a Function entity
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let func = entities.iter().find(|e| e.name == "my_function").unwrap();
+
+        assert_eq!(func.entity_type, EntityType::Function);
+    }
+
+    #[test]
+    fn v_pub_results_in_public_visibility() {
+        // Rule V-PUB: pub modifier results in Public visibility
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let func = entities.iter().find(|e| e.name == "public_function").unwrap();
+
+        assert_eq!(func.visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn q_item_qualified_under_module() {
+        // Rule Q-ITEM: Top-level items are qualified under module path
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let func = entities.iter().find(|e| e.name == "my_function").unwrap();
+
+        assert!(func.qualified_name.ends_with("::my_function"));
+    }
+
+    #[test]
+    fn r_calls_function_extracts_calls() {
+        // Rule R-CALLS-FUNCTION: Function CALLS another function
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let caller = entities.iter().find(|e| e.name == "caller").unwrap();
+
+        assert!(!caller.relationships.calls.is_empty());
+        assert!(caller.relationships.calls.iter()
+            .any(|c| c.simple_name == "helper"));
+    }
+}
+
+/// Fixture: trait_impl
+/// Tests: E-IMPL-TRAIT, R-IMPLEMENTS, Q-IMPL-TRAIT
+mod trait_impl {
+    use super::*;
+
+    const FIXTURE: &str = include_str!("fixtures/rust/trait_impl.rs");
+
+    #[test]
+    fn e_impl_trait_produces_impl_entity() {
+        // Rule E-IMPL-TRAIT: A trait impl block produces an ImplBlock entity
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let impl_entity = entities.iter()
+            .find(|e| e.entity_type == EntityType::Impl)
+            .unwrap();
+
+        assert!(impl_entity.relationships.implements_trait.is_some());
+    }
+
+    #[test]
+    fn r_implements_links_to_trait() {
+        // Rule R-IMPLEMENTS: Trait impl block IMPLEMENTS the trait
+        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
+        let impl_entity = entities.iter()
+            .find(|e| e.entity_type == EntityType::Impl)
+            .unwrap();
+
+        let implements = impl_entity.relationships.implements_trait.as_ref().unwrap();
+        assert!(implements.target.contains("Display"));
+    }
+}
+```
+
+### Running E2E Tests
+
+```bash
+# Run all e2e tests (requires Docker for infrastructure)
+cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
+
+# Run specific language validation
+cargo test --manifest-path crates/e2e-tests/Cargo.toml rust_spec_validation -- --ignored
+```
+
+### Fixture File Requirements
+
+Each fixture should be minimal but complete for testing specific rules:
+
+```rust
+// fixtures/rust/free_functions.rs
+
+/// A public free function
+pub fn public_function() {
+    helper();
+}
+
+/// A private free function
+fn private_function() {}
+
+/// Helper function for call testing
+fn helper() {}
+
+/// Caller function for R-CALLS-FUNCTION
+fn caller() {
+    helper();
+    private_function();
+}
+```
+
+### Spec Coverage Matrix
+
+Maintain a coverage matrix in each test file:
+
+```rust
+// Spec coverage for rust_spec_validation.rs
+//
+// | Rule ID | Description | Test | Status |
+// |---------|-------------|------|--------|
+// | E-FN-FREE | Free function → Function | e_fn_free_produces_function_entity | ✓ |
+// | E-METHOD-SELF | Self param → Method | e_method_self_produces_method | ✓ |
+// | V-PUB | pub → Public | v_pub_results_in_public_visibility | ✓ |
+// | V-PRIVATE | no modifier → Private | v_private_default | ✓ |
+// | Q-ITEM | Module::name format | q_item_qualified_under_module | ✓ |
+// | R-CALLS | CALLS relationship | r_calls_function_extracts_calls | ✓ |
+// | R-IMPLEMENTS | IMPLEMENTS relationship | r_implements_links_to_trait | ✓ |
+```
+
 ---
 
 ## Checklist
 
+### Specification
 1. [ ] Create spec file: `crates/languages/specs/{language}.yaml`
+   - Define entity rules (E-xxx)
+   - Define visibility rules (V-xxx)
+   - Define qualified name rules (Q-xxx)
+   - Define relationship rules (R-xxx)
+   - Define metadata rules (M-xxx)
+   - Map fixtures to rules
+
+### Language Module
 2. [ ] Create language directory: `crates/languages/src/{language}/`
 3. [ ] Add `mod.rs` with `define_language_extractor!` macro
 4. [ ] Create `queries.rs` with tree-sitter queries
@@ -597,8 +837,19 @@ pub const CALLS: RelationshipDef = RelationshipDef::new(
 7. [ ] Use `SourceReference` with `is_external` flag
 8. [ ] Add import parser in `common/import_map.rs`
 9. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
-10. [ ] Write handler unit tests referencing spec rule IDs
-11. [ ] Test with e2e resolution tests
+
+### Resolver Work (outbox-processor)
+10. [ ] Verify existing `RelationshipDef` definitions cover your language's relationships
+11. [ ] If needed: Add new `RelationshipDef` in `crates/core/src/resolution.rs`
+12. [ ] If needed: Add new `ReferenceExtractor` in `crates/outbox-processor/src/generic_resolver.rs`
+13. [ ] If needed: Add factory function and register in `processor.rs`
+
+### Testing
+14. [ ] Write handler unit tests in `crates/languages/src/{language}/handler_impls/tests/`
+15. [ ] Create E2E spec validation tests in `crates/e2e-tests/tests/{language}_spec_validation.rs`
+16. [ ] Create test fixtures in `crates/e2e-tests/tests/fixtures/{language}/`
+17. [ ] Maintain spec coverage matrix in test file
+18. [ ] Run full E2E test suite: `cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored`
 
 ---
 

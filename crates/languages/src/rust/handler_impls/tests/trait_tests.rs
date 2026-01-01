@@ -237,6 +237,17 @@ trait Complex: Display + Send + Sync + 'static {
     assert!(bounds_str.contains("Send"));
     assert!(bounds_str.contains("Sync"));
 
+    // Verify 'static lifetime is NOT in relationships.supertraits
+    // Lifetimes are excluded at extraction time via tree-sitter query
+    assert!(
+        !complex_trait
+            .relationships
+            .supertraits
+            .iter()
+            .any(|s| s.contains("'static")),
+        "'static lifetime should be excluded from supertraits"
+    );
+
     // Check methods
     let methods = complex_trait.metadata.attributes.get("methods");
     assert!(methods.is_some());

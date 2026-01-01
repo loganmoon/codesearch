@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 use im::HashMap as ImHashMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 use strum_macros::{Display, EnumString};
 
@@ -73,13 +73,26 @@ pub enum ReferenceType {
     Uses,
 }
 
+/// Compute the simple name (last path segment) from a qualified reference.
+///
+/// Handles both Rust-style `::` separators and dot notation `.` separators.
+/// Returns the original string if no separator is found.
+fn compute_simple_name(target: &str) -> String {
+    target
+        .rsplit("::")
+        .next()
+        .or_else(|| target.rsplit('.').next())
+        .unwrap_or(target)
+        .to_string()
+}
+
 /// A reference from one entity to another at a specific source location.
 ///
 /// Captures call sites, type annotations, imports, etc. The `target` field
 /// contains the best-effort qualified name, which may be:
 /// - Fully resolved for internal references (e.g., "crate::module::function")
 /// - Partially resolved or external for cross-crate references
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SourceReference {
     /// Qualified name of the target entity.
@@ -135,6 +148,44 @@ impl SourceReference {
             location,
             ref_type,
         }
+    }
+}
+
+/// Custom deserializer for SourceReference that recomputes simple_name from target
+/// if it's missing or empty. This ensures backward compatibility with older
+/// serialized data that didn't include simple_name.
+impl<'de> Deserialize<'de> for SourceReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct SourceReferenceHelper {
+            target: String,
+            #[serde(default)]
+            simple_name: String,
+            #[serde(default)]
+            is_external: bool,
+            location: SourceLocation,
+            ref_type: ReferenceType,
+        }
+
+        let helper = SourceReferenceHelper::deserialize(deserializer)?;
+
+        // Recompute simple_name from target if missing or empty
+        let simple_name = if helper.simple_name.is_empty() {
+            compute_simple_name(&helper.target)
+        } else {
+            helper.simple_name
+        };
+
+        Ok(SourceReference {
+            target: helper.target,
+            simple_name,
+            is_external: helper.is_external,
+            location: helper.location,
+            ref_type: helper.ref_type,
+        })
     }
 }
 

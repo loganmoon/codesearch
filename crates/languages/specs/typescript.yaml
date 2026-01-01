@@ -49,6 +49,13 @@ entity_rules:
       Namespaces (formerly "internal modules") provide a way to organize code.
       The `namespace` keyword is preferred over the older `module` keyword for
       internal modules to avoid confusion with ES modules.
+    divergence: |
+      TypeScript has two distinct module systems: ES Modules (file-based) and
+      Namespaces (declaration-based). We map both to the Module entity type for
+      simplicity. In formal TypeScript semantics, they have different behaviors:
+      - ES Modules: Runtime construct with file boundaries
+      - Namespaces: Compile-time organization that can span files and merge
+      This conflation may lose semantic distinction but enables unified searching.
     reference: "https://www.typescriptlang.org/docs/handbook/namespaces.html"
     tested_by: [namespaces, nested_namespaces]
 
@@ -156,6 +163,16 @@ entity_rules:
       use sites. They cannot have computed members.
     tested_by: [const_enums]
 
+  - id: E-ENUM-MEMBER
+    description: "An enum member produces an EnumVariant entity"
+    construct: "enum E { Member, Member2 = 'value' }"
+    produces: EnumVariant
+    note: |
+      Enum members can be numeric (auto-incrementing from 0) or string-valued.
+      Numeric enum members get reverse mappings; string members do not.
+    reference: "https://www.typescriptlang.org/docs/handbook/enums.html"
+    tested_by: [enums, string_enums]
+
   # ---------------------------------------------------------------------------
   # Functions
   # Reference: https://www.typescriptlang.org/docs/handbook/2/functions.html
@@ -226,6 +243,15 @@ entity_rules:
     produces: Method
     note: "Interface methods are always signatures without implementation"
     tested_by: [interfaces]
+
+  - id: E-PROPERTY-INTERFACE
+    description: "An interface property signature produces a Property entity"
+    construct: "interface I { prop: Type; }"
+    produces: Property
+    note: |
+      Interface properties define the shape of object properties.
+      They can be optional (?) or readonly.
+    tested_by: [interfaces, interface_properties]
 
   - id: E-METHOD-GETTER
     description: "A getter accessor produces a Method entity"
@@ -300,6 +326,131 @@ entity_rules:
       privacy, unlike TypeScript's `private` keyword which is compile-time only.
     reference: "https://www.typescriptlang.org/docs/handbook/2/classes.html#caveats"
     tested_by: [private_fields]
+
+  - id: E-PROPERTY-ARROW-FIELD
+    description: "An arrow function assigned to a class field produces a Property entity"
+    construct: "class C { handler = () => { ... }; }"
+    produces: Property
+    note: |
+      Arrow functions as class fields maintain lexical `this` binding.
+      They are properties whose value is a function, not methods.
+    tested_by: [arrow_field_properties]
+
+  # ---------------------------------------------------------------------------
+  # Ambient Declarations
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/type-declarations.html
+  # ---------------------------------------------------------------------------
+  - id: E-AMBIENT-VAR
+    description: "A declare var/let/const produces an ambient Variable/Constant entity"
+    construct: "declare const NAME: Type;"
+    produces: [Constant, Variable]
+    condition: "declaration has `declare` keyword"
+    note: |
+      Ambient declarations describe the shape of existing JavaScript code.
+      They have no runtime representation and are used in .d.ts files.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/type-declarations.html"
+    tested_by: [ambient_declarations]
+
+  - id: E-AMBIENT-FUNCTION
+    description: "A declare function produces an ambient Function entity"
+    construct: "declare function name(): Type;"
+    produces: Function
+    condition: "function declaration has `declare` keyword"
+    note: "Ambient functions have no implementation body"
+    tested_by: [ambient_declarations]
+
+  - id: E-AMBIENT-CLASS
+    description: "A declare class produces an ambient Class entity"
+    construct: "declare class Name { ... }"
+    produces: Class
+    condition: "class declaration has `declare` keyword"
+    note: "Ambient classes describe the shape of existing JavaScript classes"
+    tested_by: [ambient_declarations]
+
+  - id: E-AMBIENT-MODULE
+    description: "A declare module produces an ambient Module entity"
+    construct: "declare module 'name' { ... }"
+    produces: Module
+    condition: "module declaration has `declare` keyword"
+    note: |
+      Ambient modules describe the shape of external modules.
+      Used for creating type definitions for JavaScript libraries.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/type-declarations.html#declaring-types-for-modules"
+    tested_by: [ambient_modules]
+
+  - id: E-AMBIENT-NAMESPACE
+    description: "A declare namespace produces an ambient Module entity"
+    construct: "declare namespace Name { ... }"
+    produces: Module
+    condition: "namespace declaration has `declare` keyword"
+    note: "Ambient namespaces describe global namespace augmentations"
+    tested_by: [ambient_declarations]
+
+  - id: E-GLOBAL-AUGMENTATION
+    description: "A declare global block augments the global scope"
+    construct: "declare global { ... }"
+    produces: Module
+    note: |
+      Global augmentations add declarations to the global scope from within
+      a module. Must be inside a module (file with import/export).
+    reference: "https://www.typescriptlang.org/docs/handbook/declaration-merging.html#global-augmentation"
+    tested_by: [global_augmentation]
+
+  # ---------------------------------------------------------------------------
+  # Signatures (Interface/Type Members)
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/functions.html
+  # ---------------------------------------------------------------------------
+  - id: E-INDEX-SIGNATURE
+    description: "An index signature produces a Property entity"
+    construct: "interface I { [key: string]: Type; }"
+    produces: Property
+    note: |
+      Index signatures define the type of properties accessed with bracket
+      notation. The key type must be string, number, or symbol.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/objects.html#index-signatures"
+    tested_by: [index_signatures]
+
+  - id: E-CALL-SIGNATURE
+    description: "A call signature produces a Method entity"
+    construct: "interface I { (arg: Type): ReturnType; }"
+    produces: Method
+    note: |
+      Call signatures describe how a type can be called as a function.
+      Types with call signatures are callable.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/functions.html#call-signatures"
+    tested_by: [call_signatures]
+
+  - id: E-CONSTRUCT-SIGNATURE
+    description: "A construct signature produces a Method entity"
+    construct: "interface I { new (arg: Type): Instance; }"
+    produces: Method
+    note: |
+      Construct signatures describe how a type can be instantiated with `new`.
+      Used for describing constructor functions and classes.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/functions.html#construct-signatures"
+    tested_by: [construct_signatures]
+
+  # ---------------------------------------------------------------------------
+  # JSX Elements (React/Preact)
+  # Reference: https://www.typescriptlang.org/docs/handbook/jsx.html
+  # ---------------------------------------------------------------------------
+  - id: E-JSX-COMPONENT
+    description: "A function component returning JSX produces a Function entity"
+    construct: "function Component(): JSX.Element { return <div/>; }"
+    produces: Function
+    condition: "function returns JSX element and follows component naming (PascalCase)"
+    note: |
+      JSX components are functions that return JSX elements.
+      By convention, component names start with uppercase letters.
+    reference: "https://www.typescriptlang.org/docs/handbook/jsx.html"
+    tested_by: [jsx_components]
+
+  - id: E-JSX-ARROW-COMPONENT
+    description: "An arrow function component produces a Function entity"
+    construct: "const Component = (): JSX.Element => <div/>;"
+    produces: Function
+    condition: "arrow function assigned to PascalCase name returning JSX"
+    tested_by: [jsx_components]
 
 
 # =============================================================================
@@ -686,6 +837,49 @@ relationship_rules:
     tested_by: [type_imports]
 
   # ---------------------------------------------------------------------------
+  # Re-export relationships
+  # Reference: https://www.typescriptlang.org/docs/handbook/2/modules.html#re-exports
+  # ---------------------------------------------------------------------------
+  - id: R-REEXPORTS-NAMED
+    description: "Module REEXPORTS named exports from another module"
+    kind: Reexports
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Enum, Constant, Variable]
+    condition: "export { name } from 'module'"
+    note: "Re-exports make items from one module available from another"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html#re-exports"
+    tested_by: [reexports]
+
+  - id: R-REEXPORTS-ALL
+    description: "Module REEXPORTS all exports from another module"
+    kind: Reexports
+    from: Module
+    to: Module
+    condition: "export * from 'module'"
+    note: |
+      Barrel exports re-export all named exports from another module.
+      Does not include default exports.
+    tested_by: [barrel_exports]
+
+  - id: R-REEXPORTS-NAMESPACE
+    description: "Module REEXPORTS another module as a namespace"
+    kind: Reexports
+    from: Module
+    to: Module
+    condition: "export * as name from 'module'"
+    note: "Creates a namespace object containing all exports from the source module"
+    reference: "https://www.typescriptlang.org/docs/handbook/2/modules.html#re-exports"
+    tested_by: [namespace_reexports]
+
+  - id: R-REEXPORTS-DEFAULT
+    description: "Module REEXPORTS default export"
+    kind: Reexports
+    from: Module
+    to: [Function, Class, Interface, TypeAlias, Constant]
+    condition: "export { default } from 'module' or export { default as name } from 'module'"
+    tested_by: [reexports]
+
+  # ---------------------------------------------------------------------------
   # Call relationships
   # ---------------------------------------------------------------------------
   - id: R-CALLS-FUNCTION
@@ -738,6 +932,18 @@ metadata_rules:
     field: is_arrow
     condition: "function uses arrow syntax"
     tested_by: [arrow_functions]
+
+  - id: M-FN-OVERLOADED
+    description: "Overloaded functions have overload_count and is_overloaded=true"
+    applies_to: [Function, Method]
+    fields: [is_overloaded, overload_count]
+    condition: "function has multiple signature declarations"
+    note: |
+      TypeScript allows multiple function signatures followed by a single
+      implementation. Each overload signature defines different parameter
+      and return types.
+    reference: "https://www.typescriptlang.org/docs/handbook/2/functions.html#function-overloads"
+    tested_by: [overloaded_functions]
 
   # ---------------------------------------------------------------------------
   # Class metadata
@@ -814,6 +1020,35 @@ metadata_rules:
     condition: "enum has `const` keyword"
     tested_by: [const_enums]
 
+  - id: M-ENUM-STRING
+    description: "String enums have enum_type='string'"
+    applies_to: Enum
+    field: enum_type
+    condition: "all enum members have string literal initializers"
+    note: |
+      String enums require explicit string values for all members.
+      They don't have reverse mappings like numeric enums.
+    reference: "https://www.typescriptlang.org/docs/handbook/enums.html#string-enums"
+    tested_by: [string_enums]
+
+  - id: M-ENUM-NUMERIC
+    description: "Numeric enums have enum_type='numeric'"
+    applies_to: Enum
+    field: enum_type
+    condition: "enum members have numeric values (explicit or auto-incremented)"
+    note: "Numeric enums auto-increment from 0 and have reverse mappings"
+    tested_by: [enums]
+
+  - id: M-ENUM-HETEROGENEOUS
+    description: "Mixed enums have enum_type='heterogeneous'"
+    applies_to: Enum
+    field: enum_type
+    condition: "enum has both string and numeric members"
+    note: |
+      Heterogeneous enums mix string and numeric members.
+      Generally not recommended due to confusing semantics.
+    tested_by: [heterogeneous_enums]
+
   # ---------------------------------------------------------------------------
   # Generic metadata
   # ---------------------------------------------------------------------------
@@ -860,9 +1095,24 @@ metadata_rules:
     field: decorators
     condition: "item has `@decorator` syntax"
     note: |
-      TypeScript supports decorators for classes, methods, accessors, properties,
-      and parameters. They are metadata annotations that can modify behavior.
+      TypeScript supports two decorator systems:
+      1. Stage 3 decorators (TypeScript 5.0+): Standard ECMAScript decorators.
+         Parameter decorators are NOT supported in Stage 3.
+      2. Experimental decorators: Legacy system requiring `experimentalDecorators`.
+         Supports parameter decorators but uses different semantics.
+      Both use `@decorator` syntax but have different runtime behavior.
+    reference: "https://www.typescriptlang.org/docs/handbook/decorators.html"
     tested_by: [decorators]
+
+  - id: M-DECORATOR-PARAM
+    description: "Parameter decorators tracked separately (experimental only)"
+    applies_to: [Function, Method]
+    field: parameter_decorators
+    condition: "parameter has `@decorator` syntax (requires experimentalDecorators)"
+    note: |
+      Parameter decorators are only available with experimentalDecorators.
+      Stage 3 decorators do NOT support parameter decorators.
+    tested_by: [experimental_decorators]
 
 
 # =============================================================================
@@ -910,8 +1160,14 @@ fixtures:
   private_fields:
     tests: [E-PROPERTY-PRIVATE-FIELD, V-CLASS-PRIVATE-FIELD]
 
+  arrow_field_properties:
+    tests: [E-PROPERTY-ARROW-FIELD]
+
   interfaces:
-    tests: [E-INTERFACE, V-INTERFACE-MEMBER, Q-INTERFACE-METHOD, R-CONTAINS-INTERFACE-MEMBER]
+    tests: [E-INTERFACE, E-PROPERTY-INTERFACE, V-INTERFACE-MEMBER, Q-INTERFACE-METHOD, Q-INTERFACE-PROPERTY, R-CONTAINS-INTERFACE-MEMBER]
+
+  interface_properties:
+    tests: [E-PROPERTY-INTERFACE, M-PROPERTY-OPTIONAL, M-PROPERTY-READONLY]
 
   interface_extends:
     tests: [E-INTERFACE, R-EXTENDS-INTERFACE]
@@ -926,7 +1182,13 @@ fixtures:
     tests: [E-TYPE-ALIAS, M-GENERIC]
 
   enums:
-    tests: [E-ENUM, R-CONTAINS-ENUM-MEMBER]
+    tests: [E-ENUM, E-ENUM-MEMBER, R-CONTAINS-ENUM-MEMBER, M-ENUM-NUMERIC]
+
+  string_enums:
+    tests: [E-ENUM, E-ENUM-MEMBER, M-ENUM-STRING]
+
+  heterogeneous_enums:
+    tests: [E-ENUM, M-ENUM-HETEROGENEOUS]
 
   const_enums:
     tests: [E-ENUM-CONST, M-ENUM-CONST]
@@ -945,6 +1207,9 @@ fixtures:
 
   generator_functions:
     tests: [E-FN-GENERATOR, M-FN-GENERATOR]
+
+  overloaded_functions:
+    tests: [E-FN-DECL, M-FN-OVERLOADED]
 
   methods:
     tests: [E-METHOD-CLASS, V-CLASS-PUBLIC, Q-METHOD-INSTANCE, R-CONTAINS-CLASS-MEMBER]
@@ -983,7 +1248,13 @@ fixtures:
     tests: [V-EXPORT]
 
   reexports:
-    tests: [V-EXPORT, R-IMPORTS-NAMED]
+    tests: [V-EXPORT, R-REEXPORTS-NAMED, R-REEXPORTS-DEFAULT]
+
+  barrel_exports:
+    tests: [R-REEXPORTS-ALL]
+
+  namespace_reexports:
+    tests: [R-REEXPORTS-NAMESPACE]
 
   default_exports:
     tests: [V-EXPORT-DEFAULT, R-IMPORTS-DEFAULT]
@@ -1023,3 +1294,36 @@ fixtures:
 
   decorators:
     tests: [M-DECORATOR]
+
+  experimental_decorators:
+    tests: [M-DECORATOR, M-DECORATOR-PARAM]
+
+  # ---------------------------------------------------------------------------
+  # Ambient declarations (.d.ts files)
+  # ---------------------------------------------------------------------------
+  ambient_declarations:
+    tests: [E-AMBIENT-VAR, E-AMBIENT-FUNCTION, E-AMBIENT-CLASS, E-AMBIENT-NAMESPACE]
+
+  ambient_modules:
+    tests: [E-AMBIENT-MODULE]
+
+  global_augmentation:
+    tests: [E-GLOBAL-AUGMENTATION]
+
+  # ---------------------------------------------------------------------------
+  # Signatures
+  # ---------------------------------------------------------------------------
+  index_signatures:
+    tests: [E-INDEX-SIGNATURE]
+
+  call_signatures:
+    tests: [E-CALL-SIGNATURE]
+
+  construct_signatures:
+    tests: [E-CONSTRUCT-SIGNATURE]
+
+  # ---------------------------------------------------------------------------
+  # JSX
+  # ---------------------------------------------------------------------------
+  jsx_components:
+    tests: [E-JSX-COMPONENT, E-JSX-ARROW-COMPONENT]

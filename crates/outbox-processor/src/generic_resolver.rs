@@ -127,13 +127,9 @@ struct SupertraitsExtractor;
 
 impl ReferenceExtractor for SupertraitsExtractor {
     fn extract_refs(&self, entity: &CodeEntity) -> Vec<String> {
-        entity
-            .relationships
-            .supertraits
-            .iter()
-            .filter(|s| !s.starts_with('\'')) // Skip lifetimes
-            .cloned()
-            .collect()
+        // NOTE: Lifetimes are now excluded at extraction time (tree-sitter query),
+        // so no filtering is needed here
+        entity.relationships.supertraits.clone()
     }
 }
 
@@ -565,7 +561,10 @@ mod tests {
     }
 
     #[test]
-    fn test_supertraits_extractor_skips_lifetimes() {
+    fn test_supertraits_extractor() {
+        // NOTE: Lifetimes are now excluded at extraction time (tree-sitter query
+        // in type_handlers.rs), so they won't appear in supertraits at all.
+        // This test verifies the extractor works correctly with clean data.
         let extractor = SupertraitsExtractor;
         let entity = make_test_entity(
             EntityType::Trait,
@@ -573,17 +572,17 @@ mod tests {
             "crate::MyTrait",
             EntityRelationshipData {
                 supertraits: vec![
-                    "'static".to_string(),
                     "crate::BaseTrait".to_string(),
-                    "'a".to_string(),
+                    "crate::OtherTrait".to_string(),
                 ],
                 ..Default::default()
             },
         );
 
         let refs = extractor.extract_refs(&entity);
-        assert_eq!(refs.len(), 1);
+        assert_eq!(refs.len(), 2);
         assert_eq!(refs[0], "crate::BaseTrait");
+        assert_eq!(refs[1], "crate::OtherTrait");
     }
 
     #[test]

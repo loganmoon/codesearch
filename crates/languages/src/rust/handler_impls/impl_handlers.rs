@@ -229,10 +229,12 @@ pub fn handle_impl_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| SourceReference {
-            target: trait_ref.clone(),
-            location: impl_location.clone(),
-            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        .map(|trait_ref| {
+            SourceReference::new(
+                trait_ref.clone(),
+                impl_location.clone(),
+                codesearch_core::entities::ReferenceType::TypeUsage,
+            )
         })
         .collect();
 
@@ -429,10 +431,12 @@ pub fn handle_impl_trait_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| SourceReference {
-            target: trait_ref.clone(),
-            location: location.clone(),
-            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        .map(|trait_ref| {
+            SourceReference::new(
+                trait_ref.clone(),
+                location.clone(),
+                codesearch_core::entities::ReferenceType::TypeUsage,
+            )
         })
         .collect();
 

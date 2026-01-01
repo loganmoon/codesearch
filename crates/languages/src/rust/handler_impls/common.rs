@@ -660,11 +660,11 @@ pub fn extract_function_calls(
             // Bare identifier call like `foo()`
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = ctx.resolve(&name);
-                calls.push(SourceReference {
-                    target: resolved,
-                    location: SourceLocation::from_tree_sitter_node(bare_cap.node),
-                    ref_type: ReferenceType::Call,
-                });
+                calls.push(SourceReference::new(
+                    resolved,
+                    SourceLocation::from_tree_sitter_node(bare_cap.node),
+                    ReferenceType::Call,
+                ));
             }
         } else if let Some(scoped_cap) = scoped_callee {
             // Scoped call like `std::io::read()`, `Vec::<String>::new()`, or UFCS
@@ -680,11 +680,11 @@ pub fn extract_function_calls(
                         .unwrap_or(full_text)
                 };
                 let resolved = ctx.resolve(&call_path);
-                calls.push(SourceReference {
-                    target: resolved,
-                    location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
-                    ref_type: ReferenceType::Call,
-                });
+                calls.push(SourceReference::new(
+                    resolved,
+                    SourceLocation::from_tree_sitter_node(scoped_cap.node),
+                    ReferenceType::Call,
+                ));
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
             // Method call like `x.bar()`
@@ -701,22 +701,22 @@ pub fn extract_function_calls(
                         // so we add all possibilities. The outbox processor's resolution
                         // will only create CALLS relationships for methods that exist as entities.
                         for bound in bounds {
-                            calls.push(SourceReference {
-                                target: format!("{bound}::{method_name}"),
-                                location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                                ref_type: ReferenceType::Call,
-                            });
+                            calls.push(SourceReference::new(
+                                format!("{bound}::{method_name}"),
+                                SourceLocation::from_tree_sitter_node(method_cap.node),
+                                ReferenceType::Call,
+                            ));
                         }
                     } else {
                         // Not a generic type parameter, resolve through imports
                         // Use UFCS format <Type>::method to match inherent methods directly.
                         // Trait methods have call_aliases that will also match this format.
                         let resolved_type = ctx.resolve(recv_type);
-                        calls.push(SourceReference {
-                            target: format!("<{resolved_type}>::{method_name}"),
-                            location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                            ref_type: ReferenceType::Call,
-                        });
+                        calls.push(SourceReference::new(
+                            format!("<{resolved_type}>::{method_name}"),
+                            SourceLocation::from_tree_sitter_node(method_cap.node),
+                            ReferenceType::Call,
+                        ));
                     }
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
@@ -731,11 +731,11 @@ pub fn extract_function_calls(
                     Some(chain_head_type) => {
                         // Use UFCS format <Type>::method to match inherent methods directly
                         let resolved_type = ctx.resolve(&chain_head_type);
-                        calls.push(SourceReference {
-                            target: format!("<{resolved_type}>::{method_name}"),
-                            location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
-                            ref_type: ReferenceType::Call,
-                        });
+                        calls.push(SourceReference::new(
+                            format!("<{resolved_type}>::{method_name}"),
+                            SourceLocation::from_tree_sitter_node(chain_method_cap.node),
+                            ReferenceType::Call,
+                        ));
                     }
                     None => {
                         trace!(
@@ -1091,11 +1091,11 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = ctx.resolve(&type_name);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }
@@ -1104,11 +1104,11 @@ pub fn extract_type_references(
                         // Resolve to normalize crate::, self::, super:: paths
                         let resolved = ctx.resolve(&full_path);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }

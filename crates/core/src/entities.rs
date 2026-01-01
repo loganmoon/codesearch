@@ -85,6 +85,18 @@ pub struct SourceReference {
     /// Qualified name of the target entity.
     /// May be fully resolved (internal) or partial/external (cross-crate).
     pub target: String,
+
+    /// Pre-computed simple name (last path segment, without generics).
+    /// For "std::collections::HashMap<K, V>", this would be "HashMap".
+    /// For "external.lodash.debounce", this would be "debounce".
+    #[serde(default)]
+    pub simple_name: String,
+
+    /// Whether this references an external dependency (outside the repository).
+    /// Set during extraction based on import resolution context.
+    #[serde(default)]
+    pub is_external: bool,
+
     /// Location of the reference in source (line/column)
     pub location: SourceLocation,
     /// Type of reference
@@ -92,7 +104,10 @@ pub struct SourceReference {
 }
 
 impl SourceReference {
-    /// Create a new SourceReference.
+    /// Create a new SourceReference with computed simple_name.
+    ///
+    /// The simple_name is extracted from the target as the last path segment,
+    /// stripping any generic parameters.
     ///
     /// # Panics
     /// Panics if `target` is empty after trimming whitespace.
@@ -106,11 +121,55 @@ impl SourceReference {
             !target.trim().is_empty(),
             "SourceReference target must be non-empty"
         );
+        let simple_name = Self::compute_simple_name(&target);
         Self {
             target,
+            simple_name,
+            is_external: false,
             location,
             ref_type,
         }
+    }
+
+    /// Create a new SourceReference with explicit is_external flag.
+    pub fn new_with_external(
+        target: impl Into<String>,
+        location: SourceLocation,
+        ref_type: ReferenceType,
+        is_external: bool,
+    ) -> Self {
+        let target = target.into();
+        assert!(
+            !target.trim().is_empty(),
+            "SourceReference target must be non-empty"
+        );
+        let simple_name = Self::compute_simple_name(&target);
+        Self {
+            target,
+            simple_name,
+            is_external,
+            location,
+            ref_type,
+        }
+    }
+
+    /// Compute the simple name from a target path.
+    ///
+    /// Handles both Rust-style paths (::) and JS/Python-style paths (.).
+    /// Strips generic parameters from the result.
+    fn compute_simple_name(target: &str) -> String {
+        // First, strip any generic parameters: "HashMap<K, V>" -> "HashMap"
+        let without_generics = target.split('<').next().unwrap_or(target);
+
+        // Handle both :: (Rust) and . (JS/Python) path separators
+        // Try Rust-style first, then JS/Python-style
+        without_generics
+            .rsplit("::")
+            .next()
+            .filter(|s| !s.is_empty())
+            .or_else(|| without_generics.rsplit('.').next())
+            .unwrap_or(without_generics)
+            .to_string()
     }
 }
 

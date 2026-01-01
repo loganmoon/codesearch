@@ -356,11 +356,9 @@ pub fn handle_trait_impl(
         }
 
         // Store resolved supertraits separately for EXTENDS_INTERFACE relationships
-        let supertraits: Vec<String> = bounds
-            .iter()
-            .filter(|b| !b.starts_with('\'')) // Skip lifetimes
-            .map(|b| resolution_ctx.resolve(b))
-            .collect();
+        // NOTE: Lifetimes are now excluded at query time (in extract_trait_bounds),
+        // so no filtering is needed here
+        let supertraits: Vec<String> = bounds.iter().map(|b| resolution_ctx.resolve(b)).collect();
         if !supertraits.is_empty() {
             match serde_json::to_string(&supertraits) {
                 Ok(json) => {
@@ -709,8 +707,10 @@ fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
     };
 
     // Query for type identifiers within trait bounds
+    // NOTE: We exclude (lifetime) intentionally - lifetimes are not trait bounds
+    // and should not create EXTENDS_INTERFACE relationships
     let query_source = r#"
-        [(type_identifier) (scoped_type_identifier) (lifetime)] @bound
+        [(type_identifier) (scoped_type_identifier)] @bound
     "#;
 
     let language = tree_sitter_rust::LANGUAGE.into();
@@ -955,10 +955,12 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
 fn strings_to_source_refs(types: &[String]) -> Vec<SourceReference> {
     types
         .iter()
-        .map(|t| SourceReference {
-            target: t.clone(),
-            location: SourceLocation::default(),
-            ref_type: ReferenceType::TypeUsage,
+        .map(|t| {
+            SourceReference::new(
+                t.clone(),
+                SourceLocation::default(),
+                ReferenceType::TypeUsage,
+            )
         })
         .collect()
 }

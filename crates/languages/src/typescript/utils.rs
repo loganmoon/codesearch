@@ -79,11 +79,11 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }
@@ -91,11 +91,11 @@ pub fn extract_type_references(
                     if let Ok(full_path) = node_to_text(capture.node, source) {
                         // Scoped types are already qualified
                         if seen.insert(full_path.clone()) {
-                            type_refs.push(SourceReference {
-                                target: full_path,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                full_path,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }

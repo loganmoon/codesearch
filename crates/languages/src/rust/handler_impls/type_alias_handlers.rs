@@ -126,10 +126,12 @@ pub fn handle_type_alias_impl(
     let relationships = EntityRelationshipData {
         uses_types: uses_types
             .iter()
-            .map(|t| SourceReference {
-                target: t.clone(),
-                location: SourceLocation::default(),
-                ref_type: ReferenceType::TypeUsage,
+            .map(|t| {
+                SourceReference::new(
+                    t.clone(),
+                    SourceLocation::default(),
+                    ReferenceType::TypeUsage,
+                )
             })
             .collect(),
         ..Default::default()

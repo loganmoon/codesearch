@@ -17,7 +17,8 @@ members = [
 ]
 # Excluded from default builds - run explicitly with --manifest-path:
 #   cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
-exclude = ["crates/e2e-tests"]
+#   cargo test --manifest-path evals/Cargo.toml -- --ignored
+exclude = ["crates/e2e-tests", "evals"]
 
 [workspace.metadata]
 default-run = "codesearch"

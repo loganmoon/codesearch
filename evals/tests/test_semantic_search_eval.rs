@@ -5,10 +5,10 @@
 //! and where that entity appears in search results.
 //!
 //! Usage:
-//!   cargo test --manifest-path crates/e2e-tests/Cargo.toml --test test_semantic_search_eval -- --ignored --nocapture
+//!   cargo test --manifest-path evals/Cargo.toml --test test_semantic_search_eval -- --ignored --nocapture
 //!
 //! To include agentic search comparison:
-//!   EVAL_AGENTIC=1 cargo test --manifest-path crates/e2e-tests/Cargo.toml --test test_semantic_search_eval -- --ignored --nocapture
+//!   EVAL_AGENTIC=1 cargo test --manifest-path evals/Cargo.toml --test test_semantic_search_eval -- --ignored --nocapture
 //!
 //! Requirements:
 //! - codesearch server running on localhost:3000
@@ -16,7 +16,7 @@
 //!   (entity IDs are content-based hashes and will differ on other commits)
 
 use anyhow::{Context, Result};
-use codesearch_e2e_tests::eval_metrics::EvaluationResults;
+use codesearch_evals::EvaluationResults;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

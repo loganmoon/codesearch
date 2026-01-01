@@ -8,10 +8,6 @@ publish = false
 # compiling during normal builds. Run explicitly with:
 #   cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
 
-[[bin]]
-name = "extract_eval_candidates"
-path = "src/bin/extract_eval_candidates.rs"
-
 [dependencies]
 # Workspace crates (path dependencies still work when excluded)
 codesearch-core = { path = "../core" }

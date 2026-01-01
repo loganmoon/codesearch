@@ -2,7 +2,7 @@
 //!
 //! This module provides a test harness for validating that the code graph
 //! extraction pipeline correctly identifies entities and relationships
-//! from Rust source code.
+//! from source code in any supported language.
 
 mod assertions;
 mod neo4j_queries;
@@ -170,7 +170,10 @@ fn create_test_repository(fixture: &Fixture) -> Result<TempDir> {
             fs::create_dir_all(&src_dir)?;
             src_dir
         }
-        ProjectType::Workspace | ProjectType::Custom => repo_path.to_path_buf(),
+        ProjectType::Workspace
+        | ProjectType::Custom
+        | ProjectType::TypeScriptProject
+        | ProjectType::NodePackage => repo_path.to_path_buf(),
     };
 
     // Write source files
@@ -182,30 +185,76 @@ fn create_test_repository(fixture: &Fixture) -> Result<TempDir> {
         fs::write(&file_path, content)?;
     }
 
-    // Create Cargo.toml (use custom or generate default based on project type)
-    let cargo_toml = match fixture.cargo_toml {
-        Some(custom) => custom.to_string(),
-        None => match fixture.project_type {
-            ProjectType::SingleCrate | ProjectType::BinaryCrate => r#"[package]
+    // Create manifest file(s) based on project type
+    match fixture.project_type {
+        ProjectType::SingleCrate | ProjectType::BinaryCrate => {
+            let cargo_toml = fixture.manifest.unwrap_or(
+                r#"[package]
 name = "test_crate"
 version = "0.1.0"
 edition = "2021"
-"#
-            .to_string(),
-            ProjectType::Workspace => r#"[workspace]
+"#,
+            );
+            fs::write(repo_path.join("Cargo.toml"), cargo_toml)?;
+        }
+        ProjectType::Workspace => {
+            let cargo_toml = fixture.manifest.unwrap_or(
+                r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
-"#
-            .to_string(),
-            ProjectType::Custom => r#"[package]
+"#,
+            );
+            fs::write(repo_path.join("Cargo.toml"), cargo_toml)?;
+        }
+        ProjectType::TypeScriptProject => {
+            // Write package.json
+            let package_json = fixture.manifest.unwrap_or(
+                r#"{
+  "name": "test-package",
+  "version": "1.0.0",
+  "type": "module"
+}"#,
+            );
+            fs::write(repo_path.join("package.json"), package_json)?;
+
+            // Write tsconfig.json
+            fs::write(
+                repo_path.join("tsconfig.json"),
+                r#"{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "strict": true
+  }
+}"#,
+            )?;
+        }
+        ProjectType::NodePackage => {
+            let package_json = fixture.manifest.unwrap_or(
+                r#"{
+  "name": "test-package",
+  "version": "1.0.0",
+  "type": "module"
+}"#,
+            );
+            fs::write(repo_path.join("package.json"), package_json)?;
+        }
+        ProjectType::Custom => {
+            // Use custom manifest if provided, otherwise create minimal Cargo.toml
+            if let Some(manifest) = fixture.manifest {
+                fs::write(repo_path.join("Cargo.toml"), manifest)?;
+            } else {
+                fs::write(
+                    repo_path.join("Cargo.toml"),
+                    r#"[package]
 name = "test_crate"
 version = "0.1.0"
 edition = "2021"
-"#
-            .to_string(),
-        },
-    };
-    fs::write(repo_path.join("Cargo.toml"), cargo_toml)?;
+"#,
+                )?;
+            }
+        }
+    }
 
     // Initialize git repository (required for indexing)
     run_git_command(repo_path, &["init"])?;

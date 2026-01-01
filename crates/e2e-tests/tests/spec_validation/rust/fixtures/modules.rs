@@ -58,7 +58,7 @@ pub static BASIC_MOD: Fixture = Fixture {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Visibility modifiers: pub, pub(crate), pub(super), pub(in path), pub(self), private
@@ -166,7 +166,7 @@ pub mod outer {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Use declarations and imports
@@ -234,7 +234,7 @@ pub static USE_IMPORTS: Fixture = Fixture {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Re-exports with pub use
@@ -283,7 +283,7 @@ pub static REEXPORTS: Fixture = Fixture {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 // =============================================================================
@@ -360,7 +360,7 @@ pub mod level1 {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Mixed inline and file-based modules with directory structure
@@ -465,7 +465,7 @@ pub fn handle_request() {}
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Self and super references in modules
@@ -574,5 +574,5 @@ pub mod child {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

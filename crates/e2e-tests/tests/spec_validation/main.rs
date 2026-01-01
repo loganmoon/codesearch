@@ -1,16 +1,21 @@
 //! Specification-based graph validation tests
 //!
 //! These tests validate that the code graph extraction pipeline correctly
-//! identifies entities and relationships from Rust source code by comparing
+//! identifies entities and relationships from source code by comparing
 //! against hand-verified expected specifications.
 //!
 //! Run with: cargo test --manifest-path crates/e2e-tests/Cargo.toml spec_validation -- --ignored
+//!
+//! Tests are organized by language:
+//! - rust/ - Rust spec validation tests
+//! - typescript/ - TypeScript spec validation tests (TODO)
 
-mod fixtures;
+mod rust;
+mod typescript;
 
 use anyhow::Result;
 use codesearch_e2e_tests::common::spec_validation::run_spec_validation;
-use fixtures::*;
+use rust::*;
 
 // =============================================================================
 // Test Functions - Basic

@@ -472,7 +472,26 @@ pub fn parse_file_imports(
 
 ## Testing
 
-### Handler Unit Tests
+Language implementations require two levels of testing. The table below clarifies when to use each:
+
+| Aspect | Handler Unit Tests | E2E Spec Validation Tests |
+|--------|-------------------|---------------------------|
+| **Location** | `crates/languages/src/{lang}/handler_impls/tests/` | `crates/e2e-tests/tests/spec_validation/{lang}/` |
+| **Checklist** | Item 14 | Items 15-18 |
+| **Infrastructure** | None (pure Rust unit tests) | Docker (Postgres, Neo4j, Qdrant) |
+| **Speed** | Fast (~ms) | Slow (~seconds per test) |
+| **Scope** | Single handler correctness | Full pipeline: parse → extract → resolve → graph |
+| **Run command** | `cargo test -p codesearch-languages` | `cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored` |
+
+**When to use each:**
+- **Handler unit tests**: Write these first when developing handlers. Test that individual handlers correctly extract entities and populate relationship data from source code.
+- **E2E spec validation tests**: Write these to validate that spec rules are correctly implemented end-to-end, including graph resolution and Neo4j storage.
+
+---
+
+### Handler Unit Tests (`crates/languages/src/{lang}/handler_impls/tests/`)
+
+Handler unit tests verify that individual extraction handlers correctly parse source code and produce the expected entities and relationship data. These run without external infrastructure.
 
 ```rust
 #[test]
@@ -510,9 +529,7 @@ fn test_impl_extracts_implements_trait() {
 }
 ```
 
-### Spec Validation
-
-Tests should reference spec rule IDs:
+Tests should reference spec rule IDs in comments:
 
 ```rust
 /// Tests rule E-FN-FREE: Free functions produce Function entity
@@ -647,31 +664,30 @@ let resolvers: Vec<Box<dyn RelationshipResolver>> = vec![
 
 ---
 
-## E2E Spec Validation Tests
+### E2E Spec Validation Tests (`crates/e2e-tests/tests/spec_validation/{lang}/`)
 
-Each language requires E2E tests that validate extraction against the spec file rules.
+E2E spec validation tests run the full pipeline against test fixtures and validate that the resulting graph matches the expected entities and relationships defined in the language spec. These require Docker infrastructure (Postgres, Neo4j, Qdrant).
 
-### Test Structure
+#### Test Structure
 
 ```
-crates/e2e-tests/
-├── Cargo.toml
-├── src/
-│   └── lib.rs
-└── tests/
-    ├── rust_spec_validation.rs      # Rust spec validation
-    ├── javascript_spec_validation.rs
-    ├── typescript_spec_validation.rs
-    ├── python_spec_validation.rs
-    └── fixtures/
-        ├── rust/                     # Test fixtures per language
-        │   ├── free_functions.rs
-        │   ├── methods.rs
-        │   ├── trait_impl.rs
-        │   └── ...
-        ├── javascript/
-        ├── typescript/
-        └── python/
+crates/e2e-tests/tests/spec_validation/
+├── main.rs                           # Test orchestration
+├── rust/
+│   ├── mod.rs                        # Rust test functions
+│   └── fixtures/                     # Rust-specific fixtures
+│       ├── mod.rs
+│       ├── modules.rs
+│       ├── functions.rs
+│       └── ...
+├── typescript/
+│   ├── mod.rs                        # TypeScript test functions
+│   └── fixtures/                     # TypeScript-specific fixtures
+│       ├── mod.rs
+│       ├── modules.rs
+│       ├── classes.rs
+│       └── ...
+└── common/                           # Shared test utilities (if needed)
 ```
 
 ### Writing Spec Validation Tests

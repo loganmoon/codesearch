@@ -10,7 +10,8 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::entities::{
-    CodeEntityBuilder, EntityRelationshipData, EntityType, Language, SourceLocation, Visibility,
+    CodeEntityBuilder, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
+    SourceReference, Visibility,
 };
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
@@ -423,7 +424,7 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
 ///
 /// This extracts imports that are direct children of the source_file (not nested in mod blocks).
 /// Uses tree-sitter queries to properly parse the file structure.
-fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
+fn extract_file_level_imports(file_path: &Path) -> Vec<SourceReference> {
     // Read file content
     let content = match std::fs::read_to_string(file_path) {
         Ok(c) => c,
@@ -463,8 +464,37 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
         if child.kind() == "use_declaration" {
             // Extract the use path from the declaration
             if let Some(argument) = child.child_by_field_name("argument") {
-                let import_text = &content[argument.byte_range()];
-                imports.push(import_text.to_string());
+                let import_path = &content[argument.byte_range()];
+                if import_path.is_empty() {
+                    continue;
+                }
+
+                // Extract simple name (last path segment)
+                let simple_name = import_path
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(import_path)
+                    .to_string();
+
+                // Determine if external: crate::, self::, super:: are internal
+                let is_external = !import_path.starts_with("crate::")
+                    && !import_path.starts_with("self::")
+                    && !import_path.starts_with("super::");
+
+                let location = SourceLocation {
+                    start_line: child.start_position().row + 1,
+                    end_line: child.end_position().row + 1,
+                    start_column: child.start_position().column,
+                    end_column: child.end_position().column,
+                };
+
+                imports.push(SourceReference::new(
+                    import_path,
+                    simple_name,
+                    is_external,
+                    location,
+                    ReferenceType::Import,
+                ));
             }
         }
     }

@@ -244,7 +244,7 @@ trait Complex: Display + Send + Sync + 'static {
             .relationships
             .supertraits
             .iter()
-            .any(|s| s.contains("'static")),
+            .any(|s| s.target.contains("'static")),
         "'static lifetime should be excluded from supertraits"
     );
 

@@ -253,27 +253,27 @@ pub struct EntityRelationshipData {
     /// Imported modules/entities.
     /// Resolved to IMPORTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub imports: Vec<String>,
+    pub imports: Vec<SourceReference>,
 
     /// Trait/interface being implemented (for impl blocks).
     /// Resolved to IMPLEMENTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub implements_trait: Option<String>,
+    pub implements_trait: Option<SourceReference>,
 
     /// Type this impl block is for (for ASSOCIATES relationship).
     /// Resolved to ASSOCIATES relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub for_type: Option<String>,
+    pub for_type: Option<SourceReference>,
 
     /// Parent class/interface for inheritance (JS/TS extends, Python bases).
     /// Resolved to INHERITS_FROM relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub extends: Vec<String>,
+    pub extends: Vec<SourceReference>,
 
     /// Trait supertraits (Rust trait bounds like `trait Foo: Bar`).
     /// Resolved to EXTENDS_INTERFACE relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub supertraits: Vec<String>,
+    pub supertraits: Vec<SourceReference>,
 
     /// Pre-computed call aliases for language-specific resolution.
     /// E.g., Rust UFCS: "TypeFQN::method" for "<TypeFQN as TraitFQN>::method".
@@ -387,7 +387,8 @@ pub struct FunctionSignature {
 
 /// Relationship types between code entities
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, EnumString)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum RelationshipType {
     Contains,
     Calls,
@@ -399,7 +400,11 @@ pub enum RelationshipType {
     Returns,
     AcceptsParameter,
     ThrowsException,
-    DefinesEntity, // chunk-to-entity
+    DefinesEntity,
+    /// Impl block associates with its target type
+    Associates,
+    /// Trait extends another trait (supertraits)
+    ExtendsInterface,
 }
 
 /// Represents a relationship between code entities

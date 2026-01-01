@@ -22,7 +22,7 @@ use crate::rust::handler_impls::common::{
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
-    Language, SourceLocation, SourceReference, Visibility,
+    Language, ReferenceType, SourceLocation, SourceReference, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
@@ -247,7 +247,13 @@ pub fn handle_impl_impl(
 
     let relationships = EntityRelationshipData {
         uses_types,
-        for_type: Some(for_type_resolved.clone()),
+        for_type: Some(SourceReference::new(
+            for_type_resolved_ref.target.clone(),
+            for_type_resolved_ref.simple_name.clone(),
+            for_type_resolved_ref.is_external,
+            impl_location.clone(),
+            ReferenceType::TypeUsage,
+        )),
         ..Default::default()
     };
 
@@ -457,8 +463,20 @@ pub fn handle_impl_trait_impl(
 
     let relationships = EntityRelationshipData {
         uses_types,
-        implements_trait: Some(trait_name_resolved.clone()),
-        for_type: Some(for_type_resolved.clone()),
+        implements_trait: Some(SourceReference::new(
+            trait_name_resolved_ref.target.clone(),
+            trait_name_resolved_ref.simple_name.clone(),
+            trait_name_resolved_ref.is_external,
+            location.clone(),
+            ReferenceType::Extends,
+        )),
+        for_type: Some(SourceReference::new(
+            for_type_resolved_ref.target.clone(),
+            for_type_resolved_ref.simple_name.clone(),
+            for_type_resolved_ref.is_external,
+            location.clone(),
+            ReferenceType::TypeUsage,
+        )),
         ..Default::default()
     };
 

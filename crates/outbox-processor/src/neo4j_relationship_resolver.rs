@@ -31,7 +31,7 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
-use codesearch_core::entities::{CodeEntity, EntityType, SourceReference};
+use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
 use std::collections::HashMap;
@@ -52,10 +52,6 @@ pub struct EntityCache {
     entities: Vec<CodeEntity>,
     /// Pre-built lookup: qualified_name -> entity_id (semantic, package-relative)
     qname_to_id: HashMap<String, String>,
-    /// Pre-built lookup: path_entity_identifier -> entity_id (file-path-based)
-    path_id_to_id: HashMap<String, String>,
-    /// Pre-built lookup: simple name -> entity_id (for fallback)
-    name_to_id: HashMap<String, String>,
 }
 
 impl EntityCache {
@@ -74,26 +70,9 @@ impl EntityCache {
             .map(|e| (e.qualified_name.clone(), e.entity_id.clone()))
             .collect();
 
-        // Build path_entity_identifier map (only for entities that have it)
-        let path_id_to_id: HashMap<String, String> = entities
-            .iter()
-            .filter_map(|e| {
-                e.path_entity_identifier
-                    .as_ref()
-                    .map(|pid| (pid.clone(), e.entity_id.clone()))
-            })
-            .collect();
-
-        let name_to_id: HashMap<String, String> = entities
-            .iter()
-            .map(|e| (e.name.clone(), e.entity_id.clone()))
-            .collect();
-
         Ok(Self {
             entities,
             qname_to_id,
-            path_id_to_id,
-            name_to_id,
         })
     }
 
@@ -102,73 +81,9 @@ impl EntityCache {
         &self.entities
     }
 
-    /// Get entities filtered by type
-    pub fn by_type(&self, entity_type: EntityType) -> Vec<&CodeEntity> {
-        self.entities
-            .iter()
-            .filter(|e| e.entity_type == entity_type)
-            .collect()
-    }
-
-    /// Get all type entities (Struct, Enum, Class, Interface, Trait, TypeAlias)
-    pub fn all_types(&self) -> Vec<&CodeEntity> {
-        self.entities
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e.entity_type,
-                    EntityType::Struct
-                        | EntityType::Enum
-                        | EntityType::Class
-                        | EntityType::Interface
-                        | EntityType::Trait
-                        | EntityType::TypeAlias
-                )
-            })
-            .collect()
-    }
-
     /// Get qualified_name -> entity_id lookup map
     pub fn qname_map(&self) -> &HashMap<String, String> {
         &self.qname_to_id
-    }
-
-    /// Get path_entity_identifier -> entity_id lookup map
-    ///
-    /// For file-path-based lookups (useful for import resolution)
-    pub fn path_id_map(&self) -> &HashMap<String, String> {
-        &self.path_id_to_id
-    }
-
-    /// Get simple name -> entity_id lookup map (use with caution - collisions possible)
-    pub fn name_map(&self) -> &HashMap<String, String> {
-        &self.name_to_id
-    }
-
-    /// Resolve a reference using multiple fallback strategies
-    ///
-    /// For import/file-based resolution:
-    /// 1. Try path_entity_identifier map first
-    /// 2. Fall back to qualified_name map
-    /// 3. Fall back to simple name map
-    pub fn resolve_path_reference(&self, reference: &str) -> Option<&String> {
-        self.path_id_to_id
-            .get(reference)
-            .or_else(|| self.qname_to_id.get(reference))
-            .or_else(|| self.name_to_id.get(reference))
-    }
-
-    /// Resolve a reference using semantic matching
-    ///
-    /// For semantic lookups (traits, types, etc.):
-    /// 1. Try qualified_name map first
-    /// 2. Fall back to path_entity_identifier map
-    /// 3. Fall back to simple name map
-    pub fn resolve_semantic_reference(&self, reference: &str) -> Option<&String> {
-        self.qname_to_id
-            .get(reference)
-            .or_else(|| self.path_id_to_id.get(reference))
-            .or_else(|| self.name_to_id.get(reference))
     }
 
     /// Check if cache is empty
@@ -330,9 +245,7 @@ impl ExternalRef {
 /// 2. Creates External stub nodes in Neo4j for those references
 /// 3. Creates relationships from source entities to External nodes
 ///
-/// External references are identified by:
-/// - explicit "external::" prefix in resolved attributes
-/// - references in implements_trait, extends, uses_types that don't match any entity
+/// External references are identified by the `is_external` flag on SourceReference fields.
 pub async fn resolve_external_references(
     cache: &EntityCache,
     neo4j: &dyn Neo4jClientTrait,
@@ -348,35 +261,35 @@ pub async fn resolve_external_references(
 
     let entities = cache.all();
 
-    // Build set of known qualified names from cache's pre-built map
-    let known_names: HashSet<&str> = cache.qname_map().keys().map(|s| s.as_str()).collect();
-
-    // Use cache's name map for simple name lookups
-    let name_to_qname: HashMap<&str, &str> = cache
-        .name_map()
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-
     // Collect all external references with their source relationships
     let mut external_refs: HashSet<ExternalRef> = HashSet::new();
     let mut relationships: Vec<(String, String, String)> = Vec::new();
 
     for entity in entities {
-        // Check implements_trait
-        if let Some(trait_ref) = entity.metadata.attributes.get("implements_trait") {
-            if is_external_ref(trait_ref, &known_names, &name_to_qname) {
-                let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref));
+        // Check implements_trait (typed SourceReference with is_external flag)
+        if let Some(ref trait_ref) = entity.relationships.implements_trait {
+            if trait_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&trait_ref.target));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
             }
         }
 
-        // Check extends (for classes/interfaces)
-        if let Some(extends_ref) = entity.metadata.attributes.get("extends") {
-            if is_external_ref(extends_ref, &known_names, &name_to_qname) {
-                let ext_ref = ExternalRef::new(normalize_external_ref(extends_ref));
+        // Check for_type (for Associates relationships on impl blocks)
+        if let Some(ref for_type_ref) = entity.relationships.for_type {
+            if for_type_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&for_type_ref.target));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((entity.entity_id.clone(), ext_id, "ASSOCIATES".to_string()));
+            }
+        }
+
+        // Check extends (for classes/interfaces - typed SourceReference)
+        for extend_ref in &entity.relationships.extends {
+            if extend_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&extend_ref.target));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((
@@ -387,49 +300,47 @@ pub async fn resolve_external_references(
             }
         }
 
-        // Check uses_types (JSON array of SourceReference)
-        if let Some(uses_types_str) = entity.metadata.attributes.get("uses_types") {
-            if let Ok(types) = serde_json::from_str::<Vec<SourceReference>>(uses_types_str) {
-                for type_ref in types {
-                    if is_external_ref(&type_ref.target, &known_names, &name_to_qname) {
-                        let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref.target));
-                        let ext_id = ext_ref.entity_id();
-                        external_refs.insert(ext_ref);
-                        relationships.push((entity.entity_id.clone(), ext_id, "USES".to_string()));
-                    }
-                }
+        // Check supertraits (for Rust traits - typed SourceReference)
+        for supertrait_ref in &entity.relationships.supertraits {
+            if supertrait_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&supertrait_ref.target));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((
+                    entity.entity_id.clone(),
+                    ext_id,
+                    "EXTENDS_INTERFACE".to_string(),
+                ));
             }
         }
 
-        // Check calls (JSON array of SourceReference)
-        if let Some(calls_str) = entity.metadata.attributes.get("calls") {
-            if let Ok(calls) = serde_json::from_str::<Vec<SourceReference>>(calls_str) {
-                for call_ref in calls {
-                    if is_external_ref(&call_ref.target, &known_names, &name_to_qname) {
-                        let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref.target));
-                        let ext_id = ext_ref.entity_id();
-                        external_refs.insert(ext_ref);
-                        relationships.push((entity.entity_id.clone(), ext_id, "CALLS".to_string()));
-                    }
-                }
+        // Check uses_types (typed SourceReference with is_external flag)
+        for type_ref in &entity.relationships.uses_types {
+            if type_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&type_ref.target));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((entity.entity_id.clone(), ext_id, "USES".to_string()));
             }
         }
 
-        // Check imports (JSON array of import paths)
-        if let Some(imports_str) = entity.metadata.attributes.get("imports") {
-            if let Ok(imports) = serde_json::from_str::<Vec<String>>(imports_str) {
-                for import_ref in imports {
-                    if is_external_ref(&import_ref, &known_names, &name_to_qname) {
-                        let ext_ref = ExternalRef::new(normalize_external_ref(&import_ref));
-                        let ext_id = ext_ref.entity_id();
-                        external_refs.insert(ext_ref);
-                        relationships.push((
-                            entity.entity_id.clone(),
-                            ext_id,
-                            "IMPORTS".to_string(),
-                        ));
-                    }
-                }
+        // Check calls (typed SourceReference with is_external flag)
+        for call_ref in &entity.relationships.calls {
+            if call_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&call_ref.target));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((entity.entity_id.clone(), ext_id, "CALLS".to_string()));
+            }
+        }
+
+        // Check imports (typed SourceReference with is_external flag)
+        for import_ref in &entity.relationships.imports {
+            if import_ref.is_external {
+                let ext_ref = ExternalRef::new(normalize_external_ref(&import_ref.target));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((entity.entity_id.clone(), ext_id, "IMPORTS".to_string()));
             }
         }
     }
@@ -467,52 +378,6 @@ pub async fn resolve_external_references(
     Ok(())
 }
 
-/// Check if a reference is external (not in the known entity set)
-fn is_external_ref(
-    ref_name: &str,
-    known_names: &std::collections::HashSet<&str>,
-    name_to_qname: &std::collections::HashMap<&str, &str>,
-) -> bool {
-    // Explicit external prefix
-    if ref_name.starts_with("external::") || ref_name.starts_with("external.") {
-        return true;
-    }
-
-    // Check if it matches any known qualified name
-    if known_names.contains(ref_name) {
-        return false;
-    }
-
-    // Strip generics before further checks
-    let without_generics = ref_name.split('<').next().unwrap_or(ref_name);
-    if known_names.contains(without_generics) {
-        return false;
-    }
-
-    // Extract simple name using language-appropriate separator
-    // Rust uses "::", JS/TS/Python use "."
-    let simple_name = if without_generics.contains("::") {
-        without_generics
-            .rsplit("::")
-            .next()
-            .unwrap_or(without_generics)
-    } else if without_generics.contains('.') {
-        without_generics
-            .rsplit('.')
-            .next()
-            .unwrap_or(without_generics)
-    } else {
-        without_generics
-    };
-
-    if name_to_qname.contains_key(simple_name) {
-        return false;
-    }
-
-    // Assume it's external if we can't find it
-    true
-}
-
 /// Normalize an external reference name
 fn normalize_external_ref(ref_name: &str) -> String {
     // Strip crate:: prefix, keep external:: or add it
@@ -533,67 +398,27 @@ fn normalize_external_ref(ref_name: &str) -> String {
 mod tests {
     use super::*;
 
-    // Note: resolve_relative_import tests are in codesearch_languages::common::import_map
-    // These tests verify the external reference detection logic
-
     #[test]
-    fn test_is_external_ref_with_dot_separator() {
-        let mut known_names = std::collections::HashSet::new();
-        known_names.insert("utils.helpers");
-        known_names.insert("core.module");
+    fn test_normalize_external_ref() {
+        // Strip crate:: prefix
+        assert_eq!(
+            normalize_external_ref("crate::utils::helpers"),
+            "external::utils::helpers"
+        );
 
-        let mut name_to_qname = std::collections::HashMap::new();
-        name_to_qname.insert("helpers", "utils.helpers");
-        name_to_qname.insert("module", "core.module");
+        // Keep external:: prefix
+        assert_eq!(
+            normalize_external_ref("external::std::collections"),
+            "external::std::collections"
+        );
 
-        // Full qualified name match
-        assert!(!is_external_ref(
-            "utils.helpers",
-            &known_names,
-            &name_to_qname
-        ));
+        // Add external:: prefix to bare refs
+        assert_eq!(
+            normalize_external_ref("std::collections::HashMap"),
+            "external::std::collections::HashMap"
+        );
 
-        // Simple name match (via name_to_qname)
-        assert!(!is_external_ref("helpers", &known_names, &name_to_qname));
-
-        // Unknown reference is external
-        assert!(is_external_ref(
-            "unknown.thing",
-            &known_names,
-            &name_to_qname
-        ));
-
-        // Explicit external prefix
-        assert!(is_external_ref(
-            "external.react",
-            &known_names,
-            &name_to_qname
-        ));
-    }
-
-    #[test]
-    fn test_is_external_ref_with_rust_separator() {
-        let mut known_names = std::collections::HashSet::new();
-        known_names.insert("crate::utils::helpers");
-
-        let mut name_to_qname = std::collections::HashMap::new();
-        name_to_qname.insert("helpers", "crate::utils::helpers");
-
-        // Full qualified name match
-        assert!(!is_external_ref(
-            "crate::utils::helpers",
-            &known_names,
-            &name_to_qname
-        ));
-
-        // Simple name match
-        assert!(!is_external_ref("helpers", &known_names, &name_to_qname));
-
-        // Explicit external prefix
-        assert!(is_external_ref(
-            "external::std::collections",
-            &known_names,
-            &name_to_qname
-        ));
+        // Strip generic parameters
+        assert_eq!(normalize_external_ref("Vec<T>"), "external::Vec");
     }
 }

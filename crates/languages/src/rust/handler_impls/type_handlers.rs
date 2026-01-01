@@ -365,7 +365,18 @@ pub fn handle_trait_impl(
             .iter()
             .map(|b| resolution_ctx.resolve(b, b))
             .collect();
-        let supertraits: Vec<String> = supertrait_refs.iter().map(|r| r.target.clone()).collect();
+        let supertraits: Vec<SourceReference> = supertrait_refs
+            .iter()
+            .map(|r| {
+                SourceReference::new(
+                    r.target.clone(),
+                    r.simple_name.clone(),
+                    r.is_external,
+                    SourceLocation::default(),
+                    ReferenceType::Extends,
+                )
+            })
+            .collect();
         if !supertraits.is_empty() {
             match serde_json::to_string(&supertraits) {
                 Ok(json) => {

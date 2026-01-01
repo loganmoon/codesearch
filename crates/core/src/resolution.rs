@@ -7,7 +7,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::entities::EntityType;
+use crate::entities::{EntityType, RelationshipType};
 
 /// Lookup strategy for resolving entity references
 ///
@@ -40,8 +40,8 @@ pub struct RelationshipDef {
     pub source_types: &'static [EntityType],
     /// Entity types that can be targets of this relationship
     pub target_types: &'static [EntityType],
-    /// The relationship type (e.g., "CALLS")
-    pub forward_rel: &'static str,
+    /// The relationship type
+    pub forward_rel: RelationshipType,
     /// Ordered list of lookup strategies to try
     pub lookup_strategies: &'static [LookupStrategy],
 }
@@ -52,7 +52,7 @@ impl RelationshipDef {
         name: &'static str,
         source_types: &'static [EntityType],
         target_types: &'static [EntityType],
-        forward_rel: &'static str,
+        forward_rel: RelationshipType,
         lookup_strategies: &'static [LookupStrategy],
     ) -> Self {
         Self {
@@ -76,9 +76,6 @@ impl RelationshipDef {
         }
         if self.target_types.is_empty() {
             return Err("RelationshipDef target_types cannot be empty");
-        }
-        if self.forward_rel.is_empty() {
-            return Err("RelationshipDef forward_rel cannot be empty");
         }
         if self.lookup_strategies.is_empty() {
             return Err("RelationshipDef lookup_strategies cannot be empty");
@@ -115,7 +112,7 @@ pub mod definitions {
         "calls",
         CALLABLE_TYPES,
         CALLABLE_TYPES,
-        "CALLS",
+        RelationshipType::Calls,
         &[
             LookupStrategy::QualifiedName,
             LookupStrategy::CallAliases,
@@ -138,7 +135,7 @@ pub mod definitions {
             EntityType::Impl,
         ],
         TYPE_TYPES,
-        "USES",
+        RelationshipType::Uses,
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
@@ -147,7 +144,7 @@ pub mod definitions {
         "implements",
         IMPL_TYPES,
         &[EntityType::Trait, EntityType::Interface],
-        "IMPLEMENTS",
+        RelationshipType::Implements,
         &[LookupStrategy::QualifiedName],
     );
 
@@ -156,7 +153,7 @@ pub mod definitions {
         "associates",
         IMPL_TYPES,
         TYPE_TYPES,
-        "ASSOCIATES",
+        RelationshipType::Associates,
         &[LookupStrategy::QualifiedName],
     );
 
@@ -165,7 +162,7 @@ pub mod definitions {
         "extends",
         &[EntityType::Trait, EntityType::Interface],
         &[EntityType::Trait, EntityType::Interface],
-        "EXTENDS_INTERFACE",
+        RelationshipType::ExtendsInterface,
         &[LookupStrategy::QualifiedName],
     );
 
@@ -174,7 +171,7 @@ pub mod definitions {
         "inherits",
         &[EntityType::Class],
         &[EntityType::Class],
-        "INHERITS_FROM",
+        RelationshipType::InheritsFrom,
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
@@ -207,7 +204,7 @@ pub mod definitions {
             EntityType::TypeAlias,
             EntityType::Constant,
         ],
-        "IMPORTS",
+        RelationshipType::Imports,
         &[
             LookupStrategy::QualifiedName,
             LookupStrategy::PathEntityIdentifier,
@@ -239,7 +236,7 @@ pub mod definitions {
             EntityType::TypeAlias,
             EntityType::Module,
         ],
-        "CONTAINS",
+        RelationshipType::Contains,
         &[LookupStrategy::QualifiedName],
     );
 }
@@ -254,21 +251,21 @@ mod tests {
             "test",
             &[EntityType::Function],
             &[EntityType::Method],
-            "TEST_REL",
+            RelationshipType::Calls,
             &[LookupStrategy::QualifiedName],
         );
 
         assert_eq!(def.name, "test");
         assert_eq!(def.source_types, &[EntityType::Function]);
         assert_eq!(def.target_types, &[EntityType::Method]);
-        assert_eq!(def.forward_rel, "TEST_REL");
+        assert_eq!(def.forward_rel, RelationshipType::Calls);
         assert_eq!(def.lookup_strategies, &[LookupStrategy::QualifiedName]);
     }
 
     #[test]
     fn test_standard_definitions() {
         // CALLS should have the right forward relationship
-        assert_eq!(definitions::CALLS.forward_rel, "CALLS");
+        assert_eq!(definitions::CALLS.forward_rel, RelationshipType::Calls);
 
         // USES should target type entities
         assert!(!definitions::USES.target_types.is_empty());
@@ -280,7 +277,7 @@ mod tests {
             "test",
             &[EntityType::Function],
             &[EntityType::Method],
-            "TEST_REL",
+            RelationshipType::Calls,
             &[LookupStrategy::QualifiedName],
         );
         assert!(def.validate().is_ok());
@@ -292,7 +289,7 @@ mod tests {
             "",
             &[EntityType::Function],
             &[EntityType::Method],
-            "TEST_REL",
+            RelationshipType::Calls,
             &[LookupStrategy::QualifiedName],
         );
         assert_eq!(def.validate(), Err("RelationshipDef name cannot be empty"));
@@ -304,7 +301,7 @@ mod tests {
             "test",
             &[],
             &[EntityType::Method],
-            "TEST_REL",
+            RelationshipType::Calls,
             &[LookupStrategy::QualifiedName],
         );
         assert_eq!(

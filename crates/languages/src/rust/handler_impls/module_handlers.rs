@@ -15,14 +15,18 @@ use crate::rust::handler_impls::common::{
     require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType, Language};
+use crate::rust::rust_path::RustPath;
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
+    SourceReference,
+};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Extract use statements from a module node
-fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
+fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
     let mut imports = Vec::new();
     let mut cursor = node.walk();
 
@@ -33,9 +37,31 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
                 let import_path = import_text
                     .trim_start_matches("use ")
                     .trim_end_matches(';')
-                    .trim()
-                    .to_string();
-                imports.push(import_path);
+                    .trim();
+
+                // Skip empty imports
+                if import_path.is_empty() {
+                    continue;
+                }
+
+                // Use RustPath for proper parsing
+                let rust_path = RustPath::parse(import_path);
+
+                // Extract simple name using RustPath
+                let simple_name = rust_path.simple_name().unwrap_or(import_path).to_string();
+
+                // Determine if external: relative paths (crate::, self::, super::) are internal
+                let is_external = !rust_path.is_relative();
+
+                let location = SourceLocation::from_tree_sitter_node(child);
+
+                imports.push(SourceReference::new(
+                    import_path,
+                    simple_name,
+                    is_external,
+                    location,
+                    ReferenceType::Import,
+                ));
             }
         }
     }

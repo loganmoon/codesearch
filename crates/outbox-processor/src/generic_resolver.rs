@@ -19,7 +19,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use async_trait::async_trait;
-use codesearch_core::entities::CodeEntity;
+use codesearch_core::entities::{CodeEntity, RelationshipType};
 use codesearch_core::error::Result;
 use codesearch_core::resolution::{LookupStrategy, RelationshipDef};
 use std::collections::HashMap;
@@ -97,17 +97,6 @@ impl ReferenceExtractor for UsesExtractor {
     }
 }
 
-/// Compute the simple name (last path segment) from a qualified reference.
-/// Used for relationship fields that are still `Vec<String>` (not SourceReference).
-fn compute_simple_name(target: &str) -> String {
-    target
-        .rsplit("::")
-        .next()
-        .or_else(|| target.rsplit('.').next())
-        .unwrap_or(target)
-        .to_string()
-}
-
 /// Extractor for IMPLEMENTS relationships
 struct ImplementsExtractor;
 
@@ -117,10 +106,10 @@ impl ReferenceExtractor for ImplementsExtractor {
             .relationships
             .implements_trait
             .as_ref()
-            .map(|t| {
+            .map(|src_ref| {
                 vec![ExtractedRef {
-                    target: t.clone(),
-                    simple_name: compute_simple_name(t),
+                    target: src_ref.target.clone(),
+                    simple_name: src_ref.simple_name.clone(),
                 }]
             })
             .unwrap_or_default()
@@ -136,10 +125,10 @@ impl ReferenceExtractor for AssociatesExtractor {
             .relationships
             .for_type
             .as_ref()
-            .map(|t| {
+            .map(|src_ref| {
                 vec![ExtractedRef {
-                    target: t.clone(),
-                    simple_name: compute_simple_name(t),
+                    target: src_ref.target.clone(),
+                    simple_name: src_ref.simple_name.clone(),
                 }]
             })
             .unwrap_or_default()
@@ -157,9 +146,9 @@ impl ReferenceExtractor for SupertraitsExtractor {
             .relationships
             .supertraits
             .iter()
-            .map(|t| ExtractedRef {
-                target: t.clone(),
-                simple_name: compute_simple_name(t),
+            .map(|src_ref| ExtractedRef {
+                target: src_ref.target.clone(),
+                simple_name: src_ref.simple_name.clone(),
             })
             .collect()
     }
@@ -174,9 +163,9 @@ impl ReferenceExtractor for InheritsExtractor {
             .relationships
             .extends
             .iter()
-            .map(|t| ExtractedRef {
-                target: t.clone(),
-                simple_name: compute_simple_name(t),
+            .map(|src_ref| ExtractedRef {
+                target: src_ref.target.clone(),
+                simple_name: src_ref.simple_name.clone(),
             })
             .collect()
     }
@@ -191,9 +180,9 @@ impl ReferenceExtractor for ImportsExtractor {
             .relationships
             .imports
             .iter()
-            .map(|t| ExtractedRef {
-                target: t.clone(),
-                simple_name: compute_simple_name(t),
+            .map(|src_ref| ExtractedRef {
+                target: src_ref.target.clone(),
+                simple_name: src_ref.simple_name.clone(),
             })
             .collect()
     }
@@ -406,7 +395,9 @@ impl RelationshipResolver for GenericResolver {
             for ext_ref in refs {
                 if let Some(target_id) = self.resolve_reference(&ext_ref, &maps) {
                     // Skip self-references (except for CALLS - recursive functions are valid)
-                    if target_id == source.entity_id && self.def.forward_rel != "CALLS" {
+                    if target_id == source.entity_id
+                        && self.def.forward_rel != RelationshipType::Calls
+                    {
                         continue;
                     }
 
@@ -606,7 +597,13 @@ mod tests {
             "impl",
             "crate::impl_MyTrait_for_MyStruct",
             EntityRelationshipData {
-                implements_trait: Some("crate::MyTrait".to_string()),
+                implements_trait: Some(SourceReference::new(
+                    "crate::MyTrait",
+                    "MyTrait",
+                    false,
+                    SourceLocation::default(),
+                    codesearch_core::ReferenceType::Extends,
+                )),
                 ..Default::default()
             },
         );
@@ -629,8 +626,20 @@ mod tests {
             "crate::MyTrait",
             EntityRelationshipData {
                 supertraits: vec![
-                    "crate::BaseTrait".to_string(),
-                    "crate::OtherTrait".to_string(),
+                    SourceReference::new(
+                        "crate::BaseTrait",
+                        "BaseTrait",
+                        false,
+                        SourceLocation::default(),
+                        codesearch_core::ReferenceType::Extends,
+                    ),
+                    SourceReference::new(
+                        "crate::OtherTrait",
+                        "OtherTrait",
+                        false,
+                        SourceLocation::default(),
+                        codesearch_core::ReferenceType::Extends,
+                    ),
                 ],
                 ..Default::default()
             },
@@ -652,7 +661,13 @@ mod tests {
             "mod",
             "crate::mod",
             EntityRelationshipData {
-                imports: vec!["crate::other::Thing".to_string()],
+                imports: vec![SourceReference::new(
+                    "crate::other::Thing",
+                    "Thing",
+                    false,
+                    SourceLocation::default(),
+                    codesearch_core::ReferenceType::Import,
+                )],
                 ..Default::default()
             },
         );

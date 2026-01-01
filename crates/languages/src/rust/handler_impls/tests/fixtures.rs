@@ -553,7 +553,7 @@ fn test_large_file_impl_extraction() {
         e.relationships
             .implements_trait
             .as_ref()
-            .is_some_and(|t| t.contains("Display"))
+            .is_some_and(|t| t.target.contains("Display"))
     });
 
     assert!(display_impl.is_some(), "Should find Display trait impl");

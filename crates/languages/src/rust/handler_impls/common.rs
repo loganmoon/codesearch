@@ -192,7 +192,8 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
 // Structured Generic Bounds Extraction (Query-Based)
 // ============================================================================
 
-use crate::common::import_map::{parse_file_imports, resolve_rust_reference, ImportMap};
+use crate::common::import_map::{parse_file_imports, ImportMap};
+use crate::rust::import_resolution::{resolve_rust_reference, ResolvedReference};
 use codesearch_core::Language;
 
 /// A parsed generic parameter with its trait bounds
@@ -206,7 +207,7 @@ pub struct GenericParam {
 #[derive(Debug, Clone, Default)]
 pub struct ParsedGenerics {
     pub params: Vec<GenericParam>,
-    pub bound_trait_refs: Vec<String>,
+    pub bound_trait_refs: Vec<ResolvedReference>,
 }
 
 /// Context for resolving Rust references to fully qualified names.
@@ -227,9 +228,17 @@ pub struct RustResolutionContext<'a> {
 
 impl<'a> RustResolutionContext<'a> {
     /// Resolve a reference using this context
-    pub fn resolve(&self, name: &str) -> String {
+    ///
+    /// # Arguments
+    /// * `name` - The name as it appears in source code (may be qualified)
+    /// * `simple_name` - The simple/unqualified name extracted from the AST
+    ///
+    /// Returns a `ResolvedReference` containing the resolved target path,
+    /// the original simple name, and whether the reference is external.
+    pub fn resolve(&self, name: &str, simple_name: &str) -> ResolvedReference {
         resolve_rust_reference(
             name,
+            simple_name,
             self.import_map,
             self.parent_scope,
             self.package_name,
@@ -327,13 +336,15 @@ fn extract_params_with_bounds(
                     };
 
                     if !is_primitive_type(bound_text) {
-                        let resolved = ctx.resolve(bound_text);
+                        // bound_text is the simple name from the AST
+                        let resolved = ctx.resolve(bound_text, bound_text);
 
                         if let Some(ref param) = current_param {
+                            // Store just the target string for param bounds
                             params_map
                                 .entry(param.clone())
                                 .or_default()
-                                .push(resolved.clone());
+                                .push(resolved.target.clone());
                         }
                         if seen_traits.insert(resolved.clone()) {
                             bound_trait_refs.push(resolved);
@@ -384,8 +395,8 @@ fn run_capture_query(node: Node, source: &str, query_source: &str) -> Vec<String
 /// If a type parameter already exists, its bounds are extended.
 /// New type parameters from where clause are added.
 pub fn merge_parsed_generics(base: &mut ParsedGenerics, additional: ParsedGenerics) {
-    // Build set of existing trait refs (owned strings to avoid borrow conflicts)
-    let seen_traits: std::collections::HashSet<String> =
+    // Build set of existing trait refs
+    let seen_traits: std::collections::HashSet<ResolvedReference> =
         base.bound_trait_refs.iter().cloned().collect();
 
     // Add new trait refs that aren't already present
@@ -581,6 +592,76 @@ fn extract_call_path_from_scoped_identifier(node: Node, source: &str) -> Option<
     }
 }
 
+/// Extract the last segment (simple name) from a scoped_identifier node.
+///
+/// For `std::io::read`, returns "read".
+/// For `Vec::<String>::new`, returns "new".
+fn extract_last_segment_from_scoped_identifier(node: Node, source: &str) -> Option<String> {
+    // Query to find the last identifier in a scoped_identifier
+    let query_source = r#"
+        (scoped_identifier
+          name: (identifier) @last_name)
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(e) => {
+            warn!("Failed to compile tree-sitter query for last segment extraction: {e}");
+            return None;
+        }
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut last_name = None;
+
+    let mut matches = cursor.matches(&query, node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                last_name = Some(text.to_string());
+            }
+        }
+    }
+
+    last_name
+}
+
+/// Extract the last segment (simple name) from a scoped_type_identifier node.
+///
+/// For `std::io::Result`, returns "Result".
+/// For `std::collections::HashMap`, returns "HashMap".
+fn extract_last_segment_from_scoped_type_identifier(node: Node, source: &str) -> Option<String> {
+    // Query to find the last type_identifier in a scoped_type_identifier
+    let query_source = r#"
+        (scoped_type_identifier
+          name: (type_identifier) @last_name)
+    "#;
+
+    let language = tree_sitter_rust::LANGUAGE.into();
+    let query = match Query::new(&language, query_source) {
+        Ok(q) => q,
+        Err(e) => {
+            warn!("Failed to compile tree-sitter query for last type segment extraction: {e}");
+            return None;
+        }
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut last_name = None;
+
+    let mut matches = cursor.matches(&query, node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                last_name = Some(text.to_string());
+            }
+        }
+    }
+
+    last_name
+}
+
 /// Extract function calls from a function body using tree-sitter queries
 ///
 /// This version resolves bare identifiers to qualified names using imports and scope.
@@ -659,12 +740,15 @@ pub fn extract_function_calls(
         if let Some(bare_cap) = bare_callee {
             // Bare identifier call like `foo()`
             if let Ok(name) = node_to_text(bare_cap.node, source) {
-                let resolved = ctx.resolve(&name);
-                calls.push(SourceReference {
-                    target: resolved,
-                    location: SourceLocation::from_tree_sitter_node(bare_cap.node),
-                    ref_type: ReferenceType::Call,
-                });
+                // name is a bare identifier, so it's both the name and simple_name
+                let resolved = ctx.resolve(&name, &name);
+                calls.push(SourceReference::new(
+                    resolved.target,
+                    resolved.simple_name,
+                    resolved.is_external,
+                    SourceLocation::from_tree_sitter_node(bare_cap.node),
+                    ReferenceType::Call,
+                ));
             }
         } else if let Some(scoped_cap) = scoped_callee {
             // Scoped call like `std::io::read()`, `Vec::<String>::new()`, or UFCS
@@ -672,19 +756,25 @@ pub fn extract_function_calls(
                 // UFCS syntax like `<Type as Trait>::method` needs special handling
                 // by ctx.resolve() - pass the full text
                 let call_path = if full_text.starts_with('<') {
-                    full_text
+                    full_text.clone()
                 } else {
                     // For turbofish like `Vec::<String>::new`, extract path without generics
                     // using tree-sitter query (not string manipulation)
                     extract_call_path_from_scoped_identifier(scoped_cap.node, source)
-                        .unwrap_or(full_text)
+                        .unwrap_or(full_text.clone())
                 };
-                let resolved = ctx.resolve(&call_path);
-                calls.push(SourceReference {
-                    target: resolved,
-                    location: SourceLocation::from_tree_sitter_node(scoped_cap.node),
-                    ref_type: ReferenceType::Call,
-                });
+                // Extract simple_name: last segment of the path from AST
+                let simple_name =
+                    extract_last_segment_from_scoped_identifier(scoped_cap.node, source)
+                        .unwrap_or_else(|| call_path.clone());
+                let resolved = ctx.resolve(&call_path, &simple_name);
+                calls.push(SourceReference::new(
+                    resolved.target,
+                    resolved.simple_name,
+                    resolved.is_external,
+                    SourceLocation::from_tree_sitter_node(scoped_cap.node),
+                    ReferenceType::Call,
+                ));
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
             // Method call like `x.bar()`
@@ -701,22 +791,28 @@ pub fn extract_function_calls(
                         // so we add all possibilities. The outbox processor's resolution
                         // will only create CALLS relationships for methods that exist as entities.
                         for bound in bounds {
-                            calls.push(SourceReference {
-                                target: format!("{bound}::{method_name}"),
-                                location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                                ref_type: ReferenceType::Call,
-                            });
+                            calls.push(SourceReference::new(
+                                format!("{bound}::{method_name}"),
+                                method_name.clone(), // simple_name from AST node
+                                false,               // Trait bounds are internal by definition
+                                SourceLocation::from_tree_sitter_node(method_cap.node),
+                                ReferenceType::Call,
+                            ));
                         }
                     } else {
                         // Not a generic type parameter, resolve through imports
                         // Use UFCS format <Type>::method to match inherent methods directly.
                         // Trait methods have call_aliases that will also match this format.
-                        let resolved_type = ctx.resolve(recv_type);
-                        calls.push(SourceReference {
-                            target: format!("<{resolved_type}>::{method_name}"),
-                            location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                            ref_type: ReferenceType::Call,
-                        });
+                        // recv_type is the type name from local vars, use as both name and simple_name
+                        let resolved_type = ctx.resolve(recv_type, recv_type);
+                        let target = resolved_type.target;
+                        calls.push(SourceReference::new(
+                            format!("<{target}>::{method_name}"),
+                            method_name.clone(), // simple_name from AST node
+                            resolved_type.is_external,
+                            SourceLocation::from_tree_sitter_node(method_cap.node),
+                            ReferenceType::Call,
+                        ));
                     }
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
@@ -730,12 +826,16 @@ pub fn extract_function_calls(
                 match extract_method_chain_head_type(chain_recv_cap.node, source, local_vars) {
                     Some(chain_head_type) => {
                         // Use UFCS format <Type>::method to match inherent methods directly
-                        let resolved_type = ctx.resolve(&chain_head_type);
-                        calls.push(SourceReference {
-                            target: format!("<{resolved_type}>::{method_name}"),
-                            location: SourceLocation::from_tree_sitter_node(chain_method_cap.node),
-                            ref_type: ReferenceType::Call,
-                        });
+                        // chain_head_type is extracted from AST, use as both name and simple_name
+                        let resolved_type = ctx.resolve(&chain_head_type, &chain_head_type);
+                        let target = resolved_type.target;
+                        calls.push(SourceReference::new(
+                            format!("<{target}>::{method_name}"),
+                            method_name.clone(), // simple_name from AST node
+                            resolved_type.is_external,
+                            SourceLocation::from_tree_sitter_node(chain_method_cap.node),
+                            ReferenceType::Call,
+                        ));
                     }
                     None => {
                         trace!(
@@ -1088,27 +1188,35 @@ pub fn extract_type_references(
                         if is_primitive_type(&type_name) {
                             continue;
                         }
-                        // Resolve through imports
-                        let resolved = ctx.resolve(&type_name);
+                        // Resolve through imports - bare identifier, use as both name and simple_name
+                        let resolved = ctx.resolve(&type_name, &type_name);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved.target,
+                                resolved.simple_name,
+                                resolved.is_external,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }
                 "scoped_type_ref" => {
                     if let Ok(full_path) = node_to_text(capture.node, source) {
+                        // Extract simple_name from the last segment using AST
+                        let simple_name =
+                            extract_last_segment_from_scoped_type_identifier(capture.node, source)
+                                .unwrap_or_else(|| full_path.clone());
                         // Resolve to normalize crate::, self::, super:: paths
-                        let resolved = ctx.resolve(&full_path);
+                        let resolved = ctx.resolve(&full_path, &simple_name);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::from_tree_sitter_node(capture.node),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved.target,
+                                resolved.simple_name,
+                                resolved.is_external,
+                                SourceLocation::from_tree_sitter_node(capture.node),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }
@@ -1628,6 +1736,71 @@ pub fn make_requests() {
             bounds[0], "test_crate::Processor",
             "Bound should be resolved to test_crate::Processor"
         );
+    }
+
+    #[test]
+    fn test_extract_generics_with_bounds_excludes_lifetimes() {
+        // Regression test: lifetimes should not appear in bound_trait_refs
+        // because lifetimes are not trait bounds and should not create USES relationships
+        let source = r#"
+            fn process<'a, T: Send + 'a>(data: &'a T) {
+            }
+        "#;
+
+        let tree = parse_rust(source);
+        let func_node = find_function_node(&tree).unwrap();
+
+        // Find the type_parameters node
+        let mut cursor = func_node.walk();
+        let type_params_node = func_node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "type_parameters");
+
+        assert!(
+            type_params_node.is_some(),
+            "Should find type_parameters node"
+        );
+        let type_params_node = type_params_node.unwrap();
+
+        // Create a resolution context
+        let import_map = crate::common::import_map::ImportMap::default();
+        let ctx = RustResolutionContext {
+            import_map: &import_map,
+            parent_scope: Some("test_crate"),
+            package_name: Some("test_crate"),
+            current_module: None,
+        };
+
+        // Extract generics with bounds
+        let parsed = extract_generics_with_bounds(type_params_node, source, &ctx);
+
+        // bound_trait_refs should contain Send but NOT the lifetime 'a
+        let targets: Vec<&str> = parsed
+            .bound_trait_refs
+            .iter()
+            .map(|r| r.target.as_str())
+            .collect();
+        assert!(
+            targets.iter().any(|t| t.contains("Send")),
+            "Should have Send in bound_trait_refs"
+        );
+        assert!(
+            !targets.iter().any(|t| t.contains("'a")),
+            "Should NOT have lifetime 'a in bound_trait_refs"
+        );
+
+        // Also verify that the generic bounds map has T with Send
+        let generic_bounds = build_generic_bounds_map(&parsed);
+        if let Some(bounds) = generic_bounds.get("T") {
+            assert!(
+                bounds.iter().any(|b| b.contains("Send")),
+                "T should have Send bound"
+            );
+            assert!(
+                !bounds.iter().any(|b| b.contains("'a")),
+                "T should NOT have lifetime 'a in bounds"
+            );
+        }
     }
 
     // =========================================================================

@@ -165,12 +165,21 @@ pub fn handle_function_impl(
     // Add trait bounds to type references (they also create USES relationships)
     let func_location = SourceLocation::from_tree_sitter_node(function_node);
     for trait_ref in &parsed_generics.bound_trait_refs {
-        if !type_refs.iter().any(|r| r.target == *trait_ref) {
-            type_refs.push(SourceReference {
-                target: trait_ref.clone(),
-                location: func_location.clone(),
-                ref_type: ReferenceType::TypeUsage,
-            });
+        if !type_refs.iter().any(|r| r.target == trait_ref.target) {
+            // Extract simple_name from the trait reference target
+            let simple_name = trait_ref
+                .target
+                .rsplit("::")
+                .next()
+                .unwrap_or(&trait_ref.target)
+                .to_string();
+            type_refs.push(SourceReference::new(
+                trait_ref.target.clone(),
+                simple_name,
+                trait_ref.is_external,
+                func_location.clone(),
+                ReferenceType::TypeUsage,
+            ));
         }
     }
 

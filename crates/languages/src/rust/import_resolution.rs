@@ -11,6 +11,20 @@
 #![deny(clippy::expect_used)]
 
 use crate::common::import_map::ImportMap;
+
+/// Result of resolving a Rust reference.
+///
+/// Contains the resolved qualified name and metadata about the reference.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ResolvedReference {
+    /// The fully resolved qualified name (e.g., "std::collections::HashMap")
+    pub target: String,
+    /// The simple/unqualified name as it appeared in the source (e.g., "HashMap")
+    /// This is extracted from the AST, not computed from target.
+    pub simple_name: String,
+    /// Whether this reference is to an external dependency (not in this repository)
+    pub is_external: bool,
+}
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
 
@@ -99,6 +113,7 @@ pub fn normalize_rust_path(
 ///
 /// # Arguments
 /// * `name` - The UFCS call pattern (e.g., `<Data as Processor>::process`)
+/// * `simple_name` - The simple name extracted from the AST
 /// * `import_map` - Import map for resolving type and trait names
 /// * `package_name` - Current crate name for path normalization
 /// * `current_module` - Current module path for path normalization
@@ -108,21 +123,24 @@ pub fn normalize_rust_path(
 /// or the original pattern if parsing fails.
 fn resolve_ufcs_call(
     name: &str,
+    simple_name: &str,
     import_map: &ImportMap,
     package_name: Option<&str>,
     current_module: Option<&str>,
-) -> String {
+) -> ResolvedReference {
+    let simple = simple_name.to_string();
+
     // Parse: <Type as Trait>::method
     // Find " as " separator
     let as_pos = match name.find(" as ") {
         Some(pos) => pos,
-        None => return name.to_string(), // Can't parse, return as-is
+        None => return resolved(name.to_string(), simple), // Can't parse, return as-is
     };
 
     // Find ">::" which separates the trait from the method name
     let method_sep = match name.find(">::") {
         Some(pos) => pos,
-        None => return name.to_string(), // Can't parse, return as-is
+        None => return resolved(name.to_string(), simple), // Can't parse, return as-is
     };
 
     // Extract components
@@ -132,7 +150,9 @@ fn resolve_ufcs_call(
 
     // Resolve both type and trait through imports
     // Use None for parent_scope since we're resolving type/trait names, not methods
+    // For nested resolution, use the component as both name and simple_name
     let resolved_type = resolve_rust_reference(
+        type_name.trim(),
         type_name.trim(),
         import_map,
         None,
@@ -141,6 +161,7 @@ fn resolve_ufcs_call(
     );
     let resolved_trait = resolve_rust_reference(
         trait_name.trim(),
+        trait_name.trim(),
         import_map,
         None,
         package_name,
@@ -148,7 +169,16 @@ fn resolve_ufcs_call(
     );
 
     // Return canonical form matching trait impl method qualified names
-    format!("<{resolved_type} as {resolved_trait}>::{method_name}")
+    // If either type or trait is external, the whole UFCS call is external
+    let is_external = resolved_type.is_external || resolved_trait.is_external;
+    ResolvedReference {
+        target: format!(
+            "<{} as {}>::{method_name}",
+            resolved_type.target, resolved_trait.target
+        ),
+        simple_name: simple,
+        is_external,
+    }
 }
 
 /// Well-known std types that should never be prefixed with a local crate name.
@@ -210,6 +240,42 @@ fn is_std_type(name: &str) -> bool {
     STD_TYPES.contains(&name)
 }
 
+/// Check if a path is an external reference (outside this repository)
+fn is_external_path(path: &str) -> bool {
+    path.starts_with("std::")
+        || path.starts_with("core::")
+        || path.starts_with("alloc::")
+        || path.starts_with("external::")
+}
+
+/// Helper to create a ResolvedReference with automatic external detection
+fn resolved(target: String, simple_name: String) -> ResolvedReference {
+    let is_external = is_external_path(&target);
+    ResolvedReference {
+        target,
+        simple_name,
+        is_external,
+    }
+}
+
+/// Helper to create an internal ResolvedReference
+fn resolved_internal(target: String, simple_name: String) -> ResolvedReference {
+    ResolvedReference {
+        target,
+        simple_name,
+        is_external: false,
+    }
+}
+
+/// Helper to create an external ResolvedReference
+fn resolved_external(target: String, simple_name: String) -> ResolvedReference {
+    ResolvedReference {
+        target,
+        simple_name,
+        is_external: true,
+    }
+}
+
 /// Resolve a Rust reference with path normalization
 ///
 /// This extends resolve_reference() to handle crate::, self::, super:: prefixes.
@@ -221,42 +287,59 @@ fn is_std_type(name: &str) -> bool {
 /// 4. Try parent_scope::name
 /// 5. Try package_name::current_module::name (for locally-defined types)
 /// 6. Mark as external::name (only if no package context available)
+///
+/// # Arguments
+/// * `name` - The name as it appears in source code (may be simple or qualified)
+/// * `simple_name` - The simple/unqualified name extracted from the AST
+/// * `import_map` - Import map for resolving names
+/// * `parent_scope` - Parent scope for method resolution
+/// * `package_name` - Current crate name
+/// * `current_module` - Current module path
+///
+/// Returns a `ResolvedReference` containing the resolved target path,
+/// the original simple name, and whether it's an external reference.
 pub fn resolve_rust_reference(
     name: &str,
+    simple_name: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
     package_name: Option<&str>,
     current_module: Option<&str>,
-) -> String {
+) -> ResolvedReference {
+    let simple = simple_name.to_string();
     // Handle UFCS (Universal Function Call Syntax) patterns: <Type as Trait>::method
     if name.starts_with('<') {
-        return resolve_ufcs_call(name, import_map, package_name, current_module);
+        return resolve_ufcs_call(name, &simple, import_map, package_name, current_module);
     }
 
     // Check if this is a well-known std type - don't prefix with local crate name
+    // These are external references (from std library)
     if is_std_type(name) {
-        return name.to_string();
+        return ResolvedReference {
+            target: name.to_string(),
+            simple_name: simple,
+            is_external: true,
+        };
     }
 
-    // First normalize any Rust-relative paths
+    // First normalize any Rust-relative paths (these are internal references)
     if name.starts_with("crate::") || name.starts_with("self::") || name.starts_with("super::") {
-        return normalize_rust_path(name, package_name, current_module);
+        return ResolvedReference {
+            target: normalize_rust_path(name, package_name, current_module),
+            simple_name: simple,
+            is_external: false,
+        };
     }
 
     // Already scoped paths need special handling
     if ImportMap::is_scoped(name, "::") {
         // Check if it looks like an external path
-        // If it starts with known external prefixes, return as-is
-        if name.starts_with("std::")
-            || name.starts_with("core::")
-            || name.starts_with("alloc::")
-            || name.starts_with("external::")
-        {
-            return name.to_string();
+        if is_external_path(name) {
+            return resolved_external(name.to_string(), simple);
         }
         // Try to resolve through import map first
-        if let Some(resolved) = import_map.resolve(name) {
-            return resolved.to_string();
+        if let Some(resolved_path) = import_map.resolve(name) {
+            return resolved(resolved_path.to_string(), simple);
         }
 
         // Handle Type::method patterns where the first segment is an imported type
@@ -278,7 +361,7 @@ pub fn resolve_rust_reference(
                 {
                     let normalized_type =
                         normalize_rust_path(resolved_type, package_name, current_module);
-                    return format!("{normalized_type}::{remaining}");
+                    return resolved_internal(format!("{normalized_type}::{remaining}"), simple);
                 }
 
                 // If the resolved type is a scoped path (e.g., types::Widget),
@@ -287,25 +370,24 @@ pub fn resolve_rust_reference(
                     if let Some(pkg) = package_name {
                         if !pkg.is_empty() {
                             let first = resolved_type.split("::").next().unwrap_or(resolved_type);
-                            if first != pkg
-                                && !resolved_type.starts_with("std::")
-                                && !resolved_type.starts_with("core::")
-                                && !resolved_type.starts_with("alloc::")
-                            {
-                                return format!("{pkg}::{resolved_path}");
+                            if first != pkg && !is_external_path(resolved_type) {
+                                return resolved_internal(
+                                    format!("{pkg}::{resolved_path}"),
+                                    simple,
+                                );
                             }
                         }
                     }
-                    return resolved_path;
+                    return resolved(resolved_path, simple);
                 }
 
                 // Otherwise prepend package if available
                 if let Some(pkg) = package_name {
                     if !pkg.is_empty() {
-                        return format!("{pkg}::{resolved_path}");
+                        return resolved_internal(format!("{pkg}::{resolved_path}"), simple);
                     }
                 }
-                return resolved_path;
+                return resolved(resolved_path, simple);
             }
         }
 
@@ -319,30 +401,33 @@ pub fn resolve_rust_reference(
                 // If the first segment matches the package name, it's already
                 // absolute within this crate - return as-is
                 if first_segment == pkg {
-                    return name.to_string();
+                    return resolved_internal(name.to_string(), simple);
                 }
                 // Check if any import in the map starts with this segment.
                 // If so, it's a known external crate (e.g., `serde::Deserialize`
                 // when we have `use serde::Serialize;`).
                 if import_map.has_crate_import(first_segment, "::") {
-                    return name.to_string();
+                    return resolved_external(name.to_string(), simple);
                 }
                 // Otherwise, assume it's a relative internal path and prepend
                 // the package name (e.g., `utils::helper` -> `my_crate::utils::helper`)
-                return format!("{pkg}::{name}");
+                return resolved_internal(format!("{pkg}::{name}"), simple);
             }
         }
-        return name.to_string();
+        return resolved(name.to_string(), simple);
     }
 
     // Try import map
-    if let Some(resolved) = import_map.resolve(name) {
+    if let Some(resolved_path) = import_map.resolve(name) {
         // Normalize result if it contains Rust-relative prefixes
-        if resolved.starts_with("crate::")
-            || resolved.starts_with("self::")
-            || resolved.starts_with("super::")
+        if resolved_path.starts_with("crate::")
+            || resolved_path.starts_with("self::")
+            || resolved_path.starts_with("super::")
         {
-            return normalize_rust_path(resolved, package_name, current_module);
+            return resolved_internal(
+                normalize_rust_path(resolved_path, package_name, current_module),
+                simple,
+            );
         }
 
         // If resolved is a scoped path (contains ::), it may be a relative internal path
@@ -350,30 +435,26 @@ pub fn resolve_rust_reference(
         // Note: Unlike the scoped path handling above (for direct input), we don't use
         // has_crate_import here because the path already came from the import map.
         // Import map paths are typically internal module paths that need the package prefix.
-        if ImportMap::is_scoped(resolved, "::") {
+        if ImportMap::is_scoped(resolved_path, "::") {
             // Check if it looks like an external path (known std lib prefixes)
-            if resolved.starts_with("std::")
-                || resolved.starts_with("core::")
-                || resolved.starts_with("alloc::")
-                || resolved.starts_with("external::")
-            {
-                return resolved.to_string();
+            if is_external_path(resolved_path) {
+                return resolved_external(resolved_path.to_string(), simple);
             }
             // For relative scoped paths, prepend package name
             if let Some(pkg) = package_name {
                 if !pkg.is_empty() {
-                    let first_segment = resolved.split("::").next().unwrap_or(resolved);
+                    let first_segment = resolved_path.split("::").next().unwrap_or(resolved_path);
                     // If first segment matches package name, it's already absolute
                     if first_segment == pkg {
-                        return resolved.to_string();
+                        return resolved_internal(resolved_path.to_string(), simple);
                     }
                     // Prepend package name for relative internal paths
-                    return format!("{pkg}::{resolved}");
+                    return resolved_internal(format!("{pkg}::{resolved_path}"), simple);
                 }
             }
         }
 
-        return resolved.to_string();
+        return resolved(resolved_path.to_string(), simple);
     }
 
     // Try glob imports as fallback
@@ -391,19 +472,19 @@ pub fn resolve_rust_reference(
             if !pkg.is_empty() {
                 // Check if glob_path is already absolute
                 if glob_path.starts_with(pkg) {
-                    return format!("{glob_path}::{name}");
+                    return resolved_internal(format!("{glob_path}::{name}"), simple);
                 }
                 // Otherwise prepend package name
-                return format!("{pkg}::{candidate}");
+                return resolved_internal(format!("{pkg}::{candidate}"), simple);
             }
         }
-        return candidate;
+        return resolved(candidate, simple);
     }
 
     // Try parent scope
     if let Some(scope) = parent_scope {
         if !scope.is_empty() {
-            return format!("{scope}::{name}");
+            return resolved_internal(format!("{scope}::{name}"), simple);
         }
     }
 
@@ -411,15 +492,15 @@ pub fn resolve_rust_reference(
     // This handles types defined in the same module that aren't imported
     match (package_name, current_module) {
         (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-            format!("{pkg}::{module}::{name}")
+            resolved_internal(format!("{pkg}::{module}::{name}"), simple)
         }
         (Some(pkg), _) if !pkg.is_empty() => {
             // At crate root (no module path)
-            format!("{pkg}::{name}")
+            resolved_internal(format!("{pkg}::{name}"), simple)
         }
         _ => {
             // No package context available, mark as external
-            format!("external::{name}")
+            resolved_external(format!("external::{name}"), simple)
         }
     }
 }
@@ -760,14 +841,16 @@ mod tests {
         let import_map = ImportMap::new("::");
         let result = resolve_ufcs_call(
             "<Data as Processor>::process",
+            "process",
             &import_map,
             Some("test_crate"),
             None,
         );
         assert_eq!(
-            result,
+            result.target,
             "<test_crate::Data as test_crate::Processor>::process"
         );
+        assert_eq!(result.simple_name, "process");
     }
 
     #[test]
@@ -779,12 +862,13 @@ mod tests {
 
         let result = resolve_ufcs_call(
             "<Widget as Drawable>::draw",
+            "draw",
             &import_map,
             Some("my_crate"),
             None,
         );
         assert_eq!(
-            result,
+            result.target,
             "<my_crate::types::Widget as my_crate::traits::Drawable>::draw"
         );
     }
@@ -795,12 +879,17 @@ mod tests {
         let import_map = ImportMap::new("::");
         let result = resolve_ufcs_call(
             "<std::vec::Vec as std::iter::Iterator>::next",
+            "next",
             &import_map,
             Some("test_crate"),
             None,
         );
         // std:: paths should remain as-is
-        assert_eq!(result, "<std::vec::Vec as std::iter::Iterator>::next");
+        assert_eq!(
+            result.target,
+            "<std::vec::Vec as std::iter::Iterator>::next"
+        );
+        assert!(result.is_external);
     }
 
     #[test]
@@ -809,12 +898,18 @@ mod tests {
         let import_map = ImportMap::new("::");
 
         // Missing " as "
-        let result = resolve_ufcs_call("<Data>::process", &import_map, Some("test"), None);
-        assert_eq!(result, "<Data>::process");
+        let result = resolve_ufcs_call(
+            "<Data>::process",
+            "process",
+            &import_map,
+            Some("test"),
+            None,
+        );
+        assert_eq!(result.target, "<Data>::process");
 
         // Missing ">::"
-        let result = resolve_ufcs_call("<Data as Trait>", &import_map, Some("test"), None);
-        assert_eq!(result, "<Data as Trait>");
+        let result = resolve_ufcs_call("<Data as Trait>", "Trait", &import_map, Some("test"), None);
+        assert_eq!(result.target, "<Data as Trait>");
     }
 
     #[test]
@@ -823,12 +918,13 @@ mod tests {
         let import_map = ImportMap::new("::");
         let result = resolve_ufcs_call(
             "< Data as Processor >::process",
+            "process",
             &import_map,
             Some("test_crate"),
             None,
         );
         assert_eq!(
-            result,
+            result.target,
             "<test_crate::Data as test_crate::Processor>::process"
         );
     }
@@ -967,8 +1063,9 @@ use network::{
         import_map.add_glob("helpers");
 
         // Bare identifier should resolve through glob import
-        let result = resolve_rust_reference("helper_a", &import_map, None, Some("pkg"), None);
-        assert_eq!(result, "pkg::helpers::helper_a");
+        let result =
+            resolve_rust_reference("helper_a", "helper_a", &import_map, None, Some("pkg"), None);
+        assert_eq!(result.target, "pkg::helpers::helper_a");
     }
 
     #[test]
@@ -978,7 +1075,14 @@ use network::{
         import_map.add_glob("utils");
 
         // Should use first glob import
-        let result = resolve_rust_reference("some_func", &import_map, None, Some("pkg"), None);
-        assert_eq!(result, "pkg::helpers::some_func");
+        let result = resolve_rust_reference(
+            "some_func",
+            "some_func",
+            &import_map,
+            None,
+            Some("pkg"),
+            None,
+        );
+        assert_eq!(result.target, "pkg::helpers::some_func");
     }
 }

@@ -124,7 +124,7 @@ pub fn handle_struct_impl(
         }
 
         // Extract uses_types for relationships
-        let mut uses_types_strs = if !fields.is_empty() {
+        let mut uses_types_refs = if !fields.is_empty() {
             // Store field info as JSON in attributes
             if let Ok(json) = serde_json::to_string(&fields) {
                 metadata.attributes.insert("fields".to_string(), json);
@@ -136,14 +136,15 @@ pub fn handle_struct_impl(
 
         // Add trait bounds to uses_types
         for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types_strs.contains(trait_ref) {
-                uses_types_strs.push(trait_ref.clone());
+            if !uses_types_refs.contains(trait_ref) {
+                uses_types_refs.push(trait_ref.clone());
             }
         }
 
-        // Store in attributes for backward compatibility
-        if !uses_types_strs.is_empty() {
-            if let Ok(json) = serde_json::to_string(&uses_types_strs) {
+        // Store targets in attributes for backward compatibility
+        if !uses_types_refs.is_empty() {
+            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
+            if let Ok(json) = serde_json::to_string(&targets) {
                 metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
@@ -152,7 +153,7 @@ pub fn handle_struct_impl(
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
         // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
-            uses_types: strings_to_source_refs(&uses_types_strs),
+            uses_types: resolved_refs_to_source_refs(&uses_types_refs),
             ..Default::default()
         };
 
@@ -227,7 +228,7 @@ pub fn handle_enum_impl(
         metadata.decorators = derives;
 
         // Extract uses_types for relationships
-        let mut uses_types_strs = if !variants.is_empty() {
+        let mut uses_types_refs = if !variants.is_empty() {
             // Store variant info as JSON in attributes
             if let Ok(json) = serde_json::to_string(&variants) {
                 metadata.attributes.insert("variants".to_string(), json);
@@ -239,14 +240,15 @@ pub fn handle_enum_impl(
 
         // Add trait bounds to uses_types
         for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types_strs.contains(trait_ref) {
-                uses_types_strs.push(trait_ref.clone());
+            if !uses_types_refs.contains(trait_ref) {
+                uses_types_refs.push(trait_ref.clone());
             }
         }
 
-        // Store in attributes for backward compatibility
-        if !uses_types_strs.is_empty() {
-            if let Ok(json) = serde_json::to_string(&uses_types_strs) {
+        // Store targets in attributes for backward compatibility
+        if !uses_types_refs.is_empty() {
+            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
+            if let Ok(json) = serde_json::to_string(&targets) {
                 metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
@@ -255,7 +257,7 @@ pub fn handle_enum_impl(
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
         // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
-            uses_types: strings_to_source_refs(&uses_types_strs),
+            uses_types: resolved_refs_to_source_refs(&uses_types_refs),
             ..Default::default()
         };
 
@@ -356,11 +358,14 @@ pub fn handle_trait_impl(
         }
 
         // Store resolved supertraits separately for EXTENDS_INTERFACE relationships
-        let supertraits: Vec<String> = bounds
+        // NOTE: Lifetimes are now excluded at query time (in extract_trait_bounds),
+        // so no filtering is needed here
+        // bounds are bare identifiers from AST, use as both name and simple_name
+        let supertrait_refs: Vec<ResolvedReference> = bounds
             .iter()
-            .filter(|b| !b.starts_with('\'')) // Skip lifetimes
-            .map(|b| resolution_ctx.resolve(b))
+            .map(|b| resolution_ctx.resolve(b, b))
             .collect();
+        let supertraits: Vec<String> = supertrait_refs.iter().map(|r| r.target.clone()).collect();
         if !supertraits.is_empty() {
             match serde_json::to_string(&supertraits) {
                 Ok(json) => {
@@ -373,9 +378,10 @@ pub fn handle_trait_impl(
         }
 
         // Build uses_types from generic bounds only (supertraits are stored separately)
-        let uses_types_strs: Vec<String> = parsed_generics.bound_trait_refs.clone();
-        if !uses_types_strs.is_empty() {
-            match serde_json::to_string(&uses_types_strs) {
+        let uses_types_refs: Vec<ResolvedReference> = parsed_generics.bound_trait_refs.clone();
+        if !uses_types_refs.is_empty() {
+            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
+            match serde_json::to_string(&targets) {
                 Ok(json) => {
                     metadata.attributes.insert("uses_types".to_string(), json);
                 }
@@ -389,8 +395,8 @@ pub fn handle_trait_impl(
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
         // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
-            uses_types: strings_to_source_refs(&uses_types_strs),
-            supertraits: supertraits.clone(),
+            uses_types: resolved_refs_to_source_refs(&uses_types_refs),
+            supertraits,
             ..Default::default()
         };
 
@@ -709,8 +715,10 @@ fn extract_trait_bounds(ctx: &ExtractionContext) -> Vec<String> {
     };
 
     // Query for type identifiers within trait bounds
+    // NOTE: We exclude (lifetime) intentionally - lifetimes are not trait bounds
+    // and should not create EXTENDS_INTERFACE relationships
     let query_source = r#"
-        [(type_identifier) (scoped_type_identifier) (lifetime)] @bound
+        [(type_identifier) (scoped_type_identifier)] @bound
     "#;
 
     let language = tree_sitter_rust::LANGUAGE.into();
@@ -947,31 +955,40 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
 // Type Resolution Helpers
 // ============================================================================
 
-/// Convert a list of type name strings to SourceReferences
+use crate::rust::import_resolution::ResolvedReference;
+
+/// Convert a list of resolved references to SourceReferences
 ///
 /// Used to populate the typed `uses_types` field in EntityRelationshipData.
 /// Location is set to a default value since we don't have precise source locations
 /// for field types in the current extraction.
-fn strings_to_source_refs(types: &[String]) -> Vec<SourceReference> {
-    types
-        .iter()
-        .map(|t| SourceReference {
-            target: t.clone(),
-            location: SourceLocation::default(),
-            ref_type: ReferenceType::TypeUsage,
+fn resolved_refs_to_source_refs(refs: &[ResolvedReference]) -> Vec<SourceReference> {
+    refs.iter()
+        .map(|r| {
+            SourceReference::new(
+                r.target.clone(),
+                r.simple_name.clone(),
+                r.is_external,
+                SourceLocation::default(),
+                ReferenceType::TypeUsage,
+            )
         })
         .collect()
 }
 
 /// Extract and resolve field types for USES relationships
-fn extract_field_type_refs(fields: &[FieldInfo], ctx: &RustResolutionContext) -> Vec<String> {
+fn extract_field_type_refs(
+    fields: &[FieldInfo],
+    ctx: &RustResolutionContext,
+) -> Vec<ResolvedReference> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
     for field in fields {
         for type_name in extract_type_names_from_field_type(&field.field_type) {
             if !is_primitive_type(&type_name) {
-                let resolved = ctx.resolve(&type_name);
+                // type_name from string parsing is the simple_name
+                let resolved = ctx.resolve(&type_name, &type_name);
                 if seen.insert(resolved.clone()) {
                     result.push(resolved);
                 }
@@ -983,7 +1000,10 @@ fn extract_field_type_refs(fields: &[FieldInfo], ctx: &RustResolutionContext) ->
 }
 
 /// Extract and resolve types from enum variant fields for USES relationships
-fn extract_variant_type_refs(variants: &[VariantInfo], ctx: &RustResolutionContext) -> Vec<String> {
+fn extract_variant_type_refs(
+    variants: &[VariantInfo],
+    ctx: &RustResolutionContext,
+) -> Vec<ResolvedReference> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
@@ -991,7 +1011,8 @@ fn extract_variant_type_refs(variants: &[VariantInfo], ctx: &RustResolutionConte
         for field in &variant.fields {
             for type_name in extract_type_names_from_field_type(&field.field_type) {
                 if !is_primitive_type(&type_name) {
-                    let resolved = ctx.resolve(&type_name);
+                    // type_name from string parsing is the simple_name
+                    let resolved = ctx.resolve(&type_name, &type_name);
                     if seen.insert(resolved.clone()) {
                         result.push(resolved);
                     }
@@ -1092,7 +1113,7 @@ pub(crate) fn extract_type_refs_from_type_expr(
     type_expr: &str,
     ctx: &RustResolutionContext,
     generic_params: &[String],
-) -> Vec<String> {
+) -> Vec<ResolvedReference> {
     let mut seen = HashSet::new();
     let mut result = Vec::new();
 
@@ -1105,8 +1126,8 @@ pub(crate) fn extract_type_refs_from_type_expr(
         if generic_params.contains(&type_name) {
             continue;
         }
-        // Resolve through imports
-        let resolved = ctx.resolve(&type_name);
+        // Resolve through imports - type_name from string parsing is the simple_name
+        let resolved = ctx.resolve(&type_name, &type_name);
         if seen.insert(resolved.clone()) {
             result.push(resolved);
         }

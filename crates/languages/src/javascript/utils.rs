@@ -171,11 +171,14 @@ pub fn extract_function_calls(
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = resolve_reference(&name, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    calls.push(SourceReference {
-                        target: resolved,
-                        location: SourceLocation::from_tree_sitter_node(bare_cap.node),
-                        ref_type: ReferenceType::Call,
-                    });
+                    // simple_name is the bare identifier from the AST node
+                    calls.push(SourceReference::new(
+                        resolved,
+                        name,  // simple_name from AST
+                        false, // JS doesn't track external refs
+                        SourceLocation::from_tree_sitter_node(bare_cap.node),
+                        ReferenceType::Call,
+                    ));
                 }
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
@@ -190,11 +193,14 @@ pub fn extract_function_calls(
                 let call_ref = format!("{resolved_recv}.{method_name}");
                 if seen.insert(call_ref.clone()) {
                     // Use method node for the location (more specific than receiver)
-                    calls.push(SourceReference {
-                        target: call_ref,
-                        location: SourceLocation::from_tree_sitter_node(method_cap.node),
-                        ref_type: ReferenceType::Call,
-                    });
+                    // simple_name is the method name from the AST node
+                    calls.push(SourceReference::new(
+                        call_ref,
+                        method_name, // simple_name from AST
+                        false,       // JS doesn't track external refs
+                        SourceLocation::from_tree_sitter_node(method_cap.node),
+                        ReferenceType::Call,
+                    ));
                 }
             }
         }
@@ -282,11 +288,13 @@ fn extract_types_from_jsdoc_string(
             if !is_js_primitive(base_type) && !base_type.is_empty() {
                 let resolved = resolve_reference(base_type, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    type_refs.push(SourceReference {
-                        target: resolved,
-                        location: SourceLocation::default(),
-                        ref_type: ReferenceType::TypeUsage,
-                    });
+                    type_refs.push(SourceReference::new(
+                        resolved,
+                        base_type, // simple_name from JSDoc string
+                        false,     // JS doesn't track external refs
+                        SourceLocation::default(),
+                        ReferenceType::TypeUsage,
+                    ));
                 }
             }
 
@@ -299,11 +307,13 @@ fn extract_types_from_jsdoc_string(
                         let resolved =
                             resolve_reference(generic_type, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference {
-                                target: resolved,
-                                location: SourceLocation::default(),
-                                ref_type: ReferenceType::TypeUsage,
-                            });
+                            type_refs.push(SourceReference::new(
+                                resolved,
+                                generic_type, // simple_name from JSDoc string
+                                false,        // JS doesn't track external refs
+                                SourceLocation::default(),
+                                ReferenceType::TypeUsage,
+                            ));
                         }
                     }
                 }
@@ -313,11 +323,13 @@ fn extract_types_from_jsdoc_string(
             if !is_js_primitive(part) {
                 let resolved = resolve_reference(part, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    type_refs.push(SourceReference {
-                        target: resolved,
-                        location: SourceLocation::default(),
-                        ref_type: ReferenceType::TypeUsage,
-                    });
+                    type_refs.push(SourceReference::new(
+                        resolved,
+                        part,  // simple_name from JSDoc string
+                        false, // JS doesn't track external refs
+                        SourceLocation::default(),
+                        ReferenceType::TypeUsage,
+                    ));
                 }
             }
         }

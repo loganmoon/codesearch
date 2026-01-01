@@ -96,7 +96,9 @@ pub fn handle_impl_impl(
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
+    // for_type_base is the simple name from the AST
     let for_type_resolved_initial = resolve_rust_reference(
+        for_type_base,
         for_type_base,
         &import_map,
         None,
@@ -107,7 +109,7 @@ pub fn handle_impl_impl(
     // Check if the type is a type alias and resolve to the underlying concrete type.
     // This ensures `impl Settings` (where Settings = RawConfig) has methods named
     // RawConfig::new instead of Settings::new.
-    let for_type_resolved = {
+    let for_type_resolved_ref = {
         // Get AST root for type alias extraction
         let root = crate::common::import_map::get_ast_root(impl_node);
 
@@ -117,7 +119,9 @@ pub fn handle_impl_impl(
         // Try to resolve the base type name through the alias chain
         if let Some(concrete_type) = resolve_type_alias_chain(for_type_base, &type_aliases, 10) {
             // Build the qualified name for the concrete type
+            // The concrete_type comes from the type alias resolution
             resolve_rust_reference(
+                &concrete_type,
                 &concrete_type,
                 &import_map,
                 None,
@@ -128,6 +132,7 @@ pub fn handle_impl_impl(
             for_type_resolved_initial
         }
     };
+    let for_type_resolved = for_type_resolved_ref.target.clone();
 
     // Keep original for display, but store resolved for relationships
     let for_type = for_type_raw.clone();
@@ -229,10 +234,14 @@ pub fn handle_impl_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| SourceReference {
-            target: trait_ref.clone(),
-            location: impl_location.clone(),
-            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        .map(|trait_ref| {
+            SourceReference::new(
+                trait_ref.target.clone(),
+                trait_ref.simple_name.clone(),
+                trait_ref.is_external,
+                impl_location.clone(),
+                codesearch_core::entities::ReferenceType::TypeUsage,
+            )
         })
         .collect();
 
@@ -307,13 +316,16 @@ pub fn handle_impl_trait_impl(
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    let for_type_resolved = resolve_rust_reference(
+    // for_type_base is the simple name from the AST
+    let for_type_resolved_ref = resolve_rust_reference(
+        for_type_base,
         for_type_base,
         &import_map,
         None,
         package_name,
         module_path.as_deref(),
     );
+    let for_type_resolved = for_type_resolved_ref.target.clone();
 
     // Resolve trait_name through imports (strip generics first for resolution)
     let trait_name_base = trait_name_raw
@@ -321,13 +333,16 @@ pub fn handle_impl_trait_impl(
         .next()
         .unwrap_or(&trait_name_raw)
         .trim();
-    let trait_name_resolved = resolve_rust_reference(
+    // trait_name_base is the simple name from the AST
+    let trait_name_resolved_ref = resolve_rust_reference(
+        trait_name_base,
         trait_name_base,
         &import_map,
         None,
         package_name,
         module_path.as_deref(),
     );
+    let trait_name_resolved = trait_name_resolved_ref.target.clone();
 
     // Keep original for display
     let for_type = for_type_raw.clone();
@@ -429,10 +444,14 @@ pub fn handle_impl_trait_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| SourceReference {
-            target: trait_ref.clone(),
-            location: location.clone(),
-            ref_type: codesearch_core::entities::ReferenceType::TypeUsage,
+        .map(|trait_ref| {
+            SourceReference::new(
+                trait_ref.target.clone(),
+                trait_ref.simple_name.clone(),
+                trait_ref.is_external,
+                location.clone(),
+                codesearch_core::entities::ReferenceType::TypeUsage,
+            )
         })
         .collect();
 

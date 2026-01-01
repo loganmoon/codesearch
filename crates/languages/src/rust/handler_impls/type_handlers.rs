@@ -141,14 +141,6 @@ pub fn handle_struct_impl(
             }
         }
 
-        // Store targets in attributes for backward compatibility
-        if !uses_types_refs.is_empty() {
-            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
-            if let Ok(json) = serde_json::to_string(&targets) {
-                metadata.attributes.insert("uses_types".to_string(), json);
-            }
-        }
-
         // Build typed relationships
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
         // a module-level relationship. They are collected by module_handlers.
@@ -242,14 +234,6 @@ pub fn handle_enum_impl(
         for trait_ref in &parsed_generics.bound_trait_refs {
             if !uses_types_refs.contains(trait_ref) {
                 uses_types_refs.push(trait_ref.clone());
-            }
-        }
-
-        // Store targets in attributes for backward compatibility
-        if !uses_types_refs.is_empty() {
-            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
-            if let Ok(json) = serde_json::to_string(&targets) {
-                metadata.attributes.insert("uses_types".to_string(), json);
             }
         }
 
@@ -365,31 +349,22 @@ pub fn handle_trait_impl(
             .iter()
             .map(|b| resolution_ctx.resolve(b, b))
             .collect();
-        let supertraits: Vec<String> = supertrait_refs.iter().map(|r| r.target.clone()).collect();
-        if !supertraits.is_empty() {
-            match serde_json::to_string(&supertraits) {
-                Ok(json) => {
-                    metadata.attributes.insert("supertraits".to_string(), json);
-                }
-                Err(e) => {
-                    warn!("Failed to serialize supertraits: {e}");
-                }
-            }
-        }
+        let supertraits: Vec<SourceReference> = supertrait_refs
+            .iter()
+            .filter_map(|r| {
+                SourceReference::builder()
+                    .target(r.target.clone())
+                    .simple_name(r.simple_name.clone())
+                    .is_external(r.is_external)
+                    .location(SourceLocation::default())
+                    .ref_type(ReferenceType::Extends)
+                    .build()
+                    .ok()
+            })
+            .collect();
 
         // Build uses_types from generic bounds only (supertraits are stored separately)
         let uses_types_refs: Vec<ResolvedReference> = parsed_generics.bound_trait_refs.clone();
-        if !uses_types_refs.is_empty() {
-            let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
-            match serde_json::to_string(&targets) {
-                Ok(json) => {
-                    metadata.attributes.insert("uses_types".to_string(), json);
-                }
-                Err(e) => {
-                    warn!("Failed to serialize uses_types: {e}");
-                }
-            }
-        }
 
         // Build typed relationships
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
@@ -964,14 +939,15 @@ use crate::rust::import_resolution::ResolvedReference;
 /// for field types in the current extraction.
 fn resolved_refs_to_source_refs(refs: &[ResolvedReference]) -> Vec<SourceReference> {
     refs.iter()
-        .map(|r| {
-            SourceReference::new(
-                r.target.clone(),
-                r.simple_name.clone(),
-                r.is_external,
-                SourceLocation::default(),
-                ReferenceType::TypeUsage,
-            )
+        .filter_map(|r| {
+            SourceReference::builder()
+                .target(r.target.clone())
+                .simple_name(r.simple_name.clone())
+                .is_external(r.is_external)
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::TypeUsage)
+                .build()
+                .ok()
         })
         .collect()
 }

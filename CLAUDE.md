@@ -124,7 +124,7 @@ This is a workspace with these crates:
 - **indexer**: Repository indexing logic with Git integration
 - **watcher**: Real-time file system monitoring with ignore patterns
 - **storage**: Persistent storage layer (Postgres, Qdrant, Neo4j)
-- **outbox-processor**: Background processor for Neo4j relationship resolution
+- **outbox-processor**: Background processor for Neo4j relationship resolution using typed `EntityRelationshipData`
 
 **Search & Retrieval:**
 - **embeddings**: Vector embedding providers (Jina, LocalApi/vLLM)
@@ -182,5 +182,6 @@ cargo run -- serve        # Start REST API server
 **Neo4j Relationships:**
 - Forward: CONTAINS, IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE, INHERITS_FROM, USES, CALLS, IMPORTS
 - Reciprocal: IMPLEMENTED_BY, ASSOCIATED_WITH, EXTENDED_BY, HAS_SUBCLASS, USED_BY, CALLED_BY, IMPORTED_BY
-- Relationships resolved automatically by outbox processor after entity creation
+- Relationship data extracted at parse time into typed `EntityRelationshipData` fields (calls, uses_types, imports, etc.)
+- `GenericResolver` resolves references using configurable `LookupStrategy` chains
 - Database per repository: `codesearch_{repository_uuid}`

@@ -269,7 +269,7 @@ pub fn extract_calls_relationships(entity: &CodeEntity) -> Vec<Relationship> {
                         rel_type: "CALLS".to_string(),
                         from_id: entity.entity_id.clone(),
                         to_id: None,
-                        to_name: Some(call_ref.target),
+                        to_name: Some(call_ref.target().to_string()),
                         properties: HashMap::new(),
                     });
                 }

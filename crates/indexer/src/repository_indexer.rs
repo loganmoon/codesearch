@@ -10,12 +10,14 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use codesearch_core::config::SparseEmbeddingsConfig;
 use codesearch_core::entities::{
-    CodeEntityBuilder, EntityRelationshipData, EntityType, Language, SourceLocation, Visibility,
+    CodeEntityBuilder, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
+    SourceReference, Visibility,
 };
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::{EmbeddingContext, EmbeddingManager, EmbeddingTask};
+use codesearch_languages::rust::rust_path::RustPath;
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
@@ -423,7 +425,7 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
 ///
 /// This extracts imports that are direct children of the source_file (not nested in mod blocks).
 /// Uses tree-sitter queries to properly parse the file structure.
-fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
+fn extract_file_level_imports(file_path: &Path) -> Vec<SourceReference> {
     // Read file content
     let content = match std::fs::read_to_string(file_path) {
         Ok(c) => c,
@@ -463,8 +465,52 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<String> {
         if child.kind() == "use_declaration" {
             // Extract the use path from the declaration
             if let Some(argument) = child.child_by_field_name("argument") {
-                let import_text = &content[argument.byte_range()];
-                imports.push(import_text.to_string());
+                let import_path = &content[argument.byte_range()];
+                if import_path.is_empty() {
+                    continue;
+                }
+
+                // Use RustPath for proper parsing - encapsulates all path logic
+                let rust_path = RustPath::parse(import_path);
+
+                // Extract simple name using RustPath methods
+                let simple_name = rust_path
+                    .simple_name()
+                    .unwrap_or_else(|| {
+                        rust_path
+                            .segments()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("")
+                    })
+                    .to_string();
+
+                // Skip if simple_name is empty (shouldn't happen with valid imports)
+                if simple_name.is_empty() {
+                    continue;
+                }
+
+                // Determine if external: relative paths (crate::, self::, super::) are internal
+                let is_external = !rust_path.is_relative();
+
+                let location = SourceLocation {
+                    start_line: child.start_position().row + 1,
+                    end_line: child.end_position().row + 1,
+                    start_column: child.start_position().column,
+                    end_column: child.end_position().column,
+                };
+
+                // Use rust_path.to_qualified_name() for consistency with RustPath parsing
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(rust_path.to_qualified_name())
+                    .simple_name(simple_name)
+                    .is_external(is_external)
+                    .location(location)
+                    .ref_type(ReferenceType::Import)
+                    .build()
+                {
+                    imports.push(source_ref);
+                }
             }
         }
     }

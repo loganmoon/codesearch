@@ -22,12 +22,13 @@ use crate::rust::handler_impls::common::{
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
-    Language, SourceLocation, SourceReference, Visibility,
+    Language, ReferenceType, SourceLocation, SourceReference, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
+use tracing::debug;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Compose a full prefix from package, module, and AST scope components
@@ -234,20 +235,29 @@ pub fn handle_impl_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| {
-            SourceReference::new(
-                trait_ref.target.clone(),
-                trait_ref.simple_name.clone(),
-                trait_ref.is_external,
-                impl_location.clone(),
-                codesearch_core::entities::ReferenceType::TypeUsage,
-            )
+        .filter_map(|trait_ref| {
+            SourceReference::builder()
+                .target(trait_ref.target.clone())
+                .simple_name(trait_ref.simple_name.clone())
+                .is_external(trait_ref.is_external)
+                .location(impl_location.clone())
+                .ref_type(codesearch_core::entities::ReferenceType::TypeUsage)
+                .build()
+                .ok()
         })
         .collect();
 
     let relationships = EntityRelationshipData {
         uses_types,
-        for_type: Some(for_type_resolved.clone()),
+        for_type: Some(
+            SourceReference::builder()
+                .target(for_type_resolved_ref.target.clone())
+                .simple_name(for_type_resolved_ref.simple_name.clone())
+                .is_external(for_type_resolved_ref.is_external)
+                .location(impl_location.clone())
+                .ref_type(ReferenceType::TypeUsage)
+                .build()?,
+        ),
         ..Default::default()
     };
 
@@ -444,21 +454,38 @@ pub fn handle_impl_trait_impl(
     let uses_types: Vec<SourceReference> = parsed_generics
         .bound_trait_refs
         .iter()
-        .map(|trait_ref| {
-            SourceReference::new(
-                trait_ref.target.clone(),
-                trait_ref.simple_name.clone(),
-                trait_ref.is_external,
-                location.clone(),
-                codesearch_core::entities::ReferenceType::TypeUsage,
-            )
+        .filter_map(|trait_ref| {
+            SourceReference::builder()
+                .target(trait_ref.target.clone())
+                .simple_name(trait_ref.simple_name.clone())
+                .is_external(trait_ref.is_external)
+                .location(location.clone())
+                .ref_type(codesearch_core::entities::ReferenceType::TypeUsage)
+                .build()
+                .ok()
         })
         .collect();
 
     let relationships = EntityRelationshipData {
         uses_types,
-        implements_trait: Some(trait_name_resolved.clone()),
-        for_type: Some(for_type_resolved.clone()),
+        implements_trait: Some(
+            SourceReference::builder()
+                .target(trait_name_resolved_ref.target.clone())
+                .simple_name(trait_name_resolved_ref.simple_name.clone())
+                .is_external(trait_name_resolved_ref.is_external)
+                .location(location.clone())
+                .ref_type(ReferenceType::Extends)
+                .build()?,
+        ),
+        for_type: Some(
+            SourceReference::builder()
+                .target(for_type_resolved_ref.target.clone())
+                .simple_name(for_type_resolved_ref.simple_name.clone())
+                .is_external(for_type_resolved_ref.is_external)
+                .location(location.clone())
+                .ref_type(ReferenceType::TypeUsage)
+                .build()?,
+        ),
         ..Default::default()
     };
 
@@ -504,24 +531,34 @@ fn extract_impl_methods(
     for child in body_node.children(&mut cursor) {
         match child.kind() {
             node_kinds::FUNCTION_ITEM => {
-                if let Ok(method) =
-                    extract_method(child, source, file_path, repository_id, impl_ctx)
-                {
-                    entities.push(method);
+                match extract_method(child, source, file_path, repository_id, impl_ctx) {
+                    Ok(method) => entities.push(method),
+                    Err(e) => debug!(
+                        "Failed to extract method in impl block at {}:{}: {e}",
+                        file_path.display(),
+                        child.start_position().row + 1
+                    ),
                 }
             }
             "const_item" => {
-                if let Ok(constant) =
-                    extract_associated_constant(child, source, file_path, repository_id, impl_ctx)
+                match extract_associated_constant(child, source, file_path, repository_id, impl_ctx)
                 {
-                    entities.push(constant);
+                    Ok(constant) => entities.push(constant),
+                    Err(e) => debug!(
+                        "Failed to extract associated constant in impl block at {}:{}: {e}",
+                        file_path.display(),
+                        child.start_position().row + 1
+                    ),
                 }
             }
             "type_item" => {
-                if let Ok(type_alias) =
-                    extract_associated_type(child, source, file_path, repository_id, impl_ctx)
-                {
-                    entities.push(type_alias);
+                match extract_associated_type(child, source, file_path, repository_id, impl_ctx) {
+                    Ok(type_alias) => entities.push(type_alias),
+                    Err(e) => debug!(
+                        "Failed to extract associated type in impl block at {}:{}: {e}",
+                        file_path.display(),
+                        child.start_position().row + 1
+                    ),
                 }
             }
             _ => {}

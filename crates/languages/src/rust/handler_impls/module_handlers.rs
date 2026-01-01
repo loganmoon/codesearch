@@ -15,14 +15,18 @@ use crate::rust::handler_impls::common::{
     require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType, Language};
+use crate::rust::rust_path::RustPath;
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
+    SourceReference,
+};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
 
 /// Extract use statements from a module node
-fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
+fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
     let mut imports = Vec::new();
     let mut cursor = node.walk();
 
@@ -33,9 +37,49 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<String> {
                 let import_path = import_text
                     .trim_start_matches("use ")
                     .trim_end_matches(';')
-                    .trim()
+                    .trim();
+
+                // Skip empty imports
+                if import_path.is_empty() {
+                    continue;
+                }
+
+                // Use RustPath for proper parsing - encapsulates path logic
+                let rust_path = RustPath::parse(import_path);
+
+                // Extract simple name using RustPath
+                let simple_name = rust_path
+                    .simple_name()
+                    .unwrap_or_else(|| {
+                        rust_path
+                            .segments()
+                            .first()
+                            .map(String::as_str)
+                            .unwrap_or("")
+                    })
                     .to_string();
-                imports.push(import_path);
+
+                // Skip if simple_name is empty (shouldn't happen with valid imports)
+                if simple_name.is_empty() {
+                    continue;
+                }
+
+                // Determine if external: relative paths (crate::, self::, super::) are internal
+                let is_external = !rust_path.is_relative();
+
+                let location = SourceLocation::from_tree_sitter_node(child);
+
+                // Use rust_path.to_qualified_name() to ensure consistency with RustPath parsing
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(rust_path.to_qualified_name())
+                    .simple_name(simple_name)
+                    .is_external(is_external)
+                    .location(location)
+                    .ref_type(ReferenceType::Import)
+                    .build()
+                {
+                    imports.push(source_ref);
+                }
             }
         }
     }
@@ -92,15 +136,6 @@ pub fn handle_module_impl(
         "is_inline".to_string(),
         if has_body { "true" } else { "false" }.to_string(),
     );
-
-    // Store imports as JSON array (used by imports_resolver)
-    if !imports.is_empty() {
-        if let Ok(imports_json) = serde_json::to_string(&imports) {
-            metadata
-                .attributes
-                .insert("imports".to_string(), imports_json);
-        }
-    }
 
     // Build typed relationships
     let relationships = EntityRelationshipData {

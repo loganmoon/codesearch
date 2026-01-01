@@ -451,8 +451,8 @@ def foo():
     let import_map = ImportMap::new(".");
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
-    assert!(calls.iter().any(|c| c.target.contains("bar")));
-    assert!(calls.iter().any(|c| c.target.contains("baz")));
+    assert!(calls.iter().any(|c| c.target().contains("bar")));
+    assert!(calls.iter().any(|c| c.target().contains("baz")));
 }
 
 #[test]
@@ -468,8 +468,8 @@ def foo():
     let import_map = ImportMap::new(".");
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
-    assert!(calls.iter().any(|c| c.target.contains("method")));
-    assert!(calls.iter().any(|c| c.target.contains("helper")));
+    assert!(calls.iter().any(|c| c.target().contains("method")));
+    assert!(calls.iter().any(|c| c.target().contains("helper")));
 }
 
 #[test]
@@ -486,7 +486,7 @@ def foo():
     let import_map = ImportMap::new(".");
 
     let calls = extract_function_calls(func_node, source, &import_map, None);
-    let bar_count = calls.iter().filter(|c| c.target.contains("bar")).count();
+    let bar_count = calls.iter().filter(|c| c.target().contains("bar")).count();
     assert_eq!(bar_count, 1);
 }
 
@@ -503,7 +503,7 @@ fn test_extract_type_references_simple() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references(func_node, source, &import_map, None);
-    assert!(types.iter().any(|t| t.target.contains("User")));
+    assert!(types.iter().any(|t| t.target().contains("User")));
 }
 
 #[test]
@@ -516,7 +516,7 @@ fn test_extract_type_references_generic() {
 
     let types = extract_type_references(func_node, source, &import_map, None);
     // List is primitive, User is not
-    assert!(types.iter().any(|t| t.target.contains("User")));
+    assert!(types.iter().any(|t| t.target().contains("User")));
 }
 
 #[test]
@@ -541,7 +541,7 @@ fn test_extract_type_references_multiple() {
     let import_map = ImportMap::new(".");
 
     let types = extract_type_references(func_node, source, &import_map, None);
-    assert!(types.iter().any(|t| t.target.contains("User")));
-    assert!(types.iter().any(|t| t.target.contains("Admin")));
-    assert!(types.iter().any(|t| t.target.contains("Result")));
+    assert!(types.iter().any(|t| t.target().contains("User")));
+    assert!(types.iter().any(|t| t.target().contains("Admin")));
+    assert!(types.iter().any(|t| t.target().contains("Result")));
 }

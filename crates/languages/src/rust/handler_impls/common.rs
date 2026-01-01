@@ -742,13 +742,16 @@ pub fn extract_function_calls(
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 // name is a bare identifier, so it's both the name and simple_name
                 let resolved = ctx.resolve(&name, &name);
-                calls.push(SourceReference::new(
-                    resolved.target,
-                    resolved.simple_name,
-                    resolved.is_external,
-                    SourceLocation::from_tree_sitter_node(bare_cap.node),
-                    ReferenceType::Call,
-                ));
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(resolved.target)
+                    .simple_name(resolved.simple_name)
+                    .is_external(resolved.is_external)
+                    .location(SourceLocation::from_tree_sitter_node(bare_cap.node))
+                    .ref_type(ReferenceType::Call)
+                    .build()
+                {
+                    calls.push(source_ref);
+                }
             }
         } else if let Some(scoped_cap) = scoped_callee {
             // Scoped call like `std::io::read()`, `Vec::<String>::new()`, or UFCS
@@ -768,13 +771,16 @@ pub fn extract_function_calls(
                     extract_last_segment_from_scoped_identifier(scoped_cap.node, source)
                         .unwrap_or_else(|| call_path.clone());
                 let resolved = ctx.resolve(&call_path, &simple_name);
-                calls.push(SourceReference::new(
-                    resolved.target,
-                    resolved.simple_name,
-                    resolved.is_external,
-                    SourceLocation::from_tree_sitter_node(scoped_cap.node),
-                    ReferenceType::Call,
-                ));
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(resolved.target)
+                    .simple_name(resolved.simple_name)
+                    .is_external(resolved.is_external)
+                    .location(SourceLocation::from_tree_sitter_node(scoped_cap.node))
+                    .ref_type(ReferenceType::Call)
+                    .build()
+                {
+                    calls.push(source_ref);
+                }
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
             // Method call like `x.bar()`
@@ -791,13 +797,16 @@ pub fn extract_function_calls(
                         // so we add all possibilities. The outbox processor's resolution
                         // will only create CALLS relationships for methods that exist as entities.
                         for bound in bounds {
-                            calls.push(SourceReference::new(
-                                format!("{bound}::{method_name}"),
-                                method_name.clone(), // simple_name from AST node
-                                false,               // Trait bounds are internal by definition
-                                SourceLocation::from_tree_sitter_node(method_cap.node),
-                                ReferenceType::Call,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(format!("{bound}::{method_name}"))
+                                .simple_name(method_name.clone()) // simple_name from AST node
+                                .is_external(false) // Trait bounds are internal by definition
+                                .location(SourceLocation::from_tree_sitter_node(method_cap.node))
+                                .ref_type(ReferenceType::Call)
+                                .build()
+                            {
+                                calls.push(source_ref);
+                            }
                         }
                     } else {
                         // Not a generic type parameter, resolve through imports
@@ -806,13 +815,16 @@ pub fn extract_function_calls(
                         // recv_type is the type name from local vars, use as both name and simple_name
                         let resolved_type = ctx.resolve(recv_type, recv_type);
                         let target = resolved_type.target;
-                        calls.push(SourceReference::new(
-                            format!("<{target}>::{method_name}"),
-                            method_name.clone(), // simple_name from AST node
-                            resolved_type.is_external,
-                            SourceLocation::from_tree_sitter_node(method_cap.node),
-                            ReferenceType::Call,
-                        ));
+                        if let Ok(source_ref) = SourceReference::builder()
+                            .target(format!("<{target}>::{method_name}"))
+                            .simple_name(method_name.clone()) // simple_name from AST node
+                            .is_external(resolved_type.is_external)
+                            .location(SourceLocation::from_tree_sitter_node(method_cap.node))
+                            .ref_type(ReferenceType::Call)
+                            .build()
+                        {
+                            calls.push(source_ref);
+                        }
                     }
                 }
                 // If receiver type unknown, skip this method call (can't resolve)
@@ -829,13 +841,16 @@ pub fn extract_function_calls(
                         // chain_head_type is extracted from AST, use as both name and simple_name
                         let resolved_type = ctx.resolve(&chain_head_type, &chain_head_type);
                         let target = resolved_type.target;
-                        calls.push(SourceReference::new(
-                            format!("<{target}>::{method_name}"),
-                            method_name.clone(), // simple_name from AST node
-                            resolved_type.is_external,
-                            SourceLocation::from_tree_sitter_node(chain_method_cap.node),
-                            ReferenceType::Call,
-                        ));
+                        if let Ok(source_ref) = SourceReference::builder()
+                            .target(format!("<{target}>::{method_name}"))
+                            .simple_name(method_name.clone()) // simple_name from AST node
+                            .is_external(resolved_type.is_external)
+                            .location(SourceLocation::from_tree_sitter_node(chain_method_cap.node))
+                            .ref_type(ReferenceType::Call)
+                            .build()
+                        {
+                            calls.push(source_ref);
+                        }
                     }
                     None => {
                         trace!(
@@ -1191,13 +1206,16 @@ pub fn extract_type_references(
                         // Resolve through imports - bare identifier, use as both name and simple_name
                         let resolved = ctx.resolve(&type_name, &type_name);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference::new(
-                                resolved.target,
-                                resolved.simple_name,
-                                resolved.is_external,
-                                SourceLocation::from_tree_sitter_node(capture.node),
-                                ReferenceType::TypeUsage,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(resolved.target)
+                                .simple_name(resolved.simple_name)
+                                .is_external(resolved.is_external)
+                                .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                            {
+                                type_refs.push(source_ref);
+                            }
                         }
                     }
                 }
@@ -1210,13 +1228,16 @@ pub fn extract_type_references(
                         // Resolve to normalize crate::, self::, super:: paths
                         let resolved = ctx.resolve(&full_path, &simple_name);
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference::new(
-                                resolved.target,
-                                resolved.simple_name,
-                                resolved.is_external,
-                                SourceLocation::from_tree_sitter_node(capture.node),
-                                ReferenceType::TypeUsage,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(resolved.target)
+                                .simple_name(resolved.simple_name)
+                                .is_external(resolved.is_external)
+                                .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                            {
+                                type_refs.push(source_ref);
+                            }
                         }
                     }
                 }
@@ -1620,13 +1641,13 @@ pub fn make_requests() {
 
         println!("Extracted calls:");
         for call in &calls {
-            println!("  target: {}", call.target);
+            println!("  target: {}", call.target());
         }
 
         // Should have 3 calls with fully qualified names
         assert_eq!(calls.len(), 3);
 
-        let targets: Vec<&str> = calls.iter().map(|c| c.target.as_str()).collect();
+        let targets: Vec<&str> = calls.iter().map(|c| c.target()).collect();
         assert!(
             targets.contains(&"test_crate::network::http::get"),
             "Expected test_crate::network::http::get in {:?}",
@@ -1677,12 +1698,12 @@ pub fn make_requests() {
         let calls = extract_function_calls(func_node, source, &ctx, &local_vars, &generic_bounds);
         eprintln!(
             "calls: {:?}",
-            calls.iter().map(|c| &c.target).collect::<Vec<_>>()
+            calls.iter().map(|c| c.target()).collect::<Vec<_>>()
         );
 
         // Should resolve item.process() to test_crate::Processor::process
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].target, "test_crate::Processor::process");
+        assert_eq!(calls[0].target(), "test_crate::Processor::process");
     }
 
     #[test]
@@ -1878,13 +1899,13 @@ pub fn make_requests() {
 
         eprintln!("Extracted calls:");
         for call in &calls {
-            eprintln!("  target: {}", call.target);
+            eprintln!("  target: {}", call.target());
         }
 
         // Should have 1 call with fully qualified UFCS name
         assert_eq!(calls.len(), 1);
         assert_eq!(
-            calls[0].target,
+            calls[0].target(),
             "<test_crate::Data as test_crate::Processor>::process"
         );
     }
@@ -1917,24 +1938,24 @@ pub fn make_requests() {
 
         eprintln!("Extracted calls (turbofish test):");
         for call in &calls {
-            eprintln!("  target: {}", call.target);
+            eprintln!("  target: {}", call.target());
         }
 
         // Verify NO calls contain generic brackets - tree-sitter AST traversal
         // extracts just the path segments, skipping type_arguments nodes
         for call in &calls {
             assert!(
-                !call.target.contains('<'),
+                !call.target().contains('<'),
                 "Call target should not contain generics: {}",
-                call.target
+                call.target()
             );
         }
 
         // Verify we got the expected calls
         assert_eq!(calls.len(), 2);
-        assert!(calls.iter().any(|c| c.target == "test_crate::Vec::new"));
+        assert!(calls.iter().any(|c| c.target() == "test_crate::Vec::new"));
         assert!(calls
             .iter()
-            .any(|c| c.target == "test_crate::HashMap::with_capacity"));
+            .any(|c| c.target() == "test_crate::HashMap::with_capacity"));
     }
 }

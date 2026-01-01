@@ -100,7 +100,7 @@ pub fn handle_function_impl(
             metadata.attributes.insert("references".to_string(), json);
         }
         // Also store simplified calls list for backward compatibility with relationship resolution
-        let call_targets: Vec<&str> = calls.iter().map(|r| r.target.as_str()).collect();
+        let call_targets: Vec<&str> = calls.iter().map(|r| r.target()).collect();
         if let Ok(json) = serde_json::to_string(&call_targets) {
             metadata.attributes.insert("calls".to_string(), json);
         }
@@ -228,7 +228,7 @@ pub fn handle_arrow_function_impl(
             metadata.attributes.insert("references".to_string(), json);
         }
         // Also store simplified calls list for backward compatibility with relationship resolution
-        let call_targets: Vec<&str> = calls.iter().map(|r| r.target.as_str()).collect();
+        let call_targets: Vec<&str> = calls.iter().map(|r| r.target()).collect();
         if let Ok(json) = serde_json::to_string(&call_targets) {
             metadata.attributes.insert("calls".to_string(), json);
         }

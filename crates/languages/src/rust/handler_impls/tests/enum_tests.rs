@@ -299,17 +299,15 @@ where
         "U should have Debug bound from where clause"
     );
 
-    // Check uses_types includes bound traits
-    let uses_types_json = entity.metadata.attributes.get("uses_types");
-    assert!(uses_types_json.is_some(), "Should have uses_types");
-    let uses_types: Vec<String> =
-        serde_json::from_str(uses_types_json.unwrap()).expect("Valid JSON");
+    // Check uses_types includes bound traits (now in typed relationships)
+    let uses_types = &entity.relationships.uses_types;
+    assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
-        uses_types.iter().any(|t| t.contains("Clone")),
+        uses_types.iter().any(|t| t.target().contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.contains("Debug")),
+        uses_types.iter().any(|t| t.target().contains("Debug")),
         "uses_types should include Debug"
     );
 }

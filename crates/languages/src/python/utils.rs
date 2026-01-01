@@ -310,13 +310,16 @@ pub fn extract_function_calls(
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 let resolved = resolve_reference(&name, import_map, parent_scope, ".");
                 if seen.insert(resolved.clone()) {
-                    calls.push(SourceReference::new(
-                        resolved,
-                        name,  // simple_name from AST node
-                        false, // Python doesn't track external refs
-                        SourceLocation::from_tree_sitter_node(bare_cap.node),
-                        ReferenceType::Call,
-                    ));
+                    if let Ok(source_ref) = SourceReference::builder()
+                        .target(resolved)
+                        .simple_name(name) // simple_name from AST node
+                        .is_external(false) // Python doesn't track external refs
+                        .location(SourceLocation::from_tree_sitter_node(bare_cap.node))
+                        .ref_type(ReferenceType::Call)
+                        .build()
+                    {
+                        calls.push(source_ref);
+                    }
                 }
             }
         } else if let (Some(recv_cap), Some(method_cap)) = (receiver, method) {
@@ -329,13 +332,16 @@ pub fn extract_function_calls(
                 let resolved_recv = resolve_reference(&recv_name, import_map, parent_scope, ".");
                 let call_ref = format!("{resolved_recv}.{method_name}");
                 if seen.insert(call_ref.clone()) {
-                    calls.push(SourceReference::new(
-                        call_ref,
-                        method_name, // simple_name from AST node
-                        false,       // Python doesn't track external refs
-                        SourceLocation::from_tree_sitter_node(method_cap.node),
-                        ReferenceType::Call,
-                    ));
+                    if let Ok(source_ref) = SourceReference::builder()
+                        .target(call_ref)
+                        .simple_name(method_name) // simple_name from AST node
+                        .is_external(false) // Python doesn't track external refs
+                        .location(SourceLocation::from_tree_sitter_node(method_cap.node))
+                        .ref_type(ReferenceType::Call)
+                        .build()
+                    {
+                        calls.push(source_ref);
+                    }
                 }
             }
         }
@@ -389,13 +395,16 @@ pub fn extract_type_references(
                         // Resolve through imports
                         let resolved = resolve_reference(&type_name, import_map, parent_scope, ".");
                         if seen.insert(resolved.clone()) {
-                            type_refs.push(SourceReference::new(
-                                resolved,
-                                type_name, // simple_name from AST node
-                                false,     // Python doesn't track external refs
-                                SourceLocation::from_tree_sitter_node(capture.node),
-                                ReferenceType::TypeUsage,
-                            ));
+                            if let Ok(source_ref) = SourceReference::builder()
+                                .target(resolved)
+                                .simple_name(type_name) // simple_name from AST node
+                                .is_external(false) // Python doesn't track external refs
+                                .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                            {
+                                type_refs.push(source_ref);
+                            }
                         }
                     }
                 }
@@ -407,13 +416,16 @@ pub fn extract_type_references(
                             let resolved =
                                 resolve_reference(&type_name, import_map, parent_scope, ".");
                             if seen.insert(resolved.clone()) {
-                                type_refs.push(SourceReference::new(
-                                    resolved,
-                                    type_name, // simple_name from AST node
-                                    false,     // Python doesn't track external refs
-                                    SourceLocation::from_tree_sitter_node(capture.node),
-                                    ReferenceType::TypeUsage,
-                                ));
+                                if let Ok(source_ref) = SourceReference::builder()
+                                    .target(resolved)
+                                    .simple_name(type_name) // simple_name from AST node
+                                    .is_external(false) // Python doesn't track external refs
+                                    .location(SourceLocation::from_tree_sitter_node(capture.node))
+                                    .ref_type(ReferenceType::TypeUsage)
+                                    .build()
+                                {
+                                    type_refs.push(source_ref);
+                                }
                             }
                         }
                     }

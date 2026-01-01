@@ -334,11 +334,11 @@ fn process<T: Clone + Send, U>(item: T, other: U) -> T {
     let uses_types = &entity.relationships.uses_types;
     assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Clone")),
+        uses_types.iter().any(|t| t.target().contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Send")),
+        uses_types.iter().any(|t| t.target().contains("Send")),
         "uses_types should include Send"
     );
 }
@@ -390,15 +390,15 @@ where
     let uses_types = &entity.relationships.uses_types;
     assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Debug")),
+        uses_types.iter().any(|t| t.target().contains("Debug")),
         "uses_types should include Debug"
     );
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Clone")),
+        uses_types.iter().any(|t| t.target().contains("Clone")),
         "uses_types should include Clone"
     );
     assert!(
-        uses_types.iter().any(|t| t.target.contains("Sync")),
+        uses_types.iter().any(|t| t.target().contains("Sync")),
         "uses_types should include Sync"
     );
 }
@@ -497,7 +497,7 @@ pub fn process_item<T: Processor>(item: &T) -> i32 {
     assert!(
         calls
             .iter()
-            .any(|c| c.target.contains("Processor::process")),
+            .any(|c| c.target().contains("Processor::process")),
         "Should have a call to Processor::process, got calls: {:?}",
         calls
     );
@@ -586,7 +586,7 @@ pub fn process_item<T: Processor>(item: &T) -> i32 {
     assert!(
         calls
             .iter()
-            .any(|c| c.target == "test_crate::Processor::process"),
+            .any(|c| c.target() == "test_crate::Processor::process"),
         "Should have a call to test_crate::Processor::process, got calls: {:?}",
         calls
     );

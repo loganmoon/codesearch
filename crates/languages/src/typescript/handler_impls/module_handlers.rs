@@ -43,7 +43,15 @@ fn ts_import_query() -> Option<&'static Query> {
     TS_IMPORT_QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, TS_IMPORT_QUERY_SOURCE).ok()
+            match Query::new(&language, TS_IMPORT_QUERY_SOURCE) {
+                Ok(query) => Some(query),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to compile TypeScript import query: {e}. This is a bug."
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -53,7 +61,15 @@ fn ts_export_query() -> Option<&'static Query> {
     TS_EXPORT_QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, TS_EXPORT_QUERY_SOURCE).ok()
+            match Query::new(&language, TS_EXPORT_QUERY_SOURCE) {
+                Ok(query) => Some(query),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to compile TypeScript export query: {e}. This is a bug."
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }

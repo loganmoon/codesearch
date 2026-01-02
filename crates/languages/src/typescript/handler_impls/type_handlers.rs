@@ -1,5 +1,9 @@
 //! TypeScript type entity handler implementations
 
+#![deny(warnings)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::common::{
     import_map::{get_ast_root, parse_file_imports, resolve_reference},
     node_to_text, require_capture_node,
@@ -71,14 +75,20 @@ pub fn handle_class_impl(
         .iter()
         .filter_map(|type_name| {
             let resolved = resolve_reference(type_name, &import_map, parent_scope, ".");
-            SourceReference::builder()
+            match SourceReference::builder()
                 .target(resolved)
                 .simple_name(type_name.clone())
                 .is_external(false) // TS doesn't track external refs yet
                 .location(SourceLocation::default())
                 .ref_type(ReferenceType::Implements)
                 .build()
-                .ok()
+            {
+                Ok(ref_) => Some(ref_),
+                Err(e) => {
+                    tracing::warn!(type_name = %type_name, "Failed to build implements reference: {e}");
+                    None
+                }
+            }
         })
         .collect();
 
@@ -192,10 +202,7 @@ pub fn handle_interface_impl(
     // Extract extended interfaces (raw names)
     let extends = extract_extends_clause(interface_node, source)?;
 
-    // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
-
-    // Build import map for type resolution
+    // Build import map for type resolution (reuse module_path from above)
     let root = get_ast_root(interface_node);
     let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
@@ -234,15 +241,18 @@ pub fn handle_interface_impl(
                 },
                 ".",
             );
-            if let Ok(extends_ref) = SourceReference::builder()
+            match SourceReference::builder()
                 .target(resolved)
-                .simple_name(type_name)
+                .simple_name(type_name.clone())
                 .is_external(false)
                 .location(SourceLocation::default())
                 .ref_type(ReferenceType::Extends)
                 .build()
             {
-                relationships.supertraits.push(extends_ref);
+                Ok(extends_ref) => relationships.supertraits.push(extends_ref),
+                Err(e) => {
+                    tracing::warn!(type_name = %type_name, "Failed to build extends reference: {e}");
+                }
             }
         }
     }
@@ -359,10 +369,7 @@ pub fn handle_type_alias_impl(
     // Extract type value from the node itself
     let type_value = extract_type_value(type_alias_node, source)?;
 
-    // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
-
-    // Build import map for type resolution
+    // Build import map for type resolution (reuse module_path from above)
     let root = get_ast_root(type_alias_node);
     let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
@@ -622,7 +629,9 @@ fn extract_extends_types(node: Node, source: &str) -> Result<Vec<String>> {
                         // Qualified type like `Namespace.Type`
                         types.push(node_to_text(type_child, source)?);
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = type_child.kind(), "Unhandled extends type node");
+                    }
                 }
             }
         }
@@ -661,7 +670,9 @@ fn extract_implements_types(node: Node, source: &str) -> Result<Vec<String>> {
                         // Qualified type like `Namespace.IType`
                         types.push(node_to_text(type_child, source)?);
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = type_child.kind(), "Unhandled implements type node");
+                    }
                 }
             }
         }
@@ -722,7 +733,9 @@ fn extract_enum_member_info(enum_node: Node, source: &str) -> Result<Vec<EnumMem
                             location: SourceLocation::from_tree_sitter_node(member),
                         });
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = member.kind(), "Unhandled enum member node");
+                    }
                 }
             }
         }

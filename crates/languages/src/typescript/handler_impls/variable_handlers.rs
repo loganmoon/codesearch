@@ -380,7 +380,12 @@ fn extract_names_from_object_pattern(pattern_node: Node, source: &str) -> Result
                         "object_pattern" => {
                             names.extend(extract_names_from_object_pattern(value, source)?);
                         }
-                        _ => {}
+                        _ => {
+                            tracing::trace!(
+                                kind = value.kind(),
+                                "Unhandled pair pattern value type"
+                            );
+                        }
                     }
                 }
             }
@@ -392,7 +397,9 @@ fn extract_names_from_object_pattern(pattern_node: Node, source: &str) -> Result
                     }
                 }
             }
-            _ => {}
+            _ => {
+                tracing::trace!(kind = child.kind(), "Unhandled object pattern child type");
+            }
         }
     }
 

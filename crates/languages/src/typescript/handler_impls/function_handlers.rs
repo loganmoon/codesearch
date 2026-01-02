@@ -1,5 +1,9 @@
 //! TypeScript function handler implementations
 
+#![deny(warnings)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::common::{
     find_capture_node,
     import_map::{get_ast_root, parse_file_imports},
@@ -310,7 +314,9 @@ fn extract_typescript_parameters(
                 let param_text = node_to_text(child, source)?;
                 parameters.push((param_text, None));
             }
-            _ => {}
+            _ => {
+                tracing::trace!(kind = child.kind(), "Unhandled parameter node type");
+            }
         }
     }
 

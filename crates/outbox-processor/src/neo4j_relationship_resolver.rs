@@ -9,7 +9,8 @@
 //! Relationship information is stored in the typed `EntityRelationshipData` struct:
 //! - `calls`: Function/method call references (for CALLS)
 //! - `uses_types`: Type usage references (for USES)
-//! - `implements_trait`: Trait being implemented (for IMPLEMENTS)
+//! - `implements_trait`: Trait being implemented by Rust impl blocks (for IMPLEMENTS)
+//! - `implements`: Interfaces implemented by TS/JS classes (for IMPLEMENTS)
 //! - `for_type`: Type that impl block is for (for ASSOCIATES)
 //! - `supertraits`: Trait supertraits (for EXTENDS_INTERFACE)
 //! - `extends`: Parent class names (for INHERITS_FROM)
@@ -266,10 +267,20 @@ pub async fn resolve_external_references(
     let mut relationships: Vec<(String, String, String)> = Vec::new();
 
     for entity in entities {
-        // Check implements_trait (typed SourceReference with is_external flag)
+        // Check implements_trait (typed SourceReference with is_external flag - Rust impl blocks)
         if let Some(ref trait_ref) = entity.relationships.implements_trait {
             if trait_ref.is_external() {
                 let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref.target()));
+                let ext_id = ext_ref.entity_id();
+                external_refs.insert(ext_ref);
+                relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
+            }
+        }
+
+        // Check implements (TypeScript/JavaScript classes implementing interfaces)
+        for impl_ref in &entity.relationships.implements {
+            if impl_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(impl_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));

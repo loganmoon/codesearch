@@ -3,6 +3,7 @@
 mod function_handlers;
 mod module_handlers;
 mod type_handlers;
+mod variable_handlers;
 
 #[cfg(test)]
 mod tests;
@@ -13,3 +14,4 @@ pub use type_handlers::{
     handle_class_impl, handle_enum_impl, handle_interface_impl, handle_method_impl,
     handle_type_alias_impl,
 };
+pub use variable_handlers::handle_variable_impl;

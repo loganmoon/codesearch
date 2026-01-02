@@ -1,5 +1,9 @@
 //! TypeScript function handler implementations
 
+#![deny(warnings)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::common::{
     find_capture_node,
     import_map::{get_ast_root, parse_file_imports},
@@ -8,7 +12,7 @@ use crate::common::{
 use crate::javascript::module_path::derive_module_path;
 use crate::typescript::utils::extract_type_references;
 use codesearch_core::{
-    entities::{Language, SourceReference},
+    entities::{Language, SourceReference, Visibility},
     error::Result,
     CodeEntity,
 };
@@ -24,18 +28,20 @@ pub fn handle_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_function_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
@@ -43,10 +49,21 @@ pub fn handle_function_impl(
     // Derive module path for qualified name resolution
     let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
 
+    // Check if the function is exported
+    let function_node = find_capture_node(query_match, query, "function");
+    let is_exported = function_node.map(|n| is_node_exported(n)).unwrap_or(false);
+
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
         enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
+
+        // Set visibility based on export status (per V-EXPORT and V-MODULE-PRIVATE)
+        entity.visibility = Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        });
     }
 
     Ok(entities)
@@ -60,32 +77,73 @@ pub fn handle_arrow_function_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Start with JavaScript extraction
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_arrow_function_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
 
     // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Check if the arrow function is exported
+    let arrow_node = find_capture_node(query_match, query, "arrow_function");
+    let is_exported = arrow_node.map(|n| is_node_exported(n)).unwrap_or(false);
 
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
         enhance_with_type_annotations(entity, query_match, query, source, module_path.as_deref())?;
         entity.language = codesearch_core::entities::Language::TypeScript;
+
+        // Set visibility based on export status (per V-EXPORT and V-MODULE-PRIVATE)
+        entity.visibility = Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        });
+
+        // Fix qualified name to include module path (JS handler doesn't include it)
+        if let Some(ref module) = module_path {
+            // Only prepend if not already included
+            if !entity.qualified_name.starts_with(module) {
+                let old_qn = entity.qualified_name.clone();
+                entity.qualified_name = format!("{module}.{old_qn}");
+                // Also update parent_scope to include module path
+                entity.parent_scope = Some(match &entity.parent_scope {
+                    Some(scope) => format!("{module}.{scope}"),
+                    None => module.clone(),
+                });
+            }
+        }
     }
 
     Ok(entities)
+}
+
+/// Check if a node is exported (has an export_statement ancestor)
+fn is_node_exported(node: Node) -> bool {
+    let mut current = Some(node);
+    while let Some(n) = current {
+        if n.kind() == "export_statement" {
+            return true;
+        }
+        current = n.parent();
+    }
+    false
 }
 
 /// Enhance a function entity with TypeScript type annotations
@@ -256,7 +314,9 @@ fn extract_typescript_parameters(
                 let param_text = node_to_text(child, source)?;
                 parameters.push((param_text, None));
             }
-            _ => {}
+            _ => {
+                tracing::trace!(kind = child.kind(), "Unhandled parameter node type");
+            }
         }
     }
 

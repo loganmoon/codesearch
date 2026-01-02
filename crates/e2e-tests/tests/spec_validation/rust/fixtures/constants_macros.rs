@@ -68,7 +68,7 @@ const PRIVATE_CONST: i32 = -1;
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Static declarations with mutability
@@ -127,7 +127,7 @@ static PRIVATE_STATIC: &str = "private";
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Union declarations
@@ -182,7 +182,7 @@ pub union ByteRepresentation {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Extern blocks with FFI declarations
@@ -255,7 +255,7 @@ extern "C" {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Associated constants in traits and impls
@@ -361,7 +361,7 @@ impl MyType {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Declarative macros
@@ -415,5 +415,5 @@ macro_rules! private_macro {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

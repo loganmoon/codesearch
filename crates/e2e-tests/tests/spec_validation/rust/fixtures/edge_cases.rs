@@ -113,7 +113,7 @@ pub fn use_ufcs(data: &Data) -> i32 {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Const generics: types parameterized by constant values
@@ -189,7 +189,7 @@ pub fn create_large() -> FixedArray<1000> {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Blanket impl declarations: impl<T> Trait for T where T: OtherTrait
@@ -295,7 +295,7 @@ impl Debug for MyType {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Pattern matching on enum variants in function bodies
@@ -368,7 +368,7 @@ pub fn is_quit(msg: &Message) -> bool {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Tests #[path = "..."] attribute for custom module paths.
@@ -457,7 +457,7 @@ pub fn create_special() -> SpecialType {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Closures as syntactic entities in function calls
@@ -535,5 +535,5 @@ pub fn with_captured() -> i32 {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

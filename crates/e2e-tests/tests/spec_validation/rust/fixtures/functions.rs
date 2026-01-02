@@ -72,7 +72,7 @@ pub fn callee() {}
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Methods in inherent impl blocks
@@ -152,7 +152,7 @@ impl Foo {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Cross-module function calls
@@ -219,7 +219,7 @@ pub fn main_caller() {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 // =============================================================================
@@ -340,7 +340,7 @@ impl Counter {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Async functions
@@ -441,7 +441,7 @@ impl AsyncService {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Method chaining / builder pattern
@@ -610,7 +610,7 @@ pub fn create_config() -> Config {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Recursive function calls
@@ -695,5 +695,5 @@ pub fn mutually_recursive_b(n: u32) -> u32 {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

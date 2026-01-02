@@ -105,7 +105,7 @@ pub fn actual_function() {}
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Glob re-exports: resolving symbols imported via *
@@ -196,7 +196,7 @@ pub fn helper_b() {}
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Trait method vs inherent method priority
@@ -301,7 +301,7 @@ pub fn call_trait(d: &Data) -> String {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Impl blocks scattered across multiple modules
@@ -433,7 +433,7 @@ impl Widget {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Associated types in trait implementations
@@ -545,7 +545,7 @@ pub fn use_string_producer(p: &StringProducer) -> String {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Prelude shadowing: local definitions shadow std prelude
@@ -644,7 +644,7 @@ pub fn create_unknown() -> Option<i32> {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Generic trait bounds affecting method resolution
@@ -781,7 +781,7 @@ pub fn process_and_validate<T: Processor + Validator>(item: &T) -> (i32, bool) {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Type alias chains
@@ -915,7 +915,7 @@ pub fn create_with_value() -> AppConfig {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Nested use declarations with renaming
@@ -1060,7 +1060,7 @@ pub fn connect() {}
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Extension traits: adding methods to foreign types
@@ -1229,5 +1229,5 @@ pub fn count_words_string(s: String) -> usize {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

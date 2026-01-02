@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::javascript::handler_impls::{handle_arrow_function_impl, handle_function_impl};
-use codesearch_core::entities::{EntityType, SourceReference};
+use codesearch_core::entities::EntityType;
 
 #[test]
 fn test_simple_function() {
@@ -295,14 +295,16 @@ function process() {
     let entity = &entities[0];
     assert_eq!(entity.name, "process");
 
-    // Check that calls are extracted
-    let calls_attr = entity.metadata.attributes.get("calls");
-    assert!(calls_attr.is_some(), "Should have calls attribute");
-
-    let calls: Vec<String> =
-        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
-    assert!(calls.contains(&"external.helper".to_string()));
-    assert!(calls.contains(&"external.console.log".to_string()));
+    // Check that calls are extracted in relationships
+    assert!(!entity.relationships.calls.is_empty(), "Should have calls");
+    let call_targets: Vec<&str> = entity
+        .relationships
+        .calls
+        .iter()
+        .map(|c| c.target())
+        .collect();
+    assert!(call_targets.contains(&"external.helper"));
+    assert!(call_targets.contains(&"external.console.log"));
 }
 
 #[test]
@@ -321,13 +323,16 @@ function process() {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    let calls_attr = entity.metadata.attributes.get("calls");
-    assert!(calls_attr.is_some(), "Should have calls attribute");
-
-    let calls: Vec<String> =
-        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Check that calls are extracted in relationships
+    assert!(!entity.relationships.calls.is_empty(), "Should have calls");
+    let call_targets: Vec<&str> = entity
+        .relationships
+        .calls
+        .iter()
+        .map(|c| c.target())
+        .collect();
     // Should resolve through import
-    assert!(calls.contains(&"./utils.helper".to_string()));
+    assert!(call_targets.contains(&"./utils.helper"));
 }
 
 // ============================================================================
@@ -354,19 +359,28 @@ function processRequest(user, request) {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    let uses_types_attr = entity.metadata.attributes.get("uses_types");
+    // Check that uses_types are extracted in relationships
     assert!(
-        uses_types_attr.is_some(),
-        "Should have uses_types attribute"
+        !entity.relationships.uses_types.is_empty(),
+        "Should have uses_types"
     );
 
-    let uses_types: Vec<SourceReference> =
-        serde_json::from_str(uses_types_attr.unwrap()).expect("Should parse uses_types JSON");
-
     // Should extract non-primitive types from JSDoc
-    assert!(uses_types.iter().any(|t| t.target().contains("User")));
-    assert!(uses_types.iter().any(|t| t.target().contains("Request")));
-    assert!(uses_types.iter().any(|t| t.target().contains("Response")));
+    assert!(entity
+        .relationships
+        .uses_types
+        .iter()
+        .any(|t| t.target().contains("User")));
+    assert!(entity
+        .relationships
+        .uses_types
+        .iter()
+        .any(|t| t.target().contains("Request")));
+    assert!(entity
+        .relationships
+        .uses_types
+        .iter()
+        .any(|t| t.target().contains("Response")));
 }
 
 #[test]

@@ -1,5 +1,9 @@
 //! TypeScript type entity handler implementations
 
+#![deny(warnings)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 use crate::common::{
     import_map::{get_ast_root, parse_file_imports, resolve_reference},
     node_to_text, require_capture_node,
@@ -8,8 +12,8 @@ use crate::javascript::{module_path::derive_module_path, utils::extract_jsdoc_co
 use crate::typescript::utils::{extract_type_references, is_ts_primitive};
 use codesearch_core::{
     entities::{
-        CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-        Visibility,
+        CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
+        Language, ReferenceType, SourceLocation, SourceReference, Visibility,
     },
     entity_id::generate_entity_id,
     error::Result,
@@ -26,18 +30,20 @@ pub fn handle_class_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript class handler (includes extends_resolved)
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_class_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
@@ -63,35 +69,44 @@ pub fn handle_class_impl(
 
     // Extract implements clause (TypeScript-specific)
     let implements_raw = extract_implements_types(class_node, source)?;
-    let implements_resolved: Vec<String> = implements_raw
+
+    // Build SourceReference objects for implements relationships
+    let implements_refs: Vec<SourceReference> = implements_raw
         .iter()
-        .map(|type_name| resolve_reference(type_name, &import_map, parent_scope, "."))
+        .filter_map(|type_name| {
+            let resolved = resolve_reference(type_name, &import_map, parent_scope, ".");
+            match SourceReference::builder()
+                .target(resolved)
+                .simple_name(type_name.clone())
+                .is_external(false) // TS doesn't track external refs yet
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Implements)
+                .build()
+            {
+                Ok(ref_) => Some(ref_),
+                Err(e) => {
+                    tracing::warn!(type_name = %type_name, "Failed to build implements reference: {e}");
+                    None
+                }
+            }
+        })
         .collect();
 
     // Extract type references used in the class body
     let type_refs = extract_type_references(class_node, source, &import_map, parent_scope);
 
-    // Update language and add TypeScript-specific metadata
+    // Update language and add TypeScript-specific relationship data
     for entity in &mut entities {
         entity.language = Language::TypeScript;
 
-        // Add implements_trait with resolved qualified names for relationship resolution
-        if !implements_resolved.is_empty() {
-            // Store resolved interface names (comma-separated for single value compatibility)
-            entity.metadata.attributes.insert(
-                "implements_trait".to_string(),
-                implements_resolved.join(", "),
-            );
+        // Add implements to relationship data
+        if !implements_refs.is_empty() {
+            entity.relationships.implements = implements_refs.clone();
         }
 
         // Add type references for USES relationships
         if !type_refs.is_empty() {
-            if let Ok(json) = serde_json::to_string(&type_refs) {
-                entity
-                    .metadata
-                    .attributes
-                    .insert("uses_types".to_string(), json);
-            }
+            entity.relationships.uses_types.extend(type_refs.clone());
         }
     }
 
@@ -106,18 +121,20 @@ pub fn handle_method_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript method handler
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_method_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
@@ -141,7 +158,7 @@ pub fn handle_interface_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let interface_node = require_capture_node(query_match, query, "interface")?;
 
@@ -149,14 +166,34 @@ pub fn handle_interface_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(interface_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract generics (type_parameters)
@@ -165,10 +202,7 @@ pub fn handle_interface_impl(
     // Extract extended interfaces (raw names)
     let extends = extract_extends_clause(interface_node, source)?;
 
-    // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
-
-    // Build import map for type resolution
+    // Build import map for type resolution (reuse module_path from above)
     let root = get_ast_root(interface_node);
     let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
@@ -188,45 +222,57 @@ pub fn handle_interface_impl(
     let documentation = extract_jsdoc_comments(interface_node, source);
 
     // Build metadata
-    let mut metadata = EntityMetadata::default();
+    let metadata = EntityMetadata::default();
+
+    // Build relationship data
+    let mut relationships = EntityRelationshipData::default();
+
+    // Build supertraits (interface extends interface = EXTENDS_INTERFACE)
     if extends.is_some() {
-        // Resolve extended interfaces through import map and store directly in 'extends'
-        let extends_resolved = extract_extends_types(interface_node, source)?
-            .into_iter()
-            .map(|type_name| {
-                resolve_reference(
-                    &type_name,
-                    &import_map,
-                    if parent_scope.is_empty() {
-                        None
-                    } else {
-                        Some(parent_scope.as_str())
-                    },
-                    ".",
-                )
-            })
-            .collect::<Vec<_>>();
-
-        if !extends_resolved.is_empty() {
-            // Store resolved names as comma-separated for relationship resolution
-            metadata
-                .attributes
-                .insert("extends".to_string(), extends_resolved.join(", "));
+        let extends_types = extract_extends_types(interface_node, source)?;
+        for type_name in extends_types {
+            let resolved = resolve_reference(
+                &type_name,
+                &import_map,
+                if parent_scope.is_empty() {
+                    None
+                } else {
+                    Some(parent_scope.as_str())
+                },
+                ".",
+            );
+            match SourceReference::builder()
+                .target(resolved)
+                .simple_name(type_name.clone())
+                .is_external(false)
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Extends)
+                .build()
+            {
+                Ok(extends_ref) => relationships.supertraits.push(extends_ref),
+                Err(e) => {
+                    tracing::warn!(type_name = %type_name, "Failed to build extends reference: {e}");
+                }
+            }
         }
     }
 
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Add type references for USES relationships
+    relationships.uses_types = type_refs;
 
     // Generate entity_id
     let file_path_str = file_path
         .to_str()
         .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
+
+    // Check if exported
+    let is_exported = is_node_exported(interface_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
 
     // Build entity
     let entity = CodeEntityBuilder::default()
@@ -241,7 +287,7 @@ pub fn handle_interface_impl(
         })
         .entity_type(EntityType::Interface)
         .location(SourceLocation::from_tree_sitter_node(interface_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(interface_node, source).ok())
         .metadata(metadata)
@@ -257,6 +303,7 @@ pub fn handle_interface_impl(
         })
         .language(Language::TypeScript)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| {
             codesearch_core::error::Error::entity_extraction(format!(
@@ -278,7 +325,7 @@ pub fn handle_type_alias_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let type_alias_node = require_capture_node(query_match, query, "type_alias")?;
 
@@ -286,14 +333,34 @@ pub fn handle_type_alias_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(type_alias_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract generics
@@ -302,10 +369,7 @@ pub fn handle_type_alias_impl(
     // Extract type value from the node itself
     let type_value = extract_type_value(type_alias_node, source)?;
 
-    // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
-
-    // Build import map for type resolution
+    // Build import map for type resolution (reuse module_path from above)
     let root = get_ast_root(type_alias_node);
     let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
 
@@ -332,12 +396,19 @@ pub fn handle_type_alias_impl(
             .insert("type_value".to_string(), type_text);
     }
 
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Build relationship data with uses_types
+    let relationships = EntityRelationshipData {
+        uses_types: type_refs,
+        ..Default::default()
+    };
+
+    // Check if exported
+    let is_exported = is_node_exported(type_alias_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
 
     // Generate entity_id
     let file_path_str = file_path
@@ -358,7 +429,7 @@ pub fn handle_type_alias_impl(
         })
         .entity_type(EntityType::TypeAlias)
         .location(SourceLocation::from_tree_sitter_node(type_alias_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(type_alias_node, source).ok())
         .metadata(metadata)
@@ -374,6 +445,7 @@ pub fn handle_type_alias_impl(
         })
         .language(Language::TypeScript)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| {
             codesearch_core::error::Error::entity_extraction(format!(
@@ -395,7 +467,7 @@ pub fn handle_enum_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let enum_node = require_capture_node(query_match, query, "enum")?;
 
@@ -403,14 +475,34 @@ pub fn handle_enum_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(enum_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract enum members with their values
@@ -418,6 +510,14 @@ pub fn handle_enum_impl(
 
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(enum_node, source);
+
+    // Check if exported
+    let is_exported = is_node_exported(enum_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
 
     // Build metadata (no longer storing members as JSON)
     let metadata = EntityMetadata::default();
@@ -441,7 +541,7 @@ pub fn handle_enum_impl(
         })
         .entity_type(EntityType::Enum)
         .location(SourceLocation::from_tree_sitter_node(enum_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(enum_node, source).ok())
         .metadata(metadata)
@@ -454,9 +554,14 @@ pub fn handle_enum_impl(
             ))
         })?;
 
-    // Build member entities
-    let member_entities =
-        build_enum_member_entities(&member_info, &full_qualified_name, file_path, repository_id)?;
+    // Build member entities (passing parent visibility for inheritance)
+    let member_entities = build_enum_member_entities(
+        &member_info,
+        &full_qualified_name,
+        file_path,
+        repository_id,
+        Some(visibility), // Members inherit visibility from parent enum
+    )?;
 
     // Return enum + members
     let mut entities = vec![enum_entity];
@@ -524,7 +629,9 @@ fn extract_extends_types(node: Node, source: &str) -> Result<Vec<String>> {
                         // Qualified type like `Namespace.Type`
                         types.push(node_to_text(type_child, source)?);
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = type_child.kind(), "Unhandled extends type node");
+                    }
                 }
             }
         }
@@ -563,7 +670,9 @@ fn extract_implements_types(node: Node, source: &str) -> Result<Vec<String>> {
                         // Qualified type like `Namespace.IType`
                         types.push(node_to_text(type_child, source)?);
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = type_child.kind(), "Unhandled implements type node");
+                    }
                 }
             }
         }
@@ -624,7 +733,9 @@ fn extract_enum_member_info(enum_node: Node, source: &str) -> Result<Vec<EnumMem
                             location: SourceLocation::from_tree_sitter_node(member),
                         });
                     }
-                    _ => {}
+                    _ => {
+                        tracing::trace!(kind = member.kind(), "Unhandled enum member node");
+                    }
                 }
             }
         }
@@ -639,6 +750,7 @@ fn build_enum_member_entities(
     parent_qualified_name: &str,
     file_path: &Path,
     repository_id: &str,
+    parent_visibility: Option<Visibility>,
 ) -> Result<Vec<CodeEntity>> {
     let file_path_str = file_path
         .to_str()
@@ -670,7 +782,7 @@ fn build_enum_member_entities(
                 .parent_scope(Some(parent_qualified_name.to_string()))
                 .entity_type(EntityType::EnumVariant)
                 .location(member.location.clone())
-                .visibility(None) // Members inherit visibility from parent
+                .visibility(parent_visibility) // Members inherit visibility from parent
                 .content(Some(content))
                 .metadata(metadata)
                 .language(Language::TypeScript)
@@ -683,4 +795,16 @@ fn build_enum_member_entities(
                 })
         })
         .collect()
+}
+
+/// Check if a node is exported (has an export_statement ancestor)
+fn is_node_exported(node: Node) -> bool {
+    let mut current = Some(node);
+    while let Some(n) = current {
+        if n.kind() == "export_statement" {
+            return true;
+        }
+        current = n.parent();
+    }
+    false
 }

@@ -8,20 +8,28 @@ use codesearch_core::entities::Visibility;
 /// preventing typos in test specifications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntityKind {
+    // Shared across languages
     Module,
     Function,
     Method,
-    Struct,
     Enum,
+    Constant,
+    TypeAlias,
+
+    // Rust-specific
+    Struct,
     Trait,
     ImplBlock,
-    Constant,
     Static,
     Union,
     ExternBlock,
-    TypeAlias,
     Macro,
+
+    // TypeScript/JavaScript-specific
+    Class,
+    Interface,
     Property,
+    Variable,
     EnumVariant,
 }
 
@@ -29,20 +37,26 @@ impl EntityKind {
     /// Convert to Neo4j label string
     pub fn as_neo4j_label(&self) -> &'static str {
         match self {
+            // Shared across languages
             EntityKind::Module => "Module",
             EntityKind::Function => "Function",
             EntityKind::Method => "Method",
-            EntityKind::Struct => "Struct",
             EntityKind::Enum => "Enum",
+            EntityKind::Constant => "Constant",
+            EntityKind::TypeAlias => "TypeAlias",
+            // Rust-specific
+            EntityKind::Struct => "Struct",
             EntityKind::Trait => "Trait",
             EntityKind::ImplBlock => "ImplBlock",
-            EntityKind::Constant => "Constant",
             EntityKind::Static => "Static",
             EntityKind::Union => "Union",
             EntityKind::ExternBlock => "ExternBlock",
-            EntityKind::TypeAlias => "TypeAlias",
             EntityKind::Macro => "Macro",
+            // TypeScript/JavaScript-specific
+            EntityKind::Class => "Class",
+            EntityKind::Interface => "Interface",
             EntityKind::Property => "Property",
+            EntityKind::Variable => "Variable",
             EntityKind::EnumVariant => "EnumVariant",
         }
     }
@@ -62,6 +76,7 @@ pub enum RelationshipKind {
     InheritsFrom,
     Uses,
     Imports,
+    Reexports,
 }
 
 impl RelationshipKind {
@@ -76,6 +91,7 @@ impl RelationshipKind {
             RelationshipKind::InheritsFrom => "INHERITS_FROM",
             RelationshipKind::Uses => "USES",
             RelationshipKind::Imports => "IMPORTS",
+            RelationshipKind::Reexports => "REEXPORTS",
         }
     }
 }
@@ -83,6 +99,7 @@ impl RelationshipKind {
 /// Project structure type for test fixtures
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ProjectType {
+    // Rust project types
     /// Single crate with src/lib.rs (default)
     #[default]
     SingleCrate,
@@ -90,6 +107,13 @@ pub enum ProjectType {
     BinaryCrate,
     /// Workspace with multiple member crates
     Workspace,
+
+    // TypeScript/JavaScript project types
+    /// Node.js package with package.json only (for JavaScript)
+    NodePackage,
+    /// TypeScript project with package.json + tsconfig.json
+    TypeScriptProject,
+
     /// Custom project structure (files are placed at root, not in src/)
     Custom,
 }
@@ -101,6 +125,7 @@ pub struct Fixture {
     pub name: &'static str,
     /// Source files to create in the test repository: (relative_path, content)
     /// For SingleCrate/BinaryCrate: paths are relative to src/
+    /// For TypeScriptProject/NodePackage: paths are relative to repo root
     /// For Workspace/Custom: paths are relative to repo root
     pub files: &'static [(&'static str, &'static str)],
     /// Expected entities to be extracted
@@ -109,8 +134,9 @@ pub struct Fixture {
     pub relationships: &'static [ExpectedRelationship],
     /// Project structure type (defaults to SingleCrate)
     pub project_type: ProjectType,
-    /// Optional custom Cargo.toml content (uses default if None)
-    pub cargo_toml: Option<&'static str>,
+    /// Optional custom manifest content (Cargo.toml for Rust, package.json for TS/JS)
+    /// Uses language-appropriate default if None
+    pub manifest: Option<&'static str>,
 }
 
 /// An expected entity in the graph

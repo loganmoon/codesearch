@@ -117,7 +117,7 @@ pub fn process_core(ct: CoreType) -> i32 {
         },
     ],
     project_type: ProjectType::Workspace,
-    cargo_toml: Some(
+    manifest: Some(
         r#"[workspace]
 members = ["crates/*"]
 resolver = "2"

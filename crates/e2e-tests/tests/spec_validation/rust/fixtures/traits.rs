@@ -90,7 +90,7 @@ pub trait Handler {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Trait implementations
@@ -174,7 +174,7 @@ impl Handler for MyHandler {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Supertraits (trait bounds)
@@ -231,7 +231,7 @@ pub trait Extended: Base {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 // =============================================================================
@@ -338,7 +338,7 @@ impl Iterator for Counter {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Multiple trait implementations for one type
@@ -512,7 +512,7 @@ impl Clone for Value {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Generic trait with bounds
@@ -608,5 +608,5 @@ pub trait BoundedTransformer<T: Clone, U: Default> {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

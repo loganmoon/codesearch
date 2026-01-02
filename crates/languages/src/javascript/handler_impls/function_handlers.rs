@@ -15,7 +15,8 @@ use crate::javascript::{
 };
 use codesearch_core::{
     entities::{
-        EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+        EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature, Language,
+        SourceLocation, Visibility,
     },
     error::Result,
     CodeEntity,
@@ -89,29 +90,17 @@ pub fn handle_function_impl(
     );
 
     // Build metadata
-    let mut metadata = EntityMetadata {
+    let metadata = EntityMetadata {
         is_async,
         ..EntityMetadata::default()
     };
 
-    // Store function calls with locations as SourceReference objects
-    if !calls.is_empty() {
-        if let Ok(json) = serde_json::to_string(&calls) {
-            metadata.attributes.insert("references".to_string(), json);
-        }
-        // Also store simplified calls list for backward compatibility with relationship resolution
-        let call_targets: Vec<&str> = calls.iter().map(|r| r.target()).collect();
-        if let Ok(json) = serde_json::to_string(&call_targets) {
-            metadata.attributes.insert("calls".to_string(), json);
-        }
-    }
-
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Build relationship data with calls and type references
+    let relationships = EntityRelationshipData {
+        calls,
+        uses_types: type_refs,
+        ..Default::default()
+    };
 
     // Build entity using shared helper
     let entity = build_entity(
@@ -129,7 +118,7 @@ pub fn handle_function_impl(
                 generics: Vec::new(),
                 is_async,
             }),
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 
@@ -217,29 +206,17 @@ pub fn handle_arrow_function_impl(
     );
 
     // Build metadata
-    let mut metadata = EntityMetadata {
+    let metadata = EntityMetadata {
         is_async,
         ..EntityMetadata::default()
     };
 
-    // Store function calls with locations as SourceReference objects
-    if !calls.is_empty() {
-        if let Ok(json) = serde_json::to_string(&calls) {
-            metadata.attributes.insert("references".to_string(), json);
-        }
-        // Also store simplified calls list for backward compatibility with relationship resolution
-        let call_targets: Vec<&str> = calls.iter().map(|r| r.target()).collect();
-        if let Ok(json) = serde_json::to_string(&call_targets) {
-            metadata.attributes.insert("calls".to_string(), json);
-        }
-    }
-
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Build relationship data with calls and type references
+    let relationships = EntityRelationshipData {
+        calls,
+        uses_types: type_refs,
+        ..Default::default()
+    };
 
     // Generate entity_id
     let file_path_str = file_path
@@ -291,7 +268,7 @@ pub fn handle_arrow_function_impl(
                 generics: Vec::new(),
                 is_async,
             }),
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 

@@ -93,7 +93,7 @@ pub struct Wrapper {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Enum definitions
@@ -165,7 +165,7 @@ pub enum Status {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Type aliases
@@ -218,7 +218,7 @@ pub type Result<T> = std::result::Result<T, Error>;
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 // =============================================================================
@@ -355,7 +355,7 @@ pub struct NamedPoint {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Complex enums with various variant types
@@ -536,7 +536,7 @@ pub enum Message {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Generic structs with type parameters
@@ -672,7 +672,7 @@ where
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };
 
 /// Lifetimes in struct definitions and functions
@@ -786,5 +786,5 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
         },
     ],
     project_type: ProjectType::SingleCrate,
-    cargo_toml: None,
+    manifest: None,
 };

@@ -32,7 +32,15 @@ fn ts_type_refs_query() -> Option<&'static Query> {
     TS_TYPE_REFS_QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, TS_TYPE_REFS_QUERY_SOURCE).ok()
+            match Query::new(&language, TS_TYPE_REFS_QUERY_SOURCE) {
+                Ok(query) => Some(query),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to compile TypeScript type refs query: {e}. This is a bug."
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -115,7 +123,12 @@ pub fn extract_type_references(
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    tracing::trace!(
+                        kind = capture_name,
+                        "Unhandled capture name in type refs query"
+                    );
+                }
             }
         }
     }

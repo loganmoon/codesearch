@@ -133,6 +133,8 @@ pub mod definitions {
             EntityType::Trait,
             EntityType::TypeAlias,
             EntityType::Impl,
+            EntityType::Property,
+            EntityType::EnumVariant,
         ],
         TYPE_TYPES,
         RelationshipType::Uses,

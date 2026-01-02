@@ -1070,12 +1070,13 @@ impl OutboxProcessor {
     /// - extends_resolver: EXTENDS_INTERFACE for trait supertraits
     /// - inherits_resolver: INHERITS_FROM for class inheritance
     /// - imports_resolver: IMPORTS for module imports
+    /// - reexports_resolver: REEXPORTS for module re-exports (barrel exports)
     ///
     /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
         use crate::generic_resolver::{
             associates_resolver, calls_resolver, extends_resolver, implements_resolver,
-            imports_resolver, inherits_resolver, uses_resolver,
+            imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
         };
         use crate::neo4j_relationship_resolver::{
             resolve_relationships_generic, ContainsResolver, EntityCache,
@@ -1107,6 +1108,7 @@ impl OutboxProcessor {
         let extends = extends_resolver();
         let inherits = inherits_resolver();
         let imports = imports_resolver();
+        let reexports = reexports_resolver();
 
         // Define all resolvers to run (ContainsResolver uses parent_scope, not relationships field)
         let resolvers: Vec<&dyn crate::neo4j_relationship_resolver::RelationshipResolver> = vec![
@@ -1118,6 +1120,7 @@ impl OutboxProcessor {
             &extends,
             &inherits,
             &imports,
+            &reexports,
         ];
 
         // Resolve relationships for each repository

@@ -298,6 +298,34 @@ fn test_index_signature_ast_structure() {
 }
 
 #[test]
+fn test_import_statement_ast_structure() {
+    // Debug test to understand import statement AST structure
+    let source = r#"
+import DefaultClass, { helper, VALUE } from './utils';
+import * as Utils from './utils';
+export * from './user';
+export { User } from './user';
+"#;
+    let tree = parse_ts(source);
+
+    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text: String = source[node.start_byte()..node.end_byte()]
+            .chars()
+            .take(60)
+            .collect();
+        println!("{}{} [{}]", indent, node.kind(), text.replace('\n', "\\n"));
+
+        for child in node.children(&mut node.walk()) {
+            print_tree(child, source, depth + 1);
+        }
+    }
+
+    println!("\n=== Import/Export statement AST structure ===");
+    print_tree(tree.root_node(), source, 0);
+}
+
+#[test]
 fn test_ambient_function_ast_structure() {
     // Debug test to understand ambient function declaration AST structure
     let source = r#"

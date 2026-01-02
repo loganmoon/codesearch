@@ -1,7 +1,7 @@
 //! Handler for extracting TypeScript module definitions
 //!
 //! This module processes tree-sitter query matches for TypeScript program nodes
-//! and builds Module entities with import tracking.
+//! and builds Module entities with import/export tracking.
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]
@@ -14,7 +14,10 @@ use crate::common::{
 };
 use crate::javascript::module_path::derive_module_path;
 use codesearch_core::{
-    entities::{EntityMetadata, EntityType, Language, SourceLocation, Visibility},
+    entities::{
+        EntityMetadata, EntityRelationshipData, EntityType, Language, ReferenceType,
+        SourceLocation, SourceReference, Visibility,
+    },
     entity_id::generate_entity_id,
     error::Result,
     CodeEntity,
@@ -24,37 +27,12 @@ use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
-// Cached tree-sitter query for import extraction
-static TS_IMPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
 // Cached tree-sitter query for export detection
 static TS_EXPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
-
-const TS_IMPORT_QUERY_SOURCE: &str = r#"
-    (import_statement
-      source: (string) @source)
-"#;
 
 const TS_EXPORT_QUERY_SOURCE: &str = r#"
     (export_statement) @export
 "#;
-
-/// Get or initialize the cached import query
-fn ts_import_query() -> Option<&'static Query> {
-    TS_IMPORT_QUERY
-        .get_or_init(|| {
-            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            match Query::new(&language, TS_IMPORT_QUERY_SOURCE) {
-                Ok(query) => Some(query),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to compile TypeScript import query: {e}. This is a bug."
-                    );
-                    None
-                }
-            }
-        })
-        .as_ref()
-}
 
 /// Get or initialize the cached export query
 fn ts_export_query() -> Option<&'static Query> {
@@ -74,31 +52,6 @@ fn ts_export_query() -> Option<&'static Query> {
         .as_ref()
 }
 
-/// Extract import source paths from a TypeScript program node
-fn extract_import_sources(program_node: Node, source: &str) -> Vec<String> {
-    let Some(query) = ts_import_query() else {
-        return Vec::new();
-    };
-
-    let mut imports = Vec::new();
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(query, program_node, source.as_bytes());
-
-    while let Some(query_match) = matches.next() {
-        for capture in query_match.captures {
-            if let Ok(source_path) = capture.node.utf8_text(source.as_bytes()) {
-                // Remove quotes from source path
-                let source_path = source_path.trim_matches(|c| c == '"' || c == '\'');
-                if !source_path.is_empty() {
-                    imports.push(source_path.to_string());
-                }
-            }
-        }
-    }
-
-    imports
-}
-
 /// Check if a TypeScript program node has any export statements
 fn has_exports(program_node: Node, source: &str) -> bool {
     let Some(query) = ts_export_query() else {
@@ -110,6 +63,219 @@ fn has_exports(program_node: Node, source: &str) -> bool {
 
     // If there's at least one export, return true
     matches.next().is_some()
+}
+
+/// Represents an imported item with its source and local name
+#[derive(Debug)]
+struct ImportInfo {
+    /// The source module path (e.g., "./utils")
+    source_path: String,
+    /// The name being imported (or None for namespace import of the whole module)
+    imported_name: Option<String>,
+    /// Whether this is a namespace import (import * as X)
+    is_namespace: bool,
+}
+
+/// Represents a re-exported item
+#[derive(Debug)]
+struct ReexportInfo {
+    /// The source module path (e.g., "./user")
+    source_path: String,
+    /// The name being re-exported (or None for star export)
+    exported_name: Option<String>,
+}
+
+/// Extract detailed import information from a TypeScript program node
+fn extract_imports(program_node: Node, source: &str) -> Vec<ImportInfo> {
+    let mut imports = Vec::new();
+
+    for child in program_node.children(&mut program_node.walk()) {
+        if child.kind() != "import_statement" {
+            continue;
+        }
+
+        // Find the source string (e.g., './utils')
+        let source_path = child
+            .children(&mut child.walk())
+            .find(|n| n.kind() == "string")
+            .and_then(|n| {
+                n.utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
+            });
+
+        let Some(source_path) = source_path else {
+            continue;
+        };
+
+        // Find the import_clause
+        let import_clause = child
+            .children(&mut child.walk())
+            .find(|n| n.kind() == "import_clause");
+
+        let Some(clause) = import_clause else {
+            continue;
+        };
+
+        // Process import_clause children
+        for clause_child in clause.children(&mut clause.walk()) {
+            match clause_child.kind() {
+                // Default import: `import DefaultClass from ...`
+                "identifier" => {
+                    // Use the local binding name as a best-guess for the export name
+                    // This works when local name matches export name (common convention)
+                    if let Ok(local_name) = clause_child.utf8_text(source.as_bytes()) {
+                        imports.push(ImportInfo {
+                            source_path: source_path.clone(),
+                            imported_name: Some(local_name.to_string()),
+                            is_namespace: false,
+                        });
+                    }
+                }
+                // Named imports: `import { helper, VALUE } from ...`
+                "named_imports" => {
+                    for specifier in clause_child.children(&mut clause_child.walk()) {
+                        if specifier.kind() == "import_specifier" {
+                            // Get the imported name (first identifier in specifier)
+                            if let Some(name_node) = specifier
+                                .children(&mut specifier.walk())
+                                .find(|n| n.kind() == "identifier")
+                            {
+                                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                    imports.push(ImportInfo {
+                                        source_path: source_path.clone(),
+                                        imported_name: Some(name.to_string()),
+                                        is_namespace: false,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                // Namespace import: `import * as Utils from ...`
+                "namespace_import" => {
+                    imports.push(ImportInfo {
+                        source_path: source_path.clone(),
+                        imported_name: None, // Imports the whole module
+                        is_namespace: true,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    imports
+}
+
+/// Extract re-export information from a TypeScript program node
+fn extract_reexports(program_node: Node, source: &str) -> Vec<ReexportInfo> {
+    let mut reexports = Vec::new();
+
+    for child in program_node.children(&mut program_node.walk()) {
+        if child.kind() != "export_statement" {
+            continue;
+        }
+
+        // Check if this is a re-export (has "from" keyword)
+        let has_from = child
+            .children(&mut child.walk())
+            .any(|n| n.kind() == "from");
+        if !has_from {
+            continue;
+        }
+
+        // Find the source string
+        let source_path = child
+            .children(&mut child.walk())
+            .find(|n| n.kind() == "string")
+            .and_then(|n| {
+                n.utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
+            });
+
+        let Some(source_path) = source_path else {
+            continue;
+        };
+
+        // Check for star export: `export * from './module'`
+        let has_star = child.children(&mut child.walk()).any(|n| n.kind() == "*");
+        if has_star {
+            reexports.push(ReexportInfo {
+                source_path,
+                exported_name: None, // Star export
+            });
+            continue;
+        }
+
+        // Check for named re-exports: `export { User } from './user'`
+        let export_clause = child
+            .children(&mut child.walk())
+            .find(|n| n.kind() == "export_clause");
+
+        if let Some(clause) = export_clause {
+            for specifier in clause.children(&mut clause.walk()) {
+                if specifier.kind() == "export_specifier" {
+                    // Get the exported name (first identifier)
+                    if let Some(name_node) = specifier
+                        .children(&mut specifier.walk())
+                        .find(|n| n.kind() == "identifier")
+                    {
+                        if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                            reexports.push(ReexportInfo {
+                                source_path: source_path.clone(),
+                                exported_name: Some(name.to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    reexports
+}
+
+/// Resolve a relative import path to a module qualified name
+///
+/// Example: "./utils" in file "src/main.ts" with source_root "src" -> "utils"
+/// Example: "./models/user" in file "src/index.ts" -> "models.user"
+fn resolve_import_path(
+    import_path: &str,
+    current_file: &Path,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Option<String> {
+    // Only handle relative imports for now
+    if !import_path.starts_with('.') {
+        return None;
+    }
+
+    // Get the directory of the current file
+    let current_dir = current_file.parent()?;
+
+    // Resolve the relative path
+    let mut resolved = current_dir.to_path_buf();
+    for component in import_path.split('/') {
+        match component {
+            "." => {}
+            ".." => {
+                resolved.pop();
+            }
+            name => {
+                resolved.push(name);
+            }
+        }
+    }
+
+    // Try to derive module path from the resolved path
+    // Add .ts extension for resolution
+    let with_ext = resolved.with_extension("ts");
+
+    source_root
+        .and_then(|root| derive_module_path(&with_ext, root))
+        .or_else(|| derive_module_path(&with_ext, repo_root))
 }
 
 /// Handle TypeScript program node as a Module entity
@@ -152,30 +318,109 @@ pub fn handle_module_impl(
         entity_id,
         repository_id: repository_id.to_string(),
         name,
-        qualified_name,
+        qualified_name: qualified_name.clone(),
         path_entity_identifier: Some(path_entity_identifier),
         parent_scope: None,
         file_path: file_path.to_path_buf(),
         location,
     };
 
-    // Extract imports
-    let imports = extract_import_sources(program_node, source);
+    // Extract imports and re-exports
+    let import_infos = extract_imports(program_node, source);
+    let reexport_infos = extract_reexports(program_node, source);
 
     // Check for exports
     let has_export_statements = has_exports(program_node, source);
 
     // Only create a Module entity if there are imports or exports
     // Per E-MOD-FILE: "A file with import/export statements produces a Module entity"
-    if imports.is_empty() && !has_export_statements {
+    if import_infos.is_empty() && !has_export_statements {
         return Ok(vec![]);
     }
 
-    // Build metadata
-    let mut metadata = EntityMetadata::default();
+    // Build relationships
+    let mut relationships = EntityRelationshipData::default();
 
-    // Store imports as JSON array (used by imports_resolver)
-    if let Ok(imports_json) = serde_json::to_string(&imports) {
+    // Convert imports to SourceReference
+    for import in &import_infos {
+        let Some(module_qname) =
+            resolve_import_path(&import.source_path, file_path, source_root, repo_root)
+        else {
+            continue;
+        };
+
+        // Determine the target qualified name
+        let (target, simple_name) = if import.is_namespace {
+            // Namespace import: target is the module itself
+            (module_qname.clone(), module_qname.clone())
+        } else if let Some(ref name) = import.imported_name {
+            // Named import or default import: target is module.name
+            // For default imports, we use the local binding name as best-guess
+            (format!("{module_qname}.{name}"), name.clone())
+        } else {
+            continue;
+        };
+
+        if let Ok(src_ref) = SourceReference::builder()
+            .target(target)
+            .simple_name(simple_name)
+            .is_external(false)
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::Import)
+            .build()
+        {
+            relationships.imports.push(src_ref);
+        }
+    }
+
+    // Convert re-exports to SourceReference
+    for reexport in &reexport_infos {
+        let Some(module_qname) =
+            resolve_import_path(&reexport.source_path, file_path, source_root, repo_root)
+        else {
+            continue;
+        };
+
+        if let Some(ref name) = reexport.exported_name {
+            // Named re-export: target is module.name
+            let target = format!("{module_qname}.{name}");
+            if let Ok(src_ref) = SourceReference::builder()
+                .target(target)
+                .simple_name(name.clone())
+                .is_external(false)
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Import) // Using Import for re-exports
+                .build()
+            {
+                relationships.reexports.push(src_ref);
+            }
+        } else {
+            // Star re-export: target is the source module itself
+            // We create a REEXPORTS relationship to the module, which semantically
+            // means "this module re-exports everything from the target module"
+            if let Ok(src_ref) = SourceReference::builder()
+                .target(module_qname.clone())
+                .simple_name(
+                    module_qname
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(&module_qname)
+                        .to_string(),
+                )
+                .is_external(false)
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Import)
+                .build()
+            {
+                relationships.reexports.push(src_ref);
+            }
+        }
+    }
+
+    // Build metadata (keep legacy format for backwards compatibility)
+    let mut metadata = EntityMetadata::default();
+    let import_paths: Vec<String> = import_infos.iter().map(|i| i.source_path.clone()).collect();
+    if let Ok(imports_json) = serde_json::to_string(&import_paths) {
         metadata
             .attributes
             .insert("imports".to_string(), imports_json);
@@ -192,7 +437,7 @@ pub fn handle_module_impl(
             content: node_to_text(program_node, source).ok(),
             metadata,
             signature: None,
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 

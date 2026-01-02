@@ -197,6 +197,23 @@ impl ReferenceExtractor for ImportsExtractor {
     }
 }
 
+/// Extractor for REEXPORTS relationships
+struct ReexportsExtractor;
+
+impl ReferenceExtractor for ReexportsExtractor {
+    fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
+        entity
+            .relationships
+            .reexports
+            .iter()
+            .map(|src_ref| ExtractedRef {
+                target: src_ref.target().to_string(),
+                simple_name: src_ref.simple_name().to_string(),
+            })
+            .collect()
+    }
+}
+
 /// Generic relationship resolver that uses typed relationship definitions
 ///
 /// This resolver can handle any relationship type by being configured with:
@@ -482,6 +499,14 @@ pub fn imports_resolver() -> GenericResolver {
     GenericResolver::new(
         &codesearch_core::resolution::definitions::IMPORTS,
         Box::new(ImportsExtractor),
+    )
+}
+
+/// Create a GenericResolver for REEXPORTS relationships
+pub fn reexports_resolver() -> GenericResolver {
+    GenericResolver::new(
+        &codesearch_core::resolution::definitions::REEXPORTS,
+        Box::new(ReexportsExtractor),
     )
 }
 

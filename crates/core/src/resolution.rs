@@ -218,6 +218,31 @@ pub mod definitions {
         ],
     );
 
+    /// REEXPORTS relationship: Module re-exports entities from another module
+    ///
+    /// Used for barrel exports like `export * from './module'` or `export { X } from './module'`
+    pub const REEXPORTS: RelationshipDef = RelationshipDef::new(
+        "reexports",
+        &[EntityType::Module],
+        &[
+            EntityType::Module,
+            EntityType::Function,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::TypeAlias,
+            EntityType::Constant,
+        ],
+        RelationshipType::Reexports,
+        &[
+            LookupStrategy::QualifiedName,
+            LookupStrategy::PathEntityIdentifier,
+            LookupStrategy::SimpleName,
+        ],
+    );
+
     /// CONTAINS relationship: Parent scope contains child entity
     pub const CONTAINS: RelationshipDef = RelationshipDef::new(
         "contains",
@@ -328,6 +353,7 @@ mod tests {
         assert!(definitions::EXTENDS.validate().is_ok());
         assert!(definitions::INHERITS.validate().is_ok());
         assert!(definitions::IMPORTS.validate().is_ok());
+        assert!(definitions::REEXPORTS.validate().is_ok());
         assert!(definitions::CONTAINS.validate().is_ok());
     }
 }

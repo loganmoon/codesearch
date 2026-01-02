@@ -290,14 +290,15 @@ fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
     None
 }
 
-/// Check if a node is exported (has an export_statement ancestor)
+/// Check if a node is exported (has an export_statement or ambient_declaration ancestor)
+/// Ambient declarations (declare keyword) are always public in TypeScript
 fn is_node_exported(node: Node) -> bool {
     let mut current = Some(node);
     while let Some(n) = current {
-        if n.kind() == "export_statement" {
-            return true;
+        match n.kind() {
+            "export_statement" | "ambient_declaration" => return true,
+            _ => current = n.parent(),
         }
-        current = n.parent();
     }
     false
 }

@@ -584,13 +584,11 @@ app.run();
             visibility: Some(Visibility::Public),
         },
     ],
-    relationships: &[
-        ExpectedRelationship {
-            kind: RelationshipKind::Imports,
-            from: "main",
-            to: "app.App",
-        },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Imports,
+        from: "main",
+        to: "app.App",
+    }],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,
 };

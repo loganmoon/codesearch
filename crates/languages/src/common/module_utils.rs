@@ -8,13 +8,17 @@ use std::path::Path;
 /// Derive module name from file path
 ///
 /// The module name is the file name without extension.
+/// For TypeScript declaration files, also strips the `.d` suffix.
 /// e.g., "/src/utils/helpers.js" -> "helpers"
+/// e.g., "/src/types/ambient.d.ts" -> "ambient"
 pub fn derive_module_name(file_path: &Path) -> String {
-    file_path
+    let name = file_path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string()
+        .unwrap_or("module");
+
+    // Strip .d suffix for TypeScript declaration files
+    name.strip_suffix(".d").unwrap_or(name).to_string()
 }
 
 /// Derive qualified name for the module from file path

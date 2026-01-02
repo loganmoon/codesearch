@@ -4,7 +4,7 @@
 pub use crate::javascript::queries::ARROW_FUNCTION_QUERY;
 
 /// Query for regular function declarations (TypeScript-specific to handle type annotations)
-/// Also matches generator function declarations (function*)
+/// Also matches generator function declarations (function*) and ambient function declarations (declare function)
 pub const FUNCTION_QUERY: &str = r#"
 [
   (function_declaration
@@ -16,6 +16,13 @@ pub const FUNCTION_QUERY: &str = r#"
     name: (identifier) @name
     parameters: (formal_parameters) @params
   ) @function
+
+  (ambient_declaration
+    (function_signature
+      name: (identifier) @name
+      parameters: (formal_parameters) @params
+    ) @function
+  )
 ]
 "#;
 
@@ -177,6 +184,28 @@ pub const INTERFACE_METHOD_QUERY: &str = r#"
 (method_signature
   name: (property_identifier) @name
 ) @method
+"#;
+
+/// Query for interface call signatures
+/// Matches callable interfaces like `(x: number): number` in `interface Callable { (x: number): number; }`
+pub const CALL_SIGNATURE_QUERY: &str = r#"
+(call_signature
+  parameters: (formal_parameters) @params
+) @call_sig
+"#;
+
+/// Query for interface construct signatures
+/// Matches newable interfaces like `new (name: string): object` in `interface Constructable { new (name: string): object; }`
+pub const CONSTRUCT_SIGNATURE_QUERY: &str = r#"
+(construct_signature
+  parameters: (formal_parameters) @params
+) @construct_sig
+"#;
+
+/// Query for interface index signatures
+/// Matches indexer patterns like `[key: string]: value` in interfaces
+pub const INDEX_SIGNATURE_QUERY: &str = r#"
+(index_signature) @index_sig
 "#;
 
 /// Query for class expressions (named and anonymous)

@@ -256,3 +256,186 @@ fn test_interface_members_structure() {
     println!("\n=== TypeScript interface with members ===");
     print_tree(tree.root_node(), source, 0);
 }
+
+#[test]
+fn test_index_signature_ast_structure() {
+    // Debug test to understand index signature AST structure
+    let source = r#"interface NumberDictionary {
+    [index: number]: string;
+}"#;
+    let tree = parse_ts(source);
+
+    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text: String = source[node.start_byte()..node.end_byte()]
+            .chars()
+            .take(50)
+            .collect();
+        println!(
+            "{}{} [{}] (named: {})",
+            indent,
+            node.kind(),
+            text.replace('\n', "\\n"),
+            node.is_named()
+        );
+
+        for child in node.children(&mut node.walk()) {
+            print_tree(child, source, depth + 1);
+        }
+    }
+
+    println!("\n=== Index signature AST structure ===");
+    print_tree(tree.root_node(), source, 0);
+
+    // Also check index_signature children specifically
+    let index_sig =
+        find_node(tree.root_node(), "index_signature").expect("Should find index_signature");
+    println!("\n=== Index signature named children ===");
+    for child in index_sig.named_children(&mut index_sig.walk()) {
+        let text = child.utf8_text(source.as_bytes()).unwrap_or("???");
+        println!("  {} [{}]", child.kind(), text);
+    }
+}
+
+#[test]
+fn test_ambient_function_ast_structure() {
+    // Debug test to understand ambient function declaration AST structure
+    let source = r#"
+declare function getEnv(key: string): string | undefined;
+"#;
+    let tree = parse_ts(source);
+
+    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text: String = source[node.start_byte()..node.end_byte()]
+            .chars()
+            .take(50)
+            .collect();
+        println!("{}{} [{}]", indent, node.kind(), text.replace('\n', "\\n"));
+
+        for child in node.children(&mut node.walk()) {
+            print_tree(child, source, depth + 1);
+        }
+    }
+
+    println!("\n=== Ambient function declaration AST structure ===");
+    print_tree(tree.root_node(), source, 0);
+}
+
+#[test]
+fn test_tsx_component_ast_structure() {
+    // Debug test to understand TSX component AST structure
+    let source = r#"
+export function Greeting({ name }: { name: string }) {
+    return <div>Hello, {name}!</div>;
+}
+
+export const Button = ({ onClick, children }: {
+    onClick: () => void;
+    children: React.ReactNode;
+}) => {
+    return <button onClick={onClick}>{children}</button>;
+};
+
+export const Card: React.FC<{ title: string }> = ({ title, children }) => {
+    return (
+        <div className="card">
+            <h2>{title}</h2>
+            {children}
+        </div>
+    );
+};
+
+export function List<T>({ items, renderItem }: {
+    items: T[];
+    renderItem: (item: T) => React.ReactNode;
+}) {
+    return <ul>{items.map(renderItem)}</ul>;
+}
+"#;
+
+    // Parse with TypeScript parser (what we currently use)
+    let tree = parse_ts(source);
+
+    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize, max_depth: usize) {
+        if depth > max_depth {
+            return;
+        }
+        let indent = "  ".repeat(depth);
+        let text: String = source[node.start_byte()..node.end_byte()]
+            .chars()
+            .take(50)
+            .collect();
+        println!("{}{} [{}]", indent, node.kind(), text.replace('\n', "\\n"));
+
+        for child in node.children(&mut node.walk()) {
+            print_tree(child, source, depth + 1, max_depth);
+        }
+    }
+
+    println!("\n=== TSX component AST structure (TS parser, depth 3) ===");
+    print_tree(tree.root_node(), source, 0, 3);
+
+    // Find all arrow functions and functions
+    fn count_nodes(node: tree_sitter::Node, kind: &str) -> usize {
+        let mut count = if node.kind() == kind { 1 } else { 0 };
+        for child in node.children(&mut node.walk()) {
+            count += count_nodes(child, kind);
+        }
+        count
+    }
+
+    println!("\n=== Node counts (TS parser) ===");
+    println!(
+        "function_declaration: {}",
+        count_nodes(tree.root_node(), "function_declaration")
+    );
+    println!(
+        "arrow_function: {}",
+        count_nodes(tree.root_node(), "arrow_function")
+    );
+    println!(
+        "lexical_declaration: {}",
+        count_nodes(tree.root_node(), "lexical_declaration")
+    );
+    println!(
+        "export_statement: {}",
+        count_nodes(tree.root_node(), "export_statement")
+    );
+    println!("ERROR: {}", count_nodes(tree.root_node(), "ERROR"));
+
+    // Check if tree has errors
+    if tree.root_node().has_error() {
+        println!("\n*** TREE HAS PARSE ERRORS ***");
+        fn find_errors(node: tree_sitter::Node, source: &str) {
+            if node.is_error() || node.is_missing() {
+                let text: String = source[node.start_byte()..node.end_byte()]
+                    .chars()
+                    .take(50)
+                    .collect();
+                println!(
+                    "  ERROR at line {}: {} [{}]",
+                    node.start_position().row + 1,
+                    node.kind(),
+                    text.replace('\n', "\\n")
+                );
+            }
+            for child in node.children(&mut node.walk()) {
+                find_errors(child, source);
+            }
+        }
+        find_errors(tree.root_node(), source);
+    }
+
+    // Find all top-level statements
+    println!("\n=== Top-level program children ===");
+    for child in tree.root_node().children(&mut tree.root_node().walk()) {
+        if child.is_named() {
+            let text: String = source[child.start_byte()..child.end_byte()]
+                .chars()
+                .take(60)
+                .collect();
+            println!("  {} [{}...]", child.kind(), text.replace('\n', "\\n"));
+        }
+    }
+}

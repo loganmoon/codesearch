@@ -613,9 +613,8 @@ pub fn handle_interface_impl(
         .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
-    // Check if exported
-    let is_exported = is_node_exported(interface_node);
-    let visibility = if is_exported {
+    // Check if exported (or in a .d.ts file)
+    let visibility = if should_be_public(interface_node, file_path) {
         Visibility::Public
     } else {
         Visibility::Private
@@ -1163,16 +1162,287 @@ fn build_enum_member_entities(
         .collect()
 }
 
-/// Check if a node is exported (has an export_statement ancestor)
+/// Check if a node is exported (has an export_statement or ambient_declaration ancestor)
+/// Ambient declarations (declare keyword) are always public in TypeScript
 fn is_node_exported(node: Node) -> bool {
     let mut current = Some(node);
     while let Some(n) = current {
-        if n.kind() == "export_statement" {
-            return true;
+        match n.kind() {
+            "export_statement" | "ambient_declaration" => return true,
+            _ => current = n.parent(),
         }
-        current = n.parent();
     }
     false
+}
+
+/// Check if a file is a TypeScript declaration file (.d.ts)
+/// All declarations in .d.ts files are implicitly public
+fn is_declaration_file(file_path: &Path) -> bool {
+    file_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.ends_with(".d.ts"))
+        .unwrap_or(false)
+}
+
+/// Check if an entity should be public based on export status or file type
+fn should_be_public(node: Node, file_path: &Path) -> bool {
+    is_node_exported(node) || is_declaration_file(file_path)
+}
+
+/// Handle interface call signatures
+/// For: `interface Callable { (x: number): number; }`
+#[allow(clippy::too_many_arguments)]
+pub fn handle_call_signature_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let call_sig_node = require_capture_node(query_match, query, "call_sig")?;
+
+    // Derive module path
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build parent scope from AST (should include interface name)
+    let scope_result =
+        crate::qualified_name::build_qualified_name_from_ast(call_sig_node, source, "typescript");
+
+    // Full parent scope includes module path
+    let parent_scope = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => format!("{module}.{}", scope_result.parent_scope),
+        (Some(module), true) => module.clone(),
+        (None, false) => scope_result.parent_scope.clone(),
+        (None, true) => String::new(),
+    };
+
+    // Name for call signature is "()"
+    let name = "()".to_string();
+
+    // Build qualified name
+    let qualified_name = if parent_scope.is_empty() {
+        name.clone()
+    } else {
+        format!("{parent_scope}.{name}")
+    };
+
+    // Check if exported (through parent interface)
+    let is_exported = is_node_exported(call_sig_node);
+
+    // Generate entity ID
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    let entity = CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        })
+        .entity_type(EntityType::Method)
+        .location(SourceLocation::from_tree_sitter_node(call_sig_node))
+        .visibility(Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }))
+        .documentation_summary(None)
+        .content(node_to_text(call_sig_node, source).ok())
+        .metadata(EntityMetadata::default())
+        .language(Language::TypeScript)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| {
+            codesearch_core::error::Error::entity_extraction(format!(
+                "Failed to build call signature entity: {e}"
+            ))
+        })?;
+
+    Ok(vec![entity])
+}
+
+/// Handle interface construct signatures
+/// For: `interface Constructable { new (name: string): object; }`
+#[allow(clippy::too_many_arguments)]
+pub fn handle_construct_signature_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let construct_sig_node = require_capture_node(query_match, query, "construct_sig")?;
+
+    // Derive module path
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build parent scope from AST (should include interface name)
+    let scope_result = crate::qualified_name::build_qualified_name_from_ast(
+        construct_sig_node,
+        source,
+        "typescript",
+    );
+
+    // Full parent scope includes module path
+    let parent_scope = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => format!("{module}.{}", scope_result.parent_scope),
+        (Some(module), true) => module.clone(),
+        (None, false) => scope_result.parent_scope.clone(),
+        (None, true) => String::new(),
+    };
+
+    // Name for construct signature is "new()"
+    let name = "new()".to_string();
+
+    // Build qualified name
+    let qualified_name = if parent_scope.is_empty() {
+        name.clone()
+    } else {
+        format!("{parent_scope}.{name}")
+    };
+
+    // Check if exported (through parent interface)
+    let is_exported = is_node_exported(construct_sig_node);
+
+    // Generate entity ID
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    let entity = CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        })
+        .entity_type(EntityType::Method)
+        .location(SourceLocation::from_tree_sitter_node(construct_sig_node))
+        .visibility(Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }))
+        .documentation_summary(None)
+        .content(node_to_text(construct_sig_node, source).ok())
+        .metadata(EntityMetadata::default())
+        .language(Language::TypeScript)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| {
+            codesearch_core::error::Error::entity_extraction(format!(
+                "Failed to build construct signature entity: {e}"
+            ))
+        })?;
+
+    Ok(vec![entity])
+}
+
+/// Handle interface index signatures
+/// For: `interface Dict { [key: string]: value; }`
+#[allow(clippy::too_many_arguments)]
+pub fn handle_index_signature_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let index_sig_node = require_capture_node(query_match, query, "index_sig")?;
+
+    // Derive module path
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build parent scope from AST (should include interface name)
+    let scope_result =
+        crate::qualified_name::build_qualified_name_from_ast(index_sig_node, source, "typescript");
+
+    // Full parent scope includes module path
+    let parent_scope = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => format!("{module}.{}", scope_result.parent_scope),
+        (Some(module), true) => module.clone(),
+        (None, false) => scope_result.parent_scope.clone(),
+        (None, true) => String::new(),
+    };
+
+    // Extract key type from the index signature
+    // The structure is: index_signature -> identifier, type_annotation (for key type), : type_annotation (for value)
+    // We need to find the first type_annotation which is the key type
+    let key_type_str = extract_index_signature_key_type(index_sig_node, source);
+    let name = format!("[{key_type_str}]");
+
+    // Build qualified name
+    let qualified_name = if parent_scope.is_empty() {
+        name.clone()
+    } else {
+        format!("{parent_scope}.{name}")
+    };
+
+    // Check if exported (through parent interface)
+    let is_exported = is_node_exported(index_sig_node);
+
+    // Generate entity ID
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    let entity = CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        })
+        .entity_type(EntityType::Property)
+        .location(SourceLocation::from_tree_sitter_node(index_sig_node))
+        .visibility(Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }))
+        .documentation_summary(None)
+        .content(node_to_text(index_sig_node, source).ok())
+        .metadata(EntityMetadata::default())
+        .language(Language::TypeScript)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| {
+            codesearch_core::error::Error::entity_extraction(format!(
+                "Failed to build index signature entity: {e}"
+            ))
+        })?;
+
+    Ok(vec![entity])
 }
 
 /// Handle class expressions (named and anonymous)
@@ -1435,6 +1705,32 @@ fn extract_parameter_visibility(param_node: Node) -> Visibility {
     }
     // If only readonly (no visibility modifier), default to public
     Visibility::Public
+}
+
+/// Extract the key type from an index signature node
+/// For `[key: string]: value`, returns "string"
+/// For `[index: number]: value`, returns "number"
+fn extract_index_signature_key_type(node: Node, source: &str) -> String {
+    // The index_signature node structure is:
+    // index_signature -> "[", identifier, predefined_type (key type), "]", type_annotation (value type)
+    // Named children: identifier, predefined_type (key), type_annotation (value)
+    //
+    // We need the first predefined_type or type_identifier which is the key type
+    // (it appears before the type_annotation which is the value type)
+    for child in node.named_children(&mut node.walk()) {
+        match child.kind() {
+            "predefined_type" | "type_identifier" => {
+                if let Ok(type_text) = node_to_text(child, source) {
+                    return type_text;
+                }
+            }
+            // Stop when we hit type_annotation (that's the value type, not key type)
+            "type_annotation" => break,
+            _ => continue,
+        }
+    }
+    // Default to string if we can't determine
+    "string".to_string()
 }
 
 /// Test-only wrapper for extract_implements_types

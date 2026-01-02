@@ -410,13 +410,11 @@ declare global {
 export {};
 "#,
     )],
-    entities: &[
-        ExpectedEntity {
-            kind: EntityKind::Module,
-            qualified_name: "augment",
-            visibility: Some(Visibility::Public),
-        },
-    ],
+    entities: &[ExpectedEntity {
+        kind: EntityKind::Module,
+        qualified_name: "augment",
+        visibility: Some(Visibility::Public),
+    }],
     relationships: &[],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,

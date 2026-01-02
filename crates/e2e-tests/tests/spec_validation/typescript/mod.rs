@@ -313,3 +313,244 @@ async fn test_arrow_field_properties() -> Result<()> {
 async fn test_optional_readonly() -> Result<()> {
     run_spec_validation(&OPTIONAL_READONLY).await
 }
+
+// =============================================================================
+// Fixture Consistency Tests (no Docker required)
+// =============================================================================
+// These tests validate that fixture definitions are internally consistent.
+
+use codesearch_e2e_tests::common::spec_validation::{EntityKind, Fixture, RelationshipKind};
+
+/// All TypeScript fixtures for validation
+const ALL_FIXTURES: &[&Fixture] = &[
+    // Modules
+    &BASIC_MODULE,
+    &IMPORTS_EXPORTS,
+    &NAMESPACES,
+    &NESTED_NAMESPACES,
+    &NAMESPACE_MERGING,
+    &REEXPORTS,
+    &BARREL_EXPORTS,
+    &DEFAULT_EXPORTS,
+    // Classes
+    &CLASSES,
+    &ABSTRACT_CLASSES,
+    &CLASS_EXPRESSIONS,
+    &CLASS_INHERITANCE,
+    &CLASS_IMPLEMENTS,
+    &CLASS_FIELDS,
+    &PARAMETER_PROPERTIES,
+    &PRIVATE_FIELDS,
+    &STATIC_MEMBERS,
+    &ACCESSORS,
+    // Interfaces
+    &INTERFACES,
+    &INTERFACE_EXTENDS,
+    &INTERFACE_MERGING,
+    &INDEX_SIGNATURES,
+    &CALL_CONSTRUCT_SIGNATURES,
+    // Functions
+    &FUNCTIONS,
+    &FUNCTION_EXPRESSIONS,
+    &ARROW_FUNCTIONS,
+    &ASYNC_FUNCTIONS,
+    &GENERATOR_FUNCTIONS,
+    &OVERLOADED_FUNCTIONS,
+    &METHODS,
+    &FUNCTION_CALLS,
+    // Types
+    &TYPE_ALIASES,
+    &GENERIC_TYPE_ALIASES,
+    &ENUMS,
+    &STRING_ENUMS,
+    &CONST_ENUMS,
+    &CONSTANTS_VARIABLES,
+    // Advanced
+    &GENERICS,
+    &DECORATORS,
+    &AMBIENT_DECLARATIONS,
+    &AMBIENT_MODULES,
+    &GLOBAL_AUGMENTATION,
+    &TYPE_USAGE,
+    &VISIBILITY,
+    &JSX_COMPONENTS,
+    &ARROW_FIELD_PROPERTIES,
+    &OPTIONAL_READONLY,
+];
+
+#[test]
+fn test_all_fixtures_have_entities() {
+    for fixture in ALL_FIXTURES {
+        assert!(
+            !fixture.entities.is_empty(),
+            "Fixture '{}' should have at least one entity",
+            fixture.name
+        );
+    }
+}
+
+#[test]
+fn test_all_fixtures_have_files() {
+    for fixture in ALL_FIXTURES {
+        assert!(
+            !fixture.files.is_empty(),
+            "Fixture '{}' should have at least one file",
+            fixture.name
+        );
+    }
+}
+
+#[test]
+fn test_property_entities_have_class_parent() {
+    for fixture in ALL_FIXTURES {
+        let has_property = fixture
+            .entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Property);
+
+        if has_property {
+            let has_class = fixture
+                .entities
+                .iter()
+                .any(|e| e.kind == EntityKind::Class || e.kind == EntityKind::Interface);
+
+            assert!(
+                has_class,
+                "Fixture '{}' has Property entity but no Class or Interface parent",
+                fixture.name
+            );
+        }
+    }
+}
+
+#[test]
+fn test_enum_variant_entities_have_enum_parent() {
+    for fixture in ALL_FIXTURES {
+        let has_variant = fixture
+            .entities
+            .iter()
+            .any(|e| e.kind == EntityKind::EnumVariant);
+
+        if has_variant {
+            let has_enum = fixture.entities.iter().any(|e| e.kind == EntityKind::Enum);
+
+            assert!(
+                has_enum,
+                "Fixture '{}' has EnumVariant entity but no Enum parent",
+                fixture.name
+            );
+        }
+    }
+}
+
+#[test]
+fn test_contains_relationships_have_matching_entities() {
+    for fixture in ALL_FIXTURES {
+        for rel in fixture.relationships {
+            if rel.kind == RelationshipKind::Contains {
+                let from_exists = fixture
+                    .entities
+                    .iter()
+                    .any(|e| e.qualified_name == rel.from);
+                let to_exists = fixture.entities.iter().any(|e| e.qualified_name == rel.to);
+
+                assert!(
+                    from_exists,
+                    "Fixture '{}': CONTAINS from '{}' not found in entities",
+                    fixture.name, rel.from
+                );
+                assert!(
+                    to_exists,
+                    "Fixture '{}': CONTAINS to '{}' not found in entities",
+                    fixture.name, rel.to
+                );
+
+                // For TypeScript, check that the child starts with parent (dot-separated)
+                assert!(
+                    rel.to.starts_with(rel.from),
+                    "Fixture '{}': CONTAINS child '{}' should be prefixed by parent '{}'",
+                    fixture.name,
+                    rel.to,
+                    rel.from
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_uses_relationships_source_exists() {
+    for fixture in ALL_FIXTURES {
+        for rel in fixture.relationships {
+            if rel.kind == RelationshipKind::Uses {
+                let from_exists = fixture
+                    .entities
+                    .iter()
+                    .any(|e| e.qualified_name == rel.from);
+
+                assert!(
+                    from_exists,
+                    "Fixture '{}': USES source '{}' not found in entities",
+                    fixture.name, rel.from
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_class_implements_fixture_has_implements_relationships() {
+    let fixture = ALL_FIXTURES
+        .iter()
+        .find(|f| f.name == "ts_class_implements")
+        .expect("Should have ts_class_implements fixture");
+
+    let implements_count = fixture
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Implements)
+        .count();
+
+    assert!(
+        implements_count >= 1,
+        "ts_class_implements fixture should have at least 1 IMPLEMENTS relationship, found {implements_count}"
+    );
+}
+
+#[test]
+fn test_class_inheritance_fixture_has_inherits_from_relationships() {
+    let fixture = ALL_FIXTURES
+        .iter()
+        .find(|f| f.name == "ts_class_inheritance")
+        .expect("Should have ts_class_inheritance fixture");
+
+    let inherits_count = fixture
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::InheritsFrom)
+        .count();
+
+    assert!(
+        inherits_count >= 1,
+        "ts_class_inheritance fixture should have at least 1 INHERITS_FROM relationship, found {inherits_count}"
+    );
+}
+
+#[test]
+fn test_interface_extends_fixture_has_extends_interface_relationships() {
+    let fixture = ALL_FIXTURES
+        .iter()
+        .find(|f| f.name == "ts_interface_extends")
+        .expect("Should have ts_interface_extends fixture");
+
+    let extends_count = fixture
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::ExtendsInterface)
+        .count();
+
+    assert!(
+        extends_count >= 1,
+        "ts_interface_extends fixture should have at least 1 EXTENDS_INTERFACE relationship, found {extends_count}"
+    );
+}

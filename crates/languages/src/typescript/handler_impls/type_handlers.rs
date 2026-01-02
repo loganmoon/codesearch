@@ -8,8 +8,8 @@ use crate::javascript::{module_path::derive_module_path, utils::extract_jsdoc_co
 use crate::typescript::utils::{extract_type_references, is_ts_primitive};
 use codesearch_core::{
     entities::{
-        CodeEntityBuilder, EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation,
-        Visibility,
+        CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
+        Language, ReferenceType, SourceLocation, SourceReference, Visibility,
     },
     entity_id::generate_entity_id,
     error::Result,
@@ -63,35 +63,38 @@ pub fn handle_class_impl(
 
     // Extract implements clause (TypeScript-specific)
     let implements_raw = extract_implements_types(class_node, source)?;
-    let implements_resolved: Vec<String> = implements_raw
+
+    // Build SourceReference objects for implements relationships
+    let implements_refs: Vec<SourceReference> = implements_raw
         .iter()
-        .map(|type_name| resolve_reference(type_name, &import_map, parent_scope, "."))
+        .filter_map(|type_name| {
+            let resolved = resolve_reference(type_name, &import_map, parent_scope, ".");
+            SourceReference::builder()
+                .target(resolved)
+                .simple_name(type_name.clone())
+                .is_external(false) // TS doesn't track external refs yet
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Implements)
+                .build()
+                .ok()
+        })
         .collect();
 
     // Extract type references used in the class body
     let type_refs = extract_type_references(class_node, source, &import_map, parent_scope);
 
-    // Update language and add TypeScript-specific metadata
+    // Update language and add TypeScript-specific relationship data
     for entity in &mut entities {
         entity.language = Language::TypeScript;
 
-        // Add implements_trait with resolved qualified names for relationship resolution
-        if !implements_resolved.is_empty() {
-            // Store resolved interface names (comma-separated for single value compatibility)
-            entity.metadata.attributes.insert(
-                "implements_trait".to_string(),
-                implements_resolved.join(", "),
-            );
+        // Add implements to relationship data
+        if !implements_refs.is_empty() {
+            entity.relationships.implements = implements_refs.clone();
         }
 
         // Add type references for USES relationships
         if !type_refs.is_empty() {
-            if let Ok(json) = serde_json::to_string(&type_refs) {
-                entity
-                    .metadata
-                    .attributes
-                    .insert("uses_types".to_string(), json);
-            }
+            entity.relationships.uses_types.extend(type_refs.clone());
         }
     }
 
@@ -188,39 +191,40 @@ pub fn handle_interface_impl(
     let documentation = extract_jsdoc_comments(interface_node, source);
 
     // Build metadata
-    let mut metadata = EntityMetadata::default();
+    let metadata = EntityMetadata::default();
+
+    // Build relationship data
+    let mut relationships = EntityRelationshipData::default();
+
+    // Build supertraits (interface extends interface = EXTENDS_INTERFACE)
     if extends.is_some() {
-        // Resolve extended interfaces through import map and store directly in 'extends'
-        let extends_resolved = extract_extends_types(interface_node, source)?
-            .into_iter()
-            .map(|type_name| {
-                resolve_reference(
-                    &type_name,
-                    &import_map,
-                    if parent_scope.is_empty() {
-                        None
-                    } else {
-                        Some(parent_scope.as_str())
-                    },
-                    ".",
-                )
-            })
-            .collect::<Vec<_>>();
-
-        if !extends_resolved.is_empty() {
-            // Store resolved names as comma-separated for relationship resolution
-            metadata
-                .attributes
-                .insert("extends".to_string(), extends_resolved.join(", "));
+        let extends_types = extract_extends_types(interface_node, source)?;
+        for type_name in extends_types {
+            let resolved = resolve_reference(
+                &type_name,
+                &import_map,
+                if parent_scope.is_empty() {
+                    None
+                } else {
+                    Some(parent_scope.as_str())
+                },
+                ".",
+            );
+            if let Ok(extends_ref) = SourceReference::builder()
+                .target(resolved)
+                .simple_name(type_name)
+                .is_external(false)
+                .location(SourceLocation::default())
+                .ref_type(ReferenceType::Extends)
+                .build()
+            {
+                relationships.supertraits.push(extends_ref);
+            }
         }
     }
 
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Add type references for USES relationships
+    relationships.uses_types = type_refs;
 
     // Generate entity_id
     let file_path_str = file_path
@@ -257,6 +261,7 @@ pub fn handle_interface_impl(
         })
         .language(Language::TypeScript)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| {
             codesearch_core::error::Error::entity_extraction(format!(
@@ -332,12 +337,11 @@ pub fn handle_type_alias_impl(
             .insert("type_value".to_string(), type_text);
     }
 
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Build relationship data with uses_types
+    let relationships = EntityRelationshipData {
+        uses_types: type_refs,
+        ..Default::default()
+    };
 
     // Generate entity_id
     let file_path_str = file_path
@@ -374,6 +378,7 @@ pub fn handle_type_alias_impl(
         })
         .language(Language::TypeScript)
         .file_path(file_path.to_path_buf())
+        .relationships(relationships)
         .build()
         .map_err(|e| {
             codesearch_core::error::Error::entity_extraction(format!(

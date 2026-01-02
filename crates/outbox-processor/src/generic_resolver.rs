@@ -98,21 +98,30 @@ impl ReferenceExtractor for UsesExtractor {
 }
 
 /// Extractor for IMPLEMENTS relationships
+/// Handles both Rust impl blocks (implements_trait) and TypeScript classes (implements)
 struct ImplementsExtractor;
 
 impl ReferenceExtractor for ImplementsExtractor {
     fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
-        entity
-            .relationships
-            .implements_trait
-            .as_ref()
-            .map(|src_ref| {
-                vec![ExtractedRef {
-                    target: src_ref.target().to_string(),
-                    simple_name: src_ref.simple_name().to_string(),
-                }]
-            })
-            .unwrap_or_default()
+        let mut refs = Vec::new();
+
+        // Rust impl blocks: implements_trait (single trait)
+        if let Some(src_ref) = entity.relationships.implements_trait.as_ref() {
+            refs.push(ExtractedRef {
+                target: src_ref.target().to_string(),
+                simple_name: src_ref.simple_name().to_string(),
+            });
+        }
+
+        // TypeScript/JavaScript classes: implements (multiple interfaces)
+        for src_ref in &entity.relationships.implements {
+            refs.push(ExtractedRef {
+                target: src_ref.target().to_string(),
+                simple_name: src_ref.simple_name().to_string(),
+            });
+        }
+
+        refs
     }
 }
 

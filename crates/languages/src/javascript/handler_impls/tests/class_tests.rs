@@ -43,7 +43,10 @@ class Employee extends Person {
     let entity = &entities[0];
     assert_eq!(entity.name, "Employee");
     assert_eq!(entity.entity_type, EntityType::Class);
-    assert!(entity.metadata.attributes.contains_key("extends"));
+    assert!(
+        !entity.relationships.extends.is_empty(),
+        "Should have extends relationship"
+    );
 }
 
 #[test]
@@ -254,13 +257,12 @@ class MyClass extends BaseClass {
     let entity = &entities[0];
     assert_eq!(entity.name, "MyClass");
 
-    // Should have extends attribute with resolved qualified name
-    let extends = entity
-        .metadata
-        .attributes
-        .get("extends")
-        .expect("Should have extends");
-    assert_eq!(extends, "./base.BaseClass");
+    // Should have extends relationship with resolved qualified name
+    assert!(
+        !entity.relationships.extends.is_empty(),
+        "Should have extends"
+    );
+    assert_eq!(entity.relationships.extends[0].target(), "./base.BaseClass");
 }
 
 #[test]
@@ -279,13 +281,15 @@ class MyClass extends SomeBaseClass {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    // Should have extends attribute with external prefix for unresolved references
-    let extends = entity
-        .metadata
-        .attributes
-        .get("extends")
-        .expect("Should have extends");
-    assert_eq!(extends, "external.SomeBaseClass");
+    // Should have extends relationship with external prefix for unresolved references
+    assert!(
+        !entity.relationships.extends.is_empty(),
+        "Should have extends"
+    );
+    assert_eq!(
+        entity.relationships.extends[0].target(),
+        "external.SomeBaseClass"
+    );
 }
 
 // ============================================================================
@@ -309,11 +313,12 @@ class MyService {
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
 
-    let calls_attr = entity.metadata.attributes.get("calls");
-    assert!(calls_attr.is_some(), "Should have calls attribute");
-
-    let calls: Vec<String> =
-        serde_json::from_str(calls_attr.unwrap()).expect("Should parse calls JSON");
+    // Should have calls in relationships
+    assert!(!entity.relationships.calls.is_empty(), "Should have calls");
     // Should capture the console.log call
-    assert!(calls.iter().any(|c| c.contains("console.log")));
+    assert!(entity
+        .relationships
+        .calls
+        .iter()
+        .any(|c| c.target().contains("console.log")));
 }

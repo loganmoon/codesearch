@@ -70,8 +70,10 @@ pub enum ReferenceType {
     TypeUsage,
     /// Import statement
     Import,
-    /// extends/implements relationship
+    /// extends relationship (class extends class, interface extends interface)
     Extends,
+    /// implements relationship (class implements interface)
+    Implements,
     /// General usage (field types, etc.)
     Uses,
 }
@@ -344,10 +346,15 @@ pub struct EntityRelationshipData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<SourceReference>,
 
-    /// Trait/interface being implemented (for impl blocks).
+    /// Trait/interface being implemented (for Rust impl blocks).
     /// Resolved to IMPLEMENTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implements_trait: Option<SourceReference>,
+
+    /// Interfaces implemented by a class (for TypeScript/JavaScript classes).
+    /// Resolved to IMPLEMENTS relationships in Neo4j.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub implements: Vec<SourceReference>,
 
     /// Type this impl block is for (for ASSOCIATES relationship).
     /// Resolved to ASSOCIATES relationships in Neo4j.
@@ -378,6 +385,7 @@ impl EntityRelationshipData {
             && self.uses_types.is_empty()
             && self.imports.is_empty()
             && self.implements_trait.is_none()
+            && self.implements.is_empty()
             && self.for_type.is_none()
             && self.extends.is_empty()
             && self.supertraits.is_empty()

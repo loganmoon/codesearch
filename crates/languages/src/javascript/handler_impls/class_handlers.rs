@@ -14,7 +14,10 @@ use crate::javascript::{
     },
 };
 use codesearch_core::{
-    entities::{EntityMetadata, EntityType, FunctionSignature, Language, Visibility},
+    entities::{
+        EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature, Language,
+        ReferenceType, SourceLocation, Visibility,
+    },
     error::Result,
     CodeEntity,
 };
@@ -49,13 +52,6 @@ pub fn handle_class_impl(
     // Extract common components
     let components = extract_common_components(&ctx, "name", class_node, "javascript")?;
 
-    // Extract extends clause if present
-    let extends = if let Some(extends_node) = find_capture_node(query_match, query, "extends") {
-        node_to_text(extends_node, source).ok()
-    } else {
-        None
-    };
-
     // Extract just the class name from the class_heritage node for resolution
     let extends_class_name =
         if let Some(extends_node) = find_capture_node(query_match, query, "extends") {
@@ -75,20 +71,27 @@ pub fn handle_class_impl(
     let import_map = parse_file_imports(root, source, Language::JavaScript, module_path.as_deref());
 
     // Build metadata
-    let mut metadata = EntityMetadata::default();
-    if extends.is_some() {
-        // Resolve extends to qualified name using extracted class name
-        // Store the resolved name directly in 'extends' for relationship resolution
-        if let Some(ref class_name) = extends_class_name {
-            let extends_resolved = resolve_reference(
-                class_name,
-                &import_map,
-                components.parent_scope.as_deref(),
-                ".",
-            );
-            metadata
-                .attributes
-                .insert("extends".to_string(), extends_resolved);
+    let metadata = EntityMetadata::default();
+
+    // Build relationship data for extends
+    let mut relationships = EntityRelationshipData::default();
+    if let Some(ref class_name) = extends_class_name {
+        let extends_resolved = resolve_reference(
+            class_name,
+            &import_map,
+            components.parent_scope.as_deref(),
+            ".",
+        );
+        // Build SourceReference for the extends relationship
+        if let Ok(extends_ref) = codesearch_core::entities::SourceReference::builder()
+            .target(extends_resolved)
+            .simple_name(class_name.clone())
+            .is_external(false) // JS doesn't track external refs
+            .location(SourceLocation::default())
+            .ref_type(ReferenceType::Extends)
+            .build()
+        {
+            relationships.extends.push(extends_ref);
         }
     }
 
@@ -103,7 +106,7 @@ pub fn handle_class_impl(
             content: node_to_text(class_node, source).ok(),
             metadata,
             signature: None,
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 
@@ -193,24 +196,12 @@ pub fn handle_method_impl(
             .insert("static".to_string(), "true".to_string());
     }
 
-    // Store function calls with locations as SourceReference objects
-    if !calls.is_empty() {
-        if let Ok(json) = serde_json::to_string(&calls) {
-            metadata.attributes.insert("references".to_string(), json);
-        }
-        // Also store simplified calls list for backward compatibility with relationship resolution
-        let call_targets: Vec<&str> = calls.iter().map(|r| r.target()).collect();
-        if let Ok(json) = serde_json::to_string(&call_targets) {
-            metadata.attributes.insert("calls".to_string(), json);
-        }
-    }
-
-    // Store type references for USES relationships
-    if !type_refs.is_empty() {
-        if let Ok(json) = serde_json::to_string(&type_refs) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
+    // Build relationship data with calls and type references
+    let relationships = EntityRelationshipData {
+        calls,
+        uses_types: type_refs,
+        ..Default::default()
+    };
 
     // Build entity using shared helper
     let entity = build_entity(
@@ -228,7 +219,7 @@ pub fn handle_method_impl(
                 generics: Vec::new(),
                 is_async,
             }),
-            relationships: Default::default(),
+            relationships,
         },
     )?;
 

@@ -78,8 +78,10 @@ pub fn handle_struct_impl(
     let struct_node = require_capture_node(query_match, query, capture_names::STRUCT)?;
     let import_map = get_file_import_map(struct_node, source);
 
-    // Extract common components for parent_scope
+    // Extract common components for parent_scope and qualified_name
     let components = extract_common_components(&ctx, capture_names::NAME, struct_node, "rust")?;
+    let struct_qualified_name = components.qualified_name.clone();
+    let struct_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
     let module_path =
@@ -93,65 +95,70 @@ pub fn handle_struct_impl(
         current_module: module_path.as_deref(),
     };
 
-    extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
-        // Extract generics with parsed bounds
-        let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
+    // Extract fields early so we can create child entities
+    let (fields, is_tuple) = extract_struct_fields(&ctx);
 
-        // Build backward-compatible generic_params
-        let generics: Vec<String> = parsed_generics
-            .params
-            .iter()
-            .map(format_generic_param)
-            .collect();
+    // Build struct entity
+    let struct_entity =
+        extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
+            // Extract generics with parsed bounds
+            let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
-        // Build generic_bounds map
-        let generic_bounds = build_generic_bounds_map(&parsed_generics);
+            // Build backward-compatible generic_params
+            let generics: Vec<String> = parsed_generics
+                .params
+                .iter()
+                .map(format_generic_param)
+                .collect();
 
-        let derives = extract_derives(ctx);
-        let (fields, is_tuple) = extract_struct_fields(ctx);
+            // Build generic_bounds map
+            let generic_bounds = build_generic_bounds_map(&parsed_generics);
 
-        let mut metadata = EntityMetadata::default();
-        metadata.generic_params = generics;
-        metadata.generic_bounds = generic_bounds;
-        metadata.is_generic = !metadata.generic_params.is_empty();
-        metadata.decorators = derives;
+            let derives = extract_derives(ctx);
 
-        // Store struct-specific info in attributes
-        if is_tuple {
-            metadata
-                .attributes
-                .insert("struct_type".to_string(), "tuple".to_string());
-        }
+            let mut metadata = EntityMetadata::default();
+            metadata.generic_params = generics;
+            metadata.generic_bounds = generic_bounds;
+            metadata.is_generic = !metadata.generic_params.is_empty();
+            metadata.decorators = derives;
 
-        // Extract uses_types for relationships
-        let mut uses_types_refs = if !fields.is_empty() {
-            // Store field info as JSON in attributes
-            if let Ok(json) = serde_json::to_string(&fields) {
-                metadata.attributes.insert("fields".to_string(), json);
+            // Store struct-specific info in attributes
+            if is_tuple {
+                metadata
+                    .attributes
+                    .insert("struct_type".to_string(), "tuple".to_string());
             }
-            extract_field_type_refs(&fields, &resolution_ctx)
-        } else {
-            Vec::new()
-        };
 
-        // Add trait bounds to uses_types
-        for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types_refs.contains(trait_ref) {
-                uses_types_refs.push(trait_ref.clone());
-            }
-        }
+            // Struct no longer stores its own uses_types for field types;
+            // each Property child entity has its own uses_types.
+            // Still include trait bounds from generics on the struct itself.
+            let uses_types_refs: Vec<ResolvedReference> = parsed_generics.bound_trait_refs.clone();
 
-        // Build typed relationships
-        // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
-        // a module-level relationship. They are collected by module_handlers.
-        let relationships = EntityRelationshipData {
-            uses_types: resolved_refs_to_source_refs(&uses_types_refs),
-            ..Default::default()
-        };
+            // Build typed relationships
+            // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
+            // a module-level relationship. They are collected by module_handlers.
+            let relationships = EntityRelationshipData {
+                uses_types: resolved_refs_to_source_refs(&uses_types_refs),
+                ..Default::default()
+            };
 
-        (metadata, relationships)
-    })
-    .map(|data| vec![data])
+            (metadata, relationships)
+        })?;
+
+    // Build field entities as children of the struct
+    let field_entities = build_field_entities(
+        &fields,
+        &struct_qualified_name,
+        file_path,
+        repository_id,
+        &resolution_ctx,
+        &struct_location,
+    );
+
+    // Return struct followed by its fields
+    let mut entities = vec![struct_entity];
+    entities.extend(field_entities);
+    Ok(entities)
 }
 
 /// Process an enum query match and extract entity data
@@ -181,8 +188,10 @@ pub fn handle_enum_impl(
     let enum_node = require_capture_node(query_match, query, capture_names::ENUM)?;
     let import_map = get_file_import_map(enum_node, source);
 
-    // Extract common components for parent_scope
+    // Extract common components for parent_scope and qualified_name
     let components = extract_common_components(&ctx, capture_names::NAME, enum_node, "rust")?;
+    let enum_qualified_name = components.qualified_name.clone();
+    let enum_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
     let module_path =
@@ -196,7 +205,11 @@ pub fn handle_enum_impl(
         current_module: module_path.as_deref(),
     };
 
-    extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
+    // Extract variants early so we can create child entities
+    let variants = extract_enum_variants(&ctx);
+
+    // Build enum entity
+    let enum_entity = extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         // Extract generics with parsed bounds
         let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
@@ -211,7 +224,6 @@ pub fn handle_enum_impl(
         let generic_bounds = build_generic_bounds_map(&parsed_generics);
 
         let derives = extract_derives(ctx);
-        let variants = extract_enum_variants(ctx);
 
         let mut metadata = EntityMetadata::default();
         metadata.generic_params = generics;
@@ -219,23 +231,10 @@ pub fn handle_enum_impl(
         metadata.is_generic = !metadata.generic_params.is_empty();
         metadata.decorators = derives;
 
-        // Extract uses_types for relationships
-        let mut uses_types_refs = if !variants.is_empty() {
-            // Store variant info as JSON in attributes
-            if let Ok(json) = serde_json::to_string(&variants) {
-                metadata.attributes.insert("variants".to_string(), json);
-            }
-            extract_variant_type_refs(&variants, &resolution_ctx)
-        } else {
-            Vec::new()
-        };
-
-        // Add trait bounds to uses_types
-        for trait_ref in &parsed_generics.bound_trait_refs {
-            if !uses_types_refs.contains(trait_ref) {
-                uses_types_refs.push(trait_ref.clone());
-            }
-        }
+        // Enum no longer stores its own uses_types for variant field types;
+        // each EnumVariant child entity has its own uses_types.
+        // Still include trait bounds from generics on the enum itself.
+        let uses_types_refs: Vec<ResolvedReference> = parsed_generics.bound_trait_refs.clone();
 
         // Build typed relationships
         // Note: imports are NOT stored here. Per the spec (R-IMPORTS), imports are
@@ -246,8 +245,22 @@ pub fn handle_enum_impl(
         };
 
         (metadata, relationships)
-    })
-    .map(|data| vec![data])
+    })?;
+
+    // Build variant entities as children of the enum
+    let variant_entities = build_variant_entities(
+        &variants,
+        &enum_qualified_name,
+        file_path,
+        repository_id,
+        &resolution_ctx,
+        &enum_location,
+    );
+
+    // Return enum followed by its variants
+    let mut entities = vec![enum_entity];
+    entities.extend(variant_entities);
+    Ok(entities)
 }
 
 /// Process a trait query match and extract entity data
@@ -602,6 +615,179 @@ fn parse_tuple_fields(node: Node, source: &str) -> Vec<FieldInfo> {
     fields
 }
 
+/// Build Property entities from extracted fields
+pub(crate) fn build_field_entities(
+    fields: &[FieldInfo],
+    parent_qualified_name: &str,
+    file_path: &Path,
+    repository_id: &str,
+    resolution_ctx: &RustResolutionContext,
+    parent_location: &SourceLocation,
+) -> Vec<CodeEntity> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            // Build qualified name: Parent::field_name
+            let qualified_name = format!("{parent_qualified_name}::{}", field.name);
+
+            // Generate entity_id
+            let file_path_str = file_path.to_str()?;
+            let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+            // Build content representation: "visibility name: type"
+            let content = match field.visibility {
+                Visibility::Public => format!("pub {}: {}", field.name, field.field_type),
+                Visibility::Internal | Visibility::Protected => {
+                    format!("pub(crate) {}: {}", field.name, field.field_type)
+                }
+                Visibility::Private => format!("{}: {}", field.name, field.field_type),
+            };
+
+            // Extract type references for USES relationships
+            let uses_types: Vec<SourceReference> =
+                extract_type_names_from_field_type(&field.field_type)
+                    .into_iter()
+                    .filter(|type_name| !is_primitive_type(type_name))
+                    .filter_map(|type_name| {
+                        let resolved = resolution_ctx.resolve(&type_name, &type_name);
+                        SourceReference::builder()
+                            .target(resolved.target)
+                            .simple_name(resolved.simple_name)
+                            .is_external(resolved.is_external)
+                            .location(SourceLocation::default())
+                            .ref_type(ReferenceType::TypeUsage)
+                            .build()
+                            .ok()
+                    })
+                    .collect();
+
+            Some(CodeEntity {
+                entity_id,
+                repository_id: repository_id.to_string(),
+                entity_type: EntityType::Property,
+                name: field.name.clone(),
+                qualified_name,
+                path_entity_identifier: None,
+                parent_scope: Some(parent_qualified_name.to_string()),
+                dependencies: Vec::new(),
+                documentation_summary: None,
+                file_path: file_path.to_path_buf(),
+                language: Language::Rust,
+                content: Some(content),
+                metadata: EntityMetadata::default(),
+                signature: None,
+                visibility: Some(field.visibility),
+                location: parent_location.clone(), // Fields don't have precise location in FieldInfo
+                relationships: EntityRelationshipData {
+                    uses_types,
+                    ..Default::default()
+                },
+            })
+        })
+        .collect()
+}
+
+/// Build EnumVariant entities from extracted variants
+fn build_variant_entities(
+    variants: &[VariantInfo],
+    parent_qualified_name: &str,
+    file_path: &Path,
+    repository_id: &str,
+    resolution_ctx: &RustResolutionContext,
+    parent_location: &SourceLocation,
+) -> Vec<CodeEntity> {
+    variants
+        .iter()
+        .filter_map(|variant| {
+            // Build qualified name: EnumName::VariantName
+            let qualified_name = format!("{parent_qualified_name}::{}", variant.name);
+
+            // Generate entity_id
+            let file_path_str = file_path.to_str()?;
+            let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+            // Build content representation based on variant kind
+            let content = if variant.fields.is_empty() {
+                // Unit variant
+                variant.name.clone()
+            } else if variant
+                .fields
+                .iter()
+                .all(|f| f.name.parse::<usize>().is_ok())
+            {
+                // Tuple variant (field names are numeric indices)
+                let field_types: Vec<&str> = variant
+                    .fields
+                    .iter()
+                    .map(|f| f.field_type.as_str())
+                    .collect();
+                format!("{}({})", variant.name, field_types.join(", "))
+            } else {
+                // Struct variant (named fields)
+                let field_strs: Vec<String> = variant
+                    .fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name, f.field_type))
+                    .collect();
+                format!("{} {{ {} }}", variant.name, field_strs.join(", "))
+            };
+
+            // Extract type references for USES relationships from variant fields
+            let uses_types: Vec<SourceReference> = variant
+                .fields
+                .iter()
+                .flat_map(|field| {
+                    extract_type_names_from_field_type(&field.field_type)
+                        .into_iter()
+                        .filter(|type_name| !is_primitive_type(type_name))
+                        .filter_map(|type_name| {
+                            let resolved = resolution_ctx.resolve(&type_name, &type_name);
+                            SourceReference::builder()
+                                .target(resolved.target)
+                                .simple_name(resolved.simple_name)
+                                .is_external(resolved.is_external)
+                                .location(SourceLocation::default())
+                                .ref_type(ReferenceType::TypeUsage)
+                                .build()
+                                .ok()
+                        })
+                })
+                .collect();
+
+            // Store discriminant in metadata if present
+            let mut metadata = EntityMetadata::default();
+            if let Some(ref discriminant) = variant.discriminant {
+                metadata
+                    .attributes
+                    .insert("discriminant".to_string(), discriminant.clone());
+            }
+
+            Some(CodeEntity {
+                entity_id,
+                repository_id: repository_id.to_string(),
+                entity_type: EntityType::EnumVariant,
+                name: variant.name.clone(),
+                qualified_name,
+                path_entity_identifier: None,
+                parent_scope: Some(parent_qualified_name.to_string()),
+                dependencies: Vec::new(),
+                documentation_summary: None,
+                file_path: file_path.to_path_buf(),
+                language: Language::Rust,
+                content: Some(content),
+                metadata,
+                signature: None,
+                visibility: None, // Enum variants inherit visibility from parent enum
+                location: parent_location.clone(), // Variants don't have precise location in VariantInfo
+                relationships: EntityRelationshipData {
+                    uses_types,
+                    ..Default::default()
+                },
+            })
+        })
+        .collect()
+}
+
 // ============================================================================
 // Enum Variant Extraction
 // ============================================================================
@@ -950,54 +1136,6 @@ fn resolved_refs_to_source_refs(refs: &[ResolvedReference]) -> Vec<SourceReferen
                 .ok()
         })
         .collect()
-}
-
-/// Extract and resolve field types for USES relationships
-fn extract_field_type_refs(
-    fields: &[FieldInfo],
-    ctx: &RustResolutionContext,
-) -> Vec<ResolvedReference> {
-    let mut seen = HashSet::new();
-    let mut result = Vec::new();
-
-    for field in fields {
-        for type_name in extract_type_names_from_field_type(&field.field_type) {
-            if !is_primitive_type(&type_name) {
-                // type_name from string parsing is the simple_name
-                let resolved = ctx.resolve(&type_name, &type_name);
-                if seen.insert(resolved.clone()) {
-                    result.push(resolved);
-                }
-            }
-        }
-    }
-
-    result
-}
-
-/// Extract and resolve types from enum variant fields for USES relationships
-fn extract_variant_type_refs(
-    variants: &[VariantInfo],
-    ctx: &RustResolutionContext,
-) -> Vec<ResolvedReference> {
-    let mut seen = HashSet::new();
-    let mut result = Vec::new();
-
-    for variant in variants {
-        for field in &variant.fields {
-            for type_name in extract_type_names_from_field_type(&field.field_type) {
-                if !is_primitive_type(&type_name) {
-                    // type_name from string parsing is the simple_name
-                    let resolved = ctx.resolve(&type_name, &type_name);
-                    if seen.insert(resolved.clone()) {
-                        result.push(resolved);
-                    }
-                }
-            }
-        }
-    }
-
-    result
 }
 
 /// Extract type names from a field type string

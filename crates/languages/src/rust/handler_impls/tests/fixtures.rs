@@ -338,20 +338,26 @@ fn test_large_file_struct_extraction() {
     assert!(struct_names.contains(&"Color"));
     assert!(struct_names.contains(&"Marker"));
 
-    // Check Config struct has fields
+    // Check Config struct has fields as separate entities
     let config_struct = struct_entities
         .iter()
-        .find(|e| e.name == "Config")
+        .find(|e| e.name == "Config" && e.entity_type == EntityType::Struct)
         .expect("Should find Config struct");
 
     assert_eq!(config_struct.entity_type, EntityType::Struct);
-    let fields = config_struct.metadata.attributes.get("fields");
-    assert!(fields.is_some());
-    let fields_str = fields.unwrap();
-    assert!(fields_str.contains("hostname"));
-    assert!(fields_str.contains("port"));
-    assert!(fields_str.contains("debug"));
-    assert!(fields_str.contains("timeout"));
+
+    // Fields are now separate Property entities with Config as parent_scope
+    let config_fields: Vec<_> = struct_entities
+        .iter()
+        .filter(|e| {
+            e.entity_type == EntityType::Property && e.parent_scope.as_deref() == Some("Config")
+        })
+        .collect();
+    let field_names: Vec<&str> = config_fields.iter().map(|e| e.name.as_str()).collect();
+    assert!(field_names.contains(&"hostname"));
+    assert!(field_names.contains(&"port"));
+    assert!(field_names.contains(&"debug"));
+    assert!(field_names.contains(&"timeout"));
 
     // Check Color is a tuple struct
     let color_struct = struct_entities
@@ -373,12 +379,21 @@ fn test_large_file_struct_extraction() {
     // Check Marker is a unit struct
     let marker_struct = struct_entities
         .iter()
-        .find(|e| e.name == "Marker")
+        .find(|e| e.name == "Marker" && e.entity_type == EntityType::Struct)
         .expect("Should find Marker struct");
 
     assert_eq!(marker_struct.entity_type, EntityType::Struct);
-    // Unit structs have no fields
-    assert!(marker_struct.metadata.attributes.get("fields").is_none());
+    // Unit structs have no field entities
+    let marker_fields: Vec<_> = struct_entities
+        .iter()
+        .filter(|e| {
+            e.entity_type == EntityType::Property && e.parent_scope.as_deref() == Some("Marker")
+        })
+        .collect();
+    assert!(
+        marker_fields.is_empty(),
+        "Unit struct should have no fields"
+    );
 }
 
 #[test]
@@ -395,20 +410,26 @@ fn test_large_file_enum_extraction() {
     assert!(enum_names.contains(&"Message"));
     assert!(enum_names.contains(&"ProcessError"));
 
-    // Check Message enum variants
+    // Check Message enum variants as separate entities
     let message_enum = enum_entities
         .iter()
-        .find(|e| e.name == "Message")
+        .find(|e| e.name == "Message" && e.entity_type == EntityType::Enum)
         .expect("Should find Message enum");
 
     assert_eq!(message_enum.entity_type, EntityType::Enum);
-    let variants = message_enum.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Text"));
-    assert!(variants_str.contains("Binary"));
-    assert!(variants_str.contains("Control"));
-    assert!(variants_str.contains("Error"));
+
+    // Variants are now separate EnumVariant entities with Message as parent_scope
+    let message_variants: Vec<_> = enum_entities
+        .iter()
+        .filter(|e| {
+            e.entity_type == EntityType::EnumVariant && e.parent_scope.as_deref() == Some("Message")
+        })
+        .collect();
+    let variant_names: Vec<&str> = message_variants.iter().map(|e| e.name.as_str()).collect();
+    assert!(variant_names.contains(&"Text"));
+    assert!(variant_names.contains(&"Binary"));
+    assert!(variant_names.contains(&"Control"));
+    assert!(variant_names.contains(&"Error"));
 }
 
 #[test]

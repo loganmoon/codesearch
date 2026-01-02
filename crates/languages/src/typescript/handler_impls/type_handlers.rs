@@ -413,19 +413,14 @@ pub fn handle_enum_impl(
         format!("{parent_scope}.{name}")
     };
 
-    // Extract enum members from the node itself
-    let members = extract_enum_members_from_node(enum_node, source)?;
+    // Extract enum members with their values
+    let member_info = extract_enum_member_info(enum_node, source)?;
 
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(enum_node, source);
 
-    // Build metadata
-    let mut metadata = EntityMetadata::default();
-    if !members.is_empty() {
-        metadata
-            .attributes
-            .insert("members".to_string(), members.join(", "));
-    }
+    // Build metadata (no longer storing members as JSON)
+    let metadata = EntityMetadata::default();
 
     // Generate entity_id
     let file_path_str = file_path
@@ -433,12 +428,12 @@ pub fn handle_enum_impl(
         .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
-    // Build entity
-    let entity = CodeEntityBuilder::default()
+    // Build enum entity
+    let enum_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
         .repository_id(repository_id.to_string())
-        .name(name)
-        .qualified_name(full_qualified_name)
+        .name(name.clone())
+        .qualified_name(full_qualified_name.clone())
         .parent_scope(if parent_scope.is_empty() {
             None
         } else {
@@ -459,7 +454,14 @@ pub fn handle_enum_impl(
             ))
         })?;
 
-    Ok(vec![entity])
+    // Build member entities
+    let member_entities =
+        build_enum_member_entities(&member_info, &full_qualified_name, file_path, repository_id)?;
+
+    // Return enum + members
+    let mut entities = vec![enum_entity];
+    entities.extend(member_entities);
+    Ok(entities)
 }
 
 /// Extract generic type parameters from a node
@@ -583,24 +585,102 @@ fn extract_type_value(type_alias_node: Node, source: &str) -> Result<Option<Stri
     Ok(None)
 }
 
-/// Extract enum members from enum node
-fn extract_enum_members_from_node(enum_node: Node, source: &str) -> Result<Vec<String>> {
+/// Information about a TypeScript enum member
+struct EnumMemberInfo {
+    name: String,
+    value: Option<String>,
+    location: SourceLocation,
+}
+
+/// Extract enum members with their values from enum node
+fn extract_enum_member_info(enum_node: Node, source: &str) -> Result<Vec<EnumMemberInfo>> {
     let mut members = Vec::new();
 
     // Find the enum_body child
     for child in enum_node.children(&mut enum_node.walk()) {
         if child.kind() == "enum_body" {
             for member in child.named_children(&mut child.walk()) {
-                if member.kind() == "enum_assignment" || member.kind() == "property_identifier" {
-                    if let Some(name_node) = member.child_by_field_name("name") {
-                        members.push(node_to_text(name_node, source)?);
-                    } else {
-                        members.push(node_to_text(member, source)?);
+                match member.kind() {
+                    "enum_assignment" => {
+                        // Member with explicit value: `Foo = 1`
+                        if let Some(name_node) = member.child_by_field_name("name") {
+                            let name = node_to_text(name_node, source)?;
+                            let value = member
+                                .child_by_field_name("value")
+                                .and_then(|v| node_to_text(v, source).ok());
+                            members.push(EnumMemberInfo {
+                                name,
+                                value,
+                                location: SourceLocation::from_tree_sitter_node(member),
+                            });
+                        }
                     }
+                    "property_identifier" => {
+                        // Member without value: `Foo`
+                        let name = node_to_text(member, source)?;
+                        members.push(EnumMemberInfo {
+                            name,
+                            value: None,
+                            location: SourceLocation::from_tree_sitter_node(member),
+                        });
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
     Ok(members)
+}
+
+/// Build EnumVariant entities for TypeScript enum members
+fn build_enum_member_entities(
+    members: &[EnumMemberInfo],
+    parent_qualified_name: &str,
+    file_path: &Path,
+    repository_id: &str,
+) -> Result<Vec<CodeEntity>> {
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+
+    members
+        .iter()
+        .map(|member| {
+            let qualified_name = format!("{parent_qualified_name}.{}", member.name);
+            let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+            // Build content representation
+            let content = match &member.value {
+                Some(val) => format!("{} = {val}", member.name),
+                None => member.name.clone(),
+            };
+
+            // Build metadata with value if present
+            let mut metadata = EntityMetadata::default();
+            if let Some(val) = &member.value {
+                metadata.attributes.insert("value".to_string(), val.clone());
+            }
+
+            CodeEntityBuilder::default()
+                .entity_id(entity_id)
+                .repository_id(repository_id.to_string())
+                .name(member.name.clone())
+                .qualified_name(qualified_name)
+                .parent_scope(Some(parent_qualified_name.to_string()))
+                .entity_type(EntityType::EnumVariant)
+                .location(member.location.clone())
+                .visibility(None) // Members inherit visibility from parent
+                .content(Some(content))
+                .metadata(metadata)
+                .language(Language::TypeScript)
+                .file_path(file_path.to_path_buf())
+                .build()
+                .map_err(|e| {
+                    codesearch_core::error::Error::entity_extraction(format!(
+                        "Failed to build EnumVariant entity: {e}"
+                    ))
+                })
+        })
+        .collect()
 }

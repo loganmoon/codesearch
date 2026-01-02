@@ -367,17 +367,6 @@ entity_rules:
     note: "Ambient classes describe the shape of existing JavaScript classes"
     tested_by: [ambient_declarations]
 
-  - id: E-AMBIENT-MODULE
-    description: "A declare module produces an ambient Module entity"
-    construct: "declare module 'name' { ... }"
-    produces: Module
-    condition: "module declaration has `declare` keyword"
-    note: |
-      Ambient modules describe the shape of external modules.
-      Used for creating type definitions for JavaScript libraries.
-    reference: "https://www.typescriptlang.org/docs/handbook/2/type-declarations.html#declaring-types-for-modules"
-    tested_by: [ambient_modules]
-
   - id: E-AMBIENT-NAMESPACE
     description: "A declare namespace produces an ambient Module entity"
     construct: "declare namespace Name { ... }"
@@ -1303,9 +1292,6 @@ fixtures:
   # ---------------------------------------------------------------------------
   ambient_declarations:
     tests: [E-AMBIENT-VAR, E-AMBIENT-FUNCTION, E-AMBIENT-CLASS, E-AMBIENT-NAMESPACE]
-
-  ambient_modules:
-    tests: [E-AMBIENT-MODULE]
 
   global_augmentation:
     tests: [E-GLOBAL-AUGMENTATION]

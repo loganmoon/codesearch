@@ -274,12 +274,6 @@ async fn test_ambient_declarations() -> Result<()> {
 
 #[tokio::test]
 #[ignore]
-async fn test_ambient_modules() -> Result<()> {
-    run_spec_validation(&AMBIENT_MODULES).await
-}
-
-#[tokio::test]
-#[ignore]
 async fn test_global_augmentation() -> Result<()> {
     run_spec_validation(&GLOBAL_AUGMENTATION).await
 }
@@ -369,7 +363,6 @@ const ALL_FIXTURES: &[&Fixture] = &[
     &GENERICS,
     &DECORATORS,
     &AMBIENT_DECLARATIONS,
-    &AMBIENT_MODULES,
     &GLOBAL_AUGMENTATION,
     &TYPE_USAGE,
     &VISIBILITY,

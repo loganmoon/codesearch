@@ -11,6 +11,7 @@ mod module_tests;
 mod struct_tests;
 mod trait_tests;
 mod type_alias_tests;
+mod union_tests;
 
 use crate::rust::queries;
 use codesearch_core::{error::Result, CodeEntity};

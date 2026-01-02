@@ -169,90 +169,10 @@ pub fn build_inherits_from_relationship_json(entity: &CodeEntity) -> Vec<serde_j
     relationships
 }
 
-/// Check if a type name is a primitive type that should be filtered from relationships
-/// This filters primitives from both Rust and TypeScript/JavaScript
-fn is_primitive_type(type_name: &str) -> bool {
-    matches!(
-        type_name,
-        // Rust primitives
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
-        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" |
-        "f32" | "f64" |
-        "bool" | "char" | "str" | "String" |
-        "()" | "!" |
-        // TypeScript/JavaScript primitives
-        "string" | "number" | "boolean" | "undefined" | "null" | "any" | "unknown" | "void"
-    )
-}
-
-/// Extract USES relationships from struct fields
-/// Primitive types are filtered here rather than at extraction to keep field metadata complete
-pub fn extract_uses_relationships(entity: &CodeEntity) -> Vec<Relationship> {
-    let mut relationships = Vec::new();
-
-    if entity.entity_type == EntityType::Struct {
-        if let Some(fields_json) = entity.metadata.attributes.get("fields") {
-            // Parse fields as JSON array
-            if let Ok(fields) = serde_json::from_str::<Vec<serde_json::Value>>(fields_json) {
-                for field in fields {
-                    if let Some(field_type) = field.get("field_type").and_then(|v| v.as_str()) {
-                        if let Some(field_name) = field.get("name").and_then(|v| v.as_str()) {
-                            // Strip generics: "Vec<String>" -> "Vec"
-                            let type_name = field_type
-                                .split('<')
-                                .next()
-                                .unwrap_or(field_type)
-                                .trim()
-                                .to_string();
-
-                            // Skip primitive types
-                            if is_primitive_type(&type_name) {
-                                continue;
-                            }
-
-                            let mut props = HashMap::new();
-                            props.insert("context".to_string(), "field".to_string());
-                            props.insert("field_name".to_string(), field_name.to_string());
-
-                            relationships.push(Relationship {
-                                rel_type: "USES".to_string(),
-                                from_id: entity.entity_id.clone(),
-                                to_id: None,
-                                to_name: Some(type_name),
-                                properties: props,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    relationships
-}
-
-/// Build USES relationship JSON for outbox payload
-pub fn build_uses_relationship_json(entity: &CodeEntity) -> Vec<serde_json::Value> {
-    let mut relationships = Vec::new();
-
-    for rel in extract_uses_relationships(entity) {
-        let mut json_rel = json!({
-            "type": rel.rel_type,
-            "from_id": rel.from_id,
-            "to_name": rel.to_name,
-            "resolved": false
-        });
-
-        // Add properties if present
-        if !rel.properties.is_empty() {
-            json_rel["properties"] = json!(rel.properties);
-        }
-
-        relationships.push(json_rel);
-    }
-
-    relationships
-}
+// Note: extract_uses_relationships and build_uses_relationship_json have been removed.
+// USES relationships for field types are now handled by Property entities directly
+// via their EntityRelationshipData.uses_types field, processed by the outbox
+// processor's GenericResolver.
 
 /// Extract CALLS relationships from function metadata
 pub fn extract_calls_relationships(entity: &CodeEntity) -> Vec<Relationship> {

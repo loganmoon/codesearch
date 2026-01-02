@@ -17,18 +17,32 @@ enum SimpleEnum {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "SimpleEnum");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "SimpleEnum");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
-    // Check enum variants are captured in metadata
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("First"));
-    assert!(variants_str.contains("Second"));
-    assert!(variants_str.contains("Third"));
+    // Check variant entities
+    let variant_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::EnumVariant)
+        .collect();
+    assert_eq!(variant_entities.len(), 3);
+
+    let variant_names: Vec<&str> = variant_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(variant_names.contains(&"First"));
+    assert!(variant_names.contains(&"Second"));
+    assert!(variant_names.contains(&"Third"));
+
+    // All variants should have enum as parent
+    for variant in &variant_entities {
+        assert_eq!(
+            variant.parent_scope.as_deref(),
+            Some("SimpleEnum"),
+            "Variant should have enum as parent"
+        );
+    }
 }
 
 #[test]
@@ -44,18 +58,31 @@ enum StatusCode {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "StatusCode");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "StatusCode");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
-    // Check enum variants with discriminants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Ok"));
-    assert!(variants_str.contains("NotFound"));
-    assert!(variants_str.contains("ServerError"));
+    // Check variant entities with discriminants
+    let ok_variant = entities
+        .iter()
+        .find(|e| e.name == "Ok")
+        .expect("Should have Ok variant");
+    assert_eq!(ok_variant.entity_type, EntityType::EnumVariant);
+    assert_eq!(
+        ok_variant.metadata.attributes.get("discriminant"),
+        Some(&"200".to_string())
+    );
+
+    let not_found_variant = entities
+        .iter()
+        .find(|e| e.name == "NotFound")
+        .expect("Should have NotFound variant");
+    assert_eq!(
+        not_found_variant.metadata.attributes.get("discriminant"),
+        Some(&"404".to_string())
+    );
 }
 
 #[test]
@@ -71,18 +98,31 @@ enum Message {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Message");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "Message");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
-    // Check tuple variants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Move"));
-    assert!(variants_str.contains("Write"));
-    assert!(variants_str.contains("Color"));
+    // Check tuple variant content
+    let move_variant = entities
+        .iter()
+        .find(|e| e.name == "Move")
+        .expect("Should have Move variant");
+    assert_eq!(move_variant.entity_type, EntityType::EnumVariant);
+    assert!(
+        move_variant.content.as_ref().unwrap().contains("i32"),
+        "Move variant content should include types"
+    );
+
+    let color_variant = entities
+        .iter()
+        .find(|e| e.name == "Color")
+        .expect("Should have Color variant");
+    assert!(
+        color_variant.content.as_ref().unwrap().contains("u8"),
+        "Color variant content should include types"
+    );
 }
 
 #[test]
@@ -98,18 +138,26 @@ enum Event {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Event");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "Event");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
-    // Check struct variants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Click"));
-    assert!(variants_str.contains("KeyPress"));
-    assert!(variants_str.contains("Scroll"));
+    // Check struct variant content
+    let click_variant = entities
+        .iter()
+        .find(|e| e.name == "Click")
+        .expect("Should have Click variant");
+    assert_eq!(click_variant.entity_type, EntityType::EnumVariant);
+    assert!(
+        click_variant.content.as_ref().unwrap().contains("x:"),
+        "Click variant content should include field names"
+    );
+    assert!(
+        click_variant.content.as_ref().unwrap().contains("y:"),
+        "Click variant content should include field names"
+    );
 }
 
 #[test]
@@ -124,22 +172,30 @@ enum Option<T> {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Option");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 2 variants
+    assert_eq!(entities.len(), 3);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "Option");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
     // Check generics
-    assert!(entity.metadata.is_generic);
-    assert_eq!(entity.metadata.generic_params.len(), 1);
-    assert!(entity.metadata.generic_params.contains(&"T".to_string()));
+    assert!(enum_entity.metadata.is_generic);
+    assert_eq!(enum_entity.metadata.generic_params.len(), 1);
+    assert!(enum_entity
+        .metadata
+        .generic_params
+        .contains(&"T".to_string()));
 
     // Check variants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Some"));
-    assert!(variants_str.contains("None"));
+    let variant_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::EnumVariant)
+        .collect();
+    assert_eq!(variant_entities.len(), 2);
+
+    let variant_names: Vec<&str> = variant_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(variant_names.contains(&"Some"));
+    assert!(variant_names.contains(&"None"));
 }
 
 #[test]
@@ -156,24 +212,37 @@ enum Comparison {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Comparison");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "Comparison");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
     // Check derives stored as decorators
-    assert!(entity.metadata.decorators.contains(&"Debug".to_string()));
-    assert!(entity.metadata.decorators.contains(&"Clone".to_string()));
-    assert!(entity.metadata.decorators.contains(&"Copy".to_string()));
-    assert!(entity
+    assert!(enum_entity
+        .metadata
+        .decorators
+        .contains(&"Debug".to_string()));
+    assert!(enum_entity
+        .metadata
+        .decorators
+        .contains(&"Clone".to_string()));
+    assert!(enum_entity
+        .metadata
+        .decorators
+        .contains(&"Copy".to_string()));
+    assert!(enum_entity
         .metadata
         .decorators
         .contains(&"PartialEq".to_string()));
-    assert!(entity.metadata.decorators.contains(&"Eq".to_string()));
+    assert!(enum_entity.metadata.decorators.contains(&"Eq".to_string()));
 
-    // Check variants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
+    // Check variants exist
+    let variant_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::EnumVariant)
+        .collect();
+    assert_eq!(variant_entities.len(), 3);
 }
 
 #[test]
@@ -198,26 +267,34 @@ enum ComplexEnum<'a, T: Clone> {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    // Should extract both enums
-    assert_eq!(entities.len(), 2);
+    // Result(1) + 2 variants + ComplexEnum(1) + 4 variants = 8
+    assert_eq!(entities.len(), 8);
 
-    // Check the second, more complex enum
-    let entity = &entities[1];
-    assert_eq!(entity.name, "ComplexEnum");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Find the ComplexEnum entity
+    let complex_enum = entities
+        .iter()
+        .find(|e| e.name == "ComplexEnum" && e.entity_type == EntityType::Enum)
+        .expect("Should have ComplexEnum");
 
     // Check generics with lifetime and trait bounds
-    assert!(entity.metadata.is_generic);
-    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert!(complex_enum.metadata.is_generic);
+    assert_eq!(complex_enum.metadata.generic_params.len(), 2);
 
     // Check variants
-    let variants = entity.metadata.attributes.get("variants");
-    assert!(variants.is_some());
-    let variants_str = variants.unwrap();
-    assert!(variants_str.contains("Simple"));
-    assert!(variants_str.contains("Reference"));
-    assert!(variants_str.contains("Tuple"));
-    assert!(variants_str.contains("Struct"));
+    let complex_variants: Vec<_> = entities
+        .iter()
+        .filter(|e| {
+            e.entity_type == EntityType::EnumVariant
+                && e.parent_scope.as_deref() == Some("ComplexEnum")
+        })
+        .collect();
+    assert_eq!(complex_variants.len(), 4);
+
+    let variant_names: Vec<&str> = complex_variants.iter().map(|e| e.name.as_str()).collect();
+    assert!(variant_names.contains(&"Simple"));
+    assert!(variant_names.contains(&"Reference"));
+    assert!(variant_names.contains(&"Tuple"));
+    assert!(variant_names.contains(&"Struct"));
 }
 
 #[test]
@@ -242,11 +319,12 @@ pub enum ConnectionState {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Enum + 4 variants
+    assert_eq!(entities.len(), 5);
+    let enum_entity = &entities[0];
 
-    assert!(entity.documentation_summary.is_some());
-    let doc = entity.documentation_summary.as_ref().unwrap();
+    assert!(enum_entity.documentation_summary.is_some());
+    let doc = enum_entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("state of a connection"));
     assert!(doc.contains("lifecycle"));
 }
@@ -274,17 +352,18 @@ where
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Failed to extract enum");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.name, "Container");
-    assert_eq!(entity.entity_type, EntityType::Enum);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+    let enum_entity = &entities[0];
+    assert_eq!(enum_entity.name, "Container");
+    assert_eq!(enum_entity.entity_type, EntityType::Enum);
 
     // Check generic_params (backward-compat raw strings)
-    assert!(entity.metadata.is_generic);
-    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert!(enum_entity.metadata.is_generic);
+    assert_eq!(enum_entity.metadata.generic_params.len(), 2);
 
     // Check generic_bounds (structured) - T has inline, U has where clause
-    let bounds = &entity.metadata.generic_bounds;
+    let bounds = &enum_entity.metadata.generic_bounds;
     assert!(bounds.contains_key("T"), "Should have bounds for T");
     let t_bounds = bounds.get("T").unwrap();
     assert!(
@@ -300,7 +379,7 @@ where
     );
 
     // Check uses_types includes bound traits (now in typed relationships)
-    let uses_types = &entity.relationships.uses_types;
+    let uses_types = &enum_entity.relationships.uses_types;
     assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
         uses_types.iter().any(|t| t.target().contains("Clone")),
@@ -309,5 +388,72 @@ where
     assert!(
         uses_types.iter().any(|t| t.target().contains("Debug")),
         "uses_types should include Debug"
+    );
+}
+
+#[test]
+fn test_variant_entity_structure() {
+    let source = r#"
+pub enum Color {
+    Red,
+    Green,
+    Blue,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
+        .expect("Failed to extract enum");
+
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
+
+    // Find the Red variant
+    let red_variant = entities
+        .iter()
+        .find(|e| e.name == "Red")
+        .expect("Should have Red variant");
+
+    // Verify EnumVariant entity structure
+    assert_eq!(red_variant.entity_type, EntityType::EnumVariant);
+    assert_eq!(red_variant.qualified_name, "Color::Red");
+    assert_eq!(red_variant.parent_scope.as_deref(), Some("Color"));
+    assert_eq!(red_variant.visibility, None); // Variants inherit visibility from parent
+    assert!(red_variant.content.is_some());
+    assert_eq!(red_variant.content.as_ref().unwrap(), "Red");
+}
+
+#[test]
+fn test_variant_with_uses_types() {
+    let source = r#"
+struct Point { x: i32, y: i32 }
+
+enum Shape {
+    Circle { center: Point, radius: f32 },
+    Rectangle { corners: Vec<Point> },
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
+        .expect("Failed to extract enum");
+
+    // Enum + 2 variants = 3
+    assert_eq!(entities.len(), 3);
+
+    // Check Circle variant has uses_types for Point
+    let circle_variant = entities
+        .iter()
+        .find(|e| e.name == "Circle")
+        .expect("Should have Circle variant");
+    assert!(
+        !circle_variant.relationships.uses_types.is_empty(),
+        "Circle variant should have uses_types for Point"
+    );
+    assert!(
+        circle_variant
+            .relationships
+            .uses_types
+            .iter()
+            .any(|t| t.target().contains("Point")),
+        "Circle should reference Point type"
     );
 }

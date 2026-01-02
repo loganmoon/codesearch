@@ -1,7 +1,6 @@
 //! Tests for struct extraction handler
 
 use super::*;
-use crate::rust::entities::FieldInfo;
 use crate::rust::handler_impls::type_handlers::handle_struct_impl;
 use codesearch_core::entities::{EntityType, Visibility};
 
@@ -14,14 +13,16 @@ struct UnitStruct;
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
+    // Unit struct has no fields, so just 1 entity
     assert_eq!(entities.len(), 1);
     let entity = &entities[0];
     assert_eq!(entity.name, "UnitStruct");
     assert_eq!(entity.entity_type, EntityType::Struct);
 
-    // Unit struct has no fields
-    assert_eq!(entity.metadata.attributes.get("fields"), None);
-    assert_eq!(entity.metadata.attributes.get("struct_type"), None);
+    // No field entities
+    assert!(!entities
+        .iter()
+        .any(|e| e.entity_type == EntityType::Property));
 }
 
 #[test]
@@ -33,13 +34,14 @@ struct TupleStruct(i32, String, bool);
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 3 fields
+    assert_eq!(entities.len(), 4);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
     // Check it's marked as tuple
     assert_eq!(
-        entity
+        struct_entity
             .metadata
             .attributes
             .get("struct_type")
@@ -47,15 +49,27 @@ struct TupleStruct(i32, String, bool);
         Some("tuple")
     );
 
-    // Check fields (stored as JSON in attributes)
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Tuple struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 3);
+    // Check field entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 3);
+
+    // Tuple fields have numeric names
+    let field_names: Vec<&str> = field_entities.iter().map(|e| e.name.as_str()).collect();
+    assert!(field_names.contains(&"0"));
+    assert!(field_names.contains(&"1"));
+    assert!(field_names.contains(&"2"));
+
+    // All fields should have struct as parent
+    for field in &field_entities {
+        assert_eq!(
+            field.parent_scope.as_deref(),
+            Some("TupleStruct"),
+            "Field should have struct as parent"
+        );
+    }
 }
 
 #[test]
@@ -72,28 +86,34 @@ struct User {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 4 fields
+    assert_eq!(entities.len(), 5);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
     // Not a tuple struct
-    assert_eq!(entity.metadata.attributes.get("struct_type"), None);
+    assert_eq!(struct_entity.metadata.attributes.get("struct_type"), None);
 
-    // Check fields
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 4);
+    // Check field entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 4);
 
-    let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    let field_names: Vec<&str> = field_entities.iter().map(|e| e.name.as_str()).collect();
     assert!(field_names.contains(&"id"));
     assert!(field_names.contains(&"name"));
     assert!(field_names.contains(&"email"));
     assert!(field_names.contains(&"is_active"));
+
+    // Check field qualified names
+    let email_field = field_entities
+        .iter()
+        .find(|e| e.name == "email")
+        .expect("Should have email field");
+    assert_eq!(email_field.qualified_name, "User::email");
+    assert_eq!(email_field.parent_scope.as_deref(), Some("User"));
 }
 
 #[test]
@@ -113,42 +133,40 @@ where
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 3 fields
+    assert_eq!(entities.len(), 4);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
     // Check generics
-    assert!(entity.metadata.is_generic);
-    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert!(struct_entity.metadata.is_generic);
+    assert_eq!(struct_entity.metadata.generic_params.len(), 2);
     // With bounds extraction, where clause bounds are merged into params
     assert!(
-        entity
+        struct_entity
             .metadata
             .generic_params
             .iter()
             .any(|p| p.starts_with("T:") && p.contains("Clone")),
         "T should have Clone bound from where clause, got: {:?}",
-        entity.metadata.generic_params
+        struct_entity.metadata.generic_params
     );
     assert!(
-        entity
+        struct_entity
             .metadata
             .generic_params
             .iter()
             .any(|p| p.starts_with("U:") && p.contains("Debug")),
         "U should have Debug bound from where clause, got: {:?}",
-        entity.metadata.generic_params
+        struct_entity.metadata.generic_params
     );
 
-    // Check fields
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 3);
+    // Check field entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 3);
 }
 
 #[test]
@@ -163,25 +181,37 @@ struct DerivedStruct {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 1 field
+    assert_eq!(entities.len(), 2);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
     // Check derives stored as decorators
-    assert!(entity.metadata.decorators.contains(&"Debug".to_string()));
-    assert!(entity.metadata.decorators.contains(&"Clone".to_string()));
-    assert!(entity
+    assert!(struct_entity
+        .metadata
+        .decorators
+        .contains(&"Debug".to_string()));
+    assert!(struct_entity
+        .metadata
+        .decorators
+        .contains(&"Clone".to_string()));
+    assert!(struct_entity
         .metadata
         .decorators
         .contains(&"PartialEq".to_string()));
-    assert!(entity
+    assert!(struct_entity
         .metadata
         .decorators
         .contains(&"Serialize".to_string()));
-    assert!(entity
+    assert!(struct_entity
         .metadata
         .decorators
         .contains(&"Deserialize".to_string()));
+
+    // Check field entity
+    let field_entity = &entities[1];
+    assert_eq!(field_entity.entity_type, EntityType::Property);
+    assert_eq!(field_entity.name, "value");
 }
 
 #[test]
@@ -196,22 +226,20 @@ struct Reference<'a, 'b: 'a> {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 2 fields
+    assert_eq!(entities.len(), 3);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
     // Check generics (includes lifetimes)
-    assert_eq!(entity.metadata.generic_params.len(), 2);
+    assert_eq!(struct_entity.metadata.generic_params.len(), 2);
 
-    // Check fields
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 2);
+    // Check field entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 2);
 }
 
 #[test]
@@ -232,11 +260,12 @@ pub struct DocumentedUser {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Struct + 2 fields
+    assert_eq!(entities.len(), 3);
+    let struct_entity = &entities[0];
 
-    assert!(entity.documentation_summary.is_some());
-    let doc = entity.documentation_summary.as_ref().unwrap();
+    assert!(struct_entity.documentation_summary.is_some());
+    let doc = struct_entity.documentation_summary.as_ref().unwrap();
     assert!(doc.contains("user in the system"));
     assert!(doc.contains("registered user"));
 }
@@ -256,23 +285,32 @@ where
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
+    // Struct + 2 fields
+    assert_eq!(entities.len(), 3);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
 
-    // Check fields
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 2);
+    // Check field entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 2);
 
-    let field_names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    let field_names: Vec<&str> = field_entities.iter().map(|e| e.name.as_str()).collect();
     assert!(field_names.contains(&"data"));
     assert!(field_names.contains(&"cache"));
+
+    // Check that field entities have uses_types for complex types
+    let data_field = field_entities
+        .iter()
+        .find(|e| e.name == "data")
+        .expect("Should have data field");
+    // Vec, Option, Box are standard library types - they should be in uses_types
+    assert!(
+        !data_field.relationships.uses_types.is_empty(),
+        "data field should have uses_types for Vec, Option, Box"
+    );
 }
 
 #[test]
@@ -288,30 +326,30 @@ pub struct MixedVisibility {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
-    assert_eq!(entity.entity_type, EntityType::Struct);
-    assert_eq!(entity.visibility, Some(Visibility::Public));
+    // Struct + 3 fields
+    assert_eq!(entities.len(), 4);
+    let struct_entity = &entities[0];
+    assert_eq!(struct_entity.entity_type, EntityType::Struct);
+    assert_eq!(struct_entity.visibility, Some(Visibility::Public));
 
-    // Check fields
-    let fields_str = entity
-        .metadata
-        .attributes
-        .get("fields")
-        .expect("Struct should have fields");
-    let fields: Vec<FieldInfo> =
-        serde_json::from_str(fields_str).expect("Failed to parse fields JSON");
-    assert_eq!(fields.len(), 3);
+    // Check field visibilities
+    let public_field = entities
+        .iter()
+        .find(|e| e.name == "public_field")
+        .expect("Should have public_field");
+    assert_eq!(public_field.visibility, Some(Visibility::Public));
 
-    // Now we CAN check individual field visibility since we're storing FieldInfo!
-    let public_field = fields.iter().find(|f| f.name == "public_field").unwrap();
-    assert_eq!(public_field.visibility, Visibility::Public);
+    let private_field = entities
+        .iter()
+        .find(|e| e.name == "private_field")
+        .expect("Should have private_field");
+    assert_eq!(private_field.visibility, Some(Visibility::Private));
 
-    let private_field = fields.iter().find(|f| f.name == "private_field").unwrap();
-    assert_eq!(private_field.visibility, Visibility::Private);
-
-    let crate_field = fields.iter().find(|f| f.name == "crate_field").unwrap();
-    assert_eq!(crate_field.visibility, Visibility::Internal); // pub(crate) is captured as Internal
+    let crate_field = entities
+        .iter()
+        .find(|e| e.name == "crate_field")
+        .expect("Should have crate_field");
+    assert_eq!(crate_field.visibility, Some(Visibility::Internal)); // pub(crate) is captured as Internal
 }
 
 // ============================================================================
@@ -334,11 +372,12 @@ where
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Failed to extract struct");
 
-    assert_eq!(entities.len(), 1);
-    let entity = &entities[0];
+    // Struct + 2 fields
+    assert_eq!(entities.len(), 3);
+    let struct_entity = &entities[0];
 
     // Check generic_bounds includes where clause bounds
-    let bounds = &entity.metadata.generic_bounds;
+    let bounds = &struct_entity.metadata.generic_bounds;
     assert!(bounds.contains_key("T"), "Should have bounds for T");
     assert!(bounds.contains_key("U"), "Should have bounds for U");
 
@@ -361,8 +400,8 @@ where
         u_bounds
     );
 
-    // Check uses_types includes bound traits (now in typed relationships)
-    let uses_types = &entity.relationships.uses_types;
+    // Check struct-level uses_types includes bound traits (now in typed relationships)
+    let uses_types = &struct_entity.relationships.uses_types;
     assert!(!uses_types.is_empty(), "Should have uses_types");
     assert!(
         uses_types.iter().any(|t| t.target().contains("Clone")),
@@ -378,5 +417,42 @@ where
         uses_types.iter().any(|t| t.target().contains("Send")),
         "uses_types should include Send, got: {:?}",
         uses_types
+    );
+}
+
+#[test]
+fn test_field_entity_structure() {
+    let source = r#"
+pub struct Person {
+    pub name: String,
+    age: u32,
+}
+"#;
+
+    let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
+        .expect("Failed to extract struct");
+
+    // Struct + 2 fields
+    assert_eq!(entities.len(), 3);
+
+    // Find the name field
+    let name_field = entities
+        .iter()
+        .find(|e| e.name == "name")
+        .expect("Should have name field");
+
+    // Verify Property entity structure
+    assert_eq!(name_field.entity_type, EntityType::Property);
+    assert_eq!(name_field.qualified_name, "Person::name");
+    assert_eq!(name_field.parent_scope.as_deref(), Some("Person"));
+    assert_eq!(name_field.visibility, Some(Visibility::Public));
+    assert!(name_field.content.is_some());
+    assert!(
+        name_field.content.as_ref().unwrap().contains("name"),
+        "Content should include field name"
+    );
+    assert!(
+        name_field.content.as_ref().unwrap().contains("String"),
+        "Content should include field type"
     );
 }

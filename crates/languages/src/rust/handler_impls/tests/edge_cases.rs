@@ -47,7 +47,8 @@ struct Données {
 
     let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle unicode in structs");
-    assert_eq!(struct_entities.len(), 1);
+    // Struct + 1 field
+    assert_eq!(struct_entities.len(), 2);
     assert_eq!(struct_entities[0].name, "Données");
 }
 
@@ -171,7 +172,8 @@ struct r#struct {
 
     let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle raw identifiers in structs");
-    assert_eq!(struct_entities.len(), 1);
+    // Struct + 1 field
+    assert_eq!(struct_entities.len(), 2);
 }
 
 #[test]
@@ -198,7 +200,8 @@ struct FFIStruct {
 
     let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle attributes");
-    assert_eq!(struct_entities.len(), 1);
+    // Struct + 1 field
+    assert_eq!(struct_entities.len(), 2);
 }
 
 #[test]
@@ -215,7 +218,8 @@ fn fixed_array<const SIZE: usize>() -> [u8; SIZE] {
 
     let struct_entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should handle const generics in structs");
-    assert_eq!(struct_entities.len(), 1);
+    // Struct + 1 field
+    assert_eq!(struct_entities.len(), 2);
 
     let function_entities =
         extract_with_handler(source, queries::FUNCTION_QUERY, handle_function_impl)
@@ -267,12 +271,16 @@ struct User {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should not panic with multi-byte UTF-8 in struct fields");
 
-    assert_eq!(entities.len(), 1);
+    // Struct + 3 fields
+    assert_eq!(entities.len(), 4);
     assert_eq!(entities[0].name, "User");
 
-    // Verify fields were extracted without panicking
-    let fields = entities[0].metadata.attributes.get("fields");
-    assert!(fields.is_some());
+    // Verify fields were extracted as separate entities
+    let field_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == codesearch_core::EntityType::Property)
+        .collect();
+    assert_eq!(field_entities.len(), 3);
 }
 
 #[test]
@@ -291,8 +299,16 @@ enum 状態 {
     let entities = extract_with_handler(source, queries::ENUM_QUERY, handle_enum_impl)
         .expect("Should not panic with multi-byte UTF-8 in enum variants");
 
-    assert_eq!(entities.len(), 1);
+    // Enum + 3 variants
+    assert_eq!(entities.len(), 4);
     assert_eq!(entities[0].name, "状態");
+
+    // Verify variants were extracted as separate entities
+    let variant_entities: Vec<_> = entities
+        .iter()
+        .filter(|e| e.entity_type == codesearch_core::EntityType::EnumVariant)
+        .collect();
+    assert_eq!(variant_entities.len(), 3);
 }
 
 #[test]
@@ -333,7 +349,8 @@ struct データ {
     let entities = extract_with_handler(source, queries::STRUCT_QUERY, handle_struct_impl)
         .expect("Should not panic with multi-byte UTF-8 in derives");
 
-    assert_eq!(entities.len(), 1);
+    // Struct + 1 field
+    assert_eq!(entities.len(), 2);
     // Verify derives were extracted
     assert!(!entities[0].metadata.decorators.is_empty());
 }

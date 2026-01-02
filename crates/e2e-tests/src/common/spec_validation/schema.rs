@@ -21,6 +21,8 @@ pub enum EntityKind {
     ExternBlock,
     TypeAlias,
     Macro,
+    Property,
+    EnumVariant,
 }
 
 impl EntityKind {
@@ -40,6 +42,8 @@ impl EntityKind {
             EntityKind::ExternBlock => "ExternBlock",
             EntityKind::TypeAlias => "TypeAlias",
             EntityKind::Macro => "Macro",
+            EntityKind::Property => "Property",
+            EntityKind::EnumVariant => "EnumVariant",
         }
     }
 }

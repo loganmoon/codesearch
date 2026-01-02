@@ -18,6 +18,7 @@ use crate::rust::handler_impls::common::{
     RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::node_kinds;
+use crate::rust::handler_impls::type_handlers::build_field_entities;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
@@ -54,17 +55,21 @@ pub fn handle_union_impl(
     // Build ImportMap from file's imports for type resolution
     let import_map = get_file_import_map(union_node, source);
 
-    // Extract common components for parent_scope
+    // Extract common components for parent_scope and qualified_name
     let components = extract_common_components(&ctx, "name", union_node, "rust")?;
+    let union_qualified_name = components.qualified_name.clone();
+    let union_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
     let module_path =
         source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
 
     // Build resolution context for qualified name normalization
+    // Clone parent_scope to avoid borrow conflict with components consumed later
+    let parent_scope_clone = components.parent_scope.clone();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
-        parent_scope: components.parent_scope.as_deref(),
+        parent_scope: parent_scope_clone.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
     };
@@ -92,21 +97,14 @@ pub fn handle_union_impl(
         .map(|node| parse_named_fields(node, source))
         .unwrap_or_default();
 
-    // Build metadata
+    // Build metadata (no longer stores fields as JSON)
     let mut metadata = EntityMetadata::default();
     metadata.generic_params = generics;
     metadata.generic_bounds = generic_bounds;
     metadata.is_generic = !metadata.generic_params.is_empty();
 
-    // Store field info as JSON in attributes
-    if !fields.is_empty() {
-        if let Ok(json) = serde_json::to_string(&fields) {
-            metadata.attributes.insert("fields".to_string(), json);
-        }
-    }
-
-    // Build the entity using the shared helper
-    let entity = build_entity(
+    // Build the union entity using the shared helper
+    let union_entity = build_entity(
         components,
         EntityDetails {
             entity_type: EntityType::Union,
@@ -120,7 +118,20 @@ pub fn handle_union_impl(
         },
     )?;
 
-    Ok(vec![entity])
+    // Build field entities as children of the union
+    let field_entities = build_field_entities(
+        &fields,
+        &union_qualified_name,
+        file_path,
+        repository_id,
+        &resolution_ctx,
+        &union_location,
+    );
+
+    // Return union followed by its fields
+    let mut entities = vec![union_entity];
+    entities.extend(field_entities);
+    Ok(entities)
 }
 
 /// Extract generic parameters with parsed bounds

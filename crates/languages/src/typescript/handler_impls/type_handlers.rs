@@ -1175,6 +1175,268 @@ fn is_node_exported(node: Node) -> bool {
     false
 }
 
+/// Handle class expressions (named and anonymous)
+/// For: `const NamedClass = class MyClass {}` or `const AnonymousClass = class {}`
+#[allow(clippy::too_many_arguments)]
+pub fn handle_class_expression_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let class_expr_node = require_capture_node(query_match, query, "class_expr")?;
+
+    // Skip if this is a class_declaration (handled by the main class handler)
+    // class expressions use node kind "class" in tree-sitter
+    if class_expr_node.kind() == "class_declaration" {
+        return Ok(vec![]);
+    }
+
+    // Get class name: prefer internal name, fall back to variable name from parent
+    let class_name = crate::common::find_capture_node(query_match, query, "class_name")
+        .and_then(|n| node_to_text(n, source).ok());
+
+    // If no internal name, try to find the variable name by traversing up
+    let var_name = if class_name.is_none() {
+        find_parent_variable_name(class_expr_node, source)
+    } else {
+        None
+    };
+
+    let name = class_name.or(var_name).ok_or_else(|| {
+        codesearch_core::error::Error::entity_extraction("Could not extract class name")
+    })?;
+
+    // Derive module path for qualified name
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name
+    let qualified_name = match &module_path {
+        Some(module) => format!("{module}.{name}"),
+        None => name.clone(),
+    };
+
+    // Parent scope is the module
+    let parent_scope = module_path.clone();
+
+    // Check if exported by traversing up to find export_statement
+    let is_exported = is_node_exported(class_expr_node);
+
+    // Generate entity_id
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    let entity = CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .parent_scope(parent_scope)
+        .entity_type(EntityType::Class)
+        .location(SourceLocation::from_tree_sitter_node(class_expr_node))
+        .visibility(Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }))
+        .documentation_summary(None)
+        .content(node_to_text(class_expr_node, source).ok())
+        .metadata(EntityMetadata::default())
+        .language(Language::TypeScript)
+        .file_path(file_path.to_path_buf())
+        .build()
+        .map_err(|e| {
+            codesearch_core::error::Error::entity_extraction(format!(
+                "Failed to build class expression entity: {e}"
+            ))
+        })?;
+
+    Ok(vec![entity])
+}
+
+/// Find the variable name from a parent variable_declarator node
+fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "variable_declarator" {
+            if let Some(name_node) = parent.child_by_field_name("name") {
+                if name_node.kind() == "identifier" {
+                    return node_to_text(name_node, source).ok();
+                }
+            }
+        }
+        // Stop if we hit something that shouldn't contain a variable declarator
+        if parent.kind() == "program" || parent.kind() == "class_body" {
+            break;
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+/// Handle constructor parameter properties
+///
+/// Extracts Property entities from constructor parameters that have visibility modifiers.
+/// For: `constructor(public x: number, private y: string, protected readonly z: number)`
+#[allow(clippy::too_many_arguments)]
+pub fn handle_parameter_property_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let constructor_node = require_capture_node(query_match, query, "constructor")?;
+    let params_node = require_capture_node(query_match, query, "params")?;
+
+    // Derive module path
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build parent scope from AST (includes class name)
+    let scope_result = crate::qualified_name::build_qualified_name_from_ast(
+        constructor_node,
+        source,
+        "typescript",
+    );
+
+    // Full parent scope includes module path
+    let parent_scope = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => format!("{module}.{}", scope_result.parent_scope),
+        (Some(module), true) => module.clone(),
+        (None, false) => scope_result.parent_scope.clone(),
+        (None, true) => String::new(),
+    };
+
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+
+    let mut entities = Vec::new();
+
+    // Iterate through parameters and extract those with accessibility modifiers or readonly
+    for child in params_node.named_children(&mut params_node.walk()) {
+        match child.kind() {
+            "required_parameter" | "optional_parameter" => {
+                // Check if this parameter has an accessibility modifier or readonly (making it a parameter property)
+                let has_visibility = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "accessibility_modifier");
+                let has_readonly = child
+                    .children(&mut child.walk())
+                    .any(|c| c.kind() == "readonly");
+
+                if !has_visibility && !has_readonly {
+                    continue; // Not a parameter property
+                }
+
+                // Extract parameter name
+                let name = if let Some(pattern) = child.child_by_field_name("pattern") {
+                    node_to_text(pattern, source)?
+                } else {
+                    continue;
+                };
+
+                // Extract visibility
+                let visibility = extract_parameter_visibility(child);
+
+                // Build qualified name
+                let qualified_name = if parent_scope.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{parent_scope}.{name}")
+                };
+
+                // Check for readonly modifier
+                let is_readonly = has_readonly;
+
+                // Check for optional marker (?)
+                let is_optional = child.kind() == "optional_parameter";
+
+                // Build metadata
+                let mut metadata = EntityMetadata::default();
+                if is_readonly {
+                    metadata
+                        .attributes
+                        .insert("readonly".to_string(), "true".to_string());
+                }
+                if is_optional {
+                    metadata
+                        .attributes
+                        .insert("optional".to_string(), "true".to_string());
+                }
+                metadata
+                    .attributes
+                    .insert("parameter_property".to_string(), "true".to_string());
+
+                // Generate entity ID
+                let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+                // Build the entity
+                let entity = CodeEntityBuilder::default()
+                    .entity_id(entity_id)
+                    .repository_id(repository_id.to_string())
+                    .name(name)
+                    .qualified_name(qualified_name)
+                    .parent_scope(if parent_scope.is_empty() {
+                        None
+                    } else {
+                        Some(parent_scope.clone())
+                    })
+                    .entity_type(EntityType::Property)
+                    .location(SourceLocation::from_tree_sitter_node(child))
+                    .visibility(Some(visibility))
+                    .content(Some(node_to_text(child, source)?))
+                    .metadata(metadata)
+                    .language(Language::TypeScript)
+                    .file_path(file_path.to_path_buf())
+                    .build()
+                    .map_err(|e| {
+                        codesearch_core::error::Error::entity_extraction(format!(
+                            "Failed to build parameter property entity: {e}"
+                        ))
+                    })?;
+
+                entities.push(entity);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(entities)
+}
+
+/// Extract visibility from a parameter property node
+fn extract_parameter_visibility(param_node: Node) -> Visibility {
+    for child in param_node.children(&mut param_node.walk()) {
+        if child.kind() == "accessibility_modifier" {
+            // Look at the actual modifier keyword inside
+            if let Some(modifier_child) = child.children(&mut child.walk()).next() {
+                return match modifier_child.kind() {
+                    "private" => Visibility::Private,
+                    "protected" => Visibility::Protected,
+                    "public" => Visibility::Public,
+                    _ => Visibility::Public,
+                };
+            }
+        }
+    }
+    // If only readonly (no visibility modifier), default to public
+    Visibility::Public
+}
+
 /// Test-only wrapper for extract_implements_types
 #[cfg(test)]
 pub fn test_extract_implements_types(

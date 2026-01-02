@@ -9,11 +9,12 @@ mod variable_handlers;
 mod tests;
 
 pub use function_handlers::{handle_arrow_function_impl, handle_function_impl};
-// NOTE: handle_function_expression_impl is currently disabled
+// NOTE: handle_function_expression_impl is currently disabled - causes timeout issues
 pub use module_handlers::handle_module_impl;
+// NOTE: handle_namespace_impl is currently disabled - causes timeout issues
 pub use type_handlers::{
-    handle_class_impl, handle_enum_impl, handle_field_impl, handle_interface_impl,
-    handle_interface_method_impl, handle_interface_property_impl, handle_method_impl,
-    handle_type_alias_impl,
+    handle_class_expression_impl, handle_class_impl, handle_enum_impl, handle_field_impl,
+    handle_interface_impl, handle_interface_method_impl, handle_interface_property_impl,
+    handle_method_impl, handle_parameter_property_impl, handle_type_alias_impl,
 };
 pub use variable_handlers::handle_variable_impl;

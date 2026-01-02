@@ -136,7 +136,7 @@ pub fn handle_arrow_function_impl(
 
 /// Handle function expressions (named and anonymous)
 /// For: `const onClick = function handleClick() {}` or `const onHover = function() {}`
-/// NOTE: Currently disabled - needs more work to avoid conflicts with variable handler
+/// NOTE: Currently disabled - causes timeout issues
 #[allow(clippy::too_many_arguments)]
 #[allow(dead_code)]
 pub fn handle_function_expression_impl(
@@ -154,16 +154,20 @@ pub fn handle_function_expression_impl(
     };
     use codesearch_core::entity_id::generate_entity_id;
 
-    let declarator_node = crate::common::require_capture_node(query_match, query, "declarator")?;
     let func_expr_node = crate::common::require_capture_node(query_match, query, "func_expr")?;
 
-    // Get function name: prefer internal name, fall back to variable name
+    // Get function name: prefer internal name, fall back to variable name from parent
     let func_name = find_capture_node(query_match, query, "func_name")
         .and_then(|n| node_to_text(n, source).ok());
-    let var_name = find_capture_node(query_match, query, "var_name")
-        .and_then(|n| node_to_text(n, source).ok());
 
-    let name = func_name.clone().or(var_name.clone()).ok_or_else(|| {
+    // If no internal name, try to find the variable name by traversing up
+    let var_name = if func_name.is_none() {
+        find_parent_variable_name(func_expr_node, source)
+    } else {
+        None
+    };
+
+    let name = func_name.or(var_name).ok_or_else(|| {
         codesearch_core::error::Error::entity_extraction("Could not extract function name")
     })?;
 
@@ -195,8 +199,8 @@ pub fn handle_function_expression_impl(
     // Extract return type annotation
     let return_type = find_type_annotation(func_expr_node, source)?;
 
-    // Check if exported
-    let is_exported = is_node_exported(declarator_node);
+    // Check if exported by traversing up to find export_statement
+    let is_exported = is_node_exported(func_expr_node);
 
     // Check for async
     let is_async = func_expr_node
@@ -263,6 +267,27 @@ pub fn handle_function_expression_impl(
         .map_err(|e| codesearch_core::error::Error::EntityExtraction(e.to_string()))?;
 
     Ok(vec![entity])
+}
+
+/// Find the variable name from a parent variable_declarator node
+#[allow(dead_code)]
+fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "variable_declarator" {
+            if let Some(name_node) = parent.child_by_field_name("name") {
+                if name_node.kind() == "identifier" {
+                    return node_to_text(name_node, source).ok();
+                }
+            }
+        }
+        // Stop if we hit something that shouldn't contain a variable declarator
+        if parent.kind() == "program" || parent.kind() == "class_body" {
+            break;
+        }
+        current = parent.parent();
+    }
+    None
 }
 
 /// Check if a node is exported (has an export_statement ancestor)

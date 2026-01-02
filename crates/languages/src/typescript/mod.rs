@@ -25,6 +25,15 @@ const TYPESCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
         node_kind: "interface_declaration",
         field_name: "name",
     },
+    // NOTE: namespace patterns disabled - namespace handler causes timeout issues
+    // ScopePattern {
+    //     node_kind: "namespace_declaration",
+    //     field_name: "name",
+    // },
+    // ScopePattern {
+    //     node_kind: "internal_module",
+    //     field_name: "name",
+    // },
 ];
 
 inventory::submit! {
@@ -49,7 +58,6 @@ define_language_extractor! {
             query: queries::ARROW_FUNCTION_QUERY,
             handler: handler_impls::handle_arrow_function_impl
         },
-        // Temporarily disabled - needs more work to avoid conflicts with variable handler
         // function_expression => {
         //     query: queries::FUNCTION_EXPRESSION_QUERY,
         //     handler: handler_impls::handle_function_expression_impl
@@ -78,6 +86,10 @@ define_language_extractor! {
             query: queries::MODULE_QUERY,
             handler: handler_impls::handle_module_impl
         },
+        // namespace => {
+        //     query: queries::NAMESPACE_QUERY,
+        //     handler: handler_impls::handle_namespace_impl
+        // },
         variable => {
             query: queries::VARIABLE_QUERY,
             handler: handler_impls::handle_variable_impl
@@ -97,6 +109,14 @@ define_language_extractor! {
         interface_method => {
             query: queries::INTERFACE_METHOD_QUERY,
             handler: handler_impls::handle_interface_method_impl
+        },
+        parameter_property => {
+            query: queries::PARAMETER_PROPERTY_QUERY,
+            handler: handler_impls::handle_parameter_property_impl
+        },
+        class_expression => {
+            query: queries::CLASS_EXPRESSION_QUERY,
+            handler: handler_impls::handle_class_expression_impl
         }
     }
 }

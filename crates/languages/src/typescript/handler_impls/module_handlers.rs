@@ -198,3 +198,105 @@ pub fn handle_module_impl(
 
     Ok(vec![entity])
 }
+
+/// Handle TypeScript namespace declaration as a Module entity
+/// NOTE: Currently disabled - causes timeout issues
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
+pub fn handle_namespace_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    let namespace_node = require_capture_node(query_match, query, "namespace")?;
+    let name_node = require_capture_node(query_match, query, "name")?;
+
+    // Extract namespace name
+    let name = node_to_text(name_node, source)?;
+
+    // Derive module path from file
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (includes parent namespace scope)
+    let scope_result =
+        crate::qualified_name::build_qualified_name_from_ast(namespace_node, source, "typescript");
+
+    // Compose full qualified name: module.parent_namespace.name
+    let full_qualified_name = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => format!("{module}.{}.{name}", scope_result.parent_scope),
+        (Some(module), true) => format!("{module}.{name}"),
+        (None, false) => format!("{}.{name}", scope_result.parent_scope),
+        (None, true) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, scope_result.parent_scope.is_empty()) {
+        (Some(module), false) => Some(format!("{module}.{}", scope_result.parent_scope)),
+        (Some(module), true) => Some(module.clone()),
+        (None, false) => Some(scope_result.parent_scope.clone()),
+        (None, true) => None,
+    };
+
+    // Check if exported
+    let is_exported = is_namespace_exported(namespace_node);
+
+    // Generate entity ID
+    let file_path_str = file_path.to_string_lossy();
+    let entity_id = generate_entity_id(repository_id, &file_path_str, &full_qualified_name);
+
+    // Get location
+    let location = SourceLocation::from_tree_sitter_node(namespace_node);
+
+    // Create components
+    let components = CommonEntityComponents {
+        entity_id,
+        repository_id: repository_id.to_string(),
+        name,
+        qualified_name: full_qualified_name,
+        path_entity_identifier: None,
+        parent_scope,
+        file_path: file_path.to_path_buf(),
+        location,
+    };
+
+    // Build the entity
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Module,
+            language: Language::TypeScript,
+            visibility: Some(if is_exported {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            }),
+            documentation: None,
+            content: node_to_text(namespace_node, source).ok(),
+            metadata: EntityMetadata::default(),
+            signature: None,
+            relationships: Default::default(),
+        },
+    )?;
+
+    Ok(vec![entity])
+}
+
+/// Check if a namespace is exported (has an export_statement ancestor)
+#[allow(dead_code)]
+fn is_namespace_exported(node: Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "export_statement" {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
+}

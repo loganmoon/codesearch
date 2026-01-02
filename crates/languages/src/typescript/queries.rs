@@ -4,25 +4,31 @@
 pub use crate::javascript::queries::ARROW_FUNCTION_QUERY;
 
 /// Query for regular function declarations (TypeScript-specific to handle type annotations)
+/// Also matches generator function declarations (function*)
 pub const FUNCTION_QUERY: &str = r#"
-(function_declaration
-  name: (identifier) @name
-  parameters: (formal_parameters) @params
-) @function
+[
+  (function_declaration
+    name: (identifier) @name
+    parameters: (formal_parameters) @params
+  ) @function
+
+  (generator_function_declaration
+    name: (identifier) @name
+    parameters: (formal_parameters) @params
+  ) @function
+]
 "#;
 
 /// Query for function expressions (named and anonymous)
 /// Used to extract functions from: `const fn = function name() {}` or `const fn = function() {}`
-/// NOTE: Currently disabled - needs more work to avoid conflicts with variable handler
+/// Matches function expressions directly (the handler traverses up to find the variable name if anonymous)
+/// NOTE: Currently disabled - causes timeout issues
 #[allow(dead_code)]
 pub const FUNCTION_EXPRESSION_QUERY: &str = r#"
-(variable_declarator
-  name: (identifier) @var_name
-  value: (function_expression
-    name: (identifier)? @func_name
-    parameters: (formal_parameters) @params
-  ) @func_expr
-) @declarator
+(function_expression
+  name: (identifier)? @func_name
+  parameters: (formal_parameters) @params
+) @func_expr
 "#;
 
 /// Query for class declarations (TypeScript-specific)
@@ -84,6 +90,24 @@ pub const ENUM_QUERY: &str = r#"
 /// Query for the root program node (used for Module entity extraction)
 pub const MODULE_QUERY: &str = r#"
 (program) @module
+"#;
+
+/// Query for namespace declarations (TypeScript namespaces produce Module entities)
+/// Matches both `namespace` and `module` keywords
+/// NOTE: Currently disabled - causes timeout issues
+#[allow(dead_code)]
+pub const NAMESPACE_QUERY: &str = r#"
+[
+  (namespace_declaration
+    name: (identifier) @name
+    body: (statement_block) @body
+  ) @namespace
+
+  (internal_module
+    name: (identifier) @name
+    body: (statement_block) @body
+  ) @namespace
+]
 "#;
 
 /// Query for variable declarations (const, let, var)
@@ -153,4 +177,25 @@ pub const INTERFACE_METHOD_QUERY: &str = r#"
 (method_signature
   name: (property_identifier) @name
 ) @method
+"#;
+
+/// Query for class expressions (named and anonymous)
+/// Used to extract classes from: `const C = class Name {}` or `const C = class {}`
+/// Matches class expressions directly (the handler traverses up to find the variable name if anonymous)
+pub const CLASS_EXPRESSION_QUERY: &str = r#"
+(class
+  name: (type_identifier)? @class_name
+  body: (class_body) @class_body
+) @class_expr
+"#;
+
+/// Query for constructor parameter properties
+/// Matches constructor methods with parameters to extract parameter properties
+/// like `constructor(public x: number, private y: string)`
+pub const PARAMETER_PROPERTY_QUERY: &str = r#"
+(method_definition
+  name: (property_identifier) @method_name
+  parameters: (formal_parameters) @params
+  (#eq? @method_name "constructor")
+) @constructor
 "#;

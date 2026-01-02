@@ -631,7 +631,16 @@ pub(crate) fn build_field_entities(
             let qualified_name = format!("{parent_qualified_name}::{}", field.name);
 
             // Generate entity_id
-            let file_path_str = file_path.to_str()?;
+            let file_path_str = match file_path.to_str() {
+                Some(s) => s,
+                None => {
+                    tracing::warn!(
+                        "Non-UTF8 file path for field '{}', skipping entity creation",
+                        field.name
+                    );
+                    return None;
+                }
+            };
             let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
 
             // Build content representation: "visibility name: type"
@@ -643,23 +652,34 @@ pub(crate) fn build_field_entities(
                 Visibility::Private => format!("{}: {}", field.name, field.field_type),
             };
 
-            // Extract type references for USES relationships
-            let uses_types: Vec<SourceReference> =
+            // Extract type references for USES relationships (deduplicated)
+            let uses_types: Vec<SourceReference> = {
+                let mut seen = std::collections::HashSet::new();
                 extract_type_names_from_field_type(&field.field_type)
                     .into_iter()
-                    .filter(|type_name| !is_primitive_type(type_name))
+                    .filter(|type_name| {
+                        !is_primitive_type(type_name) && seen.insert(type_name.clone())
+                    })
                     .filter_map(|type_name| {
                         let resolved = resolution_ctx.resolve(&type_name, &type_name);
                         SourceReference::builder()
-                            .target(resolved.target)
+                            .target(resolved.target.clone())
                             .simple_name(resolved.simple_name)
                             .is_external(resolved.is_external)
                             .location(SourceLocation::default())
                             .ref_type(ReferenceType::TypeUsage)
                             .build()
+                            .inspect_err(|e| {
+                                tracing::trace!(
+                                    "Failed to build SourceReference for '{}': {}",
+                                    resolved.target,
+                                    e
+                                )
+                            })
                             .ok()
                     })
-                    .collect();
+                    .collect()
+            };
 
             Some(CodeEntity {
                 entity_id,
@@ -703,7 +723,16 @@ fn build_variant_entities(
             let qualified_name = format!("{parent_qualified_name}::{}", variant.name);
 
             // Generate entity_id
-            let file_path_str = file_path.to_str()?;
+            let file_path_str = match file_path.to_str() {
+                Some(s) => s,
+                None => {
+                    tracing::warn!(
+                        "Non-UTF8 file path for variant '{}', skipping entity creation",
+                        variant.name
+                    );
+                    return None;
+                }
+            };
             let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
 
             // Build content representation based on variant kind
@@ -732,27 +761,36 @@ fn build_variant_entities(
                 format!("{} {{ {} }}", variant.name, field_strs.join(", "))
             };
 
-            // Extract type references for USES relationships from variant fields
-            let uses_types: Vec<SourceReference> = variant
-                .fields
-                .iter()
-                .flat_map(|field| {
-                    extract_type_names_from_field_type(&field.field_type)
-                        .into_iter()
-                        .filter(|type_name| !is_primitive_type(type_name))
-                        .filter_map(|type_name| {
-                            let resolved = resolution_ctx.resolve(&type_name, &type_name);
-                            SourceReference::builder()
-                                .target(resolved.target)
-                                .simple_name(resolved.simple_name)
-                                .is_external(resolved.is_external)
-                                .location(SourceLocation::default())
-                                .ref_type(ReferenceType::TypeUsage)
-                                .build()
-                                .ok()
-                        })
-                })
-                .collect();
+            // Extract type references for USES relationships from variant fields (deduplicated)
+            let uses_types: Vec<SourceReference> = {
+                let mut seen = std::collections::HashSet::new();
+                variant
+                    .fields
+                    .iter()
+                    .flat_map(|field| extract_type_names_from_field_type(&field.field_type))
+                    .filter(|type_name| {
+                        !is_primitive_type(type_name) && seen.insert(type_name.clone())
+                    })
+                    .filter_map(|type_name| {
+                        let resolved = resolution_ctx.resolve(&type_name, &type_name);
+                        SourceReference::builder()
+                            .target(resolved.target.clone())
+                            .simple_name(resolved.simple_name)
+                            .is_external(resolved.is_external)
+                            .location(SourceLocation::default())
+                            .ref_type(ReferenceType::TypeUsage)
+                            .build()
+                            .inspect_err(|e| {
+                                tracing::trace!(
+                                    "Failed to build SourceReference for '{}': {}",
+                                    resolved.target,
+                                    e
+                                )
+                            })
+                            .ok()
+                    })
+                    .collect()
+            };
 
             // Store discriminant in metadata if present
             let mut metadata = EntityMetadata::default();

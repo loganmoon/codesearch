@@ -237,6 +237,8 @@ pub mod definitions {
             EntityType::Constant,
             EntityType::TypeAlias,
             EntityType::Module,
+            EntityType::Property,
+            EntityType::EnumVariant,
         ],
         RelationshipType::Contains,
         &[LookupStrategy::QualifiedName],

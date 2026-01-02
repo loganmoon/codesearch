@@ -1,5 +1,6 @@
 //! Test suite for TypeScript extraction handlers
 
+mod enum_tests;
 mod utils_tests;
 
 use codesearch_core::{error::Result, CodeEntity};

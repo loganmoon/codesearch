@@ -30,6 +30,8 @@ pub enum EntityType {
     Variable,
     TypeAlias,
     Macro,
+    Property,
+    EnumVariant,
 }
 
 /// Source location information

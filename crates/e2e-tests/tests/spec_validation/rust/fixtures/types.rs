@@ -21,8 +21,9 @@ use super::{
 ///
 /// Validates:
 /// - E-STRUCT: struct definitions produce Struct entities
-/// - M-STRUCT-FIELDS: structs include field information
-/// - R-USES-TYPE: field types create Uses relationships
+/// - E-PROPERTY: struct fields produce Property entities
+/// - R-CONTAINS-PROPERTY: structs contain their fields
+/// - R-USES-TYPE: field types create Uses relationships (from Property entities)
 pub static STRUCTS: Fixture = Fixture {
     name: "structs",
     files: &[(
@@ -49,8 +50,18 @@ pub struct Wrapper {
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Config::name",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Wrapper",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Wrapper::inner",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -62,12 +73,22 @@ pub struct Wrapper {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::Config",
+            to: "test_crate::Config::name",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::Wrapper",
         },
         ExpectedRelationship {
-            kind: RelationshipKind::Uses,
+            kind: RelationshipKind::Contains,
             from: "test_crate::Wrapper",
+            to: "test_crate::Wrapper::inner",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::Wrapper::inner",
             to: "test_crate::Config",
         },
     ],
@@ -79,8 +100,9 @@ pub struct Wrapper {
 ///
 /// Validates:
 /// - E-ENUM: enum definitions produce Enum entities
+/// - E-ENUM-VARIANT: enum variants produce EnumVariant entities
 /// - V-ENUM-VARIANT: enum variants inherit visibility from their enum
-/// - M-ENUM-VARIANTS: enums include variant information
+/// - R-CONTAINS-ENUM-VARIANT: enums contain their variants
 pub static ENUMS: Fixture = Fixture {
     name: "enums",
     files: &[(
@@ -104,12 +126,44 @@ pub enum Status {
             qualified_name: "test_crate::Status",
             visibility: Some(Visibility::Public),
         },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Status::Active",
+            visibility: None, // Variants inherit visibility, stored as None
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Status::Inactive",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Status::Pending",
+            visibility: None,
+        },
     ],
-    relationships: &[ExpectedRelationship {
-        kind: RelationshipKind::Contains,
-        from: "test_crate",
-        to: "test_crate::Status",
-    }],
+    relationships: &[
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate",
+            to: "test_crate::Status",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Status",
+            to: "test_crate::Status::Active",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Status",
+            to: "test_crate::Status::Inactive",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Status",
+            to: "test_crate::Status::Pending",
+        },
+    ],
     project_type: ProjectType::SingleCrate,
     manifest: None,
 };
@@ -175,7 +229,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// Validates:
 /// - E-STRUCT: all struct variants (named, tuple, unit) produce Struct entities
-/// - M-STRUCT-FIELDS: field metadata captures tuple vs named vs unit forms
+/// - E-PROPERTY: struct fields produce Property entities (including tuple fields)
+/// - R-CONTAINS-PROPERTY: structs contain their fields
 pub static TUPLE_AND_UNIT_STRUCTS: Fixture = Fixture {
     name: "tuple_and_unit_structs",
     files: &[(
@@ -208,19 +263,47 @@ pub struct NamedPoint {
             qualified_name: "test_crate::UnitMarker",
             visibility: Some(Visibility::Public),
         },
+        // Point tuple struct with 2 fields
         ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Point",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Point::0",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Point::1",
+            visibility: Some(Visibility::Public),
+        },
+        // UserId newtype with 1 field
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::UserId",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::UserId::0",
+            visibility: Some(Visibility::Public),
+        },
+        // NamedPoint with 2 named fields
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::NamedPoint",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::NamedPoint::x",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::NamedPoint::y",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -237,13 +320,38 @@ pub struct NamedPoint {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::Point",
+            to: "test_crate::Point::0",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Point",
+            to: "test_crate::Point::1",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::UserId",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::UserId",
+            to: "test_crate::UserId::0",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::NamedPoint",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::NamedPoint",
+            to: "test_crate::NamedPoint::x",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::NamedPoint",
+            to: "test_crate::NamedPoint::y",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -254,8 +362,9 @@ pub struct NamedPoint {
 ///
 /// Validates:
 /// - E-ENUM: enums with complex variants produce Enum entities
-/// - M-ENUM-VARIANTS: variant metadata captures different variant kinds (unit, tuple, struct)
-/// - R-USES-TYPE: enum variants using other types create Uses relationships
+/// - E-ENUM-VARIANT: each variant produces an EnumVariant entity
+/// - R-CONTAINS-ENUM-VARIANT: enums contain their variants
+/// - R-USES-TYPE: variants using other types create Uses relationships
 pub static COMPLEX_ENUMS: Fixture = Fixture {
     name: "complex_enums",
     files: &[(
@@ -273,9 +382,9 @@ pub struct ErrorDetails {
 pub enum Message {
     // Unit variant
     Quit,
-    // Tuple variant
+    // Struct variant
     Move { x: i32, y: i32 },
-    // Named struct variant
+    // Tuple variant
     Write(String),
     // Complex variant using other types
     Request(RequestData),
@@ -298,14 +407,59 @@ pub enum Message {
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::RequestData::path",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::ErrorDetails",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::ErrorDetails::code",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::ErrorDetails::message",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
             qualified_name: "test_crate::Message",
             visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Quit",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Move",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Write",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Request",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Color",
+            visibility: None,
+        },
+        ExpectedEntity {
+            kind: EntityKind::EnumVariant,
+            qualified_name: "test_crate::Message::Error",
+            visibility: None,
         },
     ],
     relationships: &[
@@ -316,8 +470,23 @@ pub enum Message {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::RequestData",
+            to: "test_crate::RequestData::path",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::ErrorDetails",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::ErrorDetails",
+            to: "test_crate::ErrorDetails::code",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::ErrorDetails",
+            to: "test_crate::ErrorDetails::message",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
@@ -325,13 +494,44 @@ pub enum Message {
             to: "test_crate::Message",
         },
         ExpectedRelationship {
-            kind: RelationshipKind::Uses,
+            kind: RelationshipKind::Contains,
             from: "test_crate::Message",
+            to: "test_crate::Message::Quit",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Message",
+            to: "test_crate::Message::Move",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Message",
+            to: "test_crate::Message::Write",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Message",
+            to: "test_crate::Message::Request",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Message",
+            to: "test_crate::Message::Color",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Message",
+            to: "test_crate::Message::Error",
+        },
+        // USES relationships now come from the variant entities
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "test_crate::Message::Request",
             to: "test_crate::RequestData",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "test_crate::Message",
+            from: "test_crate::Message::Error",
             to: "test_crate::ErrorDetails",
         },
     ],
@@ -343,7 +543,9 @@ pub enum Message {
 ///
 /// Validates:
 /// - E-STRUCT: generic structs produce Struct entities
+/// - E-PROPERTY: struct fields produce Property entities
 /// - M-GENERIC: struct includes type parameter information
+/// - R-CONTAINS-PROPERTY: structs contain their fields
 pub static GENERIC_STRUCTS: Fixture = Fixture {
     name: "generic_structs",
     files: &[(
@@ -382,8 +584,23 @@ where
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Container::value",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::Pair",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Pair::first",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Pair::second",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
@@ -392,8 +609,18 @@ where
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::BoundedContainer::value",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleConstraints",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::MultipleConstraints::value",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -405,8 +632,23 @@ where
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::Container",
+            to: "test_crate::Container::value",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::Pair",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Pair",
+            to: "test_crate::Pair::first",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::Pair",
+            to: "test_crate::Pair::second",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
@@ -415,8 +657,18 @@ where
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::BoundedContainer",
+            to: "test_crate::BoundedContainer::value",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::MultipleConstraints",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::MultipleConstraints",
+            to: "test_crate::MultipleConstraints::value",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -428,7 +680,9 @@ where
 /// Validates:
 /// - M-LIFETIMES: entities include lifetime parameter information
 /// - E-STRUCT: structs with lifetimes produce Struct entities
+/// - E-PROPERTY: struct fields produce Property entities
 /// - E-FN-FREE: functions with lifetimes produce Function entities
+/// - R-CONTAINS-PROPERTY: structs contain their fields
 pub static LIFETIMES: Fixture = Fixture {
     name: "lifetimes",
     files: &[(
@@ -464,8 +718,23 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::Borrowed::data",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
             kind: EntityKind::Struct,
             qualified_name: "test_crate::MultipleBorrows",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::MultipleBorrows::first",
+            visibility: Some(Visibility::Public),
+        },
+        ExpectedEntity {
+            kind: EntityKind::Property,
+            qualified_name: "test_crate::MultipleBorrows::second",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
@@ -487,8 +756,23 @@ pub fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
+            from: "test_crate::Borrowed",
+            to: "test_crate::Borrowed::data",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
             from: "test_crate",
             to: "test_crate::MultipleBorrows",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::MultipleBorrows",
+            to: "test_crate::MultipleBorrows::first",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Contains,
+            from: "test_crate::MultipleBorrows",
+            to: "test_crate::MultipleBorrows::second",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,

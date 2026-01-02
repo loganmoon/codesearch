@@ -113,6 +113,23 @@ entity_rules:
     produces: Enum
     tested_by: [enums, complex_enums]
 
+  # ---------------------------------------------------------------------------
+  # Struct Fields and Enum Variants
+  # ---------------------------------------------------------------------------
+  - id: E-PROPERTY
+    description: "A struct field produces a Property entity"
+    construct: "field_name: Type"
+    produces: Property
+    note: "Property entities are children of their parent Struct/Union"
+    tested_by: [structs, tuple_and_unit_structs, generic_structs]
+
+  - id: E-ENUM-VARIANT
+    description: "An enum variant produces an EnumVariant entity"
+    construct: "VariantName or VariantName(T) or VariantName { field: T }"
+    produces: EnumVariant
+    note: "EnumVariant entities are children of their parent Enum"
+    tested_by: [enums, complex_enums]
+
   - id: E-TRAIT
     description: "A trait declaration produces a Trait entity"
     construct: "trait Name { ... }"
@@ -349,6 +366,17 @@ visibility_rules:
     precedence: 5
     tested_by: [enums]
 
+  - id: V-PROPERTY
+    description: "Struct fields have explicit visibility or default to private"
+    applies_to: Property
+    result: "explicit visibility or Private"
+    reason: |
+      Struct fields can have visibility modifiers (pub, pub(crate), etc.)
+      or default to private (visible only within the module).
+    reference: "https://doc.rust-lang.org/reference/visibility-and-privacy.html"
+    precedence: 5
+    tested_by: [structs]
+
   - id: V-PRIVATE
     description: "No visibility modifier results in Private visibility"
     applies_to: "*"
@@ -475,6 +503,26 @@ qualified_name_rules:
     note: "{trait_fqn} includes full module path to the trait"
     tested_by: [trait_def]
 
+  # ---------------------------------------------------------------------------
+  # Struct field and enum variant qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-PROPERTY
+    description: "Struct/union fields are qualified under their parent type"
+    pattern: "{struct_fqn}::{field_name}"
+    examples:
+      - "test_crate::Config::name"  # field on struct at crate root
+      - "test_crate::submod::Point::x"  # field on struct in submodule
+      - "test_crate::Point::0"  # tuple struct field (numeric name)
+    tested_by: [structs, tuple_and_unit_structs]
+
+  - id: Q-ENUM-VARIANT
+    description: "Enum variants are qualified under their parent enum"
+    pattern: "{enum_fqn}::{variant_name}"
+    examples:
+      - "test_crate::Status::Active"  # variant on enum at crate root
+      - "test_crate::submod::Color::Red"  # variant on enum in submodule
+    tested_by: [enums, complex_enums]
+
 
 # =============================================================================
 # RELATIONSHIP RULES
@@ -531,6 +579,22 @@ relationship_rules:
     note: "Extern blocks contain function and static declarations for FFI"
     tested_by: [extern_blocks]
 
+  - id: R-CONTAINS-PROPERTY
+    description: "Struct/Union CONTAINS its fields"
+    kind: Contains
+    from: [Struct, Union]
+    to: Property
+    note: "Property entities represent struct/union fields as first-class entities"
+    tested_by: [structs, tuple_and_unit_structs, unions]
+
+  - id: R-CONTAINS-ENUM-VARIANT
+    description: "Enum CONTAINS its variants"
+    kind: Contains
+    from: Enum
+    to: EnumVariant
+    note: "EnumVariant entities represent enum variants as first-class entities"
+    tested_by: [enums, complex_enums]
+
   # ---------------------------------------------------------------------------
   # Trait relationships
   # ---------------------------------------------------------------------------
@@ -567,10 +631,11 @@ relationship_rules:
   - id: R-USES-TYPE
     description: "Entity USES a type it references"
     kind: Uses
-    from: [Function, Method, Struct, TypeAlias]
+    from: [Function, Method, Struct, TypeAlias, Property, EnumVariant]
     to: [Struct, Enum, Trait, TypeAlias]
     condition: "type appears in signature, field, or type expression"
-    tested_by: [generic_bounds_resolution]
+    note: "Property and EnumVariant entities have their own USES relationships for field types"
+    tested_by: [generic_bounds_resolution, structs, complex_enums]
 
   # ---------------------------------------------------------------------------
   # Import relationships
@@ -654,29 +719,27 @@ metadata_rules:
     tested_by: [lifetimes]
 
   # ---------------------------------------------------------------------------
-  # Struct/Enum metadata
+  # Struct/Enum child entities (previously JSON metadata)
   # ---------------------------------------------------------------------------
-  - id: M-STRUCT-FIELDS
-    description: "Structs include field information"
-    applies_to: Struct
-    field: attributes.fields
-    format: "JSON array of {name, type, visibility}"
+  # NOTE: Struct fields and enum variants are now extracted as first-class
+  # Property and EnumVariant entities respectively. They are no longer stored
+  # as JSON in attributes. See entity rules E-PROPERTY and E-ENUM-VARIANT.
+
+  - id: M-PROPERTY-TYPE
+    description: "Property entities include field type in content"
+    applies_to: Property
+    field: content
+    format: "Field declaration as string (e.g., 'pub name: String')"
+    note: "Type references are captured in uses_types for USES relationships"
     tested_by: [structs, tuple_and_unit_structs]
 
-  - id: M-UNION-FIELDS
-    description: "Unions include field information"
-    applies_to: Union
-    field: attributes.fields
-    format: "JSON array of {name, type}"
-    note: "Union fields share the same memory; accessing requires unsafe"
-    tested_by: [unions]
-
-  - id: M-ENUM-VARIANTS
-    description: "Enums include variant information"
-    applies_to: Enum
-    field: attributes.variants
-    format: "JSON array of variant names and fields"
-    tested_by: [enums, complex_enums]
+  - id: M-ENUM-VARIANT-VALUE
+    description: "EnumVariant entities may include discriminant value"
+    applies_to: EnumVariant
+    field: attributes.discriminant
+    format: "Integer value if explicit discriminant"
+    note: "Only present for variants with explicit discriminant (e.g., Foo = 1)"
+    tested_by: [enums]
 
   # ---------------------------------------------------------------------------
   # Trait metadata
@@ -746,13 +809,13 @@ fixtures:
     tests: [E-MOD-CRATE, E-MOD-DECL, Q-CRATE-ROOT, Q-MODULE, R-CONTAINS-MODULE]
 
   structs:
-    tests: [E-STRUCT, V-PUB, Q-ITEM, M-STRUCT-FIELDS]
+    tests: [E-STRUCT, E-PROPERTY, V-PUB, V-PROPERTY, Q-ITEM, Q-PROPERTY, R-CONTAINS-PROPERTY, R-USES-TYPE, M-PROPERTY-TYPE]
 
   enums:
-    tests: [E-ENUM, V-ENUM-VARIANT, M-ENUM-VARIANTS]
+    tests: [E-ENUM, E-ENUM-VARIANT, V-ENUM-VARIANT, Q-ENUM-VARIANT, R-CONTAINS-ENUM-VARIANT, M-ENUM-VARIANT-VALUE]
 
   unions:
-    tests: [E-UNION, M-UNION-FIELDS]
+    tests: [E-UNION, E-PROPERTY, R-CONTAINS-PROPERTY]
 
   constants:
     tests: [E-CONST]
@@ -770,7 +833,13 @@ fixtures:
     tests: [M-FN-ASYNC]
 
   generic_structs:
-    tests: [M-GENERIC]
+    tests: [M-GENERIC, E-PROPERTY, R-CONTAINS-PROPERTY]
+
+  tuple_and_unit_structs:
+    tests: [E-STRUCT, E-PROPERTY, Q-PROPERTY, R-CONTAINS-PROPERTY, M-PROPERTY-TYPE]
+
+  complex_enums:
+    tests: [E-ENUM, E-ENUM-VARIANT, Q-ENUM-VARIANT, R-CONTAINS-ENUM-VARIANT, R-USES-TYPE]
 
   macro_rules:
     tests: [E-MACRO-RULES]

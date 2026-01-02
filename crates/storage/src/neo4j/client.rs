@@ -822,6 +822,8 @@ impl Neo4jClient {
             EntityType::Static => &["Entity", "Static"],
             EntityType::Union => &["Entity", "Union"],
             EntityType::ExternBlock => &["Entity", "ExternBlock"],
+            EntityType::Property => &["Entity", "Property"],
+            EntityType::EnumVariant => &["Entity", "EnumVariant"],
         }
     }
 

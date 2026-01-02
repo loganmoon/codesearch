@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::neo4j::relationship_builder::{
     build_calls_relationship_json, build_contains_relationship_json,
     build_imports_relationship_json, build_inherits_from_relationship_json,
-    build_trait_relationship_json, build_uses_relationship_json,
+    build_trait_relationship_json,
 };
 
 /// Neo4j node properties for outbox payload
@@ -2134,6 +2134,8 @@ impl PostgresClient {
             EntityType::Static => vec!["Static"],
             EntityType::Union => vec!["Union"],
             EntityType::ExternBlock => vec!["ExternBlock"],
+            EntityType::Property => vec!["Property"],
+            EntityType::EnumVariant => vec!["EnumVariant"],
         };
 
         // Extract CONTAINS relationships using O(1) HashMap lookup
@@ -2145,8 +2147,9 @@ impl PostgresClient {
         // Extract INHERITS_FROM relationships
         relationships.extend(build_inherits_from_relationship_json(entity));
 
-        // Extract USES relationships (field type dependencies)
-        relationships.extend(build_uses_relationship_json(entity));
+        // Note: USES relationships for field types are now handled by Property entities
+        // directly via their EntityRelationshipData.uses_types field, processed by
+        // the outbox processor's GenericResolver.
 
         // Extract CALLS relationships (function calls)
         relationships.extend(build_calls_relationship_json(entity));

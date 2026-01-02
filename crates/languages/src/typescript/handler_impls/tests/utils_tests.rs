@@ -184,3 +184,75 @@ fn test_extract_type_references_scoped() {
     // Should capture the full scoped type
     assert!(types.iter().any(|t| t.target().contains("Namespace.Type")));
 }
+
+#[test]
+fn test_extract_implements_types() {
+    use crate::typescript::handler_impls::type_handlers::test_extract_implements_types;
+
+    // Test basic implements
+    let source = r#"class Resource implements Disposable, Serializable {
+    dispose(): void {}
+}"#;
+    let tree = parse_ts(source);
+    let class_node = find_node(tree.root_node(), "class_declaration").expect("Should find class");
+
+    let types = test_extract_implements_types(class_node, source).expect("Should extract types");
+    assert_eq!(
+        types.len(),
+        2,
+        "Expected 2 implements types, got: {types:?}"
+    );
+    assert!(types.contains(&"Disposable".to_string()));
+    assert!(types.contains(&"Serializable".to_string()));
+}
+
+#[test]
+fn test_extract_implements_types_with_export() {
+    use crate::typescript::handler_impls::type_handlers::test_extract_implements_types;
+
+    // Test with export statement
+    let source = r#"export class Resource implements Disposable, Serializable {
+    dispose(): void {}
+}"#;
+    let tree = parse_ts(source);
+    let class_node = find_node(tree.root_node(), "class_declaration").expect("Should find class");
+
+    let types = test_extract_implements_types(class_node, source).expect("Should extract types");
+    assert_eq!(
+        types.len(),
+        2,
+        "Expected 2 implements types, got: {types:?}"
+    );
+    assert!(types.contains(&"Disposable".to_string()));
+    assert!(types.contains(&"Serializable".to_string()));
+}
+
+#[test]
+fn test_interface_members_structure() {
+    // Test the tree structure for interface members
+    let source = r#"export interface User {
+    id: number;
+    name: string;
+    email?: string;
+    readonly createdAt: Date;
+    greet(): string;
+    updateEmail(email: string): void;
+}"#;
+    let tree = parse_ts(source);
+
+    fn print_tree(node: tree_sitter::Node, source: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text: String = source[node.start_byte()..node.end_byte()]
+            .chars()
+            .take(50)
+            .collect();
+        println!("{}{} [{}]", indent, node.kind(), text.replace('\n', "\\n"));
+
+        for child in node.children(&mut node.walk()) {
+            print_tree(child, source, depth + 1);
+        }
+    }
+
+    println!("\n=== TypeScript interface with members ===");
+    print_tree(tree.root_node(), source, 0);
+}

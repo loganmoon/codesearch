@@ -141,13 +141,17 @@ pub mod definitions {
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
-    /// IMPLEMENTS relationship: Impl block implements a trait for a type
+    /// IMPLEMENTS relationship: Impl block/Class implements a trait/interface
+    ///
+    /// Source types include:
+    /// - Impl: Rust impl blocks implementing traits
+    /// - Class: TypeScript/JavaScript classes implementing interfaces
     pub const IMPLEMENTS: RelationshipDef = RelationshipDef::new(
         "implements",
-        IMPL_TYPES,
+        &[EntityType::Impl, EntityType::Class],
         &[EntityType::Trait, EntityType::Interface],
         RelationshipType::Implements,
-        &[LookupStrategy::QualifiedName],
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
     /// ASSOCIATES relationship: Impl block associates with a type
@@ -159,13 +163,13 @@ pub mod definitions {
         &[LookupStrategy::QualifiedName],
     );
 
-    /// EXTENDS relationship: Trait extends another trait (supertraits)
+    /// EXTENDS relationship: Trait/Interface extends another trait/interface
     pub const EXTENDS: RelationshipDef = RelationshipDef::new(
         "extends",
         &[EntityType::Trait, EntityType::Interface],
         &[EntityType::Trait, EntityType::Interface],
         RelationshipType::ExtendsInterface,
-        &[LookupStrategy::QualifiedName],
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
     /// INHERITS relationship: Class inherits from another class

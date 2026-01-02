@@ -10,9 +10,9 @@ use crate::common::{
     node_to_text,
 };
 use crate::javascript::module_path::derive_module_path;
-use crate::typescript::utils::extract_type_references;
+use crate::typescript::utils::{extract_call_references, extract_type_references};
 use codesearch_core::{
-    entities::{Language, SourceReference, Visibility},
+    entities::{Language, Visibility},
     error::Result,
     CodeEntity,
 };
@@ -134,6 +134,137 @@ pub fn handle_arrow_function_impl(
     Ok(entities)
 }
 
+/// Handle function expressions (named and anonymous)
+/// For: `const onClick = function handleClick() {}` or `const onHover = function() {}`
+/// NOTE: Currently disabled - needs more work to avoid conflicts with variable handler
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
+pub fn handle_function_expression_impl(
+    query_match: &QueryMatch,
+    query: &Query,
+    source: &str,
+    file_path: &Path,
+    repository_id: &str,
+    _package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Vec<CodeEntity>> {
+    use codesearch_core::entities::{
+        CodeEntityBuilder, EntityRelationshipData, EntityType, FunctionSignature, SourceLocation,
+    };
+    use codesearch_core::entity_id::generate_entity_id;
+
+    let declarator_node = crate::common::require_capture_node(query_match, query, "declarator")?;
+    let func_expr_node = crate::common::require_capture_node(query_match, query, "func_expr")?;
+
+    // Get function name: prefer internal name, fall back to variable name
+    let func_name = find_capture_node(query_match, query, "func_name")
+        .and_then(|n| node_to_text(n, source).ok());
+    let var_name = find_capture_node(query_match, query, "var_name")
+        .and_then(|n| node_to_text(n, source).ok());
+
+    let name = func_name.clone().or(var_name.clone()).ok_or_else(|| {
+        codesearch_core::error::Error::entity_extraction("Could not extract function name")
+    })?;
+
+    // Derive module path for qualified name
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name
+    let qualified_name = match &module_path {
+        Some(module) => format!("{module}.{name}"),
+        None => name.clone(),
+    };
+
+    // Parent scope is the module
+    let parent_scope = module_path.clone();
+
+    // Build import map for type reference resolution
+    let root = get_ast_root(func_expr_node);
+    let import_map = parse_file_imports(root, source, Language::TypeScript, module_path.as_deref());
+
+    // Extract parameters with types
+    let parameters = if let Some(params_node) = find_capture_node(query_match, query, "params") {
+        extract_typescript_parameters(params_node, source)?
+    } else {
+        Vec::new()
+    };
+
+    // Extract return type annotation
+    let return_type = find_type_annotation(func_expr_node, source)?;
+
+    // Check if exported
+    let is_exported = is_node_exported(declarator_node);
+
+    // Check for async
+    let is_async = func_expr_node
+        .children(&mut func_expr_node.walk())
+        .any(|c| c.kind() == "async");
+
+    // Extract type references
+    let type_refs =
+        extract_type_references(func_expr_node, source, &import_map, parent_scope.as_deref());
+
+    // Extract call references
+    let call_refs =
+        extract_call_references(func_expr_node, source, &import_map, parent_scope.as_deref());
+
+    // Build relationships
+    let relationships = EntityRelationshipData {
+        uses_types: type_refs,
+        calls: call_refs,
+        ..Default::default()
+    };
+
+    // Generate entity_id
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(repository_id, file_path_str, &qualified_name);
+
+    // Build path_entity_identifier
+    let path_entity_identifier = file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|stem| format!("{stem}.{name}"))
+        .unwrap_or_else(|| name.clone());
+
+    let entity = CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repository_id.to_string())
+        .name(name)
+        .qualified_name(qualified_name)
+        .path_entity_identifier(path_entity_identifier)
+        .parent_scope(parent_scope)
+        .entity_type(EntityType::Function)
+        .location(SourceLocation::from_tree_sitter_node(func_expr_node))
+        .visibility(Some(if is_exported {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        }))
+        .documentation_summary(None)
+        .content(node_to_text(func_expr_node, source).ok())
+        .metadata(codesearch_core::entities::EntityMetadata {
+            is_async,
+            ..Default::default()
+        })
+        .signature(Some(FunctionSignature {
+            parameters,
+            return_type,
+            generics: Vec::new(),
+            is_async,
+        }))
+        .language(Language::TypeScript)
+        .relationships(relationships)
+        .build()
+        .map_err(|e| codesearch_core::error::Error::EntityExtraction(e.to_string()))?;
+
+    Ok(vec![entity])
+}
+
 /// Check if a node is exported (has an export_statement ancestor)
 fn is_node_exported(node: Node) -> bool {
     let mut current = Some(node);
@@ -180,52 +311,44 @@ fn enhance_with_type_annotations(
             entity.parent_scope.as_deref(),
         );
 
-        // Merge TypeScript type references with any existing references
+        // Add type references to relationships.uses_types for USES relationship resolution
         if !ts_type_refs.is_empty() {
-            // Get existing references (if any)
-            let mut all_refs: Vec<SourceReference> = entity
-                .metadata
-                .attributes
-                .get("references")
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
+            // Deduplicate by target
+            let mut seen: std::collections::HashSet<String> = entity
+                .relationships
+                .uses_types
+                .iter()
+                .map(|r| r.target().to_string())
+                .collect();
 
-            // Add TypeScript type references (deduplicating by target)
-            let mut seen: std::collections::HashSet<String> =
-                all_refs.iter().map(|r| r.target().to_string()).collect();
-            for type_ref in ts_type_refs.iter() {
+            for type_ref in ts_type_refs {
                 if seen.insert(type_ref.target().to_string()) {
-                    all_refs.push(type_ref.clone());
+                    entity.relationships.uses_types.push(type_ref);
                 }
             }
+        }
 
-            // Store combined references with locations
-            if let Ok(json) = serde_json::to_string(&all_refs) {
-                entity
-                    .metadata
-                    .attributes
-                    .insert("references".to_string(), json);
-            }
+        // Extract function call references from the function body
+        let call_refs = extract_call_references(
+            function_node,
+            source,
+            &import_map,
+            entity.parent_scope.as_deref(),
+        );
 
-            // Also store simplified uses_types list for backward compatibility
-            let mut all_type_targets: Vec<String> = entity
-                .metadata
-                .attributes
-                .get("uses_types")
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
-            let mut seen_targets: std::collections::HashSet<_> =
-                all_type_targets.iter().cloned().collect();
-            for type_ref in &ts_type_refs {
-                if seen_targets.insert(type_ref.target().to_string()) {
-                    all_type_targets.push(type_ref.target().to_string());
+        // Add call references to relationships.calls for CALLS relationship resolution
+        if !call_refs.is_empty() {
+            let mut seen: std::collections::HashSet<String> = entity
+                .relationships
+                .calls
+                .iter()
+                .map(|r| r.target().to_string())
+                .collect();
+
+            for call_ref in call_refs {
+                if seen.insert(call_ref.target().to_string()) {
+                    entity.relationships.calls.push(call_ref);
                 }
-            }
-            if let Ok(json) = serde_json::to_string(&all_type_targets) {
-                entity
-                    .metadata
-                    .attributes
-                    .insert("uses_types".to_string(), json);
             }
         }
 

@@ -9,9 +9,15 @@ use crate::qualified_name::{ScopeConfiguration, ScopePattern};
 use codesearch_languages_macros::define_language_extractor;
 
 /// Scope patterns for JavaScript qualified name building
+/// Includes abstract_class_declaration for TypeScript support (TS delegates to JS handlers)
 const JAVASCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
     ScopePattern {
         node_kind: "class_declaration",
+        field_name: "name",
+    },
+    // TypeScript abstract classes (tree-sitter-typescript extends tree-sitter-javascript)
+    ScopePattern {
+        node_kind: "abstract_class_declaration",
         field_name: "name",
     },
     ScopePattern {

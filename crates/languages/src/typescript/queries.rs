@@ -11,20 +11,53 @@ pub const FUNCTION_QUERY: &str = r#"
 ) @function
 "#;
 
+/// Query for function expressions (named and anonymous)
+/// Used to extract functions from: `const fn = function name() {}` or `const fn = function() {}`
+/// NOTE: Currently disabled - needs more work to avoid conflicts with variable handler
+#[allow(dead_code)]
+pub const FUNCTION_EXPRESSION_QUERY: &str = r#"
+(variable_declarator
+  name: (identifier) @var_name
+  value: (function_expression
+    name: (identifier)? @func_name
+    parameters: (formal_parameters) @params
+  ) @func_expr
+) @declarator
+"#;
+
 /// Query for class declarations (TypeScript-specific)
+/// Captures class_heritage for extends/implements clause handling
+/// Matches both regular and abstract class declarations
 pub const CLASS_QUERY: &str = r#"
-(class_declaration
-  name: (type_identifier) @name
-  body: (class_body) @class_body
-) @class
+[
+  (class_declaration
+    name: (type_identifier) @name
+    (class_heritage)? @extends
+    body: (class_body) @class_body
+  ) @class
+
+  (abstract_class_declaration
+    name: (type_identifier) @name
+    (class_heritage)? @extends
+    body: (class_body) @class_body
+  ) @class
+]
 "#;
 
 /// Query for class methods (TypeScript-specific)
+/// Matches both regular method definitions and abstract method signatures
 pub const METHOD_QUERY: &str = r#"
-(method_definition
-  name: (property_identifier) @name
-  parameters: (formal_parameters) @params
-) @method
+[
+  (method_definition
+    name: (property_identifier) @name
+    parameters: (formal_parameters) @params
+  ) @method
+
+  (abstract_method_signature
+    name: (property_identifier) @name
+    parameters: (formal_parameters) @params
+  ) @method
+]
 "#;
 
 /// Query for interface declarations
@@ -88,4 +121,36 @@ pub const VARIABLE_QUERY: &str = r#"
     )
   ) @declaration
 ]
+"#;
+
+/// Query for class field/property declarations
+/// Matches public_field_definition nodes inside class bodies
+pub const FIELD_QUERY: &str = r#"
+(public_field_definition
+  name: (property_identifier) @name
+) @field
+"#;
+
+/// Query for private class fields (#private syntax)
+/// Matches private fields like `#count: number`
+pub const PRIVATE_FIELD_QUERY: &str = r#"
+(public_field_definition
+  name: (private_property_identifier) @name
+) @field
+"#;
+
+/// Query for interface property signatures
+/// Matches properties like `id: number` in interfaces
+pub const INTERFACE_PROPERTY_QUERY: &str = r#"
+(property_signature
+  name: (property_identifier) @name
+) @property
+"#;
+
+/// Query for interface method signatures
+/// Matches methods like `greet(): string` in interfaces
+pub const INTERFACE_METHOD_QUERY: &str = r#"
+(method_signature
+  name: (property_identifier) @name
+) @method
 "#;

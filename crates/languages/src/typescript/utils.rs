@@ -136,6 +136,160 @@ pub fn extract_type_references(
     type_refs
 }
 
+// ============================================================================
+// Call Reference Extraction
+// ============================================================================
+
+/// Query source for extracting function call references
+const TS_CALL_REFS_QUERY_SOURCE: &str = r#"
+    ; Direct function call: foo()
+    (call_expression
+      function: (identifier) @bare_callee)
+
+    ; Member access call: obj.method()
+    (call_expression
+      function: (member_expression
+        object: (_) @receiver
+        property: (property_identifier) @method))
+"#;
+
+/// Cached tree-sitter query for call reference extraction
+static TS_CALL_REFS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+
+/// Get or initialize the cached call references query
+fn ts_call_refs_query() -> Option<&'static Query> {
+    TS_CALL_REFS_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            match Query::new(&language, TS_CALL_REFS_QUERY_SOURCE) {
+                Ok(query) => Some(query),
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to compile TypeScript call refs query: {e}. This is a bug."
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+/// Extract function call references from a TypeScript function body
+///
+/// This extracts function call sites from:
+/// - Direct calls: `foo()`, `myFunction(x, y)`
+/// - Member expression calls (only module-level): `Module.func()`
+///
+/// Note: Method calls on instance receivers (like `this.method()` or `obj.method()`)
+/// are currently not fully resolved as we'd need type inference.
+///
+/// Returns a list of `SourceReference` with resolved qualified names and locations.
+pub fn extract_call_references(
+    function_node: Node,
+    source: &str,
+    import_map: &ImportMap,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = ts_call_refs_query() else {
+        return Vec::new();
+    };
+
+    let mut cursor = QueryCursor::new();
+    let mut calls = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut matches = cursor.matches(query, function_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        // Collect captures by name
+        let mut bare_callee = None;
+        let mut _receiver = None;
+        let mut _method = None;
+
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
+
+            match capture_name {
+                "bare_callee" => bare_callee = Some(capture.node),
+                "receiver" => _receiver = Some(capture.node),
+                "method" => _method = Some(capture.node),
+                _ => {}
+            }
+        }
+
+        // Handle bare function calls: `foo()`, `fetchData(url)`
+        if let Some(callee_node) = bare_callee {
+            if let Ok(name) = node_to_text(callee_node, source) {
+                // Skip built-in functions and common globals
+                if is_builtin_function(&name) {
+                    continue;
+                }
+
+                // Resolve through imports and scope
+                let resolved = resolve_reference(&name, import_map, parent_scope, ".");
+
+                if seen.insert(resolved.clone()) {
+                    if let Ok(source_ref) = SourceReference::builder()
+                        .target(resolved)
+                        .simple_name(name)
+                        .is_external(false)
+                        .location(SourceLocation::from_tree_sitter_node(callee_node))
+                        .ref_type(ReferenceType::Call)
+                        .build()
+                    {
+                        calls.push(source_ref);
+                    }
+                }
+            }
+        }
+
+        // Note: We're not currently handling method calls like `obj.method()` or `this.method()`
+        // because that would require type inference to resolve the receiver's type.
+        // Module.func() calls are handled through imports (they appear as bare identifiers).
+    }
+
+    calls
+}
+
+/// Check if a function name is a JavaScript/TypeScript built-in
+fn is_builtin_function(name: &str) -> bool {
+    matches!(
+        name,
+        "console"
+            | "fetch"
+            | "setTimeout"
+            | "setInterval"
+            | "clearTimeout"
+            | "clearInterval"
+            | "parseInt"
+            | "parseFloat"
+            | "isNaN"
+            | "isFinite"
+            | "encodeURI"
+            | "decodeURI"
+            | "encodeURIComponent"
+            | "decodeURIComponent"
+            | "JSON"
+            | "Math"
+            | "Date"
+            | "Array"
+            | "Object"
+            | "String"
+            | "Number"
+            | "Boolean"
+            | "Symbol"
+            | "BigInt"
+            | "RegExp"
+            | "Error"
+            | "Promise"
+            | "require"
+            | "import"
+    )
+}
+
 /// Check if a type name is a TypeScript primitive type
 pub fn is_ts_primitive(name: &str) -> bool {
     name.eq_ignore_ascii_case("string")

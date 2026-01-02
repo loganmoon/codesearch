@@ -14,6 +14,10 @@ const TYPESCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
         field_name: "name",
     },
     ScopePattern {
+        node_kind: "abstract_class_declaration",
+        field_name: "name",
+    },
+    ScopePattern {
         node_kind: "function_declaration",
         field_name: "name",
     },
@@ -45,6 +49,11 @@ define_language_extractor! {
             query: queries::ARROW_FUNCTION_QUERY,
             handler: handler_impls::handle_arrow_function_impl
         },
+        // Temporarily disabled - needs more work to avoid conflicts with variable handler
+        // function_expression => {
+        //     query: queries::FUNCTION_EXPRESSION_QUERY,
+        //     handler: handler_impls::handle_function_expression_impl
+        // },
         class => {
             query: queries::CLASS_QUERY,
             handler: handler_impls::handle_class_impl
@@ -72,6 +81,22 @@ define_language_extractor! {
         variable => {
             query: queries::VARIABLE_QUERY,
             handler: handler_impls::handle_variable_impl
+        },
+        field => {
+            query: queries::FIELD_QUERY,
+            handler: handler_impls::handle_field_impl
+        },
+        private_field => {
+            query: queries::PRIVATE_FIELD_QUERY,
+            handler: handler_impls::handle_field_impl
+        },
+        interface_property => {
+            query: queries::INTERFACE_PROPERTY_QUERY,
+            handler: handler_impls::handle_interface_property_impl
+        },
+        interface_method => {
+            query: queries::INTERFACE_METHOD_QUERY,
+            handler: handler_impls::handle_interface_method_impl
         }
     }
 }

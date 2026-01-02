@@ -9,9 +9,10 @@
 
 use crate::common::{
     entity_building::{build_entity, CommonEntityComponents, EntityDetails},
-    module_utils::{derive_module_name, derive_qualified_name},
+    module_utils::derive_module_name,
     node_to_text, require_capture_node,
 };
+use crate::javascript::module_path::derive_module_path;
 use codesearch_core::{
     entities::{EntityMetadata, EntityType, Language, SourceLocation, Visibility},
     entity_id::generate_entity_id,
@@ -25,10 +26,16 @@ use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
 // Cached tree-sitter query for import extraction
 static TS_IMPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+// Cached tree-sitter query for export detection
+static TS_EXPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
 
 const TS_IMPORT_QUERY_SOURCE: &str = r#"
     (import_statement
       source: (string) @source)
+"#;
+
+const TS_EXPORT_QUERY_SOURCE: &str = r#"
+    (export_statement) @export
 "#;
 
 /// Get or initialize the cached import query
@@ -37,6 +44,16 @@ fn ts_import_query() -> Option<&'static Query> {
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
             Query::new(&language, TS_IMPORT_QUERY_SOURCE).ok()
+        })
+        .as_ref()
+}
+
+/// Get or initialize the cached export query
+fn ts_export_query() -> Option<&'static Query> {
+    TS_EXPORT_QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, TS_EXPORT_QUERY_SOURCE).ok()
         })
         .as_ref()
 }
@@ -66,6 +83,19 @@ fn extract_import_sources(program_node: Node, source: &str) -> Vec<String> {
     imports
 }
 
+/// Check if a TypeScript program node has any export statements
+fn has_exports(program_node: Node, source: &str) -> bool {
+    let Some(query) = ts_export_query() else {
+        return false;
+    };
+
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, program_node, source.as_bytes());
+
+    // If there's at least one export, return true
+    matches.next().is_some()
+}
+
 /// Handle TypeScript program node as a Module entity
 #[allow(clippy::too_many_arguments)]
 pub fn handle_module_impl(
@@ -83,8 +113,12 @@ pub fn handle_module_impl(
     // Extract module name from file path
     let name = derive_module_name(file_path);
 
-    // Build qualified name from file path
-    let qualified_name = derive_qualified_name(file_path, source_root, repo_root, ".");
+    // Build qualified name from file path using derive_module_path
+    // This correctly handles index.ts files as directory modules (models/index.ts -> "models")
+    let qualified_name = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root))
+        .unwrap_or_else(|| name.clone());
 
     // Build path_entity_identifier (repo-relative path for import resolution)
     let path_entity_identifier =
@@ -112,9 +146,12 @@ pub fn handle_module_impl(
     // Extract imports
     let imports = extract_import_sources(program_node, source);
 
-    // Only create a Module entity if there are imports to track
-    // Module entities exist to establish IMPORTS relationships
-    if imports.is_empty() {
+    // Check for exports
+    let has_export_statements = has_exports(program_node, source);
+
+    // Only create a Module entity if there are imports or exports
+    // Per E-MOD-FILE: "A file with import/export statements produces a Module entity"
+    if imports.is_empty() && !has_export_statements {
         return Ok(vec![]);
     }
 

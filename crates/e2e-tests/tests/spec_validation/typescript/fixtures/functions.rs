@@ -59,27 +59,27 @@ export function sum(...numbers: number[]): number {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::add",
+            qualified_name: "utils.add",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::greet",
+            qualified_name: "utils.greet",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::privateHelper",
+            qualified_name: "utils.privateHelper",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::createUser",
+            qualified_name: "utils.createUser",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::sum",
+            qualified_name: "utils.sum",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -116,17 +116,17 @@ const result = (function initialize(): number {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::handlers::handleClick",
+            qualified_name: "handlers.handleClick",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::handlers::onHover",
+            qualified_name: "handlers.onHover",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::handlers::initialize",
+            qualified_name: "handlers.initialize",
             visibility: Some(Visibility::Private),
         },
     ],
@@ -169,32 +169,32 @@ export const identity = <T>(value: T): T => value;
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::square",
+            qualified_name: "arrows.square",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::double",
+            qualified_name: "arrows.double",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::getTimestamp",
+            qualified_name: "arrows.getTimestamp",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::multiply",
+            qualified_name: "arrows.multiply",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::getX",
+            qualified_name: "arrows.getX",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::arrows::identity",
+            qualified_name: "arrows.identity",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -238,25 +238,25 @@ export async function safelyFetch(url: string): Promise<string | null> {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::api::fetchData",
+            qualified_name: "api.fetchData",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::api::fetchJson",
+            qualified_name: "api.fetchJson",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::api::safelyFetch",
+            qualified_name: "api.safelyFetch",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "test-package::api::safelyFetch",
-            to: "test-package::api::fetchData",
+            from: "api.safelyFetch",
+            to: "api.fetchData",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -300,17 +300,17 @@ export async function* asyncRange(start: number, end: number): AsyncGenerator<nu
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::generators::range",
+            qualified_name: "generators.range",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::generators::countdown",
+            qualified_name: "generators.countdown",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::generators::asyncRange",
+            qualified_name: "generators.asyncRange",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -355,12 +355,12 @@ export function createElement(tag: string): HTMLElement {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::overloads::format",
+            qualified_name: "overloads.format",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::overloads::createElement",
+            qualified_name: "overloads.createElement",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -413,40 +413,40 @@ export class Calculator {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::calculator::Calculator",
+            qualified_name: "calculator.Calculator",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::calculator::Calculator::add",
+            qualified_name: "calculator.Calculator.add",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::calculator::Calculator::subtract",
+            qualified_name: "calculator.Calculator.subtract",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::calculator::Calculator::getResult",
+            qualified_name: "calculator.Calculator.getResult",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::calculator::Calculator::reset",
+            qualified_name: "calculator.Calculator.reset",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::calculator::Calculator::log",
+            qualified_name: "calculator.Calculator.log",
             visibility: Some(Visibility::Protected),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::calculator::Calculator",
-            to: "test-package::calculator::Calculator::add",
+            from: "calculator.Calculator",
+            to: "calculator.Calculator.add",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -494,55 +494,55 @@ export function quadruple(x: number): number {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::step1",
+            qualified_name: "pipeline.step1",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::step2",
+            qualified_name: "pipeline.step2",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::step3",
+            qualified_name: "pipeline.step3",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::runPipeline",
+            qualified_name: "pipeline.runPipeline",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::applyTwice",
+            qualified_name: "pipeline.applyTwice",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::pipeline::quadruple",
+            qualified_name: "pipeline.quadruple",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "test-package::pipeline::runPipeline",
-            to: "test-package::pipeline::step1",
+            from: "pipeline.runPipeline",
+            to: "pipeline.step1",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "test-package::pipeline::runPipeline",
-            to: "test-package::pipeline::step2",
+            from: "pipeline.runPipeline",
+            to: "pipeline.step2",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "test-package::pipeline::runPipeline",
-            to: "test-package::pipeline::step3",
+            from: "pipeline.runPipeline",
+            to: "pipeline.step3",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "test-package::pipeline::quadruple",
-            to: "test-package::pipeline::applyTwice",
+            from: "pipeline.quadruple",
+            to: "pipeline.applyTwice",
         },
     ],
     project_type: ProjectType::TypeScriptProject,

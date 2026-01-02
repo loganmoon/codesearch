@@ -92,32 +92,32 @@ export function merge<T extends object, U extends object>(a: T, b: U): T & U {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::generics::Container",
+            qualified_name: "generics.Container",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::generics::Comparable",
+            qualified_name: "generics.Comparable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::generics::Collection",
+            qualified_name: "generics.Collection",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::generics::Repository",
+            qualified_name: "generics.Repository",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::generics::identity",
+            qualified_name: "generics.identity",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::generics::merge",
+            qualified_name: "generics.merge",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -193,32 +193,32 @@ export class AppComponent {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::decorators::sealed",
+            qualified_name: "decorators.sealed",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::decorators::log",
+            qualified_name: "decorators.log",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::decorators::UserService",
+            qualified_name: "decorators.UserService",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::decorators::UserService::getUser",
+            qualified_name: "decorators.UserService.getUser",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::decorators::Component",
+            qualified_name: "decorators.Component",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::decorators::AppComponent",
+            qualified_name: "decorators.AppComponent",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -263,32 +263,32 @@ interface GlobalConfig {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::ambient::VERSION",
+            qualified_name: "ambient.VERSION",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Variable,
-            qualified_name: "test-package::ambient::debug",
+            qualified_name: "ambient.debug",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Variable,
-            qualified_name: "test-package::ambient::legacyGlobal",
+            qualified_name: "ambient.legacyGlobal",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::ambient::getEnv",
+            qualified_name: "ambient.getEnv",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::ambient::ExternalLibrary",
+            qualified_name: "ambient.ExternalLibrary",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::ambient::GlobalConfig",
+            qualified_name: "ambient.GlobalConfig",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -348,12 +348,12 @@ export {};
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "external-lib::doSomething",
+            qualified_name: "external-lib.doSomething",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "external-lib::Client",
+            qualified_name: "external-lib.Client",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
@@ -363,7 +363,7 @@ export {};
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "NodeJS::ProcessEnv",
+            qualified_name: "NodeJS.ProcessEnv",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -413,7 +413,7 @@ export {};
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::augment",
+            qualified_name: "augment",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -463,40 +463,40 @@ export function formatPost(post: Post): string {  // Uses Post
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::models::User",
+            qualified_name: "models.User",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::models::Post",
+            qualified_name: "models.Post",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::models::UserRepository",
+            qualified_name: "models.UserRepository",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::models::formatPost",
+            qualified_name: "models.formatPost",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "test-package::models::Post",
-            to: "test-package::models::User",
+            from: "models.Post",
+            to: "models.User",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "test-package::models::UserRepository",
-            to: "test-package::models::User",
+            from: "models.UserRepository",
+            to: "models.User",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "test-package::models::formatPost",
-            to: "test-package::models::Post",
+            from: "models.formatPost",
+            to: "models.Post",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -546,57 +546,57 @@ export class MyClass {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::visibility::publicConst",
+            qualified_name: "visibility.publicConst",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::visibility::privateConst",
+            qualified_name: "visibility.privateConst",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::visibility::publicFunction",
+            qualified_name: "visibility.publicFunction",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::visibility::privateFunction",
+            qualified_name: "visibility.privateFunction",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::visibility::MyClass",
+            qualified_name: "visibility.MyClass",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::visibility::MyClass::publicProp",
+            qualified_name: "visibility.MyClass.publicProp",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::visibility::MyClass::privateProp",
+            qualified_name: "visibility.MyClass.privateProp",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::visibility::MyClass::protectedProp",
+            qualified_name: "visibility.MyClass.protectedProp",
             visibility: Some(Visibility::Protected),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::visibility::MyClass::publicMethod",
+            qualified_name: "visibility.MyClass.publicMethod",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::visibility::MyClass::privateMethod",
+            qualified_name: "visibility.MyClass.privateMethod",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::visibility::MyClass::protectedMethod",
+            qualified_name: "visibility.MyClass.protectedMethod",
             visibility: Some(Visibility::Protected),
         },
     ],
@@ -652,22 +652,22 @@ export function List<T>({ items, renderItem }: {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::components::Greeting",
+            qualified_name: "components.Greeting",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::components::Button",
+            qualified_name: "components.Button",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::components::Card",
+            qualified_name: "components.Card",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::components::List",
+            qualified_name: "components.List",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -716,27 +716,27 @@ export const handlers = {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::handlers::EventEmitter",
+            qualified_name: "handlers.EventEmitter",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::handlers::EventEmitter::onClick",
+            qualified_name: "handlers.EventEmitter.onClick",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::handlers::EventEmitter::onHover",
+            qualified_name: "handlers.EventEmitter.onHover",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::handlers::EventEmitter::transform",
+            qualified_name: "handlers.EventEmitter.transform",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::handlers::EventEmitter::processItems",
+            qualified_name: "handlers.EventEmitter.processItems",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -791,42 +791,42 @@ export class Settings {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::config::Config",
+            qualified_name: "config.Config",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::name",
+            qualified_name: "config.Config.name",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::description",
+            qualified_name: "config.Config.description",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::version",
+            qualified_name: "config.Config.version",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::config::Settings",
+            qualified_name: "config.Settings",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Settings::theme",
+            qualified_name: "config.Settings.theme",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Settings::language",
+            qualified_name: "config.Settings.language",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Settings::id",
+            qualified_name: "config.Settings.id",
             visibility: Some(Visibility::Public),
         },
     ],

@@ -70,45 +70,45 @@ export class User {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::user::User",
+            qualified_name: "user.User",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::name",
+            qualified_name: "user.User.name",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::id",
+            qualified_name: "user.User.id",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::user::User::constructor",
+            qualified_name: "user.User.constructor",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::user::User::greet",
+            qualified_name: "user.User.greet",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::user::User::validate",
+            qualified_name: "user.User.validate",
             visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::user::User",
-            to: "test-package::user::User::name",
+            from: "user.User",
+            to: "user.User.name",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::user::User",
-            to: "test-package::user::User::greet",
+            from: "user.User",
+            to: "user.User.greet",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -153,35 +153,35 @@ export class Circle extends Shape {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::shape::Shape",
+            qualified_name: "shape.Shape",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::shape::Shape::area",
+            qualified_name: "shape.Shape.area",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::shape::Shape::perimeter",
+            qualified_name: "shape.Shape.perimeter",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::shape::Shape::describe",
+            qualified_name: "shape.Shape.describe",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::shape::Circle",
+            qualified_name: "shape.Circle",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::InheritsFrom,
-            from: "test-package::shape::Circle",
-            to: "test-package::shape::Shape",
+            from: "shape.Circle",
+            to: "shape.Shape",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -211,12 +211,12 @@ export const AnonymousClass = class {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::factories::MyClass",
+            qualified_name: "factories.MyClass",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::factories::AnonymousClass",
+            qualified_name: "factories.AnonymousClass",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -267,30 +267,30 @@ export class GermanShepherd extends Dog {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::animals::Animal",
+            qualified_name: "animals.Animal",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::animals::Dog",
+            qualified_name: "animals.Dog",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::animals::GermanShepherd",
+            qualified_name: "animals.GermanShepherd",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::InheritsFrom,
-            from: "test-package::animals::Dog",
-            to: "test-package::animals::Animal",
+            from: "animals.Dog",
+            to: "animals.Animal",
         },
         ExpectedRelationship {
             kind: RelationshipKind::InheritsFrom,
-            from: "test-package::animals::GermanShepherd",
-            to: "test-package::animals::Dog",
+            from: "animals.GermanShepherd",
+            to: "animals.Dog",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -337,30 +337,30 @@ export class Resource implements Disposable, Serializable {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::disposable::Disposable",
+            qualified_name: "disposable.Disposable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::disposable::Serializable",
+            qualified_name: "disposable.Serializable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::disposable::Resource",
+            qualified_name: "disposable.Resource",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test-package::disposable::Resource",
-            to: "test-package::disposable::Disposable",
+            from: "disposable.Resource",
+            to: "disposable.Disposable",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test-package::disposable::Resource",
-            to: "test-package::disposable::Serializable",
+            from: "disposable.Resource",
+            to: "disposable.Serializable",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -400,35 +400,35 @@ export class Config {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::config::Config",
+            qualified_name: "config.Config",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::enabled",
+            qualified_name: "config.Config.enabled",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::name",
+            qualified_name: "config.Config.name",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::version",
+            qualified_name: "config.Config.version",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::config::Config::description",
+            qualified_name: "config.Config.description",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::config::Config",
-            to: "test-package::config::Config::enabled",
+            from: "config.Config",
+            to: "config.Config.enabled",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -461,27 +461,27 @@ export class Point {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::point::Point",
+            qualified_name: "point.Point",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::point::Point::x",
+            qualified_name: "point.Point.x",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::point::Point::y",
+            qualified_name: "point.Point.y",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::point::Point::_label",
+            qualified_name: "point.Point._label",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::point::Point::id",
+            qualified_name: "point.Point.id",
             visibility: Some(Visibility::Protected),
         },
     ],
@@ -523,22 +523,22 @@ export class Counter {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::counter::Counter",
+            qualified_name: "counter.Counter",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::counter::Counter::#count",
+            qualified_name: "counter.Counter.#count",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::counter::Counter::#maxValue",
+            qualified_name: "counter.Counter.#maxValue",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::counter::Counter::increment",
+            qualified_name: "counter.Counter.increment",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -580,32 +580,32 @@ export class MathUtils {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::math::MathUtils",
+            qualified_name: "math.MathUtils",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::math::MathUtils.PI",
+            qualified_name: "math.MathUtils.PI",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::math::MathUtils.E",
+            qualified_name: "math.MathUtils.E",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::math::MathUtils.add",
+            qualified_name: "math.MathUtils.add",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::math::MathUtils.multiply",
+            qualified_name: "math.MathUtils.multiply",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::math::MathUtils::instanceMethod",
+            qualified_name: "math.MathUtils.instanceMethod",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -655,28 +655,28 @@ export class Temperature {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::temperature::Temperature",
+            qualified_name: "temperature.Temperature",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::temperature::Temperature::_celsius",
+            qualified_name: "temperature.Temperature._celsius",
             visibility: Some(Visibility::Private),
         },
         // Getters
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::temperature::Temperature::celsius",
+            qualified_name: "temperature.Temperature.celsius",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::temperature::Temperature::fahrenheit",
+            qualified_name: "temperature.Temperature.fahrenheit",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::temperature::Temperature::kelvin",
+            qualified_name: "temperature.Temperature.kelvin",
             visibility: Some(Visibility::Public),
         },
     ],

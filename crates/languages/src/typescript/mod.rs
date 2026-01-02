@@ -68,6 +68,10 @@ define_language_extractor! {
         module => {
             query: queries::MODULE_QUERY,
             handler: handler_impls::handle_module_impl
+        },
+        variable => {
+            query: queries::VARIABLE_QUERY,
+            handler: handler_impls::handle_variable_impl
         }
     }
 }

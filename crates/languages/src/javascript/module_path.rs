@@ -10,12 +10,10 @@ use std::path::Path;
 /// common JS/TS module conventions.
 ///
 /// # Returns
-/// - `None` for module root `index.js`/`index.ts` files directly in the source root
-/// - `Some(module_path)` for other files, with `.` as separator
+/// - `Some(module_path)` with `.` as separator
 ///
 /// # Examples
-/// - `index.ts` -> `None` (module root)
-/// - `index.js` -> `None` (module root)
+/// - `index.ts` -> `Some("index")` (root module)
 /// - `utils.ts` -> `Some("utils")`
 /// - `components/Button.tsx` -> `Some("components.Button")`
 /// - `components/index.tsx` -> `Some("components")`
@@ -34,13 +32,14 @@ pub fn derive_module_path(file_path: &Path, source_root: &Path) -> Option<String
     // Get the filename without extension
     let filename = file_path.file_stem()?.to_str()?;
 
-    // index.js/index.ts marks a directory module, not a separate module
+    // index.js/index.ts marks a directory module, but for root index.ts we need "index"
     if filename != "index" {
         components.push(filename);
     }
 
     if components.is_empty() {
-        None
+        // For root index.ts, return "index" as the module name
+        Some("index".to_string())
     } else {
         Some(components.join("."))
     }
@@ -55,14 +54,14 @@ mod tests {
     fn test_root_index_ts() {
         let root = PathBuf::from("/project/src");
         let file = PathBuf::from("/project/src/index.ts");
-        assert_eq!(derive_module_path(&file, &root), None);
+        assert_eq!(derive_module_path(&file, &root), Some("index".to_string()));
     }
 
     #[test]
     fn test_root_index_js() {
         let root = PathBuf::from("/project/src");
         let file = PathBuf::from("/project/src/index.js");
-        assert_eq!(derive_module_path(&file, &root), None);
+        assert_eq!(derive_module_path(&file, &root), Some("index".to_string()));
     }
 
     #[test]

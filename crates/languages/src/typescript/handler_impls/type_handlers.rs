@@ -26,18 +26,20 @@ pub fn handle_class_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript class handler (includes extends_resolved)
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_class_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
@@ -109,18 +111,20 @@ pub fn handle_method_impl(
     source: &str,
     file_path: &Path,
     repository_id: &str,
-    package_name: Option<&str>,
+    _package_name: Option<&str>,
     source_root: Option<&Path>,
     repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     // Reuse JavaScript method handler
+    // Note: TypeScript qualified names are based on file paths only, not package names
+    // per spec rule Q-MODULE-FILE and Q-ITEM-MODULE
     let mut entities = crate::javascript::handler_impls::handle_method_impl(
         query_match,
         query,
         source,
         file_path,
         repository_id,
-        package_name,
+        None, // TypeScript doesn't use package name in qualified names
         source_root,
         repo_root,
     )?;
@@ -144,7 +148,7 @@ pub fn handle_interface_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let interface_node = require_capture_node(query_match, query, "interface")?;
 
@@ -152,14 +156,34 @@ pub fn handle_interface_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(interface_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract generics (type_parameters)
@@ -232,6 +256,14 @@ pub fn handle_interface_impl(
         .ok_or_else(|| codesearch_core::error::Error::entity_extraction("Invalid file path"))?;
     let entity_id = generate_entity_id(repository_id, file_path_str, &full_qualified_name);
 
+    // Check if exported
+    let is_exported = is_node_exported(interface_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
     // Build entity
     let entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
@@ -245,7 +277,7 @@ pub fn handle_interface_impl(
         })
         .entity_type(EntityType::Interface)
         .location(SourceLocation::from_tree_sitter_node(interface_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(interface_node, source).ok())
         .metadata(metadata)
@@ -283,7 +315,7 @@ pub fn handle_type_alias_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let type_alias_node = require_capture_node(query_match, query, "type_alias")?;
 
@@ -291,14 +323,34 @@ pub fn handle_type_alias_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(type_alias_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract generics
@@ -343,6 +395,14 @@ pub fn handle_type_alias_impl(
         ..Default::default()
     };
 
+    // Check if exported
+    let is_exported = is_node_exported(type_alias_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
     // Generate entity_id
     let file_path_str = file_path
         .to_str()
@@ -362,7 +422,7 @@ pub fn handle_type_alias_impl(
         })
         .entity_type(EntityType::TypeAlias)
         .location(SourceLocation::from_tree_sitter_node(type_alias_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(type_alias_node, source).ok())
         .metadata(metadata)
@@ -400,7 +460,7 @@ pub fn handle_enum_impl(
     repository_id: &str,
     package_name: Option<&str>,
     source_root: Option<&Path>,
-    _repo_root: &Path,
+    repo_root: &Path,
 ) -> Result<Vec<CodeEntity>> {
     let enum_node = require_capture_node(query_match, query, "enum")?;
 
@@ -408,14 +468,34 @@ pub fn handle_enum_impl(
     let name_node = require_capture_node(query_match, query, "name")?;
     let name = node_to_text(name_node, source)?;
 
-    // Build qualified name
+    // Derive module path from file path (for TypeScript, qualified names are file-based per Q-MODULE-FILE)
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
+
+    // Build qualified name from AST (for any parent scope like namespace)
     let scope_result =
         crate::qualified_name::build_qualified_name_from_ast(enum_node, source, "typescript");
-    let parent_scope = scope_result.parent_scope;
-    let full_qualified_name = if parent_scope.is_empty() {
-        name.clone()
+    let ast_scope = if scope_result.parent_scope.is_empty() {
+        None
     } else {
-        format!("{parent_scope}.{name}")
+        Some(scope_result.parent_scope.clone())
+    };
+
+    // Compose qualified name: module.ast_scope.name (per TypeScript spec Q-ITEM-MODULE)
+    let full_qualified_name = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}.{name}"),
+        (Some(module), None) => format!("{module}.{name}"),
+        (None, Some(scope)) => format!("{scope}.{name}"),
+        (None, None) => name.clone(),
+    };
+
+    // Parent scope includes module path
+    let parent_scope = match (&module_path, &ast_scope) {
+        (Some(module), Some(scope)) => format!("{module}.{scope}"),
+        (Some(module), None) => module.clone(),
+        (None, Some(scope)) => scope.clone(),
+        (None, None) => String::new(),
     };
 
     // Extract enum members with their values
@@ -423,6 +503,14 @@ pub fn handle_enum_impl(
 
     // Extract JSDoc documentation
     let documentation = extract_jsdoc_comments(enum_node, source);
+
+    // Check if exported
+    let is_exported = is_node_exported(enum_node);
+    let visibility = if is_exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
 
     // Build metadata (no longer storing members as JSON)
     let metadata = EntityMetadata::default();
@@ -446,7 +534,7 @@ pub fn handle_enum_impl(
         })
         .entity_type(EntityType::Enum)
         .location(SourceLocation::from_tree_sitter_node(enum_node))
-        .visibility(Some(Visibility::Public))
+        .visibility(Some(visibility))
         .documentation_summary(documentation)
         .content(node_to_text(enum_node, source).ok())
         .metadata(metadata)
@@ -459,9 +547,14 @@ pub fn handle_enum_impl(
             ))
         })?;
 
-    // Build member entities
-    let member_entities =
-        build_enum_member_entities(&member_info, &full_qualified_name, file_path, repository_id)?;
+    // Build member entities (passing parent visibility for inheritance)
+    let member_entities = build_enum_member_entities(
+        &member_info,
+        &full_qualified_name,
+        file_path,
+        repository_id,
+        Some(visibility), // Members inherit visibility from parent enum
+    )?;
 
     // Return enum + members
     let mut entities = vec![enum_entity];
@@ -644,6 +737,7 @@ fn build_enum_member_entities(
     parent_qualified_name: &str,
     file_path: &Path,
     repository_id: &str,
+    parent_visibility: Option<Visibility>,
 ) -> Result<Vec<CodeEntity>> {
     let file_path_str = file_path
         .to_str()
@@ -675,7 +769,7 @@ fn build_enum_member_entities(
                 .parent_scope(Some(parent_qualified_name.to_string()))
                 .entity_type(EntityType::EnumVariant)
                 .location(member.location.clone())
-                .visibility(None) // Members inherit visibility from parent
+                .visibility(parent_visibility) // Members inherit visibility from parent
                 .content(Some(content))
                 .metadata(metadata)
                 .language(Language::TypeScript)
@@ -688,4 +782,16 @@ fn build_enum_member_entities(
                 })
         })
         .collect()
+}
+
+/// Check if a node is exported (has an export_statement ancestor)
+fn is_node_exported(node: Node) -> bool {
+    let mut current = Some(node);
+    while let Some(n) = current {
+        if n.kind() == "export_statement" {
+            return true;
+        }
+        current = n.parent();
+    }
+    false
 }

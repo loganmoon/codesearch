@@ -42,50 +42,50 @@ export interface User {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::user::User",
+            qualified_name: "user.User",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::id",
+            qualified_name: "user.User.id",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::name",
+            qualified_name: "user.User.name",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::email",
+            qualified_name: "user.User.email",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::user::User::createdAt",
+            qualified_name: "user.User.createdAt",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::user::User::greet",
+            qualified_name: "user.User.greet",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::user::User::updateEmail",
+            qualified_name: "user.User.updateEmail",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::user::User",
-            to: "test-package::user::User::id",
+            from: "user.User",
+            to: "user.User.id",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::user::User",
-            to: "test-package::user::User::greet",
+            from: "user.User",
+            to: "user.User.greet",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -129,55 +129,55 @@ export interface AuditableAndDeletable extends Auditable, SoftDeletable {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::entities::Entity",
+            qualified_name: "entities.Entity",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::entities::Timestamped",
+            qualified_name: "entities.Timestamped",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::entities::Auditable",
+            qualified_name: "entities.Auditable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::entities::SoftDeletable",
+            qualified_name: "entities.SoftDeletable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::entities::AuditableAndDeletable",
+            qualified_name: "entities.AuditableAndDeletable",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::ExtendsInterface,
-            from: "test-package::entities::Auditable",
-            to: "test-package::entities::Entity",
+            from: "entities.Auditable",
+            to: "entities.Entity",
         },
         ExpectedRelationship {
             kind: RelationshipKind::ExtendsInterface,
-            from: "test-package::entities::Auditable",
-            to: "test-package::entities::Timestamped",
+            from: "entities.Auditable",
+            to: "entities.Timestamped",
         },
         ExpectedRelationship {
             kind: RelationshipKind::ExtendsInterface,
-            from: "test-package::entities::SoftDeletable",
-            to: "test-package::entities::Entity",
+            from: "entities.SoftDeletable",
+            to: "entities.Entity",
         },
         ExpectedRelationship {
             kind: RelationshipKind::ExtendsInterface,
-            from: "test-package::entities::AuditableAndDeletable",
-            to: "test-package::entities::Auditable",
+            from: "entities.AuditableAndDeletable",
+            to: "entities.Auditable",
         },
         ExpectedRelationship {
             kind: RelationshipKind::ExtendsInterface,
-            from: "test-package::entities::AuditableAndDeletable",
-            to: "test-package::entities::SoftDeletable",
+            from: "entities.AuditableAndDeletable",
+            to: "entities.SoftDeletable",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -213,41 +213,41 @@ export interface Window {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::window::Window",
+            qualified_name: "window.Window",
             visibility: Some(Visibility::Public),
         },
         // All properties from merged declarations
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::window::Window::title",
+            qualified_name: "window.Window.title",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::window::Window::width",
+            qualified_name: "window.Window.width",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::window::Window::height",
+            qualified_name: "window.Window.height",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::window::Window::resize",
+            qualified_name: "window.Window.resize",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::window::Window",
-            to: "test-package::window::Window::title",
+            from: "window.Window",
+            to: "window.Window.title",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::window::Window",
-            to: "test-package::window::Window::resize",
+            from: "window.Window",
+            to: "window.Window.resize",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -287,32 +287,32 @@ export interface ReadonlyDictionary {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::dictionary::StringDictionary",
+            qualified_name: "dictionary.StringDictionary",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::dictionary::StringDictionary::[string]",
+            qualified_name: "dictionary.StringDictionary.[string]",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::dictionary::NumberDictionary",
+            qualified_name: "dictionary.NumberDictionary",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::dictionary::NumberDictionary::[number]",
+            qualified_name: "dictionary.NumberDictionary.[number]",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::dictionary::MixedDictionary",
+            qualified_name: "dictionary.MixedDictionary",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::dictionary::ReadonlyDictionary",
+            qualified_name: "dictionary.ReadonlyDictionary",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -364,42 +364,42 @@ export interface FunctionWithProperties {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::callable::Callable",
+            qualified_name: "callable.Callable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::callable::Callable::()",
+            qualified_name: "callable.Callable.()",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::callable::OverloadedCallable",
+            qualified_name: "callable.OverloadedCallable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::callable::Constructable",
+            qualified_name: "callable.Constructable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::callable::Constructable::new()",
+            qualified_name: "callable.Constructable.new()",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::callable::CallableAndConstructable",
+            qualified_name: "callable.CallableAndConstructable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::callable::FunctionWithProperties",
+            qualified_name: "callable.FunctionWithProperties",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Property,
-            qualified_name: "test-package::callable::FunctionWithProperties::displayName",
+            qualified_name: "callable.FunctionWithProperties.displayName",
             visibility: Some(Visibility::Public),
         },
     ],

@@ -65,37 +65,37 @@ export type NonNullable<T> = T extends null | undefined ? never : T;
     entities: &[
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::ID",
+            qualified_name: "types.ID",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::User",
+            qualified_name: "types.User",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::Status",
+            qualified_name: "types.Status",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::WithTimestamps",
+            qualified_name: "types.WithTimestamps",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::TimestampedUser",
+            qualified_name: "types.TimestampedUser",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::InternalConfig",
+            qualified_name: "types.InternalConfig",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::types::NonNullable",
+            qualified_name: "types.NonNullable",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -144,42 +144,42 @@ export type EventName<T extends string> = `on${Capitalize<T>}`;
     entities: &[
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Box",
+            qualified_name: "generic-types.Box",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Pair",
+            qualified_name: "generic-types.Pair",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Lengthable",
+            qualified_name: "generic-types.Lengthable",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Optional",
+            qualified_name: "generic-types.Optional",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Numeric",
+            qualified_name: "generic-types.Numeric",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Unwrap",
+            qualified_name: "generic-types.Unwrap",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::Readonly",
+            qualified_name: "generic-types.Readonly",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::TypeAlias,
-            qualified_name: "test-package::generic-types::EventName",
+            qualified_name: "generic-types.EventName",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -227,50 +227,50 @@ export enum FileAccess {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::enums::Direction",
+            qualified_name: "enums.Direction",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::enums::Direction::Up",
+            qualified_name: "enums.Direction.Up",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::enums::Direction::Down",
+            qualified_name: "enums.Direction.Down",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::enums::Direction::Left",
+            qualified_name: "enums.Direction.Left",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::enums::Direction::Right",
+            qualified_name: "enums.Direction.Right",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::enums::HttpStatus",
+            qualified_name: "enums.HttpStatus",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::enums::FileAccess",
+            qualified_name: "enums.FileAccess",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::enums::Direction",
-            to: "test-package::enums::Direction::Up",
+            from: "enums.Direction",
+            to: "enums.Direction.Up",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::enums::Direction",
-            to: "test-package::enums::Direction::Right",
+            from: "enums.Direction",
+            to: "enums.Direction.Right",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -307,32 +307,32 @@ export enum MediaType {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::string-enums::LogLevel",
+            qualified_name: "string-enums.LogLevel",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::string-enums::LogLevel::Debug",
+            qualified_name: "string-enums.LogLevel.Debug",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::string-enums::LogLevel::Info",
+            qualified_name: "string-enums.LogLevel.Info",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::string-enums::LogLevel::Warn",
+            qualified_name: "string-enums.LogLevel.Warn",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::string-enums::LogLevel::Error",
+            qualified_name: "string-enums.LogLevel.Error",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::string-enums::MediaType",
+            qualified_name: "string-enums.MediaType",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -380,22 +380,22 @@ function getPriorityLabel(priority: Priority): string {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::const-enums::Priority",
+            qualified_name: "const-enums.Priority",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::EnumVariant,
-            qualified_name: "test-package::const-enums::Priority::Low",
+            qualified_name: "const-enums.Priority.Low",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Enum,
-            qualified_name: "test-package::const-enums::Environment",
+            qualified_name: "const-enums.Environment",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::const-enums::getPriorityLabel",
+            qualified_name: "const-enums.getPriorityLabel",
             visibility: Some(Visibility::Private),
         },
     ],
@@ -442,42 +442,42 @@ export const [first, second] = [1, 2];
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::VERSION",
+            qualified_name: "variables.VERSION",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::PI",
+            qualified_name: "variables.PI",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::CONFIG",
+            qualified_name: "variables.CONFIG",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::SECRET_KEY",
+            qualified_name: "variables.SECRET_KEY",
             visibility: Some(Visibility::Private),
         },
         ExpectedEntity {
             kind: EntityKind::Variable,
-            qualified_name: "test-package::variables::counter",
+            qualified_name: "variables.counter",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Variable,
-            qualified_name: "test-package::variables::legacyFlag",
+            qualified_name: "variables.legacyFlag",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::apiUrl",
+            qualified_name: "variables.apiUrl",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::variables::timeout",
+            qualified_name: "variables.timeout",
             visibility: Some(Visibility::Public),
         },
     ],

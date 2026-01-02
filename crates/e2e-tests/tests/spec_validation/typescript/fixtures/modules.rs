@@ -50,40 +50,40 @@ function privateHelper(): void {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package",
+            qualified_name: "index",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::greet",
+            qualified_name: "index.greet",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::VERSION",
+            qualified_name: "index.VERSION",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::privateHelper",
+            qualified_name: "index.privateHelper",
             visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package",
-            to: "test-package::greet",
+            from: "index",
+            to: "index.greet",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package",
-            to: "test-package::VERSION",
+            from: "index",
+            to: "index.VERSION",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package",
-            to: "test-package::privateHelper",
+            from: "index",
+            to: "index.privateHelper",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -125,32 +125,32 @@ export function useAll(): void {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::utils",
+            qualified_name: "utils",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::utils::helper",
+            qualified_name: "utils.helper",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::utils::VALUE",
+            qualified_name: "utils.VALUE",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::utils::DefaultClass",
+            qualified_name: "utils.DefaultClass",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::consumer",
+            qualified_name: "consumer",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::consumer::useAll",
+            qualified_name: "consumer.useAll",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -158,25 +158,25 @@ export function useAll(): void {
         // Named imports
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "test-package::consumer",
-            to: "test-package::utils::helper",
+            from: "consumer",
+            to: "utils.helper",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "test-package::consumer",
-            to: "test-package::utils::VALUE",
+            from: "consumer",
+            to: "utils.VALUE",
         },
         // Default import
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "test-package::consumer",
-            to: "test-package::utils::DefaultClass",
+            from: "consumer",
+            to: "utils.DefaultClass",
         },
         // Namespace import creates import relationship to module
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "test-package::consumer",
-            to: "test-package::utils",
+            from: "consumer",
+            to: "utils",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -216,45 +216,45 @@ export namespace Geometry {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::geometry",
+            qualified_name: "geometry",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::geometry::Geometry",
+            qualified_name: "geometry.Geometry",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::geometry::Geometry::Point",
+            qualified_name: "geometry.Geometry.Point",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::geometry::Geometry::distance",
+            qualified_name: "geometry.Geometry.distance",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::geometry::Geometry::internalHelper",
+            qualified_name: "geometry.Geometry.internalHelper",
             visibility: Some(Visibility::Private),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::geometry",
-            to: "test-package::geometry::Geometry",
+            from: "geometry",
+            to: "geometry.Geometry",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::geometry::Geometry",
-            to: "test-package::geometry::Geometry::Point",
+            from: "geometry.Geometry",
+            to: "geometry.Geometry.Point",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::geometry::Geometry",
-            to: "test-package::geometry::Geometry::distance",
+            from: "geometry.Geometry",
+            to: "geometry.Geometry.distance",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -289,40 +289,40 @@ export namespace Shapes {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::shapes::Shapes",
+            qualified_name: "shapes.Shapes",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::shapes::Shapes::TwoD",
+            qualified_name: "shapes.Shapes.TwoD",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::shapes::Shapes::ThreeD",
+            qualified_name: "shapes.Shapes.ThreeD",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::shapes::Shapes::TwoD::Circle",
+            qualified_name: "shapes.Shapes.TwoD.Circle",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::shapes::Shapes::ThreeD::Sphere",
+            qualified_name: "shapes.Shapes.ThreeD.Sphere",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::shapes::Shapes",
-            to: "test-package::shapes::Shapes::TwoD",
+            from: "shapes.Shapes",
+            to: "shapes.Shapes.TwoD",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::shapes::Shapes",
-            to: "test-package::shapes::Shapes::ThreeD",
+            from: "shapes.Shapes",
+            to: "shapes.Shapes.ThreeD",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -355,30 +355,30 @@ export namespace Animal {
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::animal::Animal",
+            qualified_name: "animal.Animal",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::animal::Animal::Dog",
+            qualified_name: "animal.Animal.Dog",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::animal::Animal::Cat",
+            qualified_name: "animal.Animal.Cat",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::animal::Animal",
-            to: "test-package::animal::Animal::Dog",
+            from: "animal.Animal",
+            to: "animal.Animal.Dog",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test-package::animal::Animal",
-            to: "test-package::animal::Animal::Cat",
+            from: "animal.Animal",
+            to: "animal.Animal.Cat",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -421,17 +421,17 @@ export * as Internal from './internal';
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::internal",
+            qualified_name: "internal",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "test-package::internal::internalFn",
+            qualified_name: "internal.internalFn",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "test-package::internal::INTERNAL_VALUE",
+            qualified_name: "internal.INTERNAL_VALUE",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
@@ -445,13 +445,13 @@ export * as Internal from './internal';
         ExpectedRelationship {
             kind: RelationshipKind::Reexports,
             from: "test-package",
-            to: "test-package::internal::internalFn",
+            to: "internal.internalFn",
         },
         // Renamed re-export
         ExpectedRelationship {
             kind: RelationshipKind::Reexports,
             from: "test-package",
-            to: "test-package::internal::INTERNAL_VALUE",
+            to: "internal.INTERNAL_VALUE",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -494,40 +494,40 @@ export * from './post';
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::models::user",
+            qualified_name: "models.user",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::models::user::User",
+            qualified_name: "models.user.User",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::models::post",
+            qualified_name: "models.post",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Interface,
-            qualified_name: "test-package::models::post::Post",
+            qualified_name: "models.post.Post",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::models",
+            qualified_name: "models",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Reexports,
-            from: "test-package::models",
-            to: "test-package::models::user::User",
+            from: "models",
+            to: "models.user.User",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Reexports,
-            from: "test-package::models",
-            to: "test-package::models::post::Post",
+            from: "models",
+            to: "models.post.Post",
         },
     ],
     project_type: ProjectType::TypeScriptProject,
@@ -565,30 +565,30 @@ app.run();
     entities: &[
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::app",
+            qualified_name: "app",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Class,
-            qualified_name: "test-package::app::App",
+            qualified_name: "app.App",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "test-package::app::App::run",
+            qualified_name: "app.App.run",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Module,
-            qualified_name: "test-package::main",
+            qualified_name: "main",
             visibility: Some(Visibility::Public),
         },
     ],
     relationships: &[
         ExpectedRelationship {
             kind: RelationshipKind::Imports,
-            from: "test-package::main",
-            to: "test-package::app::App",
+            from: "main",
+            to: "app.App",
         },
     ],
     project_type: ProjectType::TypeScriptProject,

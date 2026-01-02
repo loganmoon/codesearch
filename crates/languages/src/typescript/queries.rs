@@ -52,3 +52,40 @@ pub const ENUM_QUERY: &str = r#"
 pub const MODULE_QUERY: &str = r#"
 (program) @module
 "#;
+
+/// Query for variable declarations (const, let, var)
+/// Matches top-level lexical and variable declarations
+/// Includes both simple identifiers and destructuring patterns
+pub const VARIABLE_QUERY: &str = r#"
+[
+  ; Simple identifier declarations: const x = 1
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (_)? @value
+    )
+  ) @declaration
+
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (_)? @value
+    )
+  ) @declaration
+
+  ; Object destructuring: const { a, b } = obj
+  (lexical_declaration
+    (variable_declarator
+      name: (object_pattern) @destructure_pattern
+      value: (_)? @value
+    )
+  ) @declaration
+
+  (variable_declaration
+    (variable_declarator
+      name: (object_pattern) @destructure_pattern
+      value: (_)? @value
+    )
+  ) @declaration
+]
+"#;

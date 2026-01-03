@@ -76,6 +76,8 @@ pub enum ReferenceType {
     Implements,
     /// General usage (field types, etc.)
     Uses,
+    /// Re-export (barrel export like `export * from './module'`)
+    Reexport,
 }
 
 /// Compute the simple name (last path segment) from a qualified reference.
@@ -346,6 +348,14 @@ pub struct EntityRelationshipData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<SourceReference>,
 
+    /// Re-exported entities (barrel exports like `export * from './module'`).
+    /// Resolved to REEXPORTS relationships in Neo4j.
+    ///
+    /// Note: This field is only valid for Module entities, as re-exports are
+    /// a module-level concept in JavaScript/TypeScript.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reexports: Vec<SourceReference>,
+
     /// Trait/interface being implemented (for Rust impl blocks).
     /// Resolved to IMPLEMENTS relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -384,6 +394,7 @@ impl EntityRelationshipData {
         self.calls.is_empty()
             && self.uses_types.is_empty()
             && self.imports.is_empty()
+            && self.reexports.is_empty()
             && self.implements_trait.is_none()
             && self.implements.is_empty()
             && self.for_type.is_none()
@@ -490,6 +501,8 @@ pub enum RelationshipType {
     Contains,
     Calls,
     Imports,
+    /// Module re-exports entities from another module (barrel exports)
+    Reexports,
     InheritsFrom,
     Implements,
     Defines,

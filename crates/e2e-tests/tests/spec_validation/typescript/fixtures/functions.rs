@@ -252,13 +252,11 @@ export async function safelyFetch(url: string): Promise<string | null> {
             visibility: Some(Visibility::Public),
         },
     ],
-    relationships: &[
-        ExpectedRelationship {
-            kind: RelationshipKind::Calls,
-            from: "api.safelyFetch",
-            to: "api.fetchData",
-        },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Calls,
+        from: "api.safelyFetch",
+        to: "api.fetchData",
+    }],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,
 };
@@ -442,13 +440,11 @@ export class Calculator {
             visibility: Some(Visibility::Protected),
         },
     ],
-    relationships: &[
-        ExpectedRelationship {
-            kind: RelationshipKind::Contains,
-            from: "calculator.Calculator",
-            to: "calculator.Calculator.add",
-        },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "calculator.Calculator",
+        to: "calculator.Calculator.add",
+    }],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,
 };

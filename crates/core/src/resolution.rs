@@ -141,13 +141,17 @@ pub mod definitions {
         &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
-    /// IMPLEMENTS relationship: Impl block implements a trait for a type
+    /// IMPLEMENTS relationship: Impl block/Class implements a trait/interface
+    ///
+    /// Source types include:
+    /// - Impl: Rust impl blocks implementing traits
+    /// - Class: TypeScript/JavaScript classes implementing interfaces
     pub const IMPLEMENTS: RelationshipDef = RelationshipDef::new(
         "implements",
-        IMPL_TYPES,
+        &[EntityType::Impl, EntityType::Class],
         &[EntityType::Trait, EntityType::Interface],
         RelationshipType::Implements,
-        &[LookupStrategy::QualifiedName],
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
     /// ASSOCIATES relationship: Impl block associates with a type
@@ -159,13 +163,13 @@ pub mod definitions {
         &[LookupStrategy::QualifiedName],
     );
 
-    /// EXTENDS relationship: Trait extends another trait (supertraits)
+    /// EXTENDS relationship: Trait/Interface extends another trait/interface
     pub const EXTENDS: RelationshipDef = RelationshipDef::new(
         "extends",
         &[EntityType::Trait, EntityType::Interface],
         &[EntityType::Trait, EntityType::Interface],
         RelationshipType::ExtendsInterface,
-        &[LookupStrategy::QualifiedName],
+        &[LookupStrategy::QualifiedName, LookupStrategy::SimpleName],
     );
 
     /// INHERITS relationship: Class inherits from another class
@@ -207,6 +211,31 @@ pub mod definitions {
             EntityType::Constant,
         ],
         RelationshipType::Imports,
+        &[
+            LookupStrategy::QualifiedName,
+            LookupStrategy::PathEntityIdentifier,
+            LookupStrategy::SimpleName,
+        ],
+    );
+
+    /// REEXPORTS relationship: Module re-exports entities from another module
+    ///
+    /// Used for barrel exports like `export * from './module'` or `export { X } from './module'`
+    pub const REEXPORTS: RelationshipDef = RelationshipDef::new(
+        "reexports",
+        &[EntityType::Module],
+        &[
+            EntityType::Module,
+            EntityType::Function,
+            EntityType::Class,
+            EntityType::Struct,
+            EntityType::Enum,
+            EntityType::Trait,
+            EntityType::Interface,
+            EntityType::TypeAlias,
+            EntityType::Constant,
+        ],
+        RelationshipType::Reexports,
         &[
             LookupStrategy::QualifiedName,
             LookupStrategy::PathEntityIdentifier,
@@ -324,6 +353,7 @@ mod tests {
         assert!(definitions::EXTENDS.validate().is_ok());
         assert!(definitions::INHERITS.validate().is_ok());
         assert!(definitions::IMPORTS.validate().is_ok());
+        assert!(definitions::REEXPORTS.validate().is_ok());
         assert!(definitions::CONTAINS.validate().is_ok());
     }
 }

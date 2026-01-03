@@ -177,13 +177,11 @@ export class Circle extends Shape {
             visibility: Some(Visibility::Public),
         },
     ],
-    relationships: &[
-        ExpectedRelationship {
-            kind: RelationshipKind::InheritsFrom,
-            from: "shape.Circle",
-            to: "shape.Shape",
-        },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::InheritsFrom,
+        from: "shape.Circle",
+        to: "shape.Shape",
+    }],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,
 };
@@ -424,13 +422,11 @@ export class Config {
             visibility: Some(Visibility::Public),
         },
     ],
-    relationships: &[
-        ExpectedRelationship {
-            kind: RelationshipKind::Contains,
-            from: "config.Config",
-            to: "config.Config.enabled",
-        },
-    ],
+    relationships: &[ExpectedRelationship {
+        kind: RelationshipKind::Contains,
+        from: "config.Config",
+        to: "config.Config.enabled",
+    }],
     project_type: ProjectType::TypeScriptProject,
     manifest: None,
 };

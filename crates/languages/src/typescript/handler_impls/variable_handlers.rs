@@ -231,12 +231,14 @@ fn is_const_declaration(node: tree_sitter::Node) -> bool {
     false
 }
 
-/// Check if a declaration is exported
+/// Check if a declaration is exported or ambient (declare keyword)
+/// Ambient declarations are always public in TypeScript
 fn is_exported_declaration(node: tree_sitter::Node) -> bool {
-    // Check if parent is export_statement
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "export_statement" {
-            return true;
+    let mut current = Some(node);
+    while let Some(n) = current {
+        match n.kind() {
+            "export_statement" | "ambient_declaration" => return true,
+            _ => current = n.parent(),
         }
     }
     false

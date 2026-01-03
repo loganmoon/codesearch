@@ -32,6 +32,9 @@ pub fn derive_module_path(file_path: &Path, source_root: &Path) -> Option<String
     // Get the filename without extension
     let filename = file_path.file_stem()?.to_str()?;
 
+    // Strip .d suffix for TypeScript declaration files (e.g., "ambient.d" -> "ambient")
+    let filename = filename.strip_suffix(".d").unwrap_or(filename);
+
     // index.js/index.ts marks a directory module, but for root index.ts we need "index"
     if filename != "index" {
         components.push(filename);

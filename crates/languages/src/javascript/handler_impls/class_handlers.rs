@@ -230,26 +230,44 @@ pub fn handle_method_impl(
 ///
 /// The class_heritage node contains the full "extends BaseClass" text.
 /// This function extracts just the class name for resolution.
+///
+/// Tree structure varies by parser:
+/// - JavaScript: class_heritage -> identifier
+/// - TypeScript: class_heritage -> extends_clause -> identifier
 fn extract_base_class_name(class_heritage_node: tree_sitter::Node, source: &str) -> Option<String> {
-    // Walk through children to find the identifier (base class name)
-    for child in class_heritage_node.named_children(&mut class_heritage_node.walk()) {
-        match child.kind() {
-            // Direct identifier: `extends BaseClass`
-            "identifier" => {
-                return node_to_text(child, source).ok();
-            }
-            // Member expression: `extends module.BaseClass`
-            "member_expression" => {
-                return node_to_text(child, source).ok();
-            }
-            // Call expression: `extends BaseClass(args)` - get the function
-            "call_expression" => {
-                if let Some(func) = child.child_by_field_name("function") {
-                    return node_to_text(func, source).ok();
+    // Helper to extract class name from a node that should contain it
+    fn extract_from_extends_node(node: tree_sitter::Node, source: &str) -> Option<String> {
+        for child in node.named_children(&mut node.walk()) {
+            match child.kind() {
+                // Simple identifier: `extends BaseClass`
+                "identifier" | "type_identifier" => {
+                    return node_to_text(child, source).ok();
                 }
+                // Member expression: `extends module.BaseClass`
+                "member_expression" | "nested_type_identifier" => {
+                    return node_to_text(child, source).ok();
+                }
+                // Call expression: `extends BaseClass(args)` - get the function
+                "call_expression" => {
+                    if let Some(func) = child.child_by_field_name("function") {
+                        return node_to_text(func, source).ok();
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+        }
+        None
+    }
+
+    // First try to find extends_clause (TypeScript structure)
+    for child in class_heritage_node.named_children(&mut class_heritage_node.walk()) {
+        if child.kind() == "extends_clause" {
+            if let Some(name) = extract_from_extends_node(child, source) {
+                return Some(name);
+            }
         }
     }
-    None
+
+    // Fallback: try direct extraction (JavaScript structure)
+    extract_from_extends_node(class_heritage_node, source)
 }

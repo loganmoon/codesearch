@@ -45,6 +45,71 @@ fn ts_export_query() -> &'static Query {
     })
 }
 
+// Cached tree-sitter query for import extraction
+static TS_IMPORT_QUERY: OnceLock<Query> = OnceLock::new();
+
+const TS_IMPORT_QUERY_SOURCE: &str = r#"
+    ; Default import: import Foo from './module'
+    (import_statement
+        (import_clause
+            (identifier) @default_import)
+        source: (string) @source) @import
+
+    ; Named imports: import { foo, bar } from './module'
+    (import_statement
+        (import_clause
+            (named_imports
+                (import_specifier
+                    name: (identifier) @named_import)))
+        source: (string) @source) @import
+
+    ; Namespace import: import * as Utils from './module'
+    (import_statement
+        (import_clause
+            (namespace_import
+                (identifier) @namespace_alias))
+        source: (string) @source) @import
+"#;
+
+/// Get or initialize the cached import query.
+/// Panics if the query fails to compile - this is a programmer error.
+#[allow(clippy::expect_used)] // Query compilation failure is a programmer error
+fn ts_import_query() -> &'static Query {
+    TS_IMPORT_QUERY.get_or_init(|| {
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        Query::new(&language, TS_IMPORT_QUERY_SOURCE)
+            .expect("TS_IMPORT_QUERY_SOURCE should be a valid tree-sitter query")
+    })
+}
+
+// Cached tree-sitter query for re-export extraction
+static TS_REEXPORT_QUERY: OnceLock<Query> = OnceLock::new();
+
+const TS_REEXPORT_QUERY_SOURCE: &str = r#"
+    ; Star re-export: export * from './module'
+    (export_statement
+        "*" @star
+        source: (string) @source) @reexport
+
+    ; Named re-export: export { foo, bar } from './module'
+    (export_statement
+        (export_clause
+            (export_specifier
+                name: (identifier) @export_name))
+        source: (string) @source) @reexport
+"#;
+
+/// Get or initialize the cached re-export query.
+/// Panics if the query fails to compile - this is a programmer error.
+#[allow(clippy::expect_used)] // Query compilation failure is a programmer error
+fn ts_reexport_query() -> &'static Query {
+    TS_REEXPORT_QUERY.get_or_init(|| {
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        Query::new(&language, TS_REEXPORT_QUERY_SOURCE)
+            .expect("TS_REEXPORT_QUERY_SOURCE should be a valid tree-sitter query")
+    })
+}
+
 /// Check if a TypeScript program node has any export statements
 fn has_exports(program_node: Node, source: &str) -> bool {
     let query = ts_export_query();
@@ -75,82 +140,71 @@ struct ReexportInfo {
     exported_name: Option<String>,
 }
 
-/// Extract detailed import information from a TypeScript program node
+/// Extract detailed import information from a TypeScript program node using tree-sitter query
 fn extract_imports(program_node: Node, source: &str) -> Vec<ImportInfo> {
+    let query = ts_import_query();
+    let mut cursor = QueryCursor::new();
     let mut imports = Vec::new();
 
-    for child in program_node.children(&mut program_node.walk()) {
-        if child.kind() != "import_statement" {
-            continue;
-        }
+    let mut matches = cursor.matches(query, program_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        // Collect captures from this match
+        let mut source_path: Option<String> = None;
+        let mut default_import: Option<String> = None;
+        let mut named_import: Option<String> = None;
+        let mut is_namespace = false;
 
-        // Find the source string (e.g., './utils')
-        let source_path = child
-            .children(&mut child.walk())
-            .find(|n| n.kind() == "string")
-            .and_then(|n| {
-                n.utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
-            });
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
 
-        let Some(source_path) = source_path else {
-            continue;
-        };
-
-        // Find the import_clause
-        let import_clause = child
-            .children(&mut child.walk())
-            .find(|n| n.kind() == "import_clause");
-
-        let Some(clause) = import_clause else {
-            continue;
-        };
-
-        // Process import_clause children
-        for clause_child in clause.children(&mut clause.walk()) {
-            match clause_child.kind() {
-                // Default import: `import DefaultClass from ...`
-                "identifier" => {
-                    // Use the local binding name as a best-guess for the export name
-                    // This works when local name matches export name (common convention)
-                    if let Ok(local_name) = clause_child.utf8_text(source.as_bytes()) {
-                        imports.push(ImportInfo {
-                            source_path: source_path.clone(),
-                            imported_name: Some(local_name.to_string()),
-                            is_namespace: false,
-                        });
+            match capture_name {
+                "source" => {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        source_path =
+                            Some(text.trim_matches(|c| c == '"' || c == '\'').to_string());
                     }
                 }
-                // Named imports: `import { helper, VALUE } from ...`
-                "named_imports" => {
-                    for specifier in clause_child.children(&mut clause_child.walk()) {
-                        if specifier.kind() == "import_specifier" {
-                            // Get the imported name (first identifier in specifier)
-                            if let Some(name_node) = specifier
-                                .children(&mut specifier.walk())
-                                .find(|n| n.kind() == "identifier")
-                            {
-                                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                                    imports.push(ImportInfo {
-                                        source_path: source_path.clone(),
-                                        imported_name: Some(name.to_string()),
-                                        is_namespace: false,
-                                    });
-                                }
-                            }
-                        }
+                "default_import" => {
+                    if let Ok(name) = capture.node.utf8_text(source.as_bytes()) {
+                        default_import = Some(name.to_string());
                     }
                 }
-                // Namespace import: `import * as Utils from ...`
-                "namespace_import" => {
-                    imports.push(ImportInfo {
-                        source_path: source_path.clone(),
-                        imported_name: None, // Imports the whole module
-                        is_namespace: true,
-                    });
+                "named_import" => {
+                    if let Ok(name) = capture.node.utf8_text(source.as_bytes()) {
+                        named_import = Some(name.to_string());
+                    }
+                }
+                "namespace_alias" => {
+                    is_namespace = true;
                 }
                 _ => {}
+            }
+        }
+
+        // Build ImportInfo based on what we found
+        if let Some(path) = source_path {
+            if is_namespace {
+                imports.push(ImportInfo {
+                    source_path: path,
+                    imported_name: None,
+                    is_namespace: true,
+                });
+            } else if let Some(name) = default_import {
+                imports.push(ImportInfo {
+                    source_path: path,
+                    imported_name: Some(name),
+                    is_namespace: false,
+                });
+            } else if let Some(name) = named_import {
+                imports.push(ImportInfo {
+                    source_path: path,
+                    imported_name: Some(name),
+                    is_namespace: false,
+                });
             }
         }
     }
@@ -158,68 +212,57 @@ fn extract_imports(program_node: Node, source: &str) -> Vec<ImportInfo> {
     imports
 }
 
-/// Extract re-export information from a TypeScript program node
+/// Extract re-export information from a TypeScript program node using tree-sitter query
 fn extract_reexports(program_node: Node, source: &str) -> Vec<ReexportInfo> {
+    let query = ts_reexport_query();
+    let mut cursor = QueryCursor::new();
     let mut reexports = Vec::new();
 
-    for child in program_node.children(&mut program_node.walk()) {
-        if child.kind() != "export_statement" {
-            continue;
-        }
+    let mut matches = cursor.matches(query, program_node, source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        // Collect captures from this match
+        let mut source_path: Option<String> = None;
+        let mut export_name: Option<String> = None;
+        let mut is_star = false;
 
-        // Check if this is a re-export (has "from" keyword)
-        let has_from = child
-            .children(&mut child.walk())
-            .any(|n| n.kind() == "from");
-        if !has_from {
-            continue;
-        }
+        for capture in query_match.captures {
+            let capture_name = query
+                .capture_names()
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or("");
 
-        // Find the source string
-        let source_path = child
-            .children(&mut child.walk())
-            .find(|n| n.kind() == "string")
-            .and_then(|n| {
-                n.utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
-            });
-
-        let Some(source_path) = source_path else {
-            continue;
-        };
-
-        // Check for star export: `export * from './module'`
-        let has_star = child.children(&mut child.walk()).any(|n| n.kind() == "*");
-        if has_star {
-            reexports.push(ReexportInfo {
-                source_path,
-                exported_name: None, // Star export
-            });
-            continue;
-        }
-
-        // Check for named re-exports: `export { User } from './user'`
-        let export_clause = child
-            .children(&mut child.walk())
-            .find(|n| n.kind() == "export_clause");
-
-        if let Some(clause) = export_clause {
-            for specifier in clause.children(&mut clause.walk()) {
-                if specifier.kind() == "export_specifier" {
-                    // Get the exported name (first identifier)
-                    if let Some(name_node) = specifier
-                        .children(&mut specifier.walk())
-                        .find(|n| n.kind() == "identifier")
-                    {
-                        if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                            reexports.push(ReexportInfo {
-                                source_path: source_path.clone(),
-                                exported_name: Some(name.to_string()),
-                            });
-                        }
+            match capture_name {
+                "source" => {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        source_path =
+                            Some(text.trim_matches(|c| c == '"' || c == '\'').to_string());
                     }
                 }
+                "star" => {
+                    is_star = true;
+                }
+                "export_name" => {
+                    if let Ok(name) = capture.node.utf8_text(source.as_bytes()) {
+                        export_name = Some(name.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Build ReexportInfo based on what we found
+        if let Some(path) = source_path {
+            if is_star {
+                reexports.push(ReexportInfo {
+                    source_path: path,
+                    exported_name: None, // Star export
+                });
+            } else if let Some(name) = export_name {
+                reexports.push(ReexportInfo {
+                    source_path: path,
+                    exported_name: Some(name),
+                });
             }
         }
     }

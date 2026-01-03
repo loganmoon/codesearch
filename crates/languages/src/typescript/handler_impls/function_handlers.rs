@@ -120,6 +120,15 @@ pub fn handle_arrow_function_impl(
         repo_root,
     )?;
 
+    // Filter out anonymous arrow functions (consistent with Rust's approach of not extracting closures)
+    // Anonymous functions have names like "<anonymous@LINE>"
+    entities.retain(|e| !e.name.starts_with("<anonymous"));
+
+    // If no entities remain, return early
+    if entities.is_empty() {
+        return Ok(entities);
+    }
+
     // Derive module path for qualified name resolution
     let module_path = source_root
         .and_then(|root| derive_module_path(file_path, root))

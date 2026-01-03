@@ -32,15 +32,10 @@ const TYPESCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
         node_kind: "interface_declaration",
         field_name: "name",
     },
-    // NOTE: namespace patterns disabled - namespace handler causes timeout issues
-    // ScopePattern {
-    //     node_kind: "namespace_declaration",
-    //     field_name: "name",
-    // },
-    // ScopePattern {
-    //     node_kind: "internal_module",
-    //     field_name: "name",
-    // },
+    ScopePattern {
+        node_kind: "internal_module",
+        field_name: "name",
+    },
 ];
 
 inventory::submit! {
@@ -182,6 +177,16 @@ impl TypeScriptExtractor {
                 "class_expression",
                 queries::CLASS_EXPRESSION_QUERY,
                 Self::wrap_handler(handler_impls::handle_class_expression_impl),
+            )
+            .add_extractor(
+                "namespace",
+                queries::NAMESPACE_QUERY,
+                Self::wrap_handler(handler_impls::handle_namespace_impl),
+            )
+            .add_extractor(
+                "function_expression",
+                queries::FUNCTION_EXPRESSION_QUERY,
+                Self::wrap_handler(handler_impls::handle_function_expression_impl),
             )
             .build()
     }

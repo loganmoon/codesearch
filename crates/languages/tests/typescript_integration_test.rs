@@ -360,3 +360,64 @@ fn test_extract_arrow_function() {
         codesearch_core::entities::Language::TypeScript
     );
 }
+
+#[test]
+fn test_extract_function_expression() {
+    let source = r#"
+export const onClick = function handleClick(event: Event): void {
+    console.log("Clicked", event);
+};
+
+export const onHover = function(event: Event): void {
+    console.log("Hovered", event);
+};
+
+const result = (function initialize(): number {
+    return 42;
+})();
+    "#;
+
+    let extractor = create_extractor(
+        Path::new("test.ts"),
+        "test-repo",
+        None,
+        None,
+        Path::new("/test-repo"),
+    )
+    .expect("Failed to create extractor")
+    .expect("No extractor for .ts");
+
+    let entities = extractor
+        .extract(source, Path::new("handlers.ts"))
+        .expect("Failed to extract entities");
+
+    eprintln!("Extracted {} entities:", entities.len());
+    for entity in &entities {
+        eprintln!(
+            "  {:?} {} (vis: {:?})",
+            entity.entity_type, entity.qualified_name, entity.visibility
+        );
+    }
+
+    let functions = filter_by_type(&entities, EntityType::Function);
+    eprintln!("Found {} function entities", functions.len());
+
+    // Should have 3 function expressions
+    assert!(
+        functions.len() >= 3,
+        "Expected at least 3 functions, got {}",
+        functions.len()
+    );
+
+    // Check for handleClick
+    let handle_click = functions.iter().find(|e| e.name == "handleClick");
+    assert!(handle_click.is_some(), "Should find handleClick function");
+
+    // Check for onHover (anonymous function should use variable name)
+    let on_hover = functions.iter().find(|e| e.name == "onHover");
+    assert!(on_hover.is_some(), "Should find onHover function");
+
+    // Check for initialize (IIFE)
+    let initialize = functions.iter().find(|e| e.name == "initialize");
+    assert!(initialize.is_some(), "Should find initialize function");
+}

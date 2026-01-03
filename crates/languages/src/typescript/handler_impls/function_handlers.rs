@@ -47,11 +47,17 @@ pub fn handle_function_impl(
     )?;
 
     // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+    let module_path = source_root
+        .and_then(|root| derive_module_path(file_path, root))
+        .or_else(|| derive_module_path(file_path, repo_root));
 
     // Check if the function is exported
     let function_node = find_capture_node(query_match, query, "function");
     let is_exported = function_node.map(|n| is_node_exported(n)).unwrap_or(false);
+
+    // Build scope from AST to include namespace context
+    let scope_result = function_node
+        .map(|n| crate::qualified_name::build_qualified_name_from_ast(n, source, "typescript"));
 
     // Enhance with TypeScript type information and update language for all entities
     for entity in &mut entities {
@@ -64,6 +70,25 @@ pub fn handle_function_impl(
         } else {
             Visibility::Private
         });
+
+        // Fix qualified name to include namespace scope (if any)
+        if let Some(ref scope) = scope_result {
+            if !scope.parent_scope.is_empty() {
+                // Prepend module path and namespace scope
+                let full_scope = match &module_path {
+                    Some(module) => format!("{module}.{}", scope.parent_scope),
+                    None => scope.parent_scope.clone(),
+                };
+                entity.qualified_name = format!("{full_scope}.{}", entity.name);
+                entity.parent_scope = Some(full_scope);
+            } else if let Some(ref module) = module_path {
+                // Just module path, no namespace
+                if !entity.qualified_name.starts_with(module) {
+                    entity.qualified_name = format!("{module}.{}", entity.name);
+                    entity.parent_scope = Some(module.clone());
+                }
+            }
+        }
     }
 
     Ok(entities)
@@ -136,9 +161,7 @@ pub fn handle_arrow_function_impl(
 
 /// Handle function expressions (named and anonymous)
 /// For: `const onClick = function handleClick() {}` or `const onHover = function() {}`
-/// NOTE: Currently disabled - causes timeout issues
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
 pub fn handle_function_expression_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -167,9 +190,12 @@ pub fn handle_function_expression_impl(
         None
     };
 
-    let name = func_name.or(var_name).ok_or_else(|| {
-        codesearch_core::error::Error::entity_extraction("Could not extract function name")
-    })?;
+    // If no name can be found, skip this function expression
+    // (anonymous callbacks, property assignments, etc. are not top-level extractable entities)
+    let name = match func_name.or(var_name) {
+        Some(n) => n,
+        None => return Ok(vec![]),
+    };
 
     // Derive module path for qualified name
     let module_path = source_root
@@ -242,6 +268,7 @@ pub fn handle_function_expression_impl(
         .qualified_name(qualified_name)
         .path_entity_identifier(path_entity_identifier)
         .parent_scope(parent_scope)
+        .file_path(file_path.to_path_buf())
         .entity_type(EntityType::Function)
         .location(SourceLocation::from_tree_sitter_node(func_expr_node))
         .visibility(Some(if is_exported {
@@ -270,7 +297,6 @@ pub fn handle_function_expression_impl(
 }
 
 /// Find the variable name from a parent variable_declarator node
-#[allow(dead_code)]
 fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
     let mut current = node.parent();
     while let Some(parent) = current {
@@ -292,11 +318,14 @@ fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
 
 /// Check if a node is exported (has an export_statement or ambient_declaration ancestor)
 /// Ambient declarations (declare keyword) are always public in TypeScript
+/// Stops at namespace/module boundaries since exports are relative to their containing scope
 fn is_node_exported(node: Node) -> bool {
     let mut current = Some(node);
     while let Some(n) = current {
         match n.kind() {
             "export_statement" | "ambient_declaration" => return true,
+            // Stop at namespace/module boundaries
+            "internal_module" | "program" => return false,
             _ => current = n.parent(),
         }
     }

@@ -445,9 +445,7 @@ pub fn handle_module_impl(
 }
 
 /// Handle TypeScript namespace declaration as a Module entity
-/// NOTE: Currently disabled - causes timeout issues
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
 pub fn handle_namespace_impl(
     query_match: &QueryMatch,
     query: &Query,
@@ -534,7 +532,6 @@ pub fn handle_namespace_impl(
 }
 
 /// Check if a namespace is exported (has an export_statement ancestor)
-#[allow(dead_code)]
 fn is_namespace_exported(node: Node) -> bool {
     let mut current = node.parent();
     while let Some(parent) = current {

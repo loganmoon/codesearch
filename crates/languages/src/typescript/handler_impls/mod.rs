@@ -8,10 +8,10 @@ mod variable_handlers;
 #[cfg(test)]
 mod tests;
 
-pub use function_handlers::{handle_arrow_function_impl, handle_function_impl};
-// NOTE: handle_function_expression_impl is currently disabled - causes timeout issues
-pub use module_handlers::handle_module_impl;
-// NOTE: handle_namespace_impl is currently disabled - causes timeout issues
+pub use function_handlers::{
+    handle_arrow_function_impl, handle_function_expression_impl, handle_function_impl,
+};
+pub use module_handlers::{handle_module_impl, handle_namespace_impl};
 pub use type_handlers::{
     handle_call_signature_impl, handle_class_expression_impl, handle_class_impl,
     handle_construct_signature_impl, handle_enum_impl, handle_field_impl,

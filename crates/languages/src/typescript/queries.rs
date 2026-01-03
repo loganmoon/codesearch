@@ -29,8 +29,6 @@ pub const FUNCTION_QUERY: &str = r#"
 /// Query for function expressions (named and anonymous)
 /// Used to extract functions from: `const fn = function name() {}` or `const fn = function() {}`
 /// Matches function expressions directly (the handler traverses up to find the variable name if anonymous)
-/// NOTE: Currently disabled - causes timeout issues
-#[allow(dead_code)]
 pub const FUNCTION_EXPRESSION_QUERY: &str = r#"
 (function_expression
   name: (identifier)? @func_name
@@ -100,21 +98,12 @@ pub const MODULE_QUERY: &str = r#"
 "#;
 
 /// Query for namespace declarations (TypeScript namespaces produce Module entities)
-/// Matches both `namespace` and `module` keywords
-/// NOTE: Currently disabled - causes timeout issues
-#[allow(dead_code)]
+/// In tree-sitter-typescript, `namespace Foo {}` parses as `internal_module`
 pub const NAMESPACE_QUERY: &str = r#"
-[
-  (namespace_declaration
-    name: (identifier) @name
-    body: (statement_block) @body
-  ) @namespace
-
-  (internal_module
-    name: (identifier) @name
-    body: (statement_block) @body
-  ) @namespace
-]
+(internal_module
+  name: (identifier) @name
+  body: (statement_block) @body
+) @namespace
 "#;
 
 /// Query for variable declarations (const, let, var)

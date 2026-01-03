@@ -10,7 +10,9 @@ use crate::common::{
     node_to_text,
 };
 use crate::javascript::module_path::derive_module_path;
-use crate::typescript::utils::{extract_call_references, extract_type_references};
+use crate::typescript::utils::{
+    extract_call_references, extract_type_references, find_parent_variable_name,
+};
 use codesearch_core::{
     entities::{Language, Visibility},
     error::Result,
@@ -303,26 +305,6 @@ pub fn handle_function_expression_impl(
         .map_err(|e| codesearch_core::error::Error::EntityExtraction(e.to_string()))?;
 
     Ok(vec![entity])
-}
-
-/// Find the variable name from a parent variable_declarator node
-fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "variable_declarator" {
-            if let Some(name_node) = parent.child_by_field_name("name") {
-                if name_node.kind() == "identifier" {
-                    return node_to_text(name_node, source).ok();
-                }
-            }
-        }
-        // Stop if we hit something that shouldn't contain a variable declarator
-        if parent.kind() == "program" || parent.kind() == "class_body" {
-            break;
-        }
-        current = parent.parent();
-    }
-    None
 }
 
 /// Check if a node is exported (has an export_statement or ambient_declaration ancestor)

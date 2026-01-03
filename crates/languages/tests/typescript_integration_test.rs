@@ -24,9 +24,6 @@ fn test_typescript_extractor_creation() {
         None,
         Path::new("/test-repo"),
     );
-    if let Err(e) = &result {
-        eprintln!("Error creating extractor: {e:?}");
-    }
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -65,8 +62,6 @@ fn test_extract_typed_function() {
     let entities = extractor
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
-
-    eprintln!("Extracted entities: {entities:#?}");
 
     let functions = filter_by_type(&entities, EntityType::Function);
     assert_eq!(functions.len(), 1);
@@ -174,8 +169,6 @@ fn test_extract_type_alias() {
     let entities = extractor
         .extract(source, Path::new("test.ts"))
         .expect("Failed to extract entities");
-
-    eprintln!("Extracted entities: {entities:#?}");
 
     let type_aliases = filter_by_type(&entities, EntityType::TypeAlias);
     assert_eq!(type_aliases.len(), 1);
@@ -391,16 +384,7 @@ const result = (function initialize(): number {
         .extract(source, Path::new("handlers.ts"))
         .expect("Failed to extract entities");
 
-    eprintln!("Extracted {} entities:", entities.len());
-    for entity in &entities {
-        eprintln!(
-            "  {:?} {} (vis: {:?})",
-            entity.entity_type, entity.qualified_name, entity.visibility
-        );
-    }
-
     let functions = filter_by_type(&entities, EntityType::Function);
-    eprintln!("Found {} function entities", functions.len());
 
     // Should have 3 function expressions
     assert!(

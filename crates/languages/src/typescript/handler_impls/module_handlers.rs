@@ -22,42 +22,32 @@ use codesearch_core::{
     error::Result,
     CodeEntity,
 };
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::OnceLock;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
 // Cached tree-sitter query for export detection
-static TS_EXPORT_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+static TS_EXPORT_QUERY: OnceLock<Query> = OnceLock::new();
 
 const TS_EXPORT_QUERY_SOURCE: &str = r#"
     (export_statement) @export
 "#;
 
-/// Get or initialize the cached export query
-fn ts_export_query() -> Option<&'static Query> {
-    TS_EXPORT_QUERY
-        .get_or_init(|| {
-            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            match Query::new(&language, TS_EXPORT_QUERY_SOURCE) {
-                Ok(query) => Some(query),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to compile TypeScript export query: {e}. This is a bug."
-                    );
-                    None
-                }
-            }
-        })
-        .as_ref()
+/// Get or initialize the cached export query.
+/// Panics if the query fails to compile - this is a programmer error.
+#[allow(clippy::expect_used)] // Query compilation failure is a programmer error
+fn ts_export_query() -> &'static Query {
+    TS_EXPORT_QUERY.get_or_init(|| {
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        Query::new(&language, TS_EXPORT_QUERY_SOURCE)
+            .expect("TS_EXPORT_QUERY_SOURCE should be a valid tree-sitter query")
+    })
 }
 
 /// Check if a TypeScript program node has any export statements
 fn has_exports(program_node: Node, source: &str) -> bool {
-    let Some(query) = ts_export_query() else {
-        return false;
-    };
-
+    let query = ts_export_query();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, program_node, source.as_bytes());
 
@@ -255,17 +245,20 @@ fn resolve_import_path(
     // Get the directory of the current file
     let current_dir = current_file.parent()?;
 
-    // Resolve the relative path
+    // Resolve the relative path using Path components for portability
     let mut resolved = current_dir.to_path_buf();
-    for component in import_path.split('/') {
+    let import_as_path = Path::new(import_path);
+    for component in import_as_path.components() {
         match component {
-            "." => {}
-            ".." => {
+            Component::CurDir => {}
+            Component::ParentDir => {
                 resolved.pop();
             }
-            name => {
+            Component::Normal(name) => {
                 resolved.push(name);
             }
+            // RootDir, Prefix are not expected in relative import paths
+            _ => {}
         }
     }
 
@@ -361,15 +354,16 @@ pub fn handle_module_impl(
             continue;
         };
 
-        if let Ok(src_ref) = SourceReference::builder()
-            .target(target)
-            .simple_name(simple_name)
+        match SourceReference::builder()
+            .target(target.clone())
+            .simple_name(simple_name.clone())
             .is_external(false)
             .location(SourceLocation::default())
             .ref_type(ReferenceType::Import)
             .build()
         {
-            relationships.imports.push(src_ref);
+            Ok(src_ref) => relationships.imports.push(src_ref),
+            Err(e) => tracing::trace!("Failed to build import SourceReference for {target}: {e}"),
         }
     }
 
@@ -384,21 +378,24 @@ pub fn handle_module_impl(
         if let Some(ref name) = reexport.exported_name {
             // Named re-export: target is module.name
             let target = format!("{module_qname}.{name}");
-            if let Ok(src_ref) = SourceReference::builder()
-                .target(target)
+            match SourceReference::builder()
+                .target(target.clone())
                 .simple_name(name.clone())
                 .is_external(false)
                 .location(SourceLocation::default())
-                .ref_type(ReferenceType::Import) // Using Import for re-exports
+                .ref_type(ReferenceType::Reexport)
                 .build()
             {
-                relationships.reexports.push(src_ref);
+                Ok(src_ref) => relationships.reexports.push(src_ref),
+                Err(e) => {
+                    tracing::trace!("Failed to build reexport SourceReference for {target}: {e}")
+                }
             }
         } else {
             // Star re-export: target is the source module itself
             // We create a REEXPORTS relationship to the module, which semantically
             // means "this module re-exports everything from the target module"
-            if let Ok(src_ref) = SourceReference::builder()
+            match SourceReference::builder()
                 .target(module_qname.clone())
                 .simple_name(
                     module_qname
@@ -409,10 +406,13 @@ pub fn handle_module_impl(
                 )
                 .is_external(false)
                 .location(SourceLocation::default())
-                .ref_type(ReferenceType::Import)
+                .ref_type(ReferenceType::Reexport)
                 .build()
             {
-                relationships.reexports.push(src_ref);
+                Ok(src_ref) => relationships.reexports.push(src_ref),
+                Err(e) => tracing::trace!(
+                    "Failed to build star reexport SourceReference for {module_qname}: {e}"
+                ),
             }
         }
     }

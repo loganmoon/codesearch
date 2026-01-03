@@ -9,7 +9,9 @@ use crate::common::{
     node_to_text, require_capture_node,
 };
 use crate::javascript::{module_path::derive_module_path, utils::extract_jsdoc_comments};
-use crate::typescript::utils::{extract_type_references, is_ts_primitive};
+use crate::typescript::utils::{
+    extract_type_references, find_parent_variable_name, is_ts_primitive,
+};
 use codesearch_core::{
     entities::{
         CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
@@ -1530,26 +1532,6 @@ pub fn handle_class_expression_impl(
         })?;
 
     Ok(vec![entity])
-}
-
-/// Find the variable name from a parent variable_declarator node
-fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "variable_declarator" {
-            if let Some(name_node) = parent.child_by_field_name("name") {
-                if name_node.kind() == "identifier" {
-                    return node_to_text(name_node, source).ok();
-                }
-            }
-        }
-        // Stop if we hit something that shouldn't contain a variable declarator
-        if parent.kind() == "program" || parent.kind() == "class_body" {
-            break;
-        }
-        current = parent.parent();
-    }
-    None
 }
 
 /// Handle constructor parameter properties

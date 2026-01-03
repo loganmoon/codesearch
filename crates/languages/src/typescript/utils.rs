@@ -25,24 +25,38 @@ const TS_TYPE_REFS_QUERY_SOURCE: &str = r#"
 "#;
 
 /// Cached tree-sitter query for type reference extraction
-static TS_TYPE_REFS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+static TS_TYPE_REFS_QUERY: OnceLock<Query> = OnceLock::new();
 
-/// Get or initialize the cached type references query
-fn ts_type_refs_query() -> Option<&'static Query> {
-    TS_TYPE_REFS_QUERY
-        .get_or_init(|| {
-            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            match Query::new(&language, TS_TYPE_REFS_QUERY_SOURCE) {
-                Ok(query) => Some(query),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to compile TypeScript type refs query: {e}. This is a bug."
-                    );
-                    None
-                }
+/// Get or initialize the cached type references query.
+/// Panics if the query fails to compile - this is a programmer error.
+#[allow(clippy::expect_used)] // Query compilation failure is a programmer error
+fn ts_type_refs_query() -> &'static Query {
+    TS_TYPE_REFS_QUERY.get_or_init(|| {
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        Query::new(&language, TS_TYPE_REFS_QUERY_SOURCE)
+            .expect("TS_TYPE_REFS_QUERY_SOURCE should be a valid tree-sitter query")
+    })
+}
+
+/// Extract the simple name from a nested_type_identifier node using AST traversal.
+///
+/// A nested_type_identifier like `Foo.Bar.Baz` has structure:
+///   nested_type_identifier
+///     scope: nested_type_identifier (or type_identifier)
+///     name: type_identifier <- this is what we want
+///
+/// We find the rightmost type_identifier child (the "name" field).
+fn extract_simple_name_from_nested_type<'a>(node: Node<'a>, source: &'a str) -> Option<String> {
+    // The "name" field is the last type_identifier child
+    for i in (0..node.child_count()).rev() {
+        if let Some(child) = node.child(i) {
+            if child.kind() == "type_identifier" {
+                return node_to_text(child, source).ok();
             }
-        })
-        .as_ref()
+        }
+    }
+    // Fallback: use the full text
+    node_to_text(node, source).ok()
 }
 
 /// Extract type references from TypeScript type annotations
@@ -60,10 +74,7 @@ pub fn extract_type_references(
     import_map: &ImportMap,
     parent_scope: Option<&str>,
 ) -> Vec<SourceReference> {
-    let Some(query) = ts_type_refs_query() else {
-        return Vec::new();
-    };
-
+    let query = ts_type_refs_query();
     let mut cursor = QueryCursor::new();
     let mut type_refs = Vec::new();
     let mut seen = HashSet::new();
@@ -103,16 +114,14 @@ pub fn extract_type_references(
                 "scoped_type_ref" => {
                     if let Ok(full_path) = node_to_text(capture.node, source) {
                         // Scoped types are already qualified
-                        // Extract simple name from the last segment of the path
-                        let simple_name = full_path
-                            .rsplit('.')
-                            .next()
-                            .unwrap_or(&full_path)
-                            .to_string();
+                        // Extract simple name from AST (last type_identifier child)
+                        let simple_name =
+                            extract_simple_name_from_nested_type(capture.node, source)
+                                .unwrap_or_else(|| full_path.clone());
                         if seen.insert(full_path.clone()) {
                             if let Ok(source_ref) = SourceReference::builder()
                                 .target(full_path)
-                                .simple_name(simple_name) // last segment of path
+                                .simple_name(simple_name)
                                 .is_external(false) // TS doesn't track external refs
                                 .location(SourceLocation::from_tree_sitter_node(capture.node))
                                 .ref_type(ReferenceType::TypeUsage)
@@ -154,24 +163,17 @@ const TS_CALL_REFS_QUERY_SOURCE: &str = r#"
 "#;
 
 /// Cached tree-sitter query for call reference extraction
-static TS_CALL_REFS_QUERY: OnceLock<Option<Query>> = OnceLock::new();
+static TS_CALL_REFS_QUERY: OnceLock<Query> = OnceLock::new();
 
-/// Get or initialize the cached call references query
-fn ts_call_refs_query() -> Option<&'static Query> {
-    TS_CALL_REFS_QUERY
-        .get_or_init(|| {
-            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            match Query::new(&language, TS_CALL_REFS_QUERY_SOURCE) {
-                Ok(query) => Some(query),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to compile TypeScript call refs query: {e}. This is a bug."
-                    );
-                    None
-                }
-            }
-        })
-        .as_ref()
+/// Get or initialize the cached call references query.
+/// Panics if the query fails to compile - this is a programmer error.
+#[allow(clippy::expect_used)] // Query compilation failure is a programmer error
+fn ts_call_refs_query() -> &'static Query {
+    TS_CALL_REFS_QUERY.get_or_init(|| {
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        Query::new(&language, TS_CALL_REFS_QUERY_SOURCE)
+            .expect("TS_CALL_REFS_QUERY_SOURCE should be a valid tree-sitter query")
+    })
 }
 
 /// Extract function call references from a TypeScript function body
@@ -190,10 +192,7 @@ pub fn extract_call_references(
     import_map: &ImportMap,
     parent_scope: Option<&str>,
 ) -> Vec<SourceReference> {
-    let Some(query) = ts_call_refs_query() else {
-        return Vec::new();
-    };
-
+    let query = ts_call_refs_query();
     let mut cursor = QueryCursor::new();
     let mut calls = Vec::new();
     let mut seen = HashSet::new();
@@ -288,6 +287,34 @@ fn is_builtin_function(name: &str) -> bool {
             | "require"
             | "import"
     )
+}
+
+/// Find the variable name from a parent variable_declarator node.
+///
+/// When a function or class expression is assigned to a variable, this traverses
+/// up the AST to find the variable name. For example:
+///   `const onClick = function() {}` -> returns "onClick"
+///   `const MyClass = class {}` -> returns "MyClass"
+///
+/// Returns `None` if no parent variable_declarator is found before hitting
+/// a program or class_body boundary.
+pub fn find_parent_variable_name(node: Node, source: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "variable_declarator" {
+            if let Some(name_node) = parent.child_by_field_name("name") {
+                if name_node.kind() == "identifier" {
+                    return node_to_text(name_node, source).ok();
+                }
+            }
+        }
+        // Stop if we hit something that shouldn't contain a variable declarator
+        if parent.kind() == "program" || parent.kind() == "class_body" {
+            break;
+        }
+        current = parent.parent();
+    }
+    None
 }
 
 /// Check if a type name is a TypeScript primitive type

@@ -76,6 +76,8 @@ pub enum ReferenceType {
     Implements,
     /// General usage (field types, etc.)
     Uses,
+    /// Re-export (barrel export like `export * from './module'`)
+    Reexport,
 }
 
 /// Compute the simple name (last path segment) from a qualified reference.
@@ -348,6 +350,9 @@ pub struct EntityRelationshipData {
 
     /// Re-exported entities (barrel exports like `export * from './module'`).
     /// Resolved to REEXPORTS relationships in Neo4j.
+    ///
+    /// Note: This field is only valid for Module entities, as re-exports are
+    /// a module-level concept in JavaScript/TypeScript.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reexports: Vec<SourceReference>,
 

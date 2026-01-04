@@ -1,0 +1,1044 @@
+# JavaScript Entity Extraction Specification
+# ==========================================
+#
+# This specification defines the rules for extracting entities, relationships,
+# and metadata from JavaScript source code. Rules are identified by unique IDs
+# and can be referenced by test fixtures.
+#
+# Rule ID Format:
+#   E-xxx  = Entity extraction rules
+#   V-xxx  = Visibility rules
+#   Q-xxx  = Qualified name rules
+#   R-xxx  = Relationship rules
+#   M-xxx  = Metadata rules
+#
+# References:
+#   - ECMAScript 2015 (ES6): https://262.ecma-international.org/6.0/
+#   - ECMAScript 2016 (ES7): https://262.ecma-international.org/7.0/
+#   - ECMAScript 2017 (ES8): https://262.ecma-international.org/8.0/
+#   - ECMAScript 2022 (ES13): https://262.ecma-international.org/13.0/
+#   - MDN JavaScript Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference
+#   - Node.js CommonJS Modules: https://nodejs.org/api/modules.html
+#
+# Last validated: 2025-01-03
+
+version: "1.0"
+language: javascript
+
+# =============================================================================
+# ENTITY TYPES
+# =============================================================================
+# Defines which JavaScript constructs produce which entity types.
+#
+# JavaScript differs from TypeScript in several key ways:
+# - No interfaces, type aliases, or enums (use objects/constants instead)
+# - No namespaces (TypeScript-specific internal modules)
+# - No visibility modifiers (public/private/protected) - only # private fields
+# - No type annotations or generics
+# - CommonJS modules (require/exports) in addition to ES modules
+
+entity_rules:
+
+  # ---------------------------------------------------------------------------
+  # ES Modules (ECMAScript 2015+)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import
+  # ---------------------------------------------------------------------------
+  - id: E-MOD-FILE
+    description: "A file with import/export statements produces a Module entity"
+    construct: "file with `import` or `export` at top level"
+    produces: Module
+    note: |
+      In JavaScript, any file containing a top-level `import` or `export` is
+      considered an ES module. Files without these are scripts in the global scope.
+      The module is identified by its file path relative to the project root.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules"
+    tested_by: [basic_module, imports, exports]
+
+  - id: E-MOD-COMMONJS
+    description: "A file using require/module.exports produces a Module entity"
+    construct: "file with `require()`, `module.exports`, or `exports.`"
+    produces: Module
+    note: |
+      CommonJS is the original module system for Node.js. Each file is treated
+      as a separate module. Variables local to the module are private because
+      the module is wrapped in a function by Node.js.
+    reference: "https://nodejs.org/api/modules.html"
+    tested_by: [commonjs_basic, commonjs_exports]
+
+  # ---------------------------------------------------------------------------
+  # Classes (ECMAScript 2015+)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes
+  # ---------------------------------------------------------------------------
+  - id: E-CLASS
+    description: "A class declaration produces a Class entity"
+    construct: "class Name { ... }"
+    produces: Class
+    note: |
+      ES6 classes are syntactic sugar over prototype-based inheritance.
+      Unlike functions, classes are not hoisted.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes"
+    tested_by: [classes, class_inheritance]
+
+  - id: E-CLASS-EXPR
+    description: "A class expression assigned to a variable produces a Class entity"
+    construct: "const Foo = class { ... }"
+    produces: Class
+    note: |
+      Class expressions can be anonymous or named. When assigned to a variable,
+      the entity name is derived from the variable name.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/class"
+    tested_by: [class_expressions]
+
+  - id: E-CLASS-DEFAULT-EXPORT
+    description: "A default-exported anonymous class produces a Class entity"
+    construct: "export default class { ... }"
+    produces: Class
+    note: |
+      Anonymous default-exported classes use a synthetic name like 'default'
+      or the file name for identification purposes.
+    tested_by: [default_exports]
+
+  # ---------------------------------------------------------------------------
+  # Functions (ECMAScript 2015+)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions
+  # ---------------------------------------------------------------------------
+  - id: E-FN-DECL
+    description: "A function declaration produces a Function entity"
+    construct: "function name() { ... }"
+    produces: Function
+    note: |
+      Function declarations are hoisted to the top of their scope.
+      They create both a variable binding and a function object.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function"
+    tested_by: [functions, async_functions, generator_functions]
+
+  - id: E-FN-EXPR
+    description: "A function expression assigned to a variable produces a Function entity"
+    construct: "const foo = function() { ... }"
+    produces: Function
+    note: |
+      Named function expressions use the function's name for the entity;
+      anonymous ones use the variable name.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/function"
+    tested_by: [function_expressions]
+
+  - id: E-FN-ARROW
+    description: "An arrow function assigned to a variable produces a Function entity"
+    construct: "const foo = () => { ... }"
+    produces: Function
+    condition: "arrow function assigned to var/let/const at module scope"
+    note: |
+      Arrow functions (ES6) have lexical `this` binding and cannot be used
+      as constructors. When assigned to a variable at module level, they
+      produce a Function entity. This applies to var, let, and const declarations,
+      though const is the idiomatic choice in modern JavaScript.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions"
+    tested_by: [arrow_functions]
+
+  - id: E-FN-GENERATOR
+    description: "A generator function produces a Function entity"
+    construct: "function* name() { ... }"
+    produces: Function
+    condition: "function has `*` generator modifier"
+    note: |
+      Generator functions (ES6) can pause execution and resume later.
+      They return an iterator when called.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*"
+    tested_by: [generator_functions]
+
+  - id: E-FN-ASYNC
+    description: "An async function produces a Function entity"
+    construct: "async function name() { ... }"
+    produces: Function
+    condition: "function has `async` keyword"
+    note: |
+      Async functions (ES2017) enable promise-based asynchronous code to be
+      written in a synchronous style using await.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function"
+    tested_by: [async_functions]
+
+  - id: E-FN-ASYNC-GENERATOR
+    description: "An async generator function produces a Function entity"
+    construct: "async function* name() { ... }"
+    produces: Function
+    condition: "function has both `async` keyword and `*` generator modifier"
+    note: |
+      Async generator functions (ES2018) combine async functions and generators,
+      enabling asynchronous iteration with for-await-of loops.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function*"
+    tested_by: [async_generator_functions]
+
+  - id: E-FN-DEFAULT-EXPORT
+    description: "A default-exported anonymous function produces a Function entity"
+    construct: "export default function() { ... }"
+    produces: Function
+    note: "Anonymous default-exported functions use a synthetic name"
+    tested_by: [default_exports]
+
+  # ---------------------------------------------------------------------------
+  # Methods (ECMAScript 2015+)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Method_definitions
+  # ---------------------------------------------------------------------------
+  - id: E-METHOD-CLASS
+    description: "A class method produces a Method entity"
+    construct: "class C { method() { ... } }"
+    produces: Method
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes#method_definitions"
+    tested_by: [methods, static_methods]
+
+  - id: E-METHOD-STATIC
+    description: "A static class method produces a Method entity"
+    construct: "class C { static method() { ... } }"
+    produces: Method
+    condition: "method has `static` modifier"
+    note: |
+      Static methods are called on the class itself, not on instances.
+      They are often used for utility functions.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/static"
+    tested_by: [static_methods]
+
+  - id: E-METHOD-GETTER
+    description: "A getter accessor produces a Method entity"
+    construct: "class C { get prop() { ... } }"
+    produces: Method
+    note: |
+      Getters allow computed property access. A getter without a setter
+      creates a readonly property.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get"
+    tested_by: [accessors]
+
+  - id: E-METHOD-SETTER
+    description: "A setter accessor produces a Method entity"
+    construct: "class C { set prop(value) { ... } }"
+    produces: Method
+    note: "Setters allow intercepting property assignment"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set"
+    tested_by: [accessors]
+
+  - id: E-METHOD-GENERATOR
+    description: "A generator method produces a Method entity"
+    construct: "class C { *method() { ... } }"
+    produces: Method
+    condition: "method has `*` generator modifier"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*"
+    tested_by: [generator_methods]
+
+  - id: E-METHOD-ASYNC
+    description: "An async method produces a Method entity"
+    construct: "class C { async method() { ... } }"
+    produces: Method
+    condition: "method has `async` keyword"
+    tested_by: [async_methods]
+
+  # ---------------------------------------------------------------------------
+  # Variables and Constants (ECMAScript 2015+)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/const
+  # ---------------------------------------------------------------------------
+  - id: E-CONST
+    description: "A const declaration at module level produces a Constant entity"
+    construct: "const NAME = value;"
+    produces: Constant
+    condition: "const declaration at module scope (not in function body)"
+    note: |
+      Module-level constants are typically exported values or configuration.
+      Only top-level const declarations become entities; block-scoped ones do not.
+      Note: const prevents reassignment but does not make objects immutable.
+    precedence: |
+      Function expression rules (E-FN-EXPR, E-FN-ARROW) take priority over this rule.
+      When the initializer is a function expression or arrow function, the entity
+      type is Function, not Constant. This rule only applies to non-function values.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/const"
+    tested_by: [constants, exported_constants]
+
+  - id: E-VAR-LET
+    description: "A let declaration at module level produces a Variable entity"
+    construct: "let name = value;"
+    produces: Variable
+    condition: "let declaration at module scope (not in function body)"
+    note: |
+      Let (ES6) provides block-scoped variable declarations.
+      Only module-level variable declarations become entities.
+    precedence: |
+      Function expression rules (E-FN-EXPR, E-FN-ARROW) take priority over this rule.
+      When the initializer is a function, the entity type is Function, not Variable.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/let"
+    tested_by: [variables]
+
+  - id: E-VAR-VAR
+    description: "A var declaration at module level produces a Variable entity"
+    construct: "var name = value;"
+    produces: Variable
+    condition: "var declaration at module scope"
+    note: |
+      Var is function-scoped (or global if at top level).
+      Modern code typically uses let/const instead.
+    precedence: |
+      Function expression rules (E-FN-EXPR, E-FN-ARROW) take priority over this rule.
+      When the initializer is a function, the entity type is Function, not Variable.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/var"
+    tested_by: [variables]
+
+  # ---------------------------------------------------------------------------
+  # Class Fields (ECMAScript 2022)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Public_class_fields
+  # ---------------------------------------------------------------------------
+  - id: E-PROPERTY-FIELD
+    description: "A class field declaration produces a Property entity"
+    construct: "class C { field = value; }"
+    produces: Property
+    note: |
+      Public class fields (ES2022) allow field declarations directly in the
+      class body, with optional initializers.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Public_class_fields"
+    tested_by: [class_fields]
+
+  - id: E-PROPERTY-PRIVATE-FIELD
+    description: "A private class field (#field) produces a Property entity"
+    construct: "class C { #field = value; }"
+    produces: Property
+    note: |
+      ECMAScript private fields (ES2022) use the # prefix and provide hard
+      runtime privacy. They cannot be accessed outside the class body.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    tested_by: [private_fields]
+
+  - id: E-PROPERTY-STATIC-FIELD
+    description: "A static class field produces a Property entity"
+    construct: "class C { static field = value; }"
+    produces: Property
+    condition: "field has `static` modifier"
+    note: "Static fields are defined on the class itself, not on instances"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/static"
+    tested_by: [static_fields]
+
+  - id: E-PROPERTY-STATIC-PRIVATE
+    description: "A static private field produces a Property entity"
+    construct: "class C { static #field = value; }"
+    produces: Property
+    condition: "field has both `static` modifier and `#` prefix"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    tested_by: [static_private_fields]
+
+  - id: E-PROPERTY-ARROW-FIELD
+    description: "An arrow function assigned to a class field produces a Property entity"
+    construct: "class C { handler = () => { ... }; }"
+    produces: Property
+    note: |
+      Arrow functions as class fields maintain lexical `this` binding.
+      They are properties whose value is a function, not methods.
+    tested_by: [arrow_field_properties]
+
+  # ---------------------------------------------------------------------------
+  # Private Methods (ECMAScript 2022)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties
+  # ---------------------------------------------------------------------------
+  - id: E-METHOD-PRIVATE
+    description: "A private method (#method) produces a Method entity"
+    construct: "class C { #method() { ... } }"
+    produces: Method
+    note: |
+      Private methods (ES2022) use the # prefix and cannot be accessed
+      outside the class body.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    tested_by: [private_methods]
+
+  - id: E-METHOD-PRIVATE-STATIC
+    description: "A static private method produces a Method entity"
+    construct: "class C { static #method() { ... } }"
+    produces: Method
+    condition: "method has both `static` modifier and `#` prefix"
+    tested_by: [static_private_methods]
+
+  - id: E-METHOD-PRIVATE-GETTER
+    description: "A private getter produces a Method entity"
+    construct: "class C { get #prop() { ... } }"
+    produces: Method
+    tested_by: [private_accessors]
+
+  - id: E-METHOD-PRIVATE-SETTER
+    description: "A private setter produces a Method entity"
+    construct: "class C { set #prop(value) { ... } }"
+    produces: Method
+    tested_by: [private_accessors]
+
+  # ---------------------------------------------------------------------------
+  # Static Initialization Blocks (ECMAScript 2022)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Static_initialization_blocks
+  # ---------------------------------------------------------------------------
+  - id: E-STATIC-BLOCK
+    description: "A static initialization block produces a Method entity"
+    construct: "class C { static { ... } }"
+    produces: Method
+    note: |
+      Static initialization blocks (ES2022) allow complex static field
+      initialization with access to private fields.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Static_initialization_blocks"
+    tested_by: [static_blocks]
+
+  # ---------------------------------------------------------------------------
+  # JSX Components (React/JSX Transform)
+  # ---------------------------------------------------------------------------
+  - id: E-JSX-COMPONENT
+    description: "A function component returning JSX produces a Function entity"
+    construct: "function Component() { return <div/>; }"
+    produces: Function
+    condition: "function returns JSX element and follows component naming (PascalCase)"
+    note: |
+      JSX components are functions that return JSX elements.
+      By convention, component names start with uppercase letters.
+    tested_by: [jsx_components]
+
+  - id: E-JSX-ARROW-COMPONENT
+    description: "An arrow function component produces a Function entity"
+    construct: "const Component = () => <div/>;"
+    produces: Function
+    condition: "arrow function assigned to PascalCase name returning JSX"
+    tested_by: [jsx_components]
+
+
+# =============================================================================
+# VISIBILITY RULES
+# =============================================================================
+# Defines how visibility is determined for entities.
+#
+# JavaScript has a simpler visibility model than TypeScript:
+# - No public/private/protected keywords (those are TypeScript-only)
+# - Only ECMAScript private fields (#) provide true privacy
+# - Module exports control what's accessible from outside the module
+#
+# For code search, we map these to our standard visibility model:
+# - Public: Accessible from anywhere (exported module members)
+# - Private: Accessible only within defining scope (non-exported, # fields)
+
+visibility_rules:
+
+  # ---------------------------------------------------------------------------
+  # Private fields and methods (ECMAScript 2022)
+  # ---------------------------------------------------------------------------
+  - id: V-PRIVATE-FIELD
+    description: "ECMAScript private fields (#) have Private visibility"
+    applies_to: Property
+    condition: "field name starts with #"
+    result: Private
+    note: |
+      ECMAScript private fields provide hard runtime privacy.
+      They cannot be accessed outside the class, even with bracket notation.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    precedence: 1
+    tested_by: [private_fields]
+
+  - id: V-PRIVATE-METHOD
+    description: "ECMAScript private methods (#) have Private visibility"
+    applies_to: Method
+    condition: "method name starts with #"
+    result: Private
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    precedence: 1
+    tested_by: [private_methods]
+
+  # ---------------------------------------------------------------------------
+  # Class member visibility (public by default)
+  # ---------------------------------------------------------------------------
+  - id: V-CLASS-MEMBER-PUBLIC
+    description: "Non-private class members have Public visibility"
+    applies_to: [Method, Property]
+    condition: "member name does not start with #"
+    result: Public
+    note: |
+      In JavaScript classes, all non-private members are public.
+      There are no private/protected keywords as in TypeScript.
+    precedence: 10
+    tested_by: [classes, methods]
+
+  # ---------------------------------------------------------------------------
+  # Module-level visibility (export)
+  # ---------------------------------------------------------------------------
+  - id: V-EXPORT
+    description: "Exported module members have Public visibility"
+    applies_to: [Function, Class, Constant, Variable, Module]
+    condition: "has `export` keyword"
+    result: Public
+    note: |
+      The export keyword makes a declaration available for import by other
+      modules. This is the primary visibility mechanism for ES modules.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export"
+    precedence: 20
+    tested_by: [exports, reexports]
+
+  - id: V-EXPORT-DEFAULT
+    description: "Default exported members have Public visibility"
+    applies_to: [Function, Class, Constant, Variable]
+    condition: "has `export default`"
+    result: Public
+    note: "Default exports are a special case of exports, one per module"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export#using_the_default_export"
+    precedence: 20
+    tested_by: [default_exports]
+
+  - id: V-COMMONJS-EXPORT
+    description: "CommonJS exported members have Public visibility"
+    applies_to: [Function, Class, Constant, Variable]
+    condition: "assigned to `module.exports` or `exports.name`"
+    result: Public
+    note: |
+      In CommonJS modules, values assigned to module.exports or exports
+      are accessible to other modules via require().
+    reference: "https://nodejs.org/api/modules.html#moduleexports"
+    precedence: 20
+    tested_by: [commonjs_exports]
+
+  # ---------------------------------------------------------------------------
+  # Default visibility (no export)
+  # ---------------------------------------------------------------------------
+  - id: V-MODULE-PRIVATE
+    description: "Non-exported module members have Private visibility"
+    applies_to: [Function, Class, Constant, Variable]
+    condition: "no export keyword and not assigned to module.exports/exports"
+    result: Private
+    note: |
+      Module-level declarations without export are private to the module.
+      They cannot be imported by other modules.
+    precedence: 100  # lowest precedence (default)
+    tested_by: [modules, visibility]
+
+
+# =============================================================================
+# QUALIFIED NAME RULES
+# =============================================================================
+# Defines how qualified names are constructed for entities.
+#
+# JavaScript qualified names follow these patterns:
+# - ES Modules: File path based (module path + entity name)
+# - CommonJS: Same as ES modules (file path based)
+# - Classes: ClassName.memberName
+
+qualified_name_rules:
+
+  # ---------------------------------------------------------------------------
+  # Module-level qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-MODULE-FILE
+    description: "Module is named after its file path"
+    pattern: "{relative_path_without_extension}"
+    examples:
+      - "src/utils/helpers"  # from src/utils/helpers.js
+      - "components/Button"  # from components/Button.jsx
+    note: |
+      Module names are derived from their file paths relative to the
+      project root, without the file extension.
+    tested_by: [basic_module, commonjs_basic]
+
+  - id: Q-ITEM-MODULE
+    description: "Module-level items are qualified under their module"
+    pattern: "{module}.{name}"
+    applies_to: [Function, Class, Constant, Variable]
+    examples:
+      - "src/utils/helpers.formatDate"  # function in module
+      - "src/models/User.User"  # class in module
+    note: "Items at module level are qualified with the module path"
+    tested_by: [functions, classes]
+
+  # ---------------------------------------------------------------------------
+  # Class member qualified names
+  # ---------------------------------------------------------------------------
+  - id: Q-METHOD-INSTANCE
+    description: "Instance methods use dot notation from class"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.getName"  # instance method
+      - "src/models/User.User.#privateMethod"  # private method
+    note: "Instance methods are qualified as Class.methodName"
+    tested_by: [methods]
+
+  - id: Q-METHOD-STATIC
+    description: "Static methods use same qualified name pattern as instance methods"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.create"  # static method
+      - "src/models/User.User.#privateStatic"  # static private
+    note: "Static vs instance is distinguished via is_static metadata, not qualified name"
+    tested_by: [static_methods]
+
+  - id: Q-PROPERTY-INSTANCE
+    description: "Instance properties use dot notation from class"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.email"  # instance field
+      - "src/models/User.User.#secret"  # private field
+    tested_by: [class_fields]
+
+  - id: Q-PROPERTY-STATIC
+    description: "Static properties use same qualified name pattern as instance properties"
+    pattern: "{class_fqn}.{name}"
+    examples:
+      - "src/models/User.User.DEFAULT_ROLE"
+      - "src/models/User.User.#counter"  # static private
+    note: "Static vs instance is distinguished via is_static metadata, not qualified name"
+    tested_by: [static_fields]
+
+
+# =============================================================================
+# RELATIONSHIP RULES
+# =============================================================================
+# Defines what relationships are created between entities.
+
+relationship_rules:
+
+  # ---------------------------------------------------------------------------
+  # Containment (structural hierarchy)
+  # ---------------------------------------------------------------------------
+  - id: R-CONTAINS-MODULE-ITEM
+    description: "Module CONTAINS its top-level declarations"
+    kind: Contains
+    from: Module
+    to: [Function, Class, Constant, Variable]
+    tested_by: [basic_module, commonjs_basic]
+
+  - id: R-CONTAINS-CLASS-MEMBER
+    description: "Class CONTAINS its methods and properties"
+    kind: Contains
+    from: Class
+    to: [Method, Property]
+    tested_by: [classes, methods, class_fields]
+
+  # ---------------------------------------------------------------------------
+  # Inheritance
+  # ---------------------------------------------------------------------------
+  - id: R-INHERITS-FROM
+    description: "Class INHERITS_FROM its base class"
+    kind: InheritsFrom
+    from: Class
+    to: Class
+    condition: "class uses `extends` clause"
+    note: |
+      JavaScript supports single inheritance for classes. A class can only
+      extend one other class (or a constructor function).
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/extends"
+    tested_by: [class_inheritance]
+
+  # ---------------------------------------------------------------------------
+  # ES Module import relationships
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import
+  # ---------------------------------------------------------------------------
+  - id: R-IMPORTS-NAMED
+    description: "Module IMPORTS specific named exports"
+    kind: Imports
+    from: Module
+    to: [Function, Class, Constant, Variable]
+    condition: "import { name } from 'module'"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import#named_import"
+    tested_by: [imports]
+
+  - id: R-IMPORTS-DEFAULT
+    description: "Module IMPORTS default export"
+    kind: Imports
+    from: Module
+    to: [Function, Class, Constant]
+    condition: "import name from 'module'"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import#default_import"
+    tested_by: [default_imports]
+
+  - id: R-IMPORTS-NAMESPACE
+    description: "Module IMPORTS entire module as namespace"
+    kind: Imports
+    from: Module
+    to: Module
+    condition: "import * as name from 'module'"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import#namespace_import"
+    tested_by: [namespace_imports]
+
+  - id: R-IMPORTS-SIDE-EFFECT
+    description: "Module IMPORTS another module for side effects only"
+    kind: Imports
+    from: Module
+    to: Module
+    condition: "import 'module'"
+    note: "Side-effect imports run the module code but don't import any bindings"
+    tested_by: [side_effect_imports]
+
+  # ---------------------------------------------------------------------------
+  # CommonJS import relationships
+  # Reference: https://nodejs.org/api/modules.html
+  # ---------------------------------------------------------------------------
+  - id: R-IMPORTS-REQUIRE
+    description: "Module IMPORTS via CommonJS require()"
+    kind: Imports
+    from: Module
+    to: Module
+    condition: "require('module') or require('./path')"
+    note: |
+      CommonJS imports are dynamically resolved at runtime. The require()
+      function can be called anywhere in the code, not just at the top level.
+    reference: "https://nodejs.org/api/modules.html#requireid"
+    tested_by: [commonjs_require]
+
+  - id: R-IMPORTS-REQUIRE-DESTRUCTURED
+    description: "Module IMPORTS specific properties via destructured require()"
+    kind: Imports
+    from: Module
+    to: [Function, Class, Constant, Variable]
+    condition: "const { name } = require('module')"
+    note: |
+      Destructuring a require() call imports specific named exports.
+      This is the CommonJS equivalent of named ES imports.
+    tested_by: [commonjs_require_destructure]
+
+  # ---------------------------------------------------------------------------
+  # ES Module re-export relationships
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export#re-exporting_aggregating
+  # ---------------------------------------------------------------------------
+  - id: R-REEXPORTS-NAMED
+    description: "Module REEXPORTS named exports from another module"
+    kind: Reexports
+    from: Module
+    to: [Function, Class, Constant, Variable]
+    condition: "export { name } from 'module'"
+    note: "Re-exports make items from one module available from another"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export#re-exporting_aggregating"
+    tested_by: [reexports]
+
+  - id: R-REEXPORTS-ALL
+    description: "Module REEXPORTS all exports from another module"
+    kind: Reexports
+    from: Module
+    to: Module
+    condition: "export * from 'module'"
+    note: |
+      Barrel exports re-export all named exports from another module.
+      Does not include the default export.
+    tested_by: [barrel_exports]
+
+  - id: R-REEXPORTS-NAMESPACE
+    description: "Module REEXPORTS another module as a namespace"
+    kind: Reexports
+    from: Module
+    to: Module
+    condition: "export * as name from 'module'"
+    note: "Creates a namespace object containing all exports from the source module"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/export#re-exporting_aggregating"
+    tested_by: [namespace_reexports]
+
+  - id: R-REEXPORTS-DEFAULT
+    description: "Module REEXPORTS default export"
+    kind: Reexports
+    from: Module
+    to: [Function, Class, Constant]
+    condition: "export { default } from 'module' or export { default as name } from 'module'"
+    tested_by: [reexports]
+
+  # ---------------------------------------------------------------------------
+  # Call relationships
+  # ---------------------------------------------------------------------------
+  - id: R-CALLS-FUNCTION
+    description: "Function/Method CALLS another function/method"
+    kind: Calls
+    from: [Function, Method]
+    to: [Function, Method]
+    condition: "function call expression in body"
+    tested_by: [function_calls, method_calls]
+
+  # ---------------------------------------------------------------------------
+  # Dynamic import (ECMAScript 2020)
+  # Reference: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import
+  # ---------------------------------------------------------------------------
+  - id: R-IMPORTS-DYNAMIC
+    description: "Function IMPORTS a module dynamically"
+    kind: Imports
+    from: [Function, Method]
+    to: Module
+    condition: "import('module') expression"
+    note: |
+      Dynamic imports (ES2020) return a promise that resolves to the module.
+      They can be used anywhere, not just at the top level.
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import"
+    tested_by: [dynamic_imports]
+
+
+# =============================================================================
+# METADATA RULES
+# =============================================================================
+# Defines what metadata is captured for entities.
+
+metadata_rules:
+
+  # ---------------------------------------------------------------------------
+  # Function/Method metadata
+  # ---------------------------------------------------------------------------
+  - id: M-FN-ASYNC
+    description: "Async functions have is_async=true"
+    applies_to: [Function, Method]
+    field: is_async
+    condition: "function has `async` keyword"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function"
+    tested_by: [async_functions, async_methods]
+
+  - id: M-FN-GENERATOR
+    description: "Generator functions have is_generator=true"
+    applies_to: [Function, Method]
+    field: is_generator
+    condition: "function has `*` modifier"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*"
+    tested_by: [generator_functions, generator_methods]
+
+  - id: M-FN-ARROW
+    description: "Arrow functions have is_arrow=true"
+    applies_to: Function
+    field: is_arrow
+    condition: "function uses arrow syntax"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/Arrow_functions"
+    tested_by: [arrow_functions]
+
+  # ---------------------------------------------------------------------------
+  # Method metadata
+  # ---------------------------------------------------------------------------
+  - id: M-METHOD-STATIC
+    description: "Static methods have is_static=true"
+    applies_to: Method
+    field: is_static
+    condition: "method has `static` keyword"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/static"
+    tested_by: [static_methods]
+
+  - id: M-METHOD-ACCESSOR-GET
+    description: "Getter methods have is_getter=true"
+    applies_to: Method
+    field: is_getter
+    condition: "method has `get` keyword"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get"
+    tested_by: [accessors]
+
+  - id: M-METHOD-ACCESSOR-SET
+    description: "Setter methods have is_setter=true"
+    applies_to: Method
+    field: is_setter
+    condition: "method has `set` keyword"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set"
+    tested_by: [accessors]
+
+  - id: M-METHOD-PRIVATE
+    description: "Private methods have is_private=true"
+    applies_to: Method
+    field: is_private
+    condition: "method name starts with #"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    tested_by: [private_methods]
+
+  # ---------------------------------------------------------------------------
+  # Property metadata
+  # ---------------------------------------------------------------------------
+  - id: M-PROPERTY-STATIC
+    description: "Static properties have is_static=true"
+    applies_to: Property
+    field: is_static
+    condition: "property has `static` keyword"
+    tested_by: [static_fields]
+
+  - id: M-PROPERTY-PRIVATE
+    description: "Private properties have is_private=true"
+    applies_to: Property
+    field: is_private
+    condition: "property name starts with #"
+    reference: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Private_properties"
+    tested_by: [private_fields]
+
+  - id: M-FIELD-INITIALIZER
+    description: "Fields with initializers track their initial value"
+    applies_to: Property
+    field: has_initializer
+    condition: "field has `= value` initializer"
+    tested_by: [class_fields]
+
+  # ---------------------------------------------------------------------------
+  # Module metadata
+  # ---------------------------------------------------------------------------
+  - id: M-MODULE-TYPE
+    description: "Modules track their type (ES or CommonJS)"
+    applies_to: Module
+    field: module_type
+    values: ["es", "commonjs"]
+    note: |
+      ES modules use import/export syntax.
+      CommonJS modules use require/module.exports.
+    tested_by: [basic_module, commonjs_basic]
+
+  # ---------------------------------------------------------------------------
+  # JSX metadata
+  # ---------------------------------------------------------------------------
+  - id: M-FN-JSX
+    description: "Functions returning JSX have is_jsx_component=true"
+    applies_to: Function
+    field: is_jsx_component
+    condition: "function returns JSX element"
+    tested_by: [jsx_components]
+
+
+# =============================================================================
+# TEST FIXTURE MAPPING
+# =============================================================================
+# Maps test fixtures to the rules they verify.
+
+fixtures:
+  # ---------------------------------------------------------------------------
+  # Modules
+  # ---------------------------------------------------------------------------
+  basic_module:
+    tests: [E-MOD-FILE, V-EXPORT, Q-MODULE-FILE, R-CONTAINS-MODULE-ITEM, M-MODULE-TYPE]
+
+  commonjs_basic:
+    tests: [E-MOD-COMMONJS, Q-MODULE-FILE, R-CONTAINS-MODULE-ITEM, M-MODULE-TYPE]
+
+  commonjs_exports:
+    tests: [E-MOD-COMMONJS, V-COMMONJS-EXPORT]
+
+  commonjs_require:
+    tests: [R-IMPORTS-REQUIRE]
+
+  commonjs_require_destructure:
+    tests: [R-IMPORTS-REQUIRE-DESTRUCTURED]
+
+  # ---------------------------------------------------------------------------
+  # Classes
+  # ---------------------------------------------------------------------------
+  classes:
+    tests: [E-CLASS, V-CLASS-MEMBER-PUBLIC, Q-ITEM-MODULE, R-CONTAINS-CLASS-MEMBER]
+
+  class_expressions:
+    tests: [E-CLASS-EXPR]
+
+  class_inheritance:
+    tests: [E-CLASS, R-INHERITS-FROM]
+
+  class_fields:
+    tests: [E-PROPERTY-FIELD, Q-PROPERTY-INSTANCE, M-FIELD-INITIALIZER]
+
+  static_fields:
+    tests: [E-PROPERTY-STATIC-FIELD, Q-PROPERTY-STATIC, M-PROPERTY-STATIC]
+
+  private_fields:
+    tests: [E-PROPERTY-PRIVATE-FIELD, V-PRIVATE-FIELD, M-PROPERTY-PRIVATE]
+
+  static_private_fields:
+    tests: [E-PROPERTY-STATIC-PRIVATE, V-PRIVATE-FIELD, M-PROPERTY-STATIC, M-PROPERTY-PRIVATE]
+
+  arrow_field_properties:
+    tests: [E-PROPERTY-ARROW-FIELD]
+
+  # ---------------------------------------------------------------------------
+  # Functions
+  # ---------------------------------------------------------------------------
+  functions:
+    tests: [E-FN-DECL, Q-ITEM-MODULE]
+
+  function_expressions:
+    tests: [E-FN-EXPR]
+
+  arrow_functions:
+    tests: [E-FN-ARROW, M-FN-ARROW]
+
+  async_functions:
+    tests: [E-FN-ASYNC, M-FN-ASYNC]
+
+  generator_functions:
+    tests: [E-FN-GENERATOR, M-FN-GENERATOR]
+
+  async_generator_functions:
+    tests: [E-FN-ASYNC-GENERATOR, M-FN-ASYNC, M-FN-GENERATOR]
+
+  # ---------------------------------------------------------------------------
+  # Methods
+  # ---------------------------------------------------------------------------
+  methods:
+    tests: [E-METHOD-CLASS, V-CLASS-MEMBER-PUBLIC, Q-METHOD-INSTANCE, R-CONTAINS-CLASS-MEMBER]
+
+  static_methods:
+    tests: [E-METHOD-STATIC, Q-METHOD-STATIC, M-METHOD-STATIC]
+
+  async_methods:
+    tests: [E-METHOD-ASYNC, M-FN-ASYNC]
+
+  generator_methods:
+    tests: [E-METHOD-GENERATOR, M-FN-GENERATOR]
+
+  accessors:
+    tests: [E-METHOD-GETTER, E-METHOD-SETTER, M-METHOD-ACCESSOR-GET, M-METHOD-ACCESSOR-SET]
+
+  private_methods:
+    tests: [E-METHOD-PRIVATE, V-PRIVATE-METHOD, M-METHOD-PRIVATE]
+
+  static_private_methods:
+    tests: [E-METHOD-PRIVATE-STATIC, V-PRIVATE-METHOD, M-METHOD-STATIC, M-METHOD-PRIVATE]
+
+  private_accessors:
+    tests: [E-METHOD-PRIVATE-GETTER, E-METHOD-PRIVATE-SETTER, V-PRIVATE-METHOD]
+
+  static_blocks:
+    tests: [E-STATIC-BLOCK]
+
+  # ---------------------------------------------------------------------------
+  # Variables and Constants
+  # ---------------------------------------------------------------------------
+  constants:
+    tests: [E-CONST]
+
+  exported_constants:
+    tests: [E-CONST, V-EXPORT]
+
+  variables:
+    tests: [E-VAR-LET, E-VAR-VAR]
+
+  # ---------------------------------------------------------------------------
+  # Imports and Exports (ES Modules)
+  # ---------------------------------------------------------------------------
+  imports:
+    tests: [R-IMPORTS-NAMED]
+
+  default_imports:
+    tests: [R-IMPORTS-DEFAULT]
+
+  namespace_imports:
+    tests: [R-IMPORTS-NAMESPACE]
+
+  side_effect_imports:
+    tests: [R-IMPORTS-SIDE-EFFECT]
+
+  dynamic_imports:
+    tests: [R-IMPORTS-DYNAMIC]
+
+  exports:
+    tests: [V-EXPORT]
+
+  default_exports:
+    tests: [E-CLASS-DEFAULT-EXPORT, E-FN-DEFAULT-EXPORT, V-EXPORT-DEFAULT]
+
+  reexports:
+    tests: [V-EXPORT, R-REEXPORTS-NAMED, R-REEXPORTS-DEFAULT]
+
+  barrel_exports:
+    tests: [R-REEXPORTS-ALL]
+
+  namespace_reexports:
+    tests: [R-REEXPORTS-NAMESPACE]
+
+  # ---------------------------------------------------------------------------
+  # Visibility
+  # ---------------------------------------------------------------------------
+  visibility:
+    tests: [V-CLASS-MEMBER-PUBLIC, V-PRIVATE-FIELD, V-PRIVATE-METHOD, V-MODULE-PRIVATE, V-EXPORT]
+
+  modules:
+    tests: [V-MODULE-PRIVATE]
+
+  # ---------------------------------------------------------------------------
+  # Call relationships
+  # ---------------------------------------------------------------------------
+  function_calls:
+    tests: [R-CALLS-FUNCTION]
+
+  method_calls:
+    tests: [R-CALLS-FUNCTION]
+
+  # ---------------------------------------------------------------------------
+  # JSX
+  # ---------------------------------------------------------------------------
+  jsx_components:
+    tests: [E-JSX-COMPONENT, E-JSX-ARROW-COMPONENT, M-FN-JSX]

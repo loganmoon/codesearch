@@ -10,6 +10,7 @@
 
 use super::path_config::{PathConfig, RelativeSemantics};
 use std::fmt;
+use tracing::trace;
 
 /// The kind of a language path, indicating how it should be resolved
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -115,8 +116,10 @@ impl LanguagePath {
             }
         }
 
-        // Check for external:: prefix (special case for Rust)
-        if let Some(rest) = path.strip_prefix("external::") {
+        // Check for "external" prefix (project convention for marking external dependencies)
+        // Uses language-specific separator: "external::foo" for Rust, "external.foo" for Python
+        let external_prefix = format!("external{}", config.separator);
+        if let Some(rest) = path.strip_prefix(&external_prefix) {
             return Self {
                 kind: PathKind::External,
                 segments: Self::split_segments(rest, config.separator),
@@ -371,12 +374,22 @@ impl LanguagePathBuilder {
     ///
     /// Takes segments from `module`, removes the last `levels` segments,
     /// and adds the remaining to this builder.
+    ///
+    /// If `levels` exceeds or equals the module depth, no segments are added
+    /// and a trace log is emitted (this may indicate an issue with super:: chains).
     pub fn navigate_up_from(mut self, module: &LanguagePath, levels: usize) -> Self {
         let module_segments = module.segments();
         if module_segments.len() > levels {
             let keep = module_segments.len() - levels;
             self.segments
                 .extend(module_segments[..keep].iter().cloned());
+        } else {
+            trace!(
+                module = module.to_qualified_name(),
+                levels = levels,
+                module_depth = module_segments.len(),
+                "super:: chain exceeds module depth, no parent segments added"
+            );
         }
         self
     }

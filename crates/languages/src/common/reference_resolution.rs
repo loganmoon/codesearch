@@ -45,6 +45,22 @@ pub struct ResolutionContext<'a> {
     pub edge_case_handlers: Option<&'a EdgeCaseRegistry>,
 }
 
+impl<'a> ResolutionContext<'a> {
+    /// Create an EdgeCaseContext for use with edge case handlers
+    ///
+    /// This extracts the common fields needed by edge case handlers,
+    /// excluding the `edge_case_handlers` field itself to avoid circular references.
+    pub fn to_edge_case_context(&self) -> EdgeCaseContext<'a> {
+        EdgeCaseContext {
+            import_map: self.import_map,
+            parent_scope: self.parent_scope,
+            package_name: self.package_name,
+            current_module: self.current_module,
+            path_config: self.path_config,
+        }
+    }
+}
+
 impl ResolvedReference {
     /// Create a resolved reference with automatic external detection
     pub fn new(target: String, simple_name: String, config: &PathConfig) -> Self {
@@ -106,13 +122,7 @@ pub fn resolve_reference(
 
     // 0. Check edge case handlers first (e.g., UFCS, well-known stdlib types)
     if let Some(registry) = ctx.edge_case_handlers {
-        let edge_ctx = EdgeCaseContext {
-            import_map: ctx.import_map,
-            parent_scope: ctx.parent_scope,
-            package_name: ctx.package_name,
-            current_module: ctx.current_module,
-            path_config: ctx.path_config,
-        };
+        let edge_ctx = ctx.to_edge_case_context();
         if let Some(resolved) = registry.try_resolve(name, simple_name, &edge_ctx) {
             trace!(
                 name = name,

@@ -49,18 +49,38 @@ pub struct RelativePrefix {
 /// This struct is designed to be created as a static constant in each
 /// language module, providing all the information needed to parse and
 /// resolve paths without language-specific code.
+///
+/// # Field Ordering and Consistency
+///
+/// - **`relative_prefixes`**: Order matters! The parser tries prefixes in order and uses
+///   the first match. Put longer/more-specific prefixes before shorter ones to avoid
+///   incorrect matches. For example, if you have both `"self::"` and `"self::super::"`,
+///   list `"self::super::"` first.
+///
+/// - **`separator` consistency**: All prefixes in `relative_prefixes` should end with
+///   the `separator` (e.g., `"crate::"` not `"crate"` for Rust). The `external_prefixes`
+///   should NOT include the separator (e.g., `"std"` not `"std::"`).
+///
+/// - **`external_prefixes`**: These are matched against the first segment of a path,
+///   so they should be crate/package names without separators.
 #[derive(Debug)]
 pub struct PathConfig {
     /// Path separator ("::" for Rust, "." for Python/JS)
     pub separator: &'static str,
 
     /// Relative prefix mappings, ordered by match priority
+    ///
     /// The parser tries prefixes in order and uses the first match.
+    /// **Order matters**: Put longer/more-specific prefixes before shorter ones.
+    /// All prefixes should include the trailing separator (e.g., `"crate::"` not `"crate"`).
     pub relative_prefixes: &'static [RelativePrefix],
 
-    /// Known external/third-party prefixes
-    /// - Rust: ["std", "core", "alloc", "external"]
-    /// - Python: [] (no special external prefixes)
+    /// Known external/third-party prefixes (without separator)
+    ///
+    /// These are matched against the first segment of a path to determine
+    /// if a reference is external (stdlib, third-party crate, etc.).
+    /// - Rust: `["std", "core", "alloc", "external"]`
+    /// - Python: `[]` (external detection uses different heuristics)
     pub external_prefixes: &'static [&'static str],
 }
 

@@ -11,8 +11,25 @@ use crate::common::import_map::ImportMap;
 use crate::common::language_path::LanguagePath;
 use crate::common::path_config::RUST_PATH_CONFIG;
 use streaming_iterator::StreamingIterator;
-use tracing::error;
+use tracing::{debug, error};
 use tree_sitter::{Node, Query, QueryCursor};
+
+/// Extract UTF-8 text from a tree-sitter node, logging on failure
+fn node_text<'a>(node: Node<'a>, source: &'a [u8], context: &str) -> Option<&'a str> {
+    match node.utf8_text(source) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            debug!(
+                error = %e,
+                node_kind = node.kind(),
+                start = node.start_position().row,
+                context = context,
+                "Failed to extract UTF-8 text from node"
+            );
+            None
+        }
+    }
+}
 
 /// Parse Rust use declarations
 ///
@@ -73,24 +90,30 @@ pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
             match capture_name {
                 "alias" => {
                     // use X as Y - the alias name
-                    if let (Some(path_cap), Ok(alias_text)) = (
-                        query_match
-                            .captures
-                            .iter()
-                            .find(|c| {
-                                query.capture_names().get(c.index as usize).copied() == Some("path")
-                            })
-                            .map(|c| c.node),
-                        capture.node.utf8_text(source.as_bytes()),
+                    let path_cap = query_match
+                        .captures
+                        .iter()
+                        .find(|c| {
+                            query.capture_names().get(c.index as usize).copied() == Some("path")
+                        })
+                        .map(|c| c.node);
+
+                    if let (Some(path_node), Some(alias_text)) = (
+                        path_cap,
+                        node_text(capture.node, source.as_bytes(), "use alias"),
                     ) {
-                        if let Ok(path_text) = path_cap.utf8_text(source.as_bytes()) {
+                        if let Some(path_text) =
+                            node_text(path_node, source.as_bytes(), "use alias path")
+                        {
                             import_map.add(alias_text, path_text);
                         }
                     }
                 }
                 "scoped_path" => {
                     // use std::io::Read - extract the last segment as simple name
-                    if let Ok(full_path) = capture.node.utf8_text(source.as_bytes()) {
+                    if let Some(full_path) =
+                        node_text(capture.node, source.as_bytes(), "scoped import path")
+                    {
                         let parsed = LanguagePath::parse(full_path, &RUST_PATH_CONFIG);
                         if let Some(simple_name) = parsed.simple_name() {
                             if simple_name == "*" {
@@ -114,26 +137,33 @@ pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
                     if let Some(base_path_cap) = query_match.captures.iter().find(|c| {
                         query.capture_names().get(c.index as usize).copied() == Some("base_path")
                     }) {
-                        if let Ok(base_path) = base_path_cap.node.utf8_text(source.as_bytes()) {
+                        if let Some(base_path) =
+                            node_text(base_path_cap.node, source.as_bytes(), "use list base path")
+                        {
                             parse_rust_use_list(capture.node, source, base_path, &mut import_map);
                         }
                     }
                 }
                 "simple_import" => {
                     // use identifier - rare but valid
-                    if let Ok(name) = capture.node.utf8_text(source.as_bytes()) {
+                    if let Some(name) = node_text(capture.node, source.as_bytes(), "simple import")
+                    {
                         import_map.add(name, name);
                     }
                 }
                 "wildcard_scope" => {
                     // use helpers::* - scoped wildcard import
-                    if let Ok(base_path) = capture.node.utf8_text(source.as_bytes()) {
+                    if let Some(base_path) =
+                        node_text(capture.node, source.as_bytes(), "wildcard scope")
+                    {
                         import_map.add_glob(base_path);
                     }
                 }
                 "wildcard_simple" => {
                     // use ident::* - simple identifier wildcard
-                    if let Ok(base_path) = capture.node.utf8_text(source.as_bytes()) {
+                    if let Some(base_path) =
+                        node_text(capture.node, source.as_bytes(), "wildcard simple")
+                    {
                         import_map.add_glob(base_path);
                     }
                 }
@@ -153,7 +183,7 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
     for child in list_node.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
-                if let Ok(name) = child.utf8_text(source.as_bytes()) {
+                if let Some(name) = node_text(child, source.as_bytes(), "use list identifier") {
                     let full_path = LanguagePath::builder(&RUST_PATH_CONFIG)
                         .segments(base_path_parsed.segments().iter().cloned())
                         .segment(name)
@@ -168,9 +198,9 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
                 let alias_node = child.child_by_field_name("alias");
 
                 if let (Some(p_node), Some(a_node)) = (path_node, alias_node) {
-                    if let (Ok(path_text), Ok(alias_text)) = (
-                        p_node.utf8_text(source.as_bytes()),
-                        a_node.utf8_text(source.as_bytes()),
+                    if let (Some(path_text), Some(alias_text)) = (
+                        node_text(p_node, source.as_bytes(), "use_as_clause path"),
+                        node_text(a_node, source.as_bytes(), "use_as_clause alias"),
                     ) {
                         let path_parsed = LanguagePath::parse(path_text, &RUST_PATH_CONFIG);
                         let full_path = LanguagePath::builder(&RUST_PATH_CONFIG)
@@ -183,7 +213,9 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
             }
             "scoped_identifier" => {
                 // Handle nested paths like `io::Read` within a use list
-                if let Ok(scoped_path) = child.utf8_text(source.as_bytes()) {
+                if let Some(scoped_path) =
+                    node_text(child, source.as_bytes(), "use list scoped_identifier")
+                {
                     let scoped_parsed = LanguagePath::parse(scoped_path, &RUST_PATH_CONFIG);
                     let full_path = LanguagePath::builder(&RUST_PATH_CONFIG)
                         .segments(base_path_parsed.segments().iter().cloned())
@@ -207,7 +239,9 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
                     child.child_by_field_name("path"),
                     child.child_by_field_name("list"),
                 ) {
-                    if let Ok(path_text) = path_node.utf8_text(source.as_bytes()) {
+                    if let Some(path_text) =
+                        node_text(path_node, source.as_bytes(), "scoped_use_list path")
+                    {
                         let path_parsed = LanguagePath::parse(path_text, &RUST_PATH_CONFIG);
                         let nested_base = LanguagePath::builder(&RUST_PATH_CONFIG)
                             .segments(base_path_parsed.segments().iter().cloned())

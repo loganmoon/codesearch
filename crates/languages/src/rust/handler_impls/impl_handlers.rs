@@ -8,7 +8,8 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-use crate::common::import_map::resolve_rust_reference;
+use crate::common::path_config::RUST_PATH_CONFIG;
+use crate::common::reference_resolution::{resolve_reference, ResolutionContext};
 use crate::qualified_name::build_qualified_name_from_ast;
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
@@ -16,8 +17,8 @@ use crate::rust::handler_impls::common::{
     extract_local_var_types, extract_preceding_doc_comments, extract_type_alias_map,
     extract_type_references, extract_visibility_from_node, extract_where_clause_bounds,
     find_capture_node, find_child_by_kind, format_generic_param, get_file_import_map,
-    merge_parsed_generics, node_to_text, require_capture_node, resolve_type_alias_chain,
-    RustResolutionContext,
+    get_rust_edge_case_registry, merge_parsed_generics, node_to_text, require_capture_node,
+    resolve_type_alias_chain, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, node_kinds, special_idents};
 use codesearch_core::entities::{
@@ -91,21 +92,27 @@ pub fn handle_impl_impl(
     let import_map = get_file_import_map(impl_node, source);
 
     // Resolve for_type through imports (strip generics first for resolution)
-    // Use resolve_rust_reference to handle crate::, self::, super:: prefixes
+    // Use resolve_reference to handle crate::, self::, super:: prefixes
     let for_type_base = for_type_raw
         .split('<')
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    // for_type_base is the simple name from the AST
-    let for_type_resolved_initial = resolve_rust_reference(
-        for_type_base,
-        for_type_base,
-        &import_map,
-        None,
+
+    // Create resolution context for type resolution
+    let edge_case_registry = get_rust_edge_case_registry();
+    let type_resolution_ctx = ResolutionContext {
+        import_map: &import_map,
+        parent_scope: None,
         package_name,
-        module_path.as_deref(),
-    );
+        current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
+    };
+
+    // for_type_base is the simple name from the AST
+    let for_type_resolved_initial =
+        resolve_reference(for_type_base, for_type_base, &type_resolution_ctx);
 
     // Check if the type is a type alias and resolve to the underlying concrete type.
     // This ensures `impl Settings` (where Settings = RawConfig) has methods named
@@ -121,14 +128,7 @@ pub fn handle_impl_impl(
         if let Some(concrete_type) = resolve_type_alias_chain(for_type_base, &type_aliases, 10) {
             // Build the qualified name for the concrete type
             // The concrete_type comes from the type alias resolution
-            resolve_rust_reference(
-                &concrete_type,
-                &concrete_type,
-                &import_map,
-                None,
-                package_name,
-                module_path.as_deref(),
-            )
+            resolve_reference(&concrete_type, &concrete_type, &type_resolution_ctx)
         } else {
             for_type_resolved_initial
         }
@@ -152,6 +152,8 @@ pub fn handle_impl_impl(
         parent_scope: Some(parent_scope.as_str()),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds
@@ -326,15 +328,21 @@ pub fn handle_impl_trait_impl(
         .next()
         .unwrap_or(&for_type_raw)
         .trim();
-    // for_type_base is the simple name from the AST
-    let for_type_resolved_ref = resolve_rust_reference(
-        for_type_base,
-        for_type_base,
-        &import_map,
-        None,
+
+    // Create resolution context for type/trait resolution
+    let edge_case_registry = get_rust_edge_case_registry();
+    let type_resolution_ctx = ResolutionContext {
+        import_map: &import_map,
+        parent_scope: None,
         package_name,
-        module_path.as_deref(),
-    );
+        current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
+    };
+
+    // for_type_base is the simple name from the AST
+    let for_type_resolved_ref =
+        resolve_reference(for_type_base, for_type_base, &type_resolution_ctx);
     let for_type_resolved = for_type_resolved_ref.target.clone();
 
     // Resolve trait_name through imports (strip generics first for resolution)
@@ -344,14 +352,8 @@ pub fn handle_impl_trait_impl(
         .unwrap_or(&trait_name_raw)
         .trim();
     // trait_name_base is the simple name from the AST
-    let trait_name_resolved_ref = resolve_rust_reference(
-        trait_name_base,
-        trait_name_base,
-        &import_map,
-        None,
-        package_name,
-        module_path.as_deref(),
-    );
+    let trait_name_resolved_ref =
+        resolve_reference(trait_name_base, trait_name_base, &type_resolution_ctx);
     let trait_name_resolved = trait_name_resolved_ref.target.clone();
 
     // Keep original for display
@@ -372,6 +374,8 @@ pub fn handle_impl_trait_impl(
         parent_scope: Some(parent_scope.as_str()),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds
@@ -915,11 +919,14 @@ fn extract_method(
     // Build resolution context for qualified name normalization
     // Use module path as parent_scope (not impl block name) so bare function calls
     // like `async_callee()` resolve to `module::async_callee` not `impl_block::async_callee`
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: impl_ctx.module_path,
         package_name: impl_ctx.package_name,
         current_module: impl_ctx.module_path,
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract local variable types for method call resolution

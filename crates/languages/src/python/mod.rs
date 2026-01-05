@@ -31,6 +31,8 @@ define_language_extractor! {
     fqn: {
         separator: ".",
         module_path_fn: module_path::derive_module_path,
+        relative_prefixes: {},
+        external_prefixes: [],
     },
 
     entities: {

@@ -10,12 +10,14 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::path_config::RUST_PATH_CONFIG;
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_calls, extract_function_modifiers,
     extract_function_parameters, extract_generics_with_bounds, extract_local_var_types,
     extract_preceding_doc_comments, extract_type_references, extract_visibility,
     extract_where_clause_bounds, find_capture_node, format_generic_param, get_file_import_map,
-    merge_parsed_generics, node_to_text, require_capture_node, RustResolutionContext,
+    get_rust_edge_case_registry, merge_parsed_generics, node_to_text, require_capture_node,
+    RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{
@@ -109,11 +111,14 @@ pub fn handle_function_impl(
     };
 
     // Build resolution context for qualified name normalization
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
         current_module: current_module.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds

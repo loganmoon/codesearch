@@ -10,13 +10,15 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::path_config::RUST_PATH_CONFIG;
+use crate::common::reference_resolution::resolve_reference;
 use crate::rust::entities::{FieldInfo, VariantInfo};
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_function_parameters, extract_generics_with_bounds,
     extract_preceding_doc_comments, extract_visibility, extract_visibility_from_node,
     extract_where_clause_bounds, find_capture_node, find_child_by_kind, format_generic_param,
-    get_file_import_map, is_primitive_type, merge_parsed_generics, node_to_text,
-    require_capture_node, ParsedGenerics, RustResolutionContext,
+    get_file_import_map, get_rust_edge_case_registry, is_primitive_type, merge_parsed_generics,
+    node_to_text, require_capture_node, ParsedGenerics, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::{capture_names, keywords, node_kinds, punctuation};
 use codesearch_core::entities::{
@@ -88,11 +90,14 @@ pub fn handle_struct_impl(
         source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
 
     // Build resolution context for qualified name normalization
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract fields early so we can create child entities
@@ -198,11 +203,14 @@ pub fn handle_enum_impl(
         source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
 
     // Build resolution context for qualified name normalization
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract variants early so we can create child entities
@@ -298,11 +306,14 @@ pub fn handle_trait_impl(
         source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
 
     // Build resolution context for qualified name normalization
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     let trait_entity = extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
@@ -360,7 +371,7 @@ pub fn handle_trait_impl(
         // bounds are bare identifiers from AST, use as both name and simple_name
         let supertrait_refs: Vec<ResolvedReference> = bounds
             .iter()
-            .map(|b| resolution_ctx.resolve(b, b))
+            .map(|b| resolve_reference(b, b, &resolution_ctx))
             .collect();
         let supertraits: Vec<SourceReference> = supertrait_refs
             .iter()
@@ -661,7 +672,7 @@ pub(crate) fn build_field_entities(
                         !is_primitive_type(type_name) && seen.insert(type_name.clone())
                     })
                     .filter_map(|type_name| {
-                        let resolved = resolution_ctx.resolve(&type_name, &type_name);
+                        let resolved = resolve_reference(&type_name, &type_name, resolution_ctx);
                         SourceReference::builder()
                             .target(resolved.target.clone())
                             .simple_name(resolved.simple_name)
@@ -772,7 +783,7 @@ fn build_variant_entities(
                         !is_primitive_type(type_name) && seen.insert(type_name.clone())
                     })
                     .filter_map(|type_name| {
-                        let resolved = resolution_ctx.resolve(&type_name, &type_name);
+                        let resolved = resolve_reference(&type_name, &type_name, resolution_ctx);
                         SourceReference::builder()
                             .target(resolved.target.clone())
                             .simple_name(resolved.simple_name)
@@ -1154,7 +1165,7 @@ fn check_trait_is_unsafe(ctx: &ExtractionContext) -> bool {
 // Type Resolution Helpers
 // ============================================================================
 
-use crate::rust::import_resolution::ResolvedReference;
+use crate::common::reference_resolution::ResolvedReference;
 
 /// Convert a list of resolved references to SourceReferences
 ///
@@ -1279,7 +1290,7 @@ pub(crate) fn extract_type_refs_from_type_expr(
             continue;
         }
         // Resolve through imports - type_name from string parsing is the simple_name
-        let resolved = ctx.resolve(&type_name, &type_name);
+        let resolved = resolve_reference(&type_name, &type_name, ctx);
         if seen.insert(resolved.clone()) {
             result.push(resolved);
         }

@@ -26,6 +26,17 @@ struct LanguageExtractorInput {
 struct FqnConfig {
     separator: LitStr,
     module_path_fn: Option<Expr>,
+    relative_prefixes: Vec<RelativePrefixEntry>,
+    external_prefixes: Vec<LitStr>,
+    edge_cases: Option<Expr>,
+}
+
+/// Entry for a relative prefix mapping
+/// Parses: "crate::" => Root, "super::" => Parent { chainable: true }
+struct RelativePrefixEntry {
+    prefix: LitStr,
+    semantics: Ident, // Root, Current, Parent
+    chainable: bool,  // Only for Parent
 }
 
 /// Configuration for a single entity type extractor
@@ -76,6 +87,9 @@ impl Parse for LanguageExtractorInput {
 
                     let mut separator = None;
                     let mut module_path_fn = None;
+                    let mut relative_prefixes = Vec::new();
+                    let mut external_prefixes = Vec::new();
+                    let mut edge_cases = None;
 
                     while !content.is_empty() {
                         let fqn_field: Ident = content.parse()?;
@@ -87,6 +101,63 @@ impl Parse for LanguageExtractorInput {
                             }
                             "module_path_fn" => {
                                 module_path_fn = Some(content.parse::<Expr>()?);
+                            }
+                            "relative_prefixes" => {
+                                // Parse: { "crate::" => Root, "super::" => Parent { chainable: true } }
+                                let prefixes_content;
+                                braced!(prefixes_content in content);
+
+                                while !prefixes_content.is_empty() {
+                                    let prefix = prefixes_content.parse::<LitStr>()?;
+                                    prefixes_content.parse::<Token![=>]>()?;
+                                    let semantics = prefixes_content.parse::<Ident>()?;
+
+                                    // Check for optional { chainable: true }
+                                    let chainable = if prefixes_content.peek(syn::token::Brace) {
+                                        let opts_content;
+                                        braced!(opts_content in prefixes_content);
+                                        let mut is_chainable = false;
+
+                                        while !opts_content.is_empty() {
+                                            let opt_name: Ident = opts_content.parse()?;
+                                            opts_content.parse::<Token![:]>()?;
+
+                                            if opt_name == "chainable" {
+                                                let value: syn::LitBool = opts_content.parse()?;
+                                                is_chainable = value.value();
+                                            }
+
+                                            if !opts_content.is_empty() {
+                                                opts_content.parse::<Token![,]>()?;
+                                            }
+                                        }
+                                        is_chainable
+                                    } else {
+                                        false
+                                    };
+
+                                    relative_prefixes.push(RelativePrefixEntry {
+                                        prefix,
+                                        semantics,
+                                        chainable,
+                                    });
+
+                                    if !prefixes_content.is_empty() {
+                                        prefixes_content.parse::<Token![,]>()?;
+                                    }
+                                }
+                            }
+                            "external_prefixes" => {
+                                // Parse: ["std", "core", "alloc"]
+                                let ext_content;
+                                syn::bracketed!(ext_content in content);
+                                let ext_list: Punctuated<LitStr, Token![,]> =
+                                    Punctuated::parse_terminated(&ext_content)?;
+                                external_prefixes = ext_list.into_iter().collect();
+                            }
+                            "edge_cases" => {
+                                // Parse: edge_case_handlers::RUST_EDGE_CASE_HANDLERS
+                                edge_cases = Some(content.parse::<Expr>()?);
                             }
                             _ => {
                                 return Err(syn::Error::new(
@@ -106,6 +177,9 @@ impl Parse for LanguageExtractorInput {
                             syn::Error::new(input.span(), "Missing 'separator' in fqn block")
                         })?,
                         module_path_fn,
+                        relative_prefixes,
+                        external_prefixes,
+                        edge_cases,
                     });
 
                     if !input.is_empty() && !input.peek(syn::token::Brace) {
@@ -247,9 +321,56 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             Some(expr) => quote! { Some(#expr) },
             None => quote! { None },
         };
+
+        // Generate RelativePrefix entries
+        let relative_prefix_entries: Vec<_> = fqn_config
+            .relative_prefixes
+            .iter()
+            .map(|entry| {
+                let prefix = &entry.prefix;
+                let semantics_name = &entry.semantics;
+                let chainable = entry.chainable;
+
+                // Map semantics identifier to the enum variant
+                let semantics_value = match semantics_name.to_string().as_str() {
+                    "Root" => quote! { crate::common::path_config::RelativeSemantics::Root },
+                    "Current" => quote! { crate::common::path_config::RelativeSemantics::Current },
+                    "Parent" => quote! { crate::common::path_config::RelativeSemantics::Parent { levels: 1 } },
+                    _ => quote! { crate::common::path_config::RelativeSemantics::Root }, // Default
+                };
+
+                quote! {
+                    crate::common::path_config::RelativePrefix {
+                        prefix: #prefix,
+                        semantics: #semantics_value,
+                        chainable: #chainable,
+                    }
+                }
+            })
+            .collect();
+
+        // Generate external prefixes array
+        let external_prefixes = &fqn_config.external_prefixes;
+
+        // Generate edge case handlers value
+        let edge_case_handlers_value = match &fqn_config.edge_cases {
+            Some(expr) => quote! { Some(#expr) },
+            None => quote! { None },
+        };
+
         quote! {
             /// FQN separator for this language
             pub const FQN_SEPARATOR: &str = #separator;
+
+            /// Path configuration for this language
+            pub const PATH_CONFIG: crate::common::path_config::PathConfig =
+                crate::common::path_config::PathConfig {
+                    separator: #separator,
+                    relative_prefixes: &[
+                        #(#relative_prefix_entries),*
+                    ],
+                    external_prefixes: &[#(#external_prefixes),*],
+                };
 
             // Register scope configuration with inventory
             // Note: scope_patterns should be defined in the language module as SCOPE_PATTERNS
@@ -259,6 +380,8 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                     separator: #separator,
                     patterns: SCOPE_PATTERNS,
                     module_path_fn: #module_path_fn_value,
+                    path_config: &PATH_CONFIG,
+                    edge_case_handlers: #edge_case_handlers_value,
                 }
             }
         }

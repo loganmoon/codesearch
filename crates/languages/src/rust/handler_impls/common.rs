@@ -192,9 +192,20 @@ pub fn extract_generics_from_node(node: Node, source: &str) -> Vec<String> {
 // Structured Generic Bounds Extraction (Query-Based)
 // ============================================================================
 
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::import_map::{parse_file_imports, ImportMap};
-use crate::rust::import_resolution::{resolve_rust_reference, ResolvedReference};
+use crate::common::reference_resolution::{
+    resolve_reference, ResolutionContext, ResolvedReference,
+};
+use crate::rust::edge_case_handlers::RUST_EDGE_CASE_HANDLERS;
 use codesearch_core::Language;
+
+/// Get the Rust edge case registry for reference resolution
+///
+/// This registry handles UFCS syntax and well-known std types.
+pub fn get_rust_edge_case_registry() -> EdgeCaseRegistry {
+    EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS)
+}
 
 /// A parsed generic parameter with its trait bounds
 #[derive(Debug, Clone, Default)]
@@ -210,42 +221,11 @@ pub struct ParsedGenerics {
     pub bound_trait_refs: Vec<ResolvedReference>,
 }
 
-/// Context for resolving Rust references to fully qualified names.
+/// Type alias for backward compatibility
 ///
-/// Bundles all the information needed to resolve bare identifiers and
-/// Rust-relative paths (crate::, self::, super::) to absolute qualified names.
-#[derive(Debug, Clone, Copy)]
-pub struct RustResolutionContext<'a> {
-    /// Import map from the current file's use declarations
-    pub import_map: &'a ImportMap,
-    /// Parent scope for unresolved identifiers (e.g., "my_module::MyStruct")
-    pub parent_scope: Option<&'a str>,
-    /// Package/crate name for normalizing crate:: paths (e.g., "anyhow")
-    pub package_name: Option<&'a str>,
-    /// Current module path for normalizing self::/super:: paths (e.g., "error::context")
-    pub current_module: Option<&'a str>,
-}
-
-impl<'a> RustResolutionContext<'a> {
-    /// Resolve a reference using this context
-    ///
-    /// # Arguments
-    /// * `name` - The name as it appears in source code (may be qualified)
-    /// * `simple_name` - The simple/unqualified name extracted from the AST
-    ///
-    /// Returns a `ResolvedReference` containing the resolved target path,
-    /// the original simple name, and whether the reference is external.
-    pub fn resolve(&self, name: &str, simple_name: &str) -> ResolvedReference {
-        resolve_rust_reference(
-            name,
-            simple_name,
-            self.import_map,
-            self.parent_scope,
-            self.package_name,
-            self.current_module,
-        )
-    }
-}
+/// This type alias preserves API compatibility with existing code while
+/// using the new generic `ResolutionContext` from the common module.
+pub type RustResolutionContext<'a> = ResolutionContext<'a>;
 
 /// Extract generic parameters with bounds using tree-sitter queries.
 ///
@@ -337,7 +317,7 @@ fn extract_params_with_bounds(
 
                     if !is_primitive_type(bound_text) {
                         // bound_text is the simple name from the AST
-                        let resolved = ctx.resolve(bound_text, bound_text);
+                        let resolved = resolve_reference(bound_text, bound_text, ctx);
 
                         if let Some(ref param) = current_param {
                             // Store just the target string for param bounds
@@ -741,7 +721,7 @@ pub fn extract_function_calls(
             // Bare identifier call like `foo()`
             if let Ok(name) = node_to_text(bare_cap.node, source) {
                 // name is a bare identifier, so it's both the name and simple_name
-                let resolved = ctx.resolve(&name, &name);
+                let resolved = resolve_reference(&name, &name, ctx);
                 if let Ok(source_ref) = SourceReference::builder()
                     .target(resolved.target)
                     .simple_name(resolved.simple_name)
@@ -770,7 +750,7 @@ pub fn extract_function_calls(
                 let simple_name =
                     extract_last_segment_from_scoped_identifier(scoped_cap.node, source)
                         .unwrap_or_else(|| call_path.clone());
-                let resolved = ctx.resolve(&call_path, &simple_name);
+                let resolved = resolve_reference(&call_path, &simple_name, ctx);
                 if let Ok(source_ref) = SourceReference::builder()
                     .target(resolved.target)
                     .simple_name(resolved.simple_name)
@@ -813,7 +793,7 @@ pub fn extract_function_calls(
                         // Use UFCS format <Type>::method to match inherent methods directly.
                         // Trait methods have call_aliases that will also match this format.
                         // recv_type is the type name from local vars, use as both name and simple_name
-                        let resolved_type = ctx.resolve(recv_type, recv_type);
+                        let resolved_type = resolve_reference(recv_type, recv_type, ctx);
                         let target = resolved_type.target;
                         if let Ok(source_ref) = SourceReference::builder()
                             .target(format!("<{target}>::{method_name}"))
@@ -839,7 +819,8 @@ pub fn extract_function_calls(
                     Some(chain_head_type) => {
                         // Use UFCS format <Type>::method to match inherent methods directly
                         // chain_head_type is extracted from AST, use as both name and simple_name
-                        let resolved_type = ctx.resolve(&chain_head_type, &chain_head_type);
+                        let resolved_type =
+                            resolve_reference(&chain_head_type, &chain_head_type, ctx);
                         let target = resolved_type.target;
                         if let Ok(source_ref) = SourceReference::builder()
                             .target(format!("<{target}>::{method_name}"))
@@ -1204,7 +1185,7 @@ pub fn extract_type_references(
                             continue;
                         }
                         // Resolve through imports - bare identifier, use as both name and simple_name
-                        let resolved = ctx.resolve(&type_name, &type_name);
+                        let resolved = resolve_reference(&type_name, &type_name, ctx);
                         if seen.insert(resolved.clone()) {
                             if let Ok(source_ref) = SourceReference::builder()
                                 .target(resolved.target)
@@ -1226,7 +1207,7 @@ pub fn extract_type_references(
                             extract_last_segment_from_scoped_type_identifier(capture.node, source)
                                 .unwrap_or_else(|| full_path.clone());
                         // Resolve to normalize crate::, self::, super:: paths
-                        let resolved = ctx.resolve(&full_path, &simple_name);
+                        let resolved = resolve_reference(&full_path, &simple_name, ctx);
                         if seen.insert(resolved.clone()) {
                             if let Ok(source_ref) = SourceReference::builder()
                                 .target(resolved.target)
@@ -1401,6 +1382,7 @@ pub fn get_file_import_map(node: Node, source: &str) -> ImportMap {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::common::path_config::RUST_PATH_CONFIG;
     use tree_sitter::Parser;
 
     /// Parse Rust source code and return the root node
@@ -1633,6 +1615,8 @@ pub fn make_requests() {
             parent_scope: None,
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         let local_vars = std::collections::HashMap::new();
@@ -1692,6 +1676,8 @@ pub fn make_requests() {
             parent_scope: Some("test_crate"),
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         // Extract function calls
@@ -1736,6 +1722,8 @@ pub fn make_requests() {
             parent_scope: Some("test_crate"),
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         // Extract generics with bounds - this should resolve "Processor" to "test_crate::Processor"
@@ -1790,6 +1778,8 @@ pub fn make_requests() {
             parent_scope: Some("test_crate"),
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         // Extract generics with bounds
@@ -1884,13 +1874,16 @@ pub fn make_requests() {
             func_node.utf8_text(source.as_bytes()).unwrap()
         );
 
-        // Build resolution context
+        // Build resolution context with edge case handlers for UFCS
         let import_map = crate::common::import_map::ImportMap::new("::");
+        let edge_case_registry = get_rust_edge_case_registry();
         let ctx = RustResolutionContext {
             import_map: &import_map,
             parent_scope: None,
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: Some(&edge_case_registry),
         };
 
         let local_vars = std::collections::HashMap::new();
@@ -1930,6 +1923,8 @@ pub fn make_requests() {
             parent_scope: None,
             package_name: Some("test_crate"),
             current_module: None,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         let local_vars = std::collections::HashMap::new();

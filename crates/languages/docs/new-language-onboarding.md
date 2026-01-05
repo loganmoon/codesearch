@@ -171,7 +171,6 @@ crates/languages/
 │   │   ├── mod.rs                  # define_language_extractor! macro
 │   │   ├── queries.rs              # Tree-sitter queries
 │   │   ├── module_path.rs          # Module path resolution
-│   │   ├── rust_path.rs            # Rust path parsing utilities
 │   │   └── handler_impls/          # Entity extraction handlers
 │   │       ├── mod.rs
 │   │       ├── common.rs           # Shared utilities
@@ -199,7 +198,6 @@ crates/languages/
 
 pub(crate) mod handler_impls;
 pub mod module_path;
-pub mod rust_path;
 pub(crate) mod queries;
 
 use crate::qualified_name::{ScopeConfiguration, ScopePattern};
@@ -384,7 +382,8 @@ let relationships = EntityRelationshipData {
 The `is_external` flag indicates whether a reference targets code outside the repository:
 
 ```rust
-use crate::rust::rust_path::RustPath;
+use crate::common::language_path::LanguagePath;
+use crate::common::path_config::RUST_PATH_CONFIG;
 
 fn create_source_reference(
     resolved: &ResolvedReference,
@@ -399,9 +398,9 @@ fn create_source_reference(
     )
 }
 
-// For Rust, use RustPath to parse and determine externality
-let rust_path = RustPath::parse(&import_path);
-let is_external = !rust_path.is_relative();  // External if not crate-relative
+// For Rust, use LanguagePath to parse and determine externality
+let lang_path = LanguagePath::parse(&import_path, &RUST_PATH_CONFIG);
+let is_external = !lang_path.is_relative();  // External if not crate-relative
 ```
 
 ### 4.3 Relationship Field Usage

@@ -1,11 +1,11 @@
 //! Rust language extractor module
 
+pub mod edge_case_handlers;
 pub(crate) mod entities;
 pub(crate) mod handler_impls;
 pub mod import_resolution;
 pub mod module_path;
 pub(crate) mod queries;
-pub mod rust_path;
 
 use crate::qualified_name::ScopePattern;
 use codesearch_languages_macros::define_language_extractor;
@@ -33,6 +33,13 @@ define_language_extractor! {
     fqn: {
         separator: "::",
         module_path_fn: module_path::derive_module_path,
+        relative_prefixes: {
+            "crate::" => Root,
+            "self::" => Current,
+            "super::" => Parent { chainable: true },
+        },
+        external_prefixes: ["std", "core", "alloc", "external"],
+        edge_cases: edge_case_handlers::RUST_EDGE_CASE_HANDLERS,
     },
 
     entities: {

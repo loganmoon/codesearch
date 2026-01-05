@@ -1,5 +1,6 @@
 //! Qualified name building via Tree-sitter parent traversal
 
+use std::path::Path;
 use tree_sitter::Node;
 
 /// Configuration for extracting scope names from AST nodes
@@ -8,6 +9,9 @@ pub struct ScopePattern {
     pub node_kind: &'static str,
     pub field_name: &'static str,
 }
+
+/// Function type for deriving module path from file path
+pub type ModulePathFn = fn(&Path, &Path) -> Option<String>;
 
 /// Language-specific scope configuration for qualified name building
 ///
@@ -20,6 +24,9 @@ pub struct ScopeConfiguration {
     pub separator: &'static str,
     /// Patterns for identifying scope containers in the AST
     pub patterns: &'static [ScopePattern],
+    /// Optional function for deriving module path from file path
+    /// Takes (file_path, source_root) and returns the module path
+    pub module_path_fn: Option<ModulePathFn>,
 }
 
 inventory::collect!(ScopeConfiguration);
@@ -93,4 +100,19 @@ fn extract_scope_name_generic(
         }
     }
     None
+}
+
+/// Derive module path for a language using registered configuration
+///
+/// Looks up the module path function via inventory and calls it if found.
+/// Returns None if no configuration exists or no module_path_fn is registered.
+pub fn derive_module_path_for_language(
+    file_path: &Path,
+    source_root: &Path,
+    language: &str,
+) -> Option<String> {
+    inventory::iter::<ScopeConfiguration>()
+        .find(|config| config.language == language)
+        .and_then(|config| config.module_path_fn)
+        .and_then(|f| f(file_path, source_root))
 }

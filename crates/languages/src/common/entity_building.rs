@@ -105,9 +105,9 @@ pub fn extract_common_components(
     let separator = scope_result.separator;
 
     // Derive module path from file path (if source_root is available)
-    let module_prefix = ctx
-        .source_root
-        .and_then(|root| derive_module_path_for_language(ctx.file_path, root, language));
+    let module_prefix = ctx.source_root.and_then(|root| {
+        crate::qualified_name::derive_module_path_for_language(ctx.file_path, root, language)
+    });
 
     // Compose fully qualified name: package::module::ast_scope::name
     let qualified_name = compose_qualified_name(
@@ -165,22 +165,6 @@ pub fn extract_common_components(
         file_path: ctx.file_path.to_path_buf(),
         location,
     })
-}
-
-/// Derive module path from file path for a specific language
-fn derive_module_path_for_language(
-    file_path: &Path,
-    source_root: &Path,
-    language: &str,
-) -> Option<String> {
-    match language {
-        "rust" => crate::rust::module_path::derive_module_path(file_path, source_root),
-        "python" => crate::python::module_path::derive_module_path(file_path, source_root),
-        "javascript" | "typescript" => {
-            crate::javascript::module_path::derive_module_path(file_path, source_root)
-        }
-        _ => None,
-    }
 }
 
 /// Compose a fully qualified name from components

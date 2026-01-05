@@ -117,12 +117,6 @@ pub fn handle_type_alias_impl(
     // Extract type references from the aliased type for USES relationships
     let uses_types_refs =
         extract_type_refs_from_type_expr(&aliased_type, &resolution_ctx, &generics);
-    if !uses_types_refs.is_empty() {
-        let targets: Vec<&str> = uses_types_refs.iter().map(|r| r.target.as_str()).collect();
-        if let Ok(json) = serde_json::to_string(&targets) {
-            metadata.attributes.insert("uses_types".to_string(), json);
-        }
-    }
 
     // Build typed relationships
     let relationships = EntityRelationshipData {

@@ -5,11 +5,14 @@ pub mod module_path;
 pub(crate) mod queries;
 pub mod utils;
 
-use crate::qualified_name::{ScopeConfiguration, ScopePattern};
+use crate::qualified_name::ScopePattern;
 use codesearch_languages_macros::define_language_extractor;
 
 /// Scope patterns for Python qualified name building
-const PYTHON_SCOPE_PATTERNS: &[ScopePattern] = &[
+///
+/// These patterns identify AST nodes that contribute to qualified names.
+/// Used by the macro-generated ScopeConfiguration.
+const SCOPE_PATTERNS: &[ScopePattern] = &[
     ScopePattern {
         node_kind: "class_definition",
         field_name: "name",
@@ -20,18 +23,15 @@ const PYTHON_SCOPE_PATTERNS: &[ScopePattern] = &[
     },
 ];
 
-inventory::submit! {
-    ScopeConfiguration {
-        language: "python",
-        separator: ".",
-        patterns: PYTHON_SCOPE_PATTERNS,
-    }
-}
-
 define_language_extractor! {
     language: Python,
     tree_sitter: tree_sitter_python::LANGUAGE,
     extensions: ["py", "pyi"],
+
+    fqn: {
+        separator: ".",
+        module_path_fn: module_path::derive_module_path,
+    },
 
     entities: {
         function => {

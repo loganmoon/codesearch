@@ -7,11 +7,14 @@ pub mod module_path;
 pub(crate) mod queries;
 pub mod rust_path;
 
-use crate::qualified_name::{ScopeConfiguration, ScopePattern};
+use crate::qualified_name::ScopePattern;
 use codesearch_languages_macros::define_language_extractor;
 
 /// Scope patterns for Rust qualified name building
-const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
+///
+/// These patterns identify AST nodes that contribute to qualified names.
+/// Used by the macro-generated ScopeConfiguration.
+const SCOPE_PATTERNS: &[ScopePattern] = &[
     ScopePattern {
         node_kind: "mod_item",
         field_name: "name",
@@ -22,18 +25,15 @@ const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
     },
 ];
 
-inventory::submit! {
-    ScopeConfiguration {
-        language: "rust",
-        separator: "::",
-        patterns: RUST_SCOPE_PATTERNS,
-    }
-}
-
 define_language_extractor! {
     language: Rust,
     tree_sitter: tree_sitter_rust::LANGUAGE,
     extensions: ["rs"],
+
+    fqn: {
+        separator: "::",
+        module_path_fn: module_path::derive_module_path,
+    },
 
     entities: {
         function => {

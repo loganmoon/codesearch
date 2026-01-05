@@ -18,7 +18,14 @@ struct LanguageExtractorInput {
     language_name: Ident,
     tree_sitter_language: Expr,
     extensions: Vec<LitStr>,
+    fqn_config: Option<FqnConfig>,
     entities: Vec<EntityExtractor>,
+}
+
+/// FQN (Fully Qualified Name) configuration
+struct FqnConfig {
+    separator: LitStr,
+    module_path_fn: Option<Expr>,
 }
 
 /// Configuration for a single entity type extractor
@@ -33,6 +40,7 @@ impl Parse for LanguageExtractorInput {
         let mut language_name = None;
         let mut tree_sitter_language = None;
         let mut extensions = None;
+        let mut fqn_config = None;
         let mut entities = None;
 
         while !input.is_empty() {
@@ -58,6 +66,48 @@ impl Parse for LanguageExtractorInput {
                     let ext_list: Punctuated<LitStr, Token![,]> =
                         Punctuated::parse_terminated(&content)?;
                     extensions = Some(ext_list.into_iter().collect());
+                    if !input.is_empty() && !input.peek(syn::token::Brace) {
+                        input.parse::<Token![,]>()?;
+                    }
+                }
+                "fqn" => {
+                    let content;
+                    braced!(content in input);
+
+                    let mut separator = None;
+                    let mut module_path_fn = None;
+
+                    while !content.is_empty() {
+                        let fqn_field: Ident = content.parse()?;
+                        content.parse::<Token![:]>()?;
+
+                        match fqn_field.to_string().as_str() {
+                            "separator" => {
+                                separator = Some(content.parse::<LitStr>()?);
+                            }
+                            "module_path_fn" => {
+                                module_path_fn = Some(content.parse::<Expr>()?);
+                            }
+                            _ => {
+                                return Err(syn::Error::new(
+                                    fqn_field.span(),
+                                    format!("Unknown fqn field: {fqn_field}"),
+                                ))
+                            }
+                        }
+
+                        if !content.is_empty() {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+
+                    fqn_config = Some(FqnConfig {
+                        separator: separator.ok_or_else(|| {
+                            syn::Error::new(input.span(), "Missing 'separator' in fqn block")
+                        })?,
+                        module_path_fn,
+                    });
+
                     if !input.is_empty() && !input.peek(syn::token::Brace) {
                         input.parse::<Token![,]>()?;
                     }
@@ -134,6 +184,7 @@ impl Parse for LanguageExtractorInput {
                 .ok_or_else(|| syn::Error::new(input.span(), "Missing 'tree_sitter' field"))?,
             extensions: extensions
                 .ok_or_else(|| syn::Error::new(input.span(), "Missing 'extensions' field"))?,
+            fqn_config,
             entities: entities
                 .ok_or_else(|| syn::Error::new(input.span(), "Missing 'entities' field"))?,
         })
@@ -148,14 +199,24 @@ impl Parse for LanguageExtractorInput {
 /// - An Extractor trait implementation
 /// - Inventory registration for automatic discovery
 /// - Handler wrapper functions
+/// - FQN (Fully Qualified Name) configuration (if `fqn:` block provided)
 ///
 /// # Example
 ///
 /// ```ignore
+/// // Required: define SCOPE_PATTERNS if using fqn: block
+/// const SCOPE_PATTERNS: &[ScopePattern] = &[
+///     ScopePattern { node_kind: "mod_item", field_name: "name" },
+/// ];
+///
 /// define_language_extractor! {
-///     language: JavaScript,
-///     tree_sitter: tree_sitter_javascript::LANGUAGE,
-///     extensions: ["js", "jsx"],
+///     language: Rust,
+///     tree_sitter: tree_sitter_rust::LANGUAGE,
+///     extensions: ["rs"],
+///
+///     fqn: {
+///         separator: "::",
+///     },
 ///
 ///     entities: {
 ///         function => {
@@ -178,6 +239,32 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
     let extractor_name = quote::format_ident!("{language_name}Extractor");
     let tree_sitter_lang = &input.tree_sitter_language;
     let extensions = &input.extensions;
+
+    // Generate FQN config constant and scope configuration if fqn block is present
+    let fqn_output = if let Some(ref fqn_config) = input.fqn_config {
+        let separator = &fqn_config.separator;
+        let module_path_fn_value = match &fqn_config.module_path_fn {
+            Some(expr) => quote! { Some(#expr) },
+            None => quote! { None },
+        };
+        quote! {
+            /// FQN separator for this language
+            pub const FQN_SEPARATOR: &str = #separator;
+
+            // Register scope configuration with inventory
+            // Note: scope_patterns should be defined in the language module as SCOPE_PATTERNS
+            inventory::submit! {
+                crate::qualified_name::ScopeConfiguration {
+                    language: #language_name_lower,
+                    separator: #separator,
+                    patterns: SCOPE_PATTERNS,
+                    module_path_fn: #module_path_fn_value,
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     // Generate add_extractor calls for each entity type
     let add_extractor_calls: Vec<_> = input
@@ -230,6 +317,8 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
 
     // Generate the complete output
     let expanded = quote! {
+        #fqn_output
+
         /// Language extractor for #language_name
         pub struct #extractor_name {
             repository_id: String,

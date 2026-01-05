@@ -1,64 +1,57 @@
-//! JavaScript language extractor module
+//! JavaScript language extractor module (STUBBED)
+//!
+//! This module is temporarily stubbed pending the new macro architecture implementation.
+//! See issue #179 for the migration plan.
+//!
+//! ## Re-enabling JavaScript extraction
+//!
+//! When implementing the full extractor, ensure you:
+//! 1. Use `define_language_extractor!` macro with a `fqn:` block
+//! 2. Define `SCOPE_PATTERNS` for qualified name building
+//! 3. Provide `module_path_fn` if module path derivation is needed
+//!
+//! The macro will automatically register `ScopeConfiguration` via inventory.
 
-pub(crate) mod handler_impls;
-pub mod module_path;
-pub(crate) mod queries;
-pub mod utils;
+use codesearch_core::{error::Result, CodeEntity};
+use std::path::{Path, PathBuf};
 
-use crate::qualified_name::{ScopeConfiguration, ScopePattern};
-use codesearch_languages_macros::define_language_extractor;
+/// JavaScript extractor (stubbed)
+///
+/// Returns empty entity vectors. Full implementation pending macro architecture migration.
+pub struct JavaScriptExtractor;
 
-/// Scope patterns for JavaScript qualified name building
-/// Includes abstract_class_declaration for TypeScript support (TS delegates to JS handlers)
-const JAVASCRIPT_SCOPE_PATTERNS: &[ScopePattern] = &[
-    ScopePattern {
-        node_kind: "class_declaration",
-        field_name: "name",
-    },
-    // TypeScript abstract classes (tree-sitter-typescript extends tree-sitter-javascript)
-    ScopePattern {
-        node_kind: "abstract_class_declaration",
-        field_name: "name",
-    },
-    ScopePattern {
-        node_kind: "function_declaration",
-        field_name: "name",
-    },
-];
-
-inventory::submit! {
-    ScopeConfiguration {
-        language: "javascript",
-        separator: ".",
-        patterns: JAVASCRIPT_SCOPE_PATTERNS,
+impl JavaScriptExtractor {
+    /// Create a new JavaScript extractor
+    pub fn new(
+        _repository_id: String,
+        _package_name: Option<String>,
+        _source_root: Option<PathBuf>,
+        _repo_root: PathBuf,
+    ) -> Result<Self> {
+        Ok(Self)
     }
 }
 
-define_language_extractor! {
-    language: JavaScript,
-    tree_sitter: tree_sitter_javascript::LANGUAGE,
-    extensions: ["js", "jsx"],
+impl crate::Extractor for JavaScriptExtractor {
+    fn extract(&self, _source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
+        tracing::warn!(
+            "JavaScript extraction is currently disabled (pending macro migration). \
+             File will not be indexed: {}",
+            file_path.display()
+        );
+        Ok(Vec::new())
+    }
+}
 
-    entities: {
-        function => {
-            query: queries::FUNCTION_QUERY,
-            handler: handler_impls::handle_function_impl,
-        },
-        arrow_function => {
-            query: queries::ARROW_FUNCTION_QUERY,
-            handler: handler_impls::handle_arrow_function_impl,
-        },
-        class => {
-            query: queries::CLASS_QUERY,
-            handler: handler_impls::handle_class_impl,
-        },
-        method => {
-            query: queries::METHOD_QUERY,
-            handler: handler_impls::handle_method_impl,
-        },
-        module => {
-            query: queries::MODULE_QUERY,
-            handler: handler_impls::handle_module_impl,
-        }
+inventory::submit! {
+    crate::LanguageDescriptor {
+        name: "javascript",
+        extensions: &["js", "jsx"],
+        factory: |repo_id, pkg_name, src_root, repo_root| Ok(Box::new(JavaScriptExtractor::new(
+            repo_id.to_string(),
+            pkg_name.map(String::from),
+            src_root.map(PathBuf::from),
+            repo_root.to_path_buf(),
+        )?)),
     }
 }

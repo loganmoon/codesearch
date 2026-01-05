@@ -11,6 +11,7 @@ use crate::common::import_map::ImportMap;
 use crate::common::language_path::LanguagePath;
 use crate::common::path_config::RUST_PATH_CONFIG;
 use streaming_iterator::StreamingIterator;
+use tracing::error;
 use tree_sitter::{Node, Query, QueryCursor};
 
 /// Parse Rust use declarations
@@ -52,7 +53,10 @@ pub fn parse_rust_imports(root: Node, source: &str) -> ImportMap {
     let language = tree_sitter_rust::LANGUAGE.into();
     let query = match Query::new(&language, query_source) {
         Ok(q) => q,
-        Err(_) => return import_map,
+        Err(e) => {
+            error!(error = %e, "Failed to compile Rust import parsing query");
+            return import_map;
+        }
     };
 
     let mut cursor = QueryCursor::new();

@@ -400,7 +400,9 @@ fn create_source_reference(
 
 // For Rust, use LanguagePath to parse and determine externality
 let lang_path = LanguagePath::parse(&import_path, &RUST_PATH_CONFIG);
-let is_external = !lang_path.is_relative();  // External if not crate-relative
+// is_relative() checks for crate::/self::/super:: prefixes (internal references)
+// is_external() checks for known stdlib prefixes (std::/core::/alloc::)
+let is_external = !lang_path.is_relative() && lang_path.is_external();
 ```
 
 ### 4.3 Relationship Field Usage

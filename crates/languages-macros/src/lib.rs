@@ -332,11 +332,18 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                 let chainable = entry.chainable;
 
                 // Map semantics identifier to the enum variant
-                let semantics_value = match semantics_name.to_string().as_str() {
+                let semantics_str = semantics_name.to_string();
+                let semantics_value = match semantics_str.as_str() {
                     "Root" => quote! { crate::common::path_config::RelativeSemantics::Root },
                     "Current" => quote! { crate::common::path_config::RelativeSemantics::Current },
                     "Parent" => quote! { crate::common::path_config::RelativeSemantics::Parent { levels: 1 } },
-                    _ => quote! { crate::common::path_config::RelativeSemantics::Root }, // Default
+                    unknown => {
+                        let msg = format!(
+                            "Unknown relative semantics '{}'. Expected one of: Root, Current, Parent",
+                            unknown
+                        );
+                        return syn::Error::new(semantics_name.span(), msg).to_compile_error();
+                    }
                 };
 
                 quote! {

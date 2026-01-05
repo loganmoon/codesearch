@@ -11,6 +11,7 @@ use super::edge_case_handlers::{EdgeCaseContext, EdgeCaseRegistry};
 use super::import_map::ImportMap;
 use super::language_path::LanguagePath;
 use super::path_config::PathConfig;
+use tracing::trace;
 
 /// Result of resolving a reference
 ///
@@ -113,6 +114,11 @@ pub fn resolve_reference(
             path_config: ctx.path_config,
         };
         if let Some(resolved) = registry.try_resolve(name, simple_name, &edge_ctx) {
+            trace!(
+                name = name,
+                target = resolved.target,
+                "Resolved via edge case handler"
+            );
             return resolved;
         }
     }
@@ -300,16 +306,26 @@ pub fn resolve_reference(
     // 4. Try glob imports (use first glob import as best-effort resolution)
     if let Some(glob_path) = ctx.import_map.glob_imports().first() {
         let result = format!("{}{}{}", glob_path, config.separator, name);
+        trace!(
+            name = name,
+            glob_path = glob_path,
+            target = result,
+            "Resolved via glob import fallback"
+        );
         return ResolvedReference::new(result, simple, config);
     }
 
     // 5. Try parent scope
     if let Some(scope) = ctx.parent_scope {
         if !scope.is_empty() {
-            return ResolvedReference::internal(
-                format!("{}{}{}", scope, config.separator, name),
-                simple,
+            let target = format!("{}{}{}", scope, config.separator, name);
+            trace!(
+                name = name,
+                parent_scope = scope,
+                target = target,
+                "Resolved via parent scope fallback"
             );
+            return ResolvedReference::internal(target, simple);
         }
     }
 
@@ -331,6 +347,13 @@ pub fn resolve_reference(
     parts.push(name.to_string());
 
     let target = parts.join(config.separator);
+    trace!(
+        name = name,
+        target = target,
+        package = ctx.package_name,
+        module = ctx.current_module,
+        "Resolved via module-local fallback"
+    );
     ResolvedReference::internal(target, simple)
 }
 
@@ -471,5 +494,96 @@ mod tests {
 
         assert_eq!(result.target, "pkg::a::ancestor");
         assert!(!result.is_external);
+    }
+
+    // ========================================================================
+    // Tests for edge_case_handlers integration
+    // ========================================================================
+
+    fn make_context_with_handlers<'a>(
+        import_map: &'a ImportMap,
+        parent_scope: Option<&'a str>,
+        package_name: Option<&'a str>,
+        current_module: Option<&'a str>,
+        edge_case_handlers: Option<&'a EdgeCaseRegistry>,
+    ) -> ResolutionContext<'a> {
+        ResolutionContext {
+            import_map,
+            parent_scope,
+            package_name,
+            current_module,
+            path_config: &RUST_PATH_CONFIG,
+            edge_case_handlers,
+        }
+    }
+
+    #[test]
+    fn test_resolve_with_ufcs_edge_case_handler() {
+        use crate::rust::edge_case_handlers::RUST_EDGE_CASE_HANDLERS;
+
+        let import_map = ImportMap::new("::");
+        let registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
+        let ctx = make_context_with_handlers(
+            &import_map,
+            None,
+            Some("test_crate"),
+            None,
+            Some(&registry),
+        );
+
+        // UFCS pattern should be handled by UfcsHandler
+        let result = resolve_reference("<Data as Processor>::process", "process", &ctx);
+
+        assert!(
+            result.target.starts_with('<'),
+            "UFCS should preserve angle bracket syntax"
+        );
+        assert!(
+            result.target.contains("test_crate::Data"),
+            "Type should be qualified with package"
+        );
+        assert!(
+            result.target.contains("test_crate::Processor"),
+            "Trait should be qualified with package"
+        );
+    }
+
+    #[test]
+    fn test_resolve_with_std_type_edge_case_handler() {
+        use crate::rust::edge_case_handlers::RUST_EDGE_CASE_HANDLERS;
+
+        let import_map = ImportMap::new("::");
+        let registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
+        let ctx = make_context_with_handlers(
+            &import_map,
+            None,
+            Some("mypackage"),
+            Some("utils"),
+            Some(&registry),
+        );
+
+        // Vec should be recognized as std type by StdTypeHandler
+        let result = resolve_reference("Vec", "Vec", &ctx);
+
+        assert_eq!(result.target, "Vec");
+        assert!(
+            result.is_external,
+            "Vec should be marked as external std type"
+        );
+    }
+
+    #[test]
+    fn test_resolve_without_edge_case_handlers_falls_through() {
+        let import_map = ImportMap::new("::");
+        // No edge case handlers - UFCS won't be specially handled
+        let ctx = make_context(&import_map, None, Some("test_crate"), None);
+
+        let result = resolve_reference("<Data as Processor>::process", "process", &ctx);
+
+        // Without handlers, it falls through to normal resolution
+        // The < character makes it not match normal path patterns
+        assert!(!result
+            .target
+            .contains("test_crate::Data as test_crate::Processor"));
     }
 }

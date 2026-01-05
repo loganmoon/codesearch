@@ -57,13 +57,20 @@ pub fn build_qualified_name_from_ast(
 
     let (patterns, separator) = match config {
         Some(cfg) => (cfg.patterns, cfg.separator),
-        None => (
-            &[] as &[ScopePattern],
-            match language {
-                "rust" => "::",
-                _ => ".",
-            },
-        ),
+        None => {
+            tracing::warn!(
+                "No ScopeConfiguration registered for language '{language}'. \
+                 Using default separator and empty patterns. \
+                 Ensure the language module registers its configuration via inventory."
+            );
+            (
+                &[] as &[ScopePattern],
+                match language {
+                    "rust" => "::",
+                    _ => ".",
+                },
+            )
+        }
     };
 
     // Walk up the tree collecting scope names
@@ -111,8 +118,24 @@ pub fn derive_module_path_for_language(
     source_root: &Path,
     language: &str,
 ) -> Option<String> {
-    inventory::iter::<ScopeConfiguration>()
-        .find(|config| config.language == language)
-        .and_then(|config| config.module_path_fn)
-        .and_then(|f| f(file_path, source_root))
+    let config = inventory::iter::<ScopeConfiguration>().find(|c| c.language == language);
+
+    let Some(cfg) = config else {
+        tracing::trace!("No ScopeConfiguration found for language '{language}'");
+        return None;
+    };
+
+    let Some(module_path_fn) = cfg.module_path_fn else {
+        tracing::trace!("No module_path_fn registered for language '{language}'");
+        return None;
+    };
+
+    let result = module_path_fn(file_path, source_root);
+    if result.is_none() {
+        tracing::trace!(
+            "module_path_fn returned None for {language} file: {}",
+            file_path.display()
+        );
+    }
+    result
 }

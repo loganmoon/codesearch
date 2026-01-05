@@ -2,6 +2,15 @@
 //!
 //! This module is temporarily stubbed pending the new macro architecture implementation.
 //! See issue #179 for the migration plan.
+//!
+//! ## Re-enabling JavaScript extraction
+//!
+//! When implementing the full extractor, ensure you:
+//! 1. Use `define_language_extractor!` macro with a `fqn:` block
+//! 2. Define `SCOPE_PATTERNS` for qualified name building
+//! 3. Provide `module_path_fn` if module path derivation is needed
+//!
+//! The macro will automatically register `ScopeConfiguration` via inventory.
 
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::{Path, PathBuf};
@@ -25,8 +34,9 @@ impl JavaScriptExtractor {
 
 impl crate::Extractor for JavaScriptExtractor {
     fn extract(&self, _source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
-        tracing::debug!(
-            "JavaScript extraction stubbed (pending macro migration): {}",
+        tracing::warn!(
+            "JavaScript extraction is currently disabled (pending macro migration). \
+             File will not be indexed: {}",
             file_path.display()
         );
         Ok(Vec::new())

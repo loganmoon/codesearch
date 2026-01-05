@@ -10,12 +10,13 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::language_path::LanguagePath;
+use crate::common::path_config::RUST_PATH_CONFIG;
 use crate::rust::handler_impls::common::{
     extract_preceding_doc_comments, extract_visibility, find_capture_node, node_to_text,
     require_capture_node,
 };
 use crate::rust::handler_impls::constants::capture_names;
-use crate::rust::rust_path::RustPath;
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, EntityType, Language, ReferenceType, SourceLocation,
     SourceReference,
@@ -44,14 +45,14 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
                     continue;
                 }
 
-                // Use RustPath for proper parsing - encapsulates path logic
-                let rust_path = RustPath::parse(import_path);
+                // Use LanguagePath for proper parsing - encapsulates path logic
+                let lang_path = LanguagePath::parse(import_path, &RUST_PATH_CONFIG);
 
-                // Extract simple name using RustPath
-                let simple_name = rust_path
+                // Extract simple name using LanguagePath
+                let simple_name = lang_path
                     .simple_name()
                     .unwrap_or_else(|| {
-                        rust_path
+                        lang_path
                             .segments()
                             .first()
                             .map(String::as_str)
@@ -65,13 +66,13 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
                 }
 
                 // Determine if external: relative paths (crate::, self::, super::) are internal
-                let is_external = !rust_path.is_relative();
+                let is_external = !lang_path.is_relative();
 
                 let location = SourceLocation::from_tree_sitter_node(child);
 
-                // Use rust_path.to_qualified_name() to ensure consistency with RustPath parsing
+                // Use lang_path.to_qualified_name() to ensure consistency with LanguagePath parsing
                 if let Ok(source_ref) = SourceReference::builder()
-                    .target(rust_path.to_qualified_name())
+                    .target(lang_path.to_qualified_name())
                     .simple_name(simple_name)
                     .is_external(is_external)
                     .location(location)

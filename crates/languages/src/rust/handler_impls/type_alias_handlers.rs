@@ -10,10 +10,11 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::path_config::RUST_PATH_CONFIG;
 use crate::rust::handler_impls::common::{
     extract_generics_from_node, extract_preceding_doc_comments, extract_visibility,
-    find_capture_node, get_file_import_map, node_to_text, require_capture_node,
-    RustResolutionContext,
+    find_capture_node, get_file_import_map, get_rust_edge_case_registry, node_to_text,
+    require_capture_node, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::capture_names;
 use crate::rust::handler_impls::type_handlers::extract_type_refs_from_type_expr;
@@ -75,11 +76,14 @@ pub fn handle_type_alias_impl(
         source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
 
     // Build resolution context for qualified name normalization
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract Rust-specific: visibility, documentation, content

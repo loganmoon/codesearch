@@ -23,10 +23,8 @@ use std::collections::HashMap;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor};
 
-// Re-export Rust-specific functions from the rust module for backward compatibility
-pub use crate::rust::import_resolution::{
-    normalize_rust_path, parse_rust_imports, parse_trait_impl_short_form, resolve_rust_reference,
-};
+// Re-export Rust-specific import parsing function from the rust module
+pub use crate::rust::import_resolution::parse_rust_imports;
 
 /// Language-agnostic import map for resolving bare identifiers to qualified names
 #[derive(Debug, Default)]
@@ -105,22 +103,6 @@ impl ImportMap {
         self.mappings.values().cloned().collect()
     }
 
-    /// Get all imported qualified paths with Rust path normalization
-    ///
-    /// Normalizes crate::, self::, and super:: prefixes to absolute paths.
-    /// This is needed because import statements store paths with relative prefixes,
-    /// but entity qualified_names use absolute paths (package::module::name).
-    pub fn imported_paths_normalized(
-        &self,
-        package_name: Option<&str>,
-        current_module: Option<&str>,
-    ) -> Vec<String> {
-        self.mappings
-            .values()
-            .map(|path| normalize_rust_path(path, package_name, current_module))
-            .collect()
-    }
-
     /// Check if any imported path starts with the given crate prefix.
     ///
     /// This helps distinguish external crates from local modules. If we have
@@ -140,7 +122,7 @@ impl ImportMap {
 /// 2. Try import map
 /// 3. Try parent_scope::name
 /// 4. Mark as external::name
-pub fn resolve_reference(
+pub(crate) fn resolve_reference(
     name: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
@@ -187,7 +169,10 @@ pub fn resolve_reference(
 /// import: "../utils" -> "utils"
 /// import: "lodash" -> None (not a relative import)
 /// ```
-pub fn resolve_relative_import(current_module_path: &str, import_path: &str) -> Option<String> {
+pub(crate) fn resolve_relative_import(
+    current_module_path: &str,
+    import_path: &str,
+) -> Option<String> {
     // Only handle relative imports (starting with . or ..)
     if !import_path.starts_with('.') {
         return None;
@@ -248,7 +233,7 @@ pub fn resolve_relative_import(current_module_path: &str, import_path: &str) -> 
 /// * `language` - The programming language
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom").
 ///   Used to resolve relative imports to absolute qualified names that match entity qualified_names.
-pub fn parse_file_imports(
+pub(crate) fn parse_file_imports(
     root: Node,
     source: &str,
     language: Language,
@@ -280,7 +265,11 @@ pub fn parse_file_imports(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
-pub fn parse_js_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
+pub(crate) fn parse_js_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -423,7 +412,11 @@ fn parse_js_import_specifier(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
-pub fn parse_ts_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
+pub(crate) fn parse_ts_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -537,7 +530,7 @@ fn resolve_python_relative_import(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
-pub fn parse_python_imports(
+pub(crate) fn parse_python_imports(
     root: Node,
     source: &str,
     current_module_path: Option<&str>,
@@ -695,7 +688,7 @@ pub fn parse_python_imports(
 }
 
 /// Get the AST root node from any node in the tree
-pub fn get_ast_root(node: Node) -> Node {
+pub(crate) fn get_ast_root(node: Node) -> Node {
     let mut root = node;
     while let Some(parent) = root.parent() {
         root = parent;
@@ -1090,421 +1083,6 @@ import lodash from 'lodash';
 
         // Without module_path, relative import becomes raw path
         assert_eq!(import_map.resolve("foo"), Some("./bar.foo"));
-    }
-
-    // ========================================================================
-    // Tests for Rust path normalization (crate::, self::, super::)
-    // ========================================================================
-
-    #[test]
-    fn test_normalize_rust_path_crate_with_package() {
-        // crate::foo::Bar with package "mypackage" -> mypackage::foo::Bar
-        assert_eq!(
-            normalize_rust_path("crate::foo::Bar", Some("mypackage"), Some("utils")),
-            "mypackage::foo::Bar"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_crate_without_package() {
-        // crate::foo::Bar without package -> foo::Bar
-        assert_eq!(
-            normalize_rust_path("crate::foo::Bar", None, Some("utils")),
-            "foo::Bar"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_self_with_module() {
-        // self::helper in mypackage::utils::network -> mypackage::utils::network::helper
-        assert_eq!(
-            normalize_rust_path("self::helper", Some("mypackage"), Some("utils::network")),
-            "mypackage::utils::network::helper"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_self_without_module() {
-        // self::helper with package but no module -> mypackage::helper
-        assert_eq!(
-            normalize_rust_path("self::helper", Some("mypackage"), None),
-            "mypackage::helper"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_super_with_parent() {
-        // super::other in mypackage::utils::network -> mypackage::utils::other
-        assert_eq!(
-            normalize_rust_path("super::other", Some("mypackage"), Some("utils::network")),
-            "mypackage::utils::other"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_super_at_root() {
-        // super::other in mypackage::utils (single-level module) -> mypackage::other
-        assert_eq!(
-            normalize_rust_path("super::other", Some("mypackage"), Some("utils")),
-            "mypackage::other"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_super_without_module() {
-        // super::other without module context -> mypackage::other
-        assert_eq!(
-            normalize_rust_path("super::other", Some("mypackage"), None),
-            "mypackage::other"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_not_relative() {
-        // std::io::Read is not a relative path, should be returned as-is
-        assert_eq!(
-            normalize_rust_path("std::io::Read", Some("mypackage"), Some("utils")),
-            "std::io::Read"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_crate_path() {
-        let map = ImportMap::new("::");
-        // crate:: path should be normalized, not passed through
-        assert_eq!(
-            resolve_rust_reference(
-                "crate::utils::helper",
-                "helper",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("network")
-            )
-            .target,
-            "mypackage::utils::helper"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_self_path() {
-        let map = ImportMap::new("::");
-        // self:: path should be normalized
-        assert_eq!(
-            resolve_rust_reference(
-                "self::helper",
-                "helper",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("utils::network")
-            )
-            .target,
-            "mypackage::utils::network::helper"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_super_path() {
-        let map = ImportMap::new("::");
-        // super:: path should be normalized
-        assert_eq!(
-            resolve_rust_reference(
-                "super::other",
-                "other",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("utils::network")
-            )
-            .target,
-            "mypackage::utils::other"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_falls_back_to_standard() {
-        let mut map = ImportMap::new("::");
-        map.add("Read", "std::io::Read");
-
-        // Non-relative paths should use standard resolution
-        assert_eq!(
-            resolve_rust_reference("Read", "Read", &map, None, Some("mypackage"), Some("utils"))
-                .target,
-            "std::io::Read"
-        );
-
-        // Already scoped paths pass through
-        assert_eq!(
-            resolve_rust_reference(
-                "std::fmt::Display",
-                "Display",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("utils")
-            )
-            .target,
-            "std::fmt::Display"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_with_parent_scope() {
-        let map = ImportMap::new("::");
-        // When not a crate::/self::/super:: path and not in imports,
-        // should fall back to parent_scope::name
-        assert_eq!(
-            resolve_rust_reference(
-                "MyType",
-                "MyType",
-                &map,
-                Some("parent::module"),
-                Some("pkg"),
-                Some("mod")
-            )
-            .target,
-            "parent::module::MyType"
-        );
-    }
-
-    // ========================================================================
-    // Tests for chained super:: paths (super::super::foo)
-    // ========================================================================
-
-    #[test]
-    fn test_normalize_rust_path_double_super() {
-        // super::super::thing in mypackage::a::b::c should resolve to mypackage::a::thing
-        assert_eq!(
-            normalize_rust_path("super::super::thing", Some("mypackage"), Some("a::b::c")),
-            "mypackage::a::thing"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_triple_super() {
-        // super::super::super::thing in mypackage::a::b::c::d should resolve to mypackage::a::thing
-        assert_eq!(
-            normalize_rust_path(
-                "super::super::super::thing",
-                Some("mypackage"),
-                Some("a::b::c::d")
-            ),
-            "mypackage::a::thing"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_super_exceeds_depth() {
-        // super::super::super in mypackage::a::b (only 2 levels) should go to package root
-        assert_eq!(
-            normalize_rust_path(
-                "super::super::super::thing",
-                Some("mypackage"),
-                Some("a::b")
-            ),
-            "mypackage::thing"
-        );
-    }
-
-    #[test]
-    fn test_normalize_rust_path_super_exactly_matches_depth() {
-        // super::super in mypackage::a::b (exactly 2 levels) should go to package root
-        assert_eq!(
-            normalize_rust_path("super::super::thing", Some("mypackage"), Some("a::b")),
-            "mypackage::thing"
-        );
-    }
-
-    // ========================================================================
-    // Tests for import map result normalization
-    // ========================================================================
-
-    #[test]
-    fn test_resolve_rust_reference_normalizes_import_map_crate_prefix() {
-        // When import map returns crate::Error (from `use crate::Error;`),
-        // the result should be normalized to package::Error
-        let mut map = ImportMap::new("::");
-        map.add("Error", "crate::Error");
-
-        assert_eq!(
-            resolve_rust_reference("Error", "Error", &map, None, Some("anyhow"), Some("error"))
-                .target,
-            "anyhow::Error"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_normalizes_import_map_self_prefix() {
-        // When import map returns self::helper (from `use self::helper;`),
-        // the result should be normalized
-        let mut map = ImportMap::new("::");
-        map.add("helper", "self::helper");
-
-        assert_eq!(
-            resolve_rust_reference(
-                "helper",
-                "helper",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("utils")
-            )
-            .target,
-            "mypackage::utils::helper"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_normalizes_import_map_super_prefix() {
-        // When import map returns super::types::Foo (from `use super::types::Foo;`),
-        // the result should be normalized
-        let mut map = ImportMap::new("::");
-        map.add("Foo", "super::types::Foo");
-
-        assert_eq!(
-            resolve_rust_reference(
-                "Foo",
-                "Foo",
-                &map,
-                None,
-                Some("mypackage"),
-                Some("utils::helpers")
-            )
-            .target,
-            "mypackage::utils::types::Foo"
-        );
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_no_normalization_for_absolute() {
-        // When import map returns an absolute path (std::io::Read),
-        // no normalization should occur
-        let mut map = ImportMap::new("::");
-        map.add("Read", "std::io::Read");
-
-        assert_eq!(
-            resolve_rust_reference("Read", "Read", &map, None, Some("mypackage"), Some("utils"))
-                .target,
-            "std::io::Read"
-        );
-    }
-
-    // ========================================================================
-    // Tests for has_crate_import
-    // ========================================================================
-
-    #[test]
-    fn test_has_crate_import_exists() {
-        let mut map = ImportMap::new("::");
-        map.add("Serialize", "serde::Serialize");
-        map.add("Deserialize", "serde::Deserialize");
-
-        assert!(map.has_crate_import("serde", "::"));
-    }
-
-    #[test]
-    fn test_has_crate_import_not_exists() {
-        let mut map = ImportMap::new("::");
-        map.add("Serialize", "serde::Serialize");
-
-        assert!(!map.has_crate_import("tokio", "::"));
-    }
-
-    #[test]
-    fn test_has_crate_import_partial_match() {
-        let mut map = ImportMap::new("::");
-        map.add("Foo", "serde_json::Foo");
-
-        // "serde" should not match "serde_json"
-        assert!(!map.has_crate_import("serde", "::"));
-        assert!(map.has_crate_import("serde_json", "::"));
-    }
-
-    // ========================================================================
-    // Tests for external crate detection in resolve_rust_reference
-    // ========================================================================
-
-    #[test]
-    fn test_resolve_rust_reference_detects_external_crate_from_imports() {
-        // If we have `use serde::Serialize;` in imports, then
-        // `serde::Deserialize` should be recognized as external
-        let mut map = ImportMap::new("::");
-        map.add("Serialize", "serde::Serialize");
-
-        // This should NOT be prefixed with my_crate since serde is a known external
-        let resolved = resolve_rust_reference(
-            "serde::Deserialize",
-            "Deserialize",
-            &map,
-            None,
-            Some("my_crate"),
-            None,
-        );
-        assert_eq!(resolved.target, "serde::Deserialize");
-        assert!(resolved.is_external);
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_prefixes_unknown_scoped_path() {
-        // Unknown scoped paths like `utils::helper` should get package prefix
-        let map = ImportMap::new("::");
-
-        let resolved = resolve_rust_reference(
-            "utils::helper",
-            "helper",
-            &map,
-            None,
-            Some("my_crate"),
-            None,
-        );
-        assert_eq!(resolved.target, "my_crate::utils::helper");
-        assert!(!resolved.is_external);
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_keeps_own_crate_prefix() {
-        // Paths already starting with the package name should stay as-is
-        let map = ImportMap::new("::");
-
-        let resolved = resolve_rust_reference(
-            "my_crate::utils::helper",
-            "helper",
-            &map,
-            None,
-            Some("my_crate"),
-            None,
-        );
-        assert_eq!(resolved.target, "my_crate::utils::helper");
-        assert!(!resolved.is_external);
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_std_is_external() {
-        // std paths are always external
-        let map = ImportMap::new("::");
-
-        let resolved =
-            resolve_rust_reference("std::io::Read", "Read", &map, None, Some("my_crate"), None);
-        assert_eq!(resolved.target, "std::io::Read");
-        assert!(resolved.is_external);
-    }
-
-    #[test]
-    fn test_resolve_rust_reference_core_is_external() {
-        // core paths are always external
-        let map = ImportMap::new("::");
-
-        let resolved = resolve_rust_reference(
-            "core::fmt::Display",
-            "Display",
-            &map,
-            None,
-            Some("my_crate"),
-            None,
-        );
-        assert_eq!(resolved.target, "core::fmt::Display");
-        assert!(resolved.is_external);
     }
 
     // =========================================================================

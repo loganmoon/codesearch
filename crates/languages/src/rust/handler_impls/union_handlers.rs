@@ -10,12 +10,13 @@
 use crate::common::entity_building::{
     build_entity, extract_common_components, EntityDetails, ExtractionContext,
 };
+use crate::common::path_config::RUST_PATH_CONFIG;
 use crate::rust::entities::FieldInfo;
 use crate::rust::handler_impls::common::{
     build_generic_bounds_map, extract_generics_with_bounds, extract_preceding_doc_comments,
     extract_visibility, extract_where_clause_bounds, find_capture_node, format_generic_param,
-    get_file_import_map, merge_parsed_generics, node_to_text, require_capture_node, ParsedGenerics,
-    RustResolutionContext,
+    get_file_import_map, get_rust_edge_case_registry, merge_parsed_generics, node_to_text,
+    require_capture_node, ParsedGenerics, RustResolutionContext,
 };
 use crate::rust::handler_impls::constants::node_kinds;
 use crate::rust::handler_impls::type_handlers::build_field_entities;
@@ -67,11 +68,14 @@ pub fn handle_union_impl(
     // Build resolution context for qualified name normalization
     // Clone parent_scope to avoid borrow conflict with components consumed later
     let parent_scope_clone = components.parent_scope.clone();
+    let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: parent_scope_clone.as_deref(),
         package_name,
         current_module: module_path.as_deref(),
+        path_config: &RUST_PATH_CONFIG,
+        edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract Rust-specific: visibility, documentation, content

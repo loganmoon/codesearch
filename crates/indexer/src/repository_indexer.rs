@@ -17,7 +17,8 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
 use codesearch_core::CodeEntity;
 use codesearch_embeddings::{EmbeddingContext, EmbeddingManager, EmbeddingTask};
-use codesearch_languages::rust::rust_path::RustPath;
+use codesearch_languages::common::language_path::LanguagePath;
+use codesearch_languages::common::path_config::RUST_PATH_CONFIG;
 use codesearch_storage::{EmbeddingCacheEntry, OutboxOperation, PostgresClientTrait, TargetStore};
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
@@ -470,14 +471,14 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<SourceReference> {
                     continue;
                 }
 
-                // Use RustPath for proper parsing - encapsulates all path logic
-                let rust_path = RustPath::parse(import_path);
+                // Use LanguagePath for proper parsing - encapsulates all path logic
+                let lang_path = LanguagePath::parse(import_path, &RUST_PATH_CONFIG);
 
-                // Extract simple name using RustPath methods
-                let simple_name = rust_path
+                // Extract simple name using LanguagePath methods
+                let simple_name = lang_path
                     .simple_name()
                     .unwrap_or_else(|| {
-                        rust_path
+                        lang_path
                             .segments()
                             .first()
                             .map(String::as_str)
@@ -491,7 +492,7 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<SourceReference> {
                 }
 
                 // Determine if external: relative paths (crate::, self::, super::) are internal
-                let is_external = !rust_path.is_relative();
+                let is_external = !lang_path.is_relative();
 
                 let location = SourceLocation {
                     start_line: child.start_position().row + 1,
@@ -500,9 +501,9 @@ fn extract_file_level_imports(file_path: &Path) -> Vec<SourceReference> {
                     end_column: child.end_position().column,
                 };
 
-                // Use rust_path.to_qualified_name() for consistency with RustPath parsing
+                // Use lang_path.to_qualified_name() for consistency with LanguagePath parsing
                 if let Ok(source_ref) = SourceReference::builder()
-                    .target(rust_path.to_qualified_name())
+                    .target(lang_path.to_qualified_name())
                     .simple_name(simple_name)
                     .is_external(is_external)
                     .location(location)

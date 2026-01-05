@@ -27,6 +27,11 @@ pub struct ScopeConfiguration {
     /// Optional function for deriving module path from file path
     /// Takes (file_path, source_root) and returns the module path
     pub module_path_fn: Option<ModulePathFn>,
+    /// Path configuration for relative prefix handling
+    pub path_config: &'static crate::common::path_config::PathConfig,
+    /// Optional edge case handlers for language-specific resolution quirks
+    pub edge_case_handlers:
+        Option<&'static [&'static dyn crate::common::edge_case_handlers::EdgeCaseHandler]>,
 }
 
 inventory::collect!(ScopeConfiguration);

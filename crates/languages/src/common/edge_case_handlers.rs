@@ -101,6 +101,7 @@ pub struct EdgeCaseRegistry {
 
 impl EdgeCaseRegistry {
     /// Create a new empty registry
+    #[cfg(test)]
     pub const fn new() -> Self {
         Self {
             handlers: Vec::new(),
@@ -139,11 +140,13 @@ impl EdgeCaseRegistry {
     }
 
     /// Check if the registry has any handlers
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()
     }
 
     /// Get the number of handlers
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.handlers.len()
     }

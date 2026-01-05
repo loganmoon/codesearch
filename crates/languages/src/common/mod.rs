@@ -2,13 +2,13 @@
 //!
 //! These utilities work across all languages using tree-sitter.
 
-pub mod edge_case_handlers;
+pub(crate) mod edge_case_handlers;
 pub mod entity_building;
 pub mod import_map;
 pub mod language_path;
 pub mod module_utils;
 pub mod path_config;
-pub mod reference_resolution;
+pub(crate) mod reference_resolution;
 
 use codesearch_core::error::{Error, Result};
 use tree_sitter::{Node, Query, QueryMatch};

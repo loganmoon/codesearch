@@ -122,7 +122,7 @@ impl ImportMap {
 /// 2. Try import map
 /// 3. Try parent_scope::name
 /// 4. Mark as external::name
-pub fn resolve_reference(
+pub(crate) fn resolve_reference(
     name: &str,
     import_map: &ImportMap,
     parent_scope: Option<&str>,
@@ -169,7 +169,10 @@ pub fn resolve_reference(
 /// import: "../utils" -> "utils"
 /// import: "lodash" -> None (not a relative import)
 /// ```
-pub fn resolve_relative_import(current_module_path: &str, import_path: &str) -> Option<String> {
+pub(crate) fn resolve_relative_import(
+    current_module_path: &str,
+    import_path: &str,
+) -> Option<String> {
     // Only handle relative imports (starting with . or ..)
     if !import_path.starts_with('.') {
         return None;
@@ -230,7 +233,7 @@ pub fn resolve_relative_import(current_module_path: &str, import_path: &str) -> 
 /// * `language` - The programming language
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom").
 ///   Used to resolve relative imports to absolute qualified names that match entity qualified_names.
-pub fn parse_file_imports(
+pub(crate) fn parse_file_imports(
     root: Node,
     source: &str,
     language: Language,
@@ -262,7 +265,11 @@ pub fn parse_file_imports(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
-pub fn parse_js_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
+pub(crate) fn parse_js_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -405,7 +412,11 @@ fn parse_js_import_specifier(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
-pub fn parse_ts_imports(root: Node, source: &str, current_module_path: Option<&str>) -> ImportMap {
+pub(crate) fn parse_ts_imports(
+    root: Node,
+    source: &str,
+    current_module_path: Option<&str>,
+) -> ImportMap {
     let mut import_map = ImportMap::new(".");
 
     let query_source = r#"
@@ -519,7 +530,7 @@ fn resolve_python_relative_import(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
-pub fn parse_python_imports(
+pub(crate) fn parse_python_imports(
     root: Node,
     source: &str,
     current_module_path: Option<&str>,
@@ -677,7 +688,7 @@ pub fn parse_python_imports(
 }
 
 /// Get the AST root node from any node in the tree
-pub fn get_ast_root(node: Node) -> Node {
+pub(crate) fn get_ast_root(node: Node) -> Node {
     let mut root = node;
     while let Some(parent) = root.parent() {
         root = parent;

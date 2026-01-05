@@ -14,7 +14,7 @@ use tracing::trace;
 
 /// The kind of a language path, indicating how it should be resolved
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub enum PathKind {
+pub(crate) enum PathKind {
     /// Absolute path or simple name
     /// Used for fully qualified paths (e.g., `std::collections::HashMap`)
     /// or simple names without prefixes (e.g., `HashMap`)
@@ -157,12 +157,13 @@ impl LanguagePath {
     }
 
     /// Create a builder for constructing paths
-    pub fn builder(config: &'static PathConfig) -> LanguagePathBuilder {
+    pub(crate) fn builder(config: &'static PathConfig) -> LanguagePathBuilder {
         LanguagePathBuilder::new(config)
     }
 
     /// Get the path kind
-    pub fn kind(&self) -> &PathKind {
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> &PathKind {
         &self.kind
     }
 
@@ -278,7 +279,7 @@ impl LanguagePath {
                     }
 
                     if let Some(mod_path) = module {
-                        builder = builder.from_path(mod_path);
+                        builder = builder.copy_from(mod_path);
                     }
 
                     builder.segments(self.segments.iter().cloned()).build()
@@ -315,7 +316,7 @@ impl fmt::Display for LanguagePath {
 ///
 /// Provides a fluent API for building paths without string manipulation.
 #[derive(Debug)]
-pub struct LanguagePathBuilder {
+pub(crate) struct LanguagePathBuilder {
     kind: PathKind,
     segments: Vec<String>,
     separator: &'static str,
@@ -323,7 +324,7 @@ pub struct LanguagePathBuilder {
 
 impl LanguagePathBuilder {
     /// Create a new builder with the given configuration
-    pub fn new(config: &'static PathConfig) -> Self {
+    pub(crate) fn new(config: &'static PathConfig) -> Self {
         Self {
             kind: PathKind::Absolute,
             segments: Vec::new(),
@@ -332,19 +333,19 @@ impl LanguagePathBuilder {
     }
 
     /// Set the path kind
-    pub fn kind(mut self, kind: PathKind) -> Self {
+    pub(crate) fn kind(mut self, kind: PathKind) -> Self {
         self.kind = kind;
         self
     }
 
     /// Add a single segment
-    pub fn segment(mut self, segment: impl Into<String>) -> Self {
+    pub(crate) fn segment(mut self, segment: impl Into<String>) -> Self {
         self.segments.push(segment.into());
         self
     }
 
     /// Add multiple segments
-    pub fn segments<I, S>(mut self, segments: I) -> Self
+    pub(crate) fn segments<I, S>(mut self, segments: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -354,7 +355,7 @@ impl LanguagePathBuilder {
     }
 
     /// Copy segments from an existing path
-    pub fn from_path(mut self, path: &LanguagePath) -> Self {
+    pub(crate) fn copy_from(mut self, path: &LanguagePath) -> Self {
         self.segments.extend(path.segments.iter().cloned());
         self
     }
@@ -362,7 +363,8 @@ impl LanguagePathBuilder {
     /// Prepend a package name as the first segment
     ///
     /// This also sets the kind to `Absolute`.
-    pub fn with_package(mut self, package: &str) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_package(mut self, package: &str) -> Self {
         if !package.is_empty() {
             self.segments.insert(0, package.to_string());
             self.kind = PathKind::Absolute;
@@ -377,7 +379,7 @@ impl LanguagePathBuilder {
     ///
     /// If `levels` exceeds or equals the module depth, no segments are added
     /// and a trace log is emitted (this may indicate an issue with super:: chains).
-    pub fn navigate_up_from(mut self, module: &LanguagePath, levels: usize) -> Self {
+    pub(crate) fn navigate_up_from(mut self, module: &LanguagePath, levels: usize) -> Self {
         let module_segments = module.segments();
         if module_segments.len() > levels {
             let keep = module_segments.len() - levels;
@@ -395,7 +397,7 @@ impl LanguagePathBuilder {
     }
 
     /// Build the immutable `LanguagePath`
-    pub fn build(self) -> LanguagePath {
+    pub(crate) fn build(self) -> LanguagePath {
         LanguagePath {
             kind: self.kind,
             segments: self.segments,
@@ -665,11 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_from_path() {
+    fn test_builder_copy_from() {
         let source = LanguagePath::parse("module::submodule", &RUST_PATH_CONFIG);
         let path = LanguagePath::builder(&RUST_PATH_CONFIG)
             .segment("package")
-            .from_path(&source)
+            .copy_from(&source)
             .segment("Type")
             .build();
 

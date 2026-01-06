@@ -7,22 +7,11 @@ mod queries;
 
 #[cfg(test)]
 mod handler_impls {
+    use crate::common::entity_building::ExtractionContext;
     use codesearch_core::{error::Result, CodeEntity};
-    use std::path::Path;
-    use tree_sitter::{Query, QueryMatch};
 
     #[allow(unused_variables)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn handle_test_impl(
-        _query_match: &QueryMatch,
-        _query: &Query,
-        _source: &str,
-        _file_path: &Path,
-        _repository_id: &str,
-        package_name: Option<&str>,
-        source_root: Option<&Path>,
-        _repo_root: &Path,
-    ) -> Result<Vec<CodeEntity>> {
+    pub fn handle_test_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
         // Minimal implementation for testing
         Ok(Vec::new())
     }

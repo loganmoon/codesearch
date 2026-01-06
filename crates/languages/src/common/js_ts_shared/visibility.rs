@@ -23,7 +23,7 @@ use tree_sitter::Node;
 /// # Arguments
 /// * `node` - The AST node to check
 /// * `source` - The source code for extracting node text
-pub fn extract_visibility(node: Node, source: &str) -> Visibility {
+pub(crate) fn extract_visibility(node: Node, source: &str) -> Visibility {
     // Check for ECMAScript private fields/methods (# prefix)
     if is_private_identifier(node, source) {
         return Visibility::Private;
@@ -117,7 +117,7 @@ fn extract_ts_visibility_modifier(node: Node) -> Option<Visibility> {
 /// - `export const foo = 1` - direct export
 /// - `export default function() {}` - default export
 /// - `export { foo }` - named re-export (not handled here, handled at import level)
-pub fn is_exported(node: Node) -> bool {
+pub(crate) fn is_exported(node: Node) -> bool {
     // Check if the node itself is an export statement
     if node.kind() == "export_statement" {
         return true;
@@ -167,7 +167,7 @@ pub fn is_exported(node: Node) -> bool {
 }
 
 /// Check if a class member is static
-pub fn is_static_member(node: Node) -> bool {
+pub(crate) fn is_static_member(node: Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "static" {
@@ -178,7 +178,7 @@ pub fn is_static_member(node: Node) -> bool {
 }
 
 /// Check if a function/method is async
-pub fn is_async(node: Node) -> bool {
+pub(crate) fn is_async(node: Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "async" {
@@ -189,7 +189,7 @@ pub fn is_async(node: Node) -> bool {
 }
 
 /// Check if a function is a generator (has *)
-pub fn is_generator(node: Node) -> bool {
+pub(crate) fn is_generator(node: Node) -> bool {
     // Generator functions have node kind "generator_function" or "generator_function_declaration"
     // Or method_definition with a "*" child
     if node.kind().contains("generator") {
@@ -206,7 +206,7 @@ pub fn is_generator(node: Node) -> bool {
 }
 
 /// Check if a method is a getter
-pub fn is_getter(node: Node) -> bool {
+pub(crate) fn is_getter(node: Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "get" {
@@ -217,7 +217,7 @@ pub fn is_getter(node: Node) -> bool {
 }
 
 /// Check if a method is a setter
-pub fn is_setter(node: Node) -> bool {
+pub(crate) fn is_setter(node: Node) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "set" {

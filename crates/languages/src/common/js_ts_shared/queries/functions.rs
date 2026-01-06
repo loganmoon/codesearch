@@ -8,7 +8,7 @@
 /// - `function* foo() {}`
 /// - `async function* foo() {}`
 /// - `export function foo() {}`
-pub const FUNCTION_DECLARATION_QUERY: &str = r#"
+pub(crate) const FUNCTION_DECLARATION_QUERY: &str = r#"
 [
   (function_declaration
     name: (identifier) @name
@@ -41,7 +41,7 @@ pub const FUNCTION_DECLARATION_QUERY: &str = r#"
 /// - `const foo = function bar() {}`
 /// - `let foo = function() {}`
 /// - `var foo = function() {}`
-pub const FUNCTION_EXPRESSION_QUERY: &str = r#"
+pub(crate) const FUNCTION_EXPRESSION_QUERY: &str = r#"
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
@@ -73,7 +73,7 @@ pub const FUNCTION_EXPRESSION_QUERY: &str = r#"
 /// - `const foo = () => {}`
 /// - `const foo = (x) => x * 2`
 /// - `const foo = async () => {}`
-pub const ARROW_FUNCTION_QUERY: &str = r#"
+pub(crate) const ARROW_FUNCTION_QUERY: &str = r#"
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
@@ -107,7 +107,7 @@ pub const ARROW_FUNCTION_QUERY: &str = r#"
 /// - `export default function() {}`
 /// - `export default function foo() {}`
 /// - `export default async function() {}`
-pub const DEFAULT_EXPORT_FUNCTION_QUERY: &str = r#"
+pub(crate) const _DEFAULT_EXPORT_FUNCTION_QUERY: &str = r#"
 (export_statement
   (function_declaration
     name: (identifier)? @name

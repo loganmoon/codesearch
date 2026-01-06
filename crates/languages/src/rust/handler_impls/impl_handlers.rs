@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::ExtractionContext;
 use crate::common::path_config::RUST_PATH_CONFIG;
 use crate::common::reference_resolution::{resolve_reference, ResolutionContext};
 use crate::qualified_name::build_qualified_name_from_ast;
@@ -30,7 +31,7 @@ use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tracing::debug;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::Node;
 
 /// Compose a full prefix from package, module, and AST scope components
 ///
@@ -60,18 +61,8 @@ fn compose_full_prefix(
 }
 
 /// Process an inherent impl block query match and extract entities
-#[allow(clippy::too_many_arguments)]
-pub fn handle_impl_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    _repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let impl_node = require_capture_node(query_match, query, capture_names::IMPL)?;
+pub(crate) fn handle_impl_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let impl_node = require_capture_node(ctx.query_match, ctx.query, capture_names::IMPL)?;
 
     // Skip trait implementations - they will be handled by handle_impl_trait
     // Check if this impl block has a "trait" field (indicating "impl Trait for Type")
@@ -80,16 +71,17 @@ pub fn handle_impl_impl(
     }
 
     // Extract the type this impl is for
-    let for_type_raw = find_capture_node(query_match, query, capture_names::TYPE)
-        .and_then(|node| node_to_text(node, source).ok())
+    let for_type_raw = find_capture_node(ctx.query_match, ctx.query, capture_names::TYPE)
+        .and_then(|node| node_to_text(node, ctx.source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build ImportMap from file's imports for qualified name resolution
-    let import_map = get_file_import_map(impl_node, source);
+    let import_map = get_file_import_map(impl_node, ctx.source);
 
     // Resolve for_type through imports (strip generics first for resolution)
     // Use resolve_reference to handle crate::, self::, super:: prefixes
@@ -104,7 +96,7 @@ pub fn handle_impl_impl(
     let type_resolution_ctx = ResolutionContext {
         import_map: &import_map,
         parent_scope: None,
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
@@ -122,7 +114,7 @@ pub fn handle_impl_impl(
         let root = crate::common::import_map::get_ast_root(impl_node);
 
         // Extract type aliases from the file
-        let type_aliases = extract_type_alias_map(root, source);
+        let type_aliases = extract_type_alias_map(root, ctx.source);
 
         // Try to resolve the base type name through the alias chain
         if let Some(concrete_type) = resolve_type_alias_chain(for_type_base, &type_aliases, 10) {
@@ -139,31 +131,36 @@ pub fn handle_impl_impl(
     let for_type = for_type_raw.clone();
 
     // Build qualified name context
-    let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
+    let scope_result = build_qualified_name_from_ast(impl_node, ctx.source, "rust");
     let parent_scope = scope_result.parent_scope;
 
     // Build full prefix including package, module, and AST scope
-    let full_prefix =
-        compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
+    let full_prefix = compose_full_prefix(
+        ctx.package_name,
+        module_path.as_deref(),
+        &parent_scope,
+        "::",
+    );
 
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: Some(parent_scope.as_str()),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds
-    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
-        .unwrap_or_default();
+    let mut parsed_generics =
+        find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
+            .map(|node| extract_generics_with_bounds(node, ctx.source, &resolution_ctx))
+            .unwrap_or_default();
 
     // Merge where clause bounds if present
-    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
+    if let Some(where_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::WHERE) {
+        let where_bounds = extract_where_clause_bounds(where_node, ctx.source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -191,7 +188,7 @@ pub fn handle_impl_impl(
     };
 
     // Extract all methods from impl body
-    let impl_body = find_capture_node(query_match, query, capture_names::IMPL_BODY);
+    let impl_body = find_capture_node(ctx.query_match, ctx.query, capture_names::IMPL_BODY);
     let mut entities = Vec::new();
 
     if let Some(body_node) = impl_body {
@@ -200,22 +197,29 @@ pub fn handle_impl_impl(
             for_type_resolved: &for_type_resolved,
             trait_name_resolved: None, // No trait for inherent impl
             generics: &generics,
-            package_name,
+            package_name: ctx.package_name,
             module_path: module_path.as_deref(),
         };
-        let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
+        let methods = extract_impl_methods(
+            body_node,
+            ctx.source,
+            ctx.file_path,
+            ctx.repository_id,
+            &impl_ctx,
+        )?;
         entities.extend(methods);
     }
 
     // Create the impl block entity itself
     let location = SourceLocation::from_tree_sitter_node(impl_node);
-    let content = node_to_text(impl_node, source).ok();
-    let documentation = extract_preceding_doc_comments(impl_node, source);
+    let content = node_to_text(impl_node, ctx.source).ok();
+    let documentation = extract_preceding_doc_comments(impl_node, ctx.source);
 
-    let file_path_str = file_path
+    let file_path_str = ctx
+        .file_path
         .to_str()
         .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &impl_qualified_name);
+    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &impl_qualified_name);
 
     let mut metadata = EntityMetadata {
         is_generic: !generics.is_empty(),
@@ -265,7 +269,7 @@ pub fn handle_impl_impl(
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
+        .repository_id(ctx.repository_id.to_string())
         .name(for_type)
         .qualified_name(impl_qualified_name.clone())
         .parent_scope(if full_prefix.is_empty() {
@@ -280,7 +284,7 @@ pub fn handle_impl_impl(
         .content(content)
         .metadata(metadata)
         .language(Language::Rust)
-        .file_path(file_path.to_path_buf())
+        .file_path(ctx.file_path.to_path_buf())
         .relationships(relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build impl entity: {e}")))?;
@@ -292,35 +296,26 @@ pub fn handle_impl_impl(
 }
 
 /// Process a trait impl block query match and extract entities
-#[allow(clippy::too_many_arguments)]
-pub fn handle_impl_trait_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    _repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let impl_node = require_capture_node(query_match, query, capture_names::IMPL_TRAIT)?;
+pub(crate) fn handle_impl_trait_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let impl_node = require_capture_node(ctx.query_match, ctx.query, capture_names::IMPL_TRAIT)?;
 
     // Extract the type this impl is for
-    let for_type_raw = find_capture_node(query_match, query, capture_names::TYPE)
-        .and_then(|node| node_to_text(node, source).ok())
+    let for_type_raw = find_capture_node(ctx.query_match, ctx.query, capture_names::TYPE)
+        .and_then(|node| node_to_text(node, ctx.source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
     // Extract the trait being implemented
-    let trait_name_raw = find_capture_node(query_match, query, capture_names::TRAIT)
-        .and_then(|node| node_to_text(node, source).ok())
+    let trait_name_raw = find_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT)
+        .and_then(|node| node_to_text(node, ctx.source).ok())
         .unwrap_or_else(|| special_idents::ANONYMOUS.to_string());
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build ImportMap from file's imports for qualified name resolution
-    let import_map = get_file_import_map(impl_node, source);
+    let import_map = get_file_import_map(impl_node, ctx.source);
 
     // Resolve for_type through imports (strip generics first for resolution)
     let for_type_base = for_type_raw
@@ -334,7 +329,7 @@ pub fn handle_impl_trait_impl(
     let type_resolution_ctx = ResolutionContext {
         import_map: &import_map,
         parent_scope: None,
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
@@ -361,31 +356,36 @@ pub fn handle_impl_trait_impl(
     let trait_name = trait_name_raw.clone();
 
     // Build qualified name context
-    let scope_result = build_qualified_name_from_ast(impl_node, source, "rust");
+    let scope_result = build_qualified_name_from_ast(impl_node, ctx.source, "rust");
     let parent_scope = scope_result.parent_scope;
 
     // Build full prefix including package, module, and AST scope
-    let full_prefix =
-        compose_full_prefix(package_name, module_path.as_deref(), &parent_scope, "::");
+    let full_prefix = compose_full_prefix(
+        ctx.package_name,
+        module_path.as_deref(),
+        &parent_scope,
+        "::",
+    );
 
     // Build resolution context for qualified name normalization
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: Some(parent_scope.as_str()),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds
-    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
-        .unwrap_or_default();
+    let mut parsed_generics =
+        find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
+            .map(|node| extract_generics_with_bounds(node, ctx.source, &resolution_ctx))
+            .unwrap_or_default();
 
     // Merge where clause bounds if present
-    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
+    if let Some(where_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::WHERE) {
+        let where_bounds = extract_where_clause_bounds(where_node, ctx.source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -413,7 +413,7 @@ pub fn handle_impl_trait_impl(
     };
 
     // Extract all methods from impl body
-    let impl_body = find_capture_node(query_match, query, capture_names::IMPL_BODY);
+    let impl_body = find_capture_node(ctx.query_match, ctx.query, capture_names::IMPL_BODY);
     let mut entities = Vec::new();
 
     if let Some(body_node) = impl_body {
@@ -422,22 +422,29 @@ pub fn handle_impl_trait_impl(
             for_type_resolved: &for_type_resolved,
             trait_name_resolved: Some(&trait_name_resolved),
             generics: &generics,
-            package_name,
+            package_name: ctx.package_name,
             module_path: module_path.as_deref(),
         };
-        let methods = extract_impl_methods(body_node, source, file_path, repository_id, &impl_ctx)?;
+        let methods = extract_impl_methods(
+            body_node,
+            ctx.source,
+            ctx.file_path,
+            ctx.repository_id,
+            &impl_ctx,
+        )?;
         entities.extend(methods);
     }
 
     // Create the impl block entity itself
     let location = SourceLocation::from_tree_sitter_node(impl_node);
-    let content = node_to_text(impl_node, source).ok();
-    let documentation = extract_preceding_doc_comments(impl_node, source);
+    let content = node_to_text(impl_node, ctx.source).ok();
+    let documentation = extract_preceding_doc_comments(impl_node, ctx.source);
 
-    let file_path_str = file_path
+    let file_path_str = ctx
+        .file_path
         .to_str()
         .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(repository_id, file_path_str, &impl_qualified_name);
+    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &impl_qualified_name);
 
     let mut metadata = EntityMetadata {
         is_generic: !generics.is_empty(),
@@ -495,7 +502,7 @@ pub fn handle_impl_trait_impl(
 
     let impl_entity = CodeEntityBuilder::default()
         .entity_id(entity_id)
-        .repository_id(repository_id.to_string())
+        .repository_id(ctx.repository_id.to_string())
         .name(format!("{trait_name} for {for_type}"))
         .qualified_name(impl_qualified_name.clone())
         .parent_scope(if full_prefix.is_empty() {
@@ -510,7 +517,7 @@ pub fn handle_impl_trait_impl(
         .content(content)
         .metadata(metadata)
         .language(Language::Rust)
-        .file_path(file_path.to_path_buf())
+        .file_path(ctx.file_path.to_path_buf())
         .relationships(relationships)
         .build()
         .map_err(|e| Error::entity_extraction(format!("Failed to build impl entity: {e}")))?;

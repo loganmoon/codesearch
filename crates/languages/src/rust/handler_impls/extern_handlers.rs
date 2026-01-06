@@ -19,68 +19,50 @@ use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::Path;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::Node;
 
 /// Process an extern block query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_extern_block_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_extern_block_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the extern_block node
-    let extern_block_node = require_capture_node(query_match, query, "extern_block")?;
-
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let extern_block_node = require_capture_node(ctx.query_match, ctx.query, "extern_block")?;
 
     // Extract common components for the extern block
-    let components = extract_common_components(&ctx, "abi", extern_block_node, "rust")?;
+    let components = extract_common_components(ctx, "abi", extern_block_node, "rust")?;
 
     // Extract the ABI string (e.g., "C", "system", etc.)
-    let abi = find_capture_node(query_match, query, "abi")
-        .and_then(|node| node_to_text(node, source).ok())
+    let abi = find_capture_node(ctx.query_match, ctx.query, "abi")
+        .and_then(|node| node_to_text(node, ctx.source).ok())
         .map(|s| s.trim_matches('"').to_string())
         .unwrap_or_else(|| "C".to_string());
 
     // Build qualified name for the extern block
     let extern_block_qualified_name = if let Some(parent_scope) = &components.parent_scope {
         format!("{parent_scope}::extern \"{abi}\"")
-    } else if let Some(pkg) = package_name {
+    } else if let Some(pkg) = ctx.package_name {
         format!("{pkg}::extern \"{abi}\"")
     } else {
         format!("extern \"{abi}\"")
     };
 
     // Extract content
-    let content = node_to_text(extern_block_node, source).ok();
+    let content = node_to_text(extern_block_node, ctx.source).ok();
 
     // Build metadata
     let mut metadata = EntityMetadata::default();
     metadata.attributes.insert("abi".to_string(), abi.clone());
 
     // Generate entity_id for the extern block
-    let file_path_str = file_path.to_str().unwrap_or("");
-    let entity_id = generate_entity_id(repository_id, file_path_str, &extern_block_qualified_name);
+    let file_path_str = ctx.file_path.to_str().unwrap_or("");
+    let entity_id = generate_entity_id(
+        ctx.repository_id,
+        file_path_str,
+        &extern_block_qualified_name,
+    );
 
     // Build the extern block entity
     let extern_block_entity = CodeEntity {
         entity_id,
-        repository_id: repository_id.to_string(),
+        repository_id: ctx.repository_id.to_string(),
         entity_type: EntityType::ExternBlock,
         name: format!("extern \"{abi}\""),
         qualified_name: extern_block_qualified_name.clone(),
@@ -88,7 +70,7 @@ pub fn handle_extern_block_impl(
         parent_scope: components.parent_scope.clone(),
         dependencies: Vec::new(),
         documentation_summary: None,
-        file_path: file_path.to_path_buf(),
+        file_path: ctx.file_path.to_path_buf(),
         language: Language::Rust,
         content,
         metadata,
@@ -101,13 +83,13 @@ pub fn handle_extern_block_impl(
     let mut entities = vec![extern_block_entity];
 
     // Extract items inside the extern block
-    if let Some(body_node) = find_capture_node(query_match, query, "extern_body") {
+    if let Some(body_node) = find_capture_node(ctx.query_match, ctx.query, "extern_body") {
         let extern_items = extract_extern_items(
             body_node,
-            source,
-            file_path,
-            repository_id,
-            package_name,
+            ctx.source,
+            ctx.file_path,
+            ctx.repository_id,
+            ctx.package_name,
             &extern_block_qualified_name,
         );
         entities.extend(extern_items);

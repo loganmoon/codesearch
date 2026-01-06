@@ -3,14 +3,13 @@
 //! This module contains the tree-sitter query strings used to extract
 //! entities from JavaScript and TypeScript source code.
 
-pub mod classes;
-pub mod functions;
-pub mod modules;
-pub mod typescript;
-pub mod variables;
+pub(crate) mod classes;
+pub(crate) mod functions;
+pub(crate) mod modules;
+pub(crate) mod typescript;
+pub(crate) mod variables;
 
-pub use classes::*;
-pub use functions::*;
-pub use modules::*;
-pub use typescript::*;
-pub use variables::*;
+pub(crate) use classes::*;
+pub(crate) use functions::*;
+pub(crate) use typescript::*;
+pub(crate) use variables::*;

@@ -9,7 +9,7 @@
 /// - `import { foo, bar } from 'module'`
 /// - `import * as foo from 'module'`
 /// - `import 'module'` (side-effect import)
-pub const IMPORT_QUERY: &str = r#"
+pub(crate) const _IMPORT_QUERY: &str = r#"
 (import_statement
   source: (string) @source
   (import_clause
@@ -32,7 +32,7 @@ pub const IMPORT_QUERY: &str = r#"
 /// - `export { foo } from 'module'` (re-export)
 /// - `export * from 'module'` (re-export all)
 /// - `export * as foo from 'module'` (namespace re-export)
-pub const EXPORT_QUERY: &str = r#"
+pub(crate) const _EXPORT_QUERY: &str = r#"
 (export_statement
   source: (string)? @source
   [
@@ -50,7 +50,7 @@ pub const EXPORT_QUERY: &str = r#"
 /// Matches:
 /// - `import('module')`
 /// - `await import('module')`
-pub const DYNAMIC_IMPORT_QUERY: &str = r#"
+pub(crate) const _DYNAMIC_IMPORT_QUERY: &str = r#"
 (call_expression
   function: (import)
   arguments: (arguments

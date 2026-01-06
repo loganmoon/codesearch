@@ -6,8 +6,6 @@ use crate::common::entity_building::{
 use codesearch_core::entities::{EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 use super::super::visibility::{extract_visibility, is_async, is_generator};
 use super::common::{
@@ -21,43 +19,19 @@ use super::common::{
 /// - `async function foo() {}`
 /// - `function* foo() {}`
 /// - `export function foo() {}`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_function_declaration_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["function"]) {
+pub(crate) fn handle_function_declaration_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["function"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "javascript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "javascript")?;
-
-    // Extract JS-specific details
-    let visibility = extract_visibility(node, source);
+    let visibility = extract_visibility(node, ctx.source);
     let is_async_fn = is_async(node);
     let is_generator_fn = is_generator(node);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     let metadata = build_js_metadata(false, is_async_fn, is_generator_fn, false, false, false);
 
@@ -84,43 +58,19 @@ pub fn handle_function_declaration_impl(
 /// - `const foo = function() {}`
 /// - `const foo = function bar() {}`
 /// - `let foo = function() {}`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_function_expression_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["function"]) {
+pub(crate) fn handle_function_expression_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["function"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "javascript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "javascript")?;
-
-    // Extract JS-specific details
-    let visibility = extract_visibility(node, source);
+    let visibility = extract_visibility(node, ctx.source);
     let is_async_fn = is_async(node);
     let is_generator_fn = is_generator(node);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     let metadata = build_js_metadata(false, is_async_fn, is_generator_fn, false, false, false);
 
@@ -147,42 +97,18 @@ pub fn handle_function_expression_impl(
 /// - `const foo = () => {}`
 /// - `const foo = (x) => x * 2`
 /// - `const foo = async () => {}`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_arrow_function_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["function"]) {
+pub(crate) fn handle_arrow_function_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["function"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "javascript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "javascript")?;
-
-    // Extract JS-specific details
-    let visibility = extract_visibility(node, source);
+    let visibility = extract_visibility(node, ctx.source);
     let is_async_fn = is_async(node);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     // Arrow functions are marked with is_arrow = true
     let metadata = build_js_metadata(false, is_async_fn, false, false, false, true);

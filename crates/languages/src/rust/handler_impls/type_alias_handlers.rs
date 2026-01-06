@@ -24,23 +24,11 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Process a type alias query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_type_alias_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_type_alias_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Extract the main type_alias node
-    let main_node = require_capture_node(query_match, query, "type_alias")?;
+    let main_node = require_capture_node(ctx.query_match, ctx.query, "type_alias")?;
 
     // Skip type aliases inside impl blocks - those are handled by the impl extractor
     if let Some(parent) = main_node.parent() {
@@ -53,51 +41,40 @@ pub fn handle_type_alias_impl(
         }
     }
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, main_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, main_node, "rust")?;
 
     // Build ImportMap from file's imports for type resolution
-    let import_map = get_file_import_map(main_node, source);
+    let import_map = get_file_import_map(main_node, ctx.source);
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build resolution context for qualified name normalization
     let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(main_node, source);
-    let content = node_to_text(main_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(main_node, ctx.source);
+    let content = node_to_text(main_node, ctx.source).ok();
 
     // Extract aliased type
-    let aliased_type_node = require_capture_node(query_match, query, capture_names::TYPE)?;
-    let aliased_type = node_to_text(aliased_type_node, source)?;
+    let aliased_type_node = require_capture_node(ctx.query_match, ctx.query, capture_names::TYPE)?;
+    let aliased_type = node_to_text(aliased_type_node, ctx.source)?;
 
     // Extract generics if present
-    let generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_from_node(node, source))
+    let generics = find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
+        .map(|node| extract_generics_from_node(node, ctx.source))
         .unwrap_or_default();
 
     // Build metadata

@@ -12,10 +12,10 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-pub mod handlers;
-pub mod queries;
+pub(crate) mod handlers;
+pub(crate) mod queries;
 pub mod scope_patterns;
-pub mod visibility;
+pub(crate) mod visibility;
 
+// Scope patterns are needed by the macro (public)
 pub use scope_patterns::{SCOPE_PATTERNS, TS_SCOPE_PATTERNS};
-pub use visibility::{extract_visibility, is_exported};

@@ -534,14 +534,7 @@ fn extract_with_context<F>(
 ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>>
 where
     F: Fn(
-        &tree_sitter::QueryMatch,
-        &tree_sitter::Query,
-        &str,
-        &Path,
-        &str,
-        Option<&str>,
-        Option<&Path>,
-        &Path,
+        &crate::common::entity_building::ExtractionContext,
     ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>>,
 {
     let mut parser = tree_sitter::Parser::new();
@@ -560,16 +553,17 @@ where
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = streaming_iterator::StreamingIterator::next(&mut matches_iter) {
-        if let Ok(entities) = handler(
+        let ctx = crate::common::entity_building::ExtractionContext {
             query_match,
-            &query,
+            query: &query,
             source,
             file_path,
             repository_id,
             package_name,
             source_root,
             repo_root,
-        ) {
+        };
+        if let Ok(entities) = handler(&ctx) {
             all_entities.extend(entities);
         }
     }

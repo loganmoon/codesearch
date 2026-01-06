@@ -5,12 +5,12 @@ use im::HashMap as ImHashMap;
 use tree_sitter::{Node, Query, QueryMatch};
 
 // Re-export node_to_text for use by other handlers
-pub use crate::common::node_to_text;
+pub(crate) use crate::common::node_to_text;
 
 /// Extract entity name from a query match
 ///
 /// Looks for a capture named "name" in the query match.
-pub fn extract_name<'a>(
+pub(crate) fn extract_name<'a>(
     query_match: &QueryMatch<'a, 'a>,
     query: &Query,
     source: &'a str,
@@ -27,7 +27,7 @@ pub fn extract_name<'a>(
 /// Extract the main captured node from a query match
 ///
 /// Looks for captures like @function, @class, @method, etc.
-pub fn extract_main_node<'a>(
+pub(crate) fn extract_main_node<'a>(
     query_match: &QueryMatch<'a, 'a>,
     query: &Query,
     capture_names: &[&str],
@@ -48,7 +48,7 @@ pub fn extract_main_node<'a>(
 ///
 /// For JavaScript/TypeScript, looks for JSDoc-style comments (/* * */)
 /// and single-line comments (//).
-pub fn extract_preceding_doc_comments(node: Node, source: &str) -> Option<String> {
+pub(crate) fn extract_preceding_doc_comments(node: Node, source: &str) -> Option<String> {
     let mut doc_lines = Vec::new();
     let mut current = node.prev_sibling();
 
@@ -99,7 +99,7 @@ pub fn extract_preceding_doc_comments(node: Node, source: &str) -> Option<String
 ///
 /// Uses `attributes` HashMap for JS-specific boolean flags:
 /// - `is_generator`, `is_getter`, `is_setter`, `is_arrow`
-pub fn build_js_metadata(
+pub(crate) fn build_js_metadata(
     is_static: bool,
     is_async_fn: bool,
     is_generator_fn: bool,

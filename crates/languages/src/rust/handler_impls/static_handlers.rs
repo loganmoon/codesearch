@@ -17,23 +17,11 @@ use crate::rust::handler_impls::common::{
 use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Process a static query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_static_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_static_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the static node
-    let static_node = require_capture_node(query_match, query, "static")?;
+    let static_node = require_capture_node(ctx.query_match, ctx.query, "static")?;
 
     // Skip statics inside impl blocks - those are handled by the impl extractor
     if let Some(parent) = static_node.parent() {
@@ -47,36 +35,24 @@ pub fn handle_static_impl(
         }
     }
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
     // Extract common components
-    let components = extract_common_components(&ctx, "name", static_node, "rust")?;
+    let components = extract_common_components(ctx, "name", static_node, "rust")?;
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(static_node, source);
-    let content = node_to_text(static_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(static_node, ctx.source);
+    let content = node_to_text(static_node, ctx.source).ok();
 
     // Check for mutable_specifier (static mut)
-    let is_mut = find_capture_node(query_match, query, "mut").is_some();
+    let is_mut = find_capture_node(ctx.query_match, ctx.query, "mut").is_some();
 
     // Extract type
-    let static_type = find_capture_node(query_match, query, "type")
-        .and_then(|node| node_to_text(node, source).ok());
+    let static_type = find_capture_node(ctx.query_match, ctx.query, "type")
+        .and_then(|node| node_to_text(node, ctx.source).ok());
 
     // Extract value
-    let value = find_capture_node(query_match, query, "value")
-        .and_then(|node| node_to_text(node, source).ok());
+    let value = find_capture_node(ctx.query_match, ctx.query, "value")
+        .and_then(|node| node_to_text(node, ctx.source).ok());
 
     // Build metadata
     let mut metadata = EntityMetadata {

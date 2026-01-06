@@ -8,7 +8,7 @@
 /// - `interface Foo {}`
 /// - `interface Foo extends Bar {}`
 /// - `export interface Foo {}`
-pub const INTERFACE_QUERY: &str = r#"
+pub(crate) const INTERFACE_QUERY: &str = r#"
 [
   (interface_declaration
     name: (type_identifier) @name
@@ -31,7 +31,7 @@ pub const INTERFACE_QUERY: &str = r#"
 /// - `type Foo = string`
 /// - `type Foo<T> = T[]`
 /// - `export type Foo = Bar`
-pub const TYPE_ALIAS_QUERY: &str = r#"
+pub(crate) const TYPE_ALIAS_QUERY: &str = r#"
 [
   (type_alias_declaration
     name: (type_identifier) @name
@@ -52,7 +52,7 @@ pub const TYPE_ALIAS_QUERY: &str = r#"
 /// - `enum Color { Red, Green, Blue }`
 /// - `const enum Direction { Up, Down }`
 /// - `export enum Status { Active, Inactive }`
-pub const ENUM_QUERY: &str = r#"
+pub(crate) const ENUM_QUERY: &str = r#"
 [
   (enum_declaration
     name: (identifier) @name
@@ -71,7 +71,7 @@ pub const ENUM_QUERY: &str = r#"
 /// - `namespace Foo {}`
 /// - `module Bar {}`
 /// - `export namespace Foo {}`
-pub const NAMESPACE_QUERY: &str = r#"
+pub(crate) const NAMESPACE_QUERY: &str = r#"
 [
   (internal_module
     name: (identifier) @name
@@ -99,7 +99,7 @@ pub const NAMESPACE_QUERY: &str = r#"
 /// - `declare function foo(): void`
 /// - `declare const bar: string`
 /// - `declare class Baz {}`
-pub const AMBIENT_DECLARATION_QUERY: &str = r#"
+pub(crate) const _AMBIENT_DECLARATION_QUERY: &str = r#"
 (ambient_declaration
   [
     (function_signature

@@ -20,47 +20,23 @@ use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Process a macro definition query match and extract entity data
 ///
 /// Detects #[macro_export] by checking the immediate preceding sibling node.
-#[allow(clippy::too_many_arguments)]
-pub fn handle_macro_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_macro_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Extract the main macro node
-    let main_node = require_capture_node(query_match, query, "macro")?;
+    let main_node = require_capture_node(ctx.query_match, ctx.query, "macro")?;
 
     // Check if immediate preceding sibling is #[macro_export] attribute
-    let is_exported = check_immediate_macro_export(main_node, source);
-
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let is_exported = check_immediate_macro_export(main_node, ctx.source);
 
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, main_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, main_node, "rust")?;
 
     // Extract Rust-specific: documentation, content
-    let documentation = extract_preceding_doc_comments(main_node, source);
-    let content = node_to_text(main_node, source).ok();
+    let documentation = extract_preceding_doc_comments(main_node, ctx.source);
+    let content = node_to_text(main_node, ctx.source).ok();
 
     // Macros with #[macro_export] are effectively public
     let visibility = if is_exported {

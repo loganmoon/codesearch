@@ -18,23 +18,11 @@ use crate::rust::handler_impls::constants::capture_names;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Process a constant or static query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_constant_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_constant_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the constant node
-    let constant_node = require_capture_node(query_match, query, "constant")?;
+    let constant_node = require_capture_node(ctx.query_match, ctx.query, "constant")?;
 
     // Skip constants inside impl blocks - those are handled by the impl extractor
     if let Some(parent) = constant_node.parent() {
@@ -48,36 +36,24 @@ pub fn handle_constant_impl(
         }
     }
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, constant_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, constant_node, "rust")?;
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(constant_node, source);
-    let content = node_to_text(constant_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(constant_node, ctx.source);
+    let content = node_to_text(constant_node, ctx.source).ok();
 
     // Determine if this is a const item (always true for this handler)
-    let is_const = find_capture_node(query_match, query, "const_kw").is_some();
+    let is_const = find_capture_node(ctx.query_match, ctx.query, "const_kw").is_some();
 
     // Extract type
-    let const_type = find_capture_node(query_match, query, "type")
-        .and_then(|node| node_to_text(node, source).ok());
+    let const_type = find_capture_node(ctx.query_match, ctx.query, "type")
+        .and_then(|node| node_to_text(node, ctx.source).ok());
 
     // Extract value
-    let value = find_capture_node(query_match, query, "value")
-        .and_then(|node| node_to_text(node, source).ok());
+    let value = find_capture_node(ctx.query_match, ctx.query, "value")
+        .and_then(|node| node_to_text(node, ctx.source).ok());
 
     // Build metadata (is_const should be true for const items)
     let mut metadata = EntityMetadata {

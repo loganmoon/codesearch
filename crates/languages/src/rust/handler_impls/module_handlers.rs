@@ -23,8 +23,7 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::Node;
 
 /// Extract use statements from a module node
 fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
@@ -89,45 +88,23 @@ fn extract_use_statements(node: Node, source: &str) -> Vec<SourceReference> {
 }
 
 /// Process a module query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_module_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_module_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the module node for location and content
-    let module_node = require_capture_node(query_match, query, "module")?;
-
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let module_node = require_capture_node(ctx.query_match, ctx.query, "module")?;
 
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, module_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, module_node, "rust")?;
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(module_node, source);
-    let content = node_to_text(module_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(module_node, ctx.source);
+    let content = node_to_text(module_node, ctx.source).ok();
 
     // Check if this is an inline module (has body) or file module
-    let has_body = find_capture_node(query_match, query, "mod_body").is_some();
+    let has_body = find_capture_node(ctx.query_match, ctx.query, "mod_body").is_some();
 
     // Extract imports from the module
-    let imports = extract_use_statements(module_node, source);
+    let imports = extract_use_statements(module_node, ctx.source);
 
     // Build metadata
     let mut metadata = EntityMetadata::default();

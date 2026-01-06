@@ -9,7 +9,7 @@
 ///
 /// Note: This query excludes const declarations that are function expressions
 /// or arrow functions (those are handled by function queries).
-pub const CONST_QUERY: &str = r#"
+pub(crate) const CONST_QUERY: &str = r#"
 (lexical_declaration
   kind: "const"
   (variable_declarator
@@ -32,7 +32,7 @@ pub const CONST_QUERY: &str = r#"
 /// - `let foo = 1`
 /// - `let foo`
 /// - `export let foo = 1`
-pub const LET_QUERY: &str = r#"
+pub(crate) const LET_QUERY: &str = r#"
 (lexical_declaration
   kind: "let"
   (variable_declarator
@@ -53,7 +53,7 @@ pub const LET_QUERY: &str = r#"
 /// - `var foo = 1`
 /// - `var foo`
 /// - `export var foo = 1`
-pub const VAR_QUERY: &str = r#"
+pub(crate) const VAR_QUERY: &str = r#"
 (variable_declaration
   (variable_declarator
     name: (identifier) @name

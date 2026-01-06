@@ -576,18 +576,10 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             let handler_impl = &entity.handler;
 
             quote! {
-                #[allow(clippy::too_many_arguments)]
-                pub fn #handler_name(
-                    query_match: &tree_sitter::QueryMatch,
-                    query: &tree_sitter::Query,
-                    source: &str,
-                    file_path: &std::path::Path,
-                    repository_id: &str,
-                    package_name: Option<&str>,
-                    source_root: Option<&std::path::Path>,
-                    repo_root: &std::path::Path,
+                pub(crate) fn #handler_name(
+                    ctx: &crate::common::entity_building::ExtractionContext,
                 ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
-                    #handler_impl(query_match, query, source, file_path, repository_id, package_name, source_root, repo_root)
+                    #handler_impl(ctx)
                 }
             }
         })

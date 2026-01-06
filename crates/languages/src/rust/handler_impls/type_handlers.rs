@@ -31,7 +31,7 @@ use codesearch_core::CodeEntity;
 use std::collections::HashSet;
 use std::path::Path;
 use tracing::warn;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::Node;
 
 // ============================================================================
 // Type Handler Implementations
@@ -54,58 +54,38 @@ fn extract_type_entity(
 // ============================================================================
 
 /// Process a struct query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_struct_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
+pub(crate) fn handle_struct_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Build ImportMap from file's imports for type resolution
-    let struct_node = require_capture_node(query_match, query, capture_names::STRUCT)?;
-    let import_map = get_file_import_map(struct_node, source);
+    let struct_node = require_capture_node(ctx.query_match, ctx.query, capture_names::STRUCT)?;
+    let import_map = get_file_import_map(struct_node, ctx.source);
 
     // Extract common components for parent_scope and qualified_name
-    let components = extract_common_components(&ctx, capture_names::NAME, struct_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, struct_node, "rust")?;
     let struct_qualified_name = components.qualified_name.clone();
     let struct_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build resolution context for qualified name normalization
     let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract fields early so we can create child entities
-    let (fields, is_tuple) = extract_struct_fields(&ctx);
+    let (fields, is_tuple) = extract_struct_fields(ctx);
 
     // Build struct entity
     let struct_entity =
-        extract_type_entity(&ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
+        extract_type_entity(ctx, capture_names::STRUCT, EntityType::Struct, |ctx| {
             // Extract generics with parsed bounds
             let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
@@ -154,8 +134,8 @@ pub fn handle_struct_impl(
     let field_entities = build_field_entities(
         &fields,
         &struct_qualified_name,
-        file_path,
-        repository_id,
+        ctx.file_path,
+        ctx.repository_id,
         &resolution_ctx,
         &struct_location,
     );
@@ -167,57 +147,37 @@ pub fn handle_struct_impl(
 }
 
 /// Process an enum query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_enum_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
+pub(crate) fn handle_enum_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Build ImportMap from file's imports for type resolution
-    let enum_node = require_capture_node(query_match, query, capture_names::ENUM)?;
-    let import_map = get_file_import_map(enum_node, source);
+    let enum_node = require_capture_node(ctx.query_match, ctx.query, capture_names::ENUM)?;
+    let import_map = get_file_import_map(enum_node, ctx.source);
 
     // Extract common components for parent_scope and qualified_name
-    let components = extract_common_components(&ctx, capture_names::NAME, enum_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, enum_node, "rust")?;
     let enum_qualified_name = components.qualified_name.clone();
     let enum_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build resolution context for qualified name normalization
     let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract variants early so we can create child entities
-    let variants = extract_enum_variants(&ctx);
+    let variants = extract_enum_variants(ctx);
 
     // Build enum entity
-    let enum_entity = extract_type_entity(&ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
+    let enum_entity = extract_type_entity(ctx, capture_names::ENUM, EntityType::Enum, |ctx| {
         // Extract generics with parsed bounds
         let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
@@ -259,8 +219,8 @@ pub fn handle_enum_impl(
     let variant_entities = build_variant_entities(
         &variants,
         &enum_qualified_name,
-        file_path,
-        repository_id,
+        ctx.file_path,
+        ctx.repository_id,
         &resolution_ctx,
         &enum_location,
     );
@@ -272,51 +232,31 @@ pub fn handle_enum_impl(
 }
 
 /// Process a trait query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_trait_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
+pub(crate) fn handle_trait_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Build ImportMap from file's imports for type resolution
-    let trait_node = require_capture_node(query_match, query, capture_names::TRAIT)?;
-    let import_map = get_file_import_map(trait_node, source);
+    let trait_node = require_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT)?;
+    let import_map = get_file_import_map(trait_node, ctx.source);
 
     // Extract common components for parent_scope
-    let components = extract_common_components(&ctx, capture_names::NAME, trait_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, trait_node, "rust")?;
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build resolution context for qualified name normalization
     let edge_case_registry = get_rust_edge_case_registry();
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
-    let trait_entity = extract_type_entity(&ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
+    let trait_entity = extract_type_entity(ctx, capture_names::TRAIT, EntityType::Trait, |ctx| {
         // Extract generics with parsed bounds
         let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
@@ -405,12 +345,14 @@ pub fn handle_trait_impl(
     let mut entities = vec![trait_entity.clone()];
 
     // Extract trait methods as separate entities
-    if let Some(body_node) = find_capture_node(query_match, query, capture_names::TRAIT_BODY) {
+    if let Some(body_node) =
+        find_capture_node(ctx.query_match, ctx.query, capture_names::TRAIT_BODY)
+    {
         let trait_methods = extract_trait_method_entities(
             body_node,
-            source,
-            file_path,
-            repository_id,
+            ctx.source,
+            ctx.file_path,
+            ctx.repository_id,
             &trait_entity.qualified_name,
         );
         entities.extend(trait_methods);

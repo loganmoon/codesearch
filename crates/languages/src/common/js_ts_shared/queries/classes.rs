@@ -6,7 +6,7 @@
 /// - `class Foo {}`
 /// - `class Foo extends Bar {}`
 /// - `export class Foo {}`
-pub const CLASS_DECLARATION_QUERY: &str = r#"
+pub(crate) const CLASS_DECLARATION_QUERY: &str = r#"
 [
   (class_declaration
     name: (identifier) @name
@@ -31,7 +31,7 @@ pub const CLASS_DECLARATION_QUERY: &str = r#"
 /// - `const Foo = class {}`
 /// - `const Foo = class Bar {}`
 /// - `let Foo = class extends Base {}`
-pub const CLASS_EXPRESSION_QUERY: &str = r#"
+pub(crate) const CLASS_EXPRESSION_QUERY: &str = r#"
 (lexical_declaration
   (variable_declarator
     name: (identifier) @name
@@ -58,7 +58,7 @@ pub const CLASS_EXPRESSION_QUERY: &str = r#"
 /// Matches:
 /// - `export default class {}`
 /// - `export default class Foo {}`
-pub const DEFAULT_EXPORT_CLASS_QUERY: &str = r#"
+pub(crate) const _DEFAULT_EXPORT_CLASS_QUERY: &str = r#"
 (export_statement
   (class_declaration
     name: (identifier)? @name
@@ -79,7 +79,7 @@ pub const DEFAULT_EXPORT_CLASS_QUERY: &str = r#"
 /// - `get prop() {}`
 /// - `set prop(v) {}`
 /// - `#privateMethod() {}`
-pub const METHOD_QUERY: &str = r#"
+pub(crate) const METHOD_QUERY: &str = r#"
 (class_body
   (method_definition
     name: [
@@ -97,7 +97,7 @@ pub const METHOD_QUERY: &str = r#"
 /// - `static field = value`
 /// - `#privateField = value`
 /// - `field` (no initializer)
-pub const PROPERTY_QUERY: &str = r#"
+pub(crate) const PROPERTY_QUERY: &str = r#"
 (class_body
   (field_definition
     property: [
@@ -119,7 +119,7 @@ pub const PROPERTY_QUERY: &str = r#"
 ///
 /// Matches:
 /// - `static { ... }`
-pub const STATIC_BLOCK_QUERY: &str = r#"
+pub(crate) const _STATIC_BLOCK_QUERY: &str = r#"
 (class_body
   (static_block) @static_block) @method
 "#;

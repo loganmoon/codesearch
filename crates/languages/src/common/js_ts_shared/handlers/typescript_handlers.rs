@@ -8,8 +8,6 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 use super::super::visibility::extract_visibility;
 use super::common::{extract_main_node, extract_preceding_doc_comments, node_to_text};
@@ -20,48 +18,24 @@ use super::common::{extract_main_node, extract_preceding_doc_comments, node_to_t
 /// - `interface Foo {}`
 /// - `interface Foo extends Bar {}`
 /// - `export interface Foo {}`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_interface_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["interface"]) {
+pub(crate) fn handle_interface_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["interface"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "typescript")?;
-
-    // Extract TS-specific details
-    let visibility = extract_visibility(node, source);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let visibility = extract_visibility(node, ctx.source);
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     // Extract extends clause if present
     let mut relationships = EntityRelationshipData::default();
-    if let Some(extends_index) = query.capture_index_for_name("extends") {
-        for capture in query_match.captures {
+    if let Some(extends_index) = ctx.query.capture_index_for_name("extends") {
+        for capture in ctx.query_match.captures {
             if capture.index == extends_index {
-                let extends_name = &source[capture.node.byte_range()];
+                let extends_name = &ctx.source[capture.node.byte_range()];
                 if let Ok(source_ref) = SourceReference::builder()
                     .target(extends_name.to_string())
                     .simple_name(extends_name.to_string())
@@ -98,41 +72,17 @@ pub fn handle_interface_impl(
 /// - `type Foo = string`
 /// - `type Foo<T> = T[]`
 /// - `export type Foo = Bar`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_type_alias_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["type_alias"]) {
+pub(crate) fn handle_type_alias_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["type_alias"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "typescript")?;
-
-    // Extract TS-specific details
-    let visibility = extract_visibility(node, source);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let visibility = extract_visibility(node, ctx.source);
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     let metadata = EntityMetadata::default();
 
@@ -159,45 +109,23 @@ pub fn handle_type_alias_impl(
 /// - `enum Color { Red, Green, Blue }`
 /// - `const enum Direction { Up, Down }`
 /// - `export enum Status { Active, Inactive }`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_enum_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["enum"]) {
+pub(crate) fn handle_enum_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["enum"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "typescript")?;
-
-    // Extract TS-specific details
-    let visibility = extract_visibility(node, source);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let visibility = extract_visibility(node, ctx.source);
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     // Check if it's a const enum
     let is_const = node.child_by_field_name("const").is_some()
-        || source[node.byte_range()].trim_start().starts_with("const");
+        || ctx.source[node.byte_range()]
+            .trim_start()
+            .starts_with("const");
 
     let metadata = EntityMetadata {
         is_const,
@@ -227,41 +155,17 @@ pub fn handle_enum_impl(
 /// - `namespace Foo {}`
 /// - `module Bar {}`
 /// - `export namespace Foo {}`
-#[allow(clippy::too_many_arguments)]
-pub fn handle_namespace_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(query_match, query, &["namespace"]) {
+pub(crate) fn handle_namespace_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["namespace"]) {
         Some(n) => n,
         None => return Ok(Vec::new()),
     };
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
 
-    // Extract common components
-    let components = extract_common_components(&ctx, "name", node, "typescript")?;
-
-    // Extract TS-specific details
-    let visibility = extract_visibility(node, source);
-    let documentation = extract_preceding_doc_comments(node, source);
-    let content = node_to_text(node, source).ok();
+    let visibility = extract_visibility(node, ctx.source);
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
     let metadata = EntityMetadata::default();
 

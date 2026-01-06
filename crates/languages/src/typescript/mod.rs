@@ -77,6 +77,18 @@ define_language_extractor! {
             query: ts_queries::INTERFACE_METHOD_QUERY,
             handler: ts_handlers::handle_interface_method_impl
         },
+        index_signature => {
+            query: ts_queries::INDEX_SIGNATURE_QUERY,
+            handler: ts_handlers::handle_index_signature_impl
+        },
+        call_signature => {
+            query: ts_queries::CALL_SIGNATURE_QUERY,
+            handler: ts_handlers::handle_call_signature_impl
+        },
+        construct_signature => {
+            query: ts_queries::CONSTRUCT_SIGNATURE_QUERY,
+            handler: ts_handlers::handle_construct_signature_impl
+        },
         type_alias => {
             query: ts_queries::TYPE_ALIAS_QUERY,
             handler: ts_handlers::handle_type_alias_impl

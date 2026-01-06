@@ -223,3 +223,41 @@ pub(crate) const INTERFACE_METHOD_QUERY: &str = r#"
   (method_signature
     name: (property_identifier) @name) @interface_method)
 "#;
+
+/// Query for index signatures
+///
+/// Matches index signatures inside interface bodies:
+/// - `[key: string]: T`
+/// - `[index: number]: T`
+/// - `readonly [key: string]: T`
+///
+/// Note: Index signatures don't have a name field - the name is derived
+/// from the parameter type (e.g., `[string]` or `[number]`).
+pub(crate) const INDEX_SIGNATURE_QUERY: &str = r#"
+(interface_body
+  (index_signature) @index_signature)
+"#;
+
+/// Query for call signatures
+///
+/// Matches call signatures inside interface bodies:
+/// - `(): T`
+/// - `(x: number): number`
+///
+/// Note: Call signatures don't have a name - they use `()` as the name.
+pub(crate) const CALL_SIGNATURE_QUERY: &str = r#"
+(interface_body
+  (call_signature) @call_signature)
+"#;
+
+/// Query for construct signatures
+///
+/// Matches construct signatures inside interface bodies:
+/// - `new (): T`
+/// - `new (name: string): object`
+///
+/// Note: Construct signatures don't have a name - they use `new()` as the name.
+pub(crate) const CONSTRUCT_SIGNATURE_QUERY: &str = r#"
+(interface_body
+  (construct_signature) @construct_signature)
+"#;

@@ -6,6 +6,8 @@ pub(crate) mod edge_case_handlers;
 pub mod entity_building;
 pub mod import_map;
 pub mod js_ts_shared;
+#[macro_use]
+pub mod language_extractors;
 pub mod language_path;
 pub mod module_utils;
 pub mod path_config;

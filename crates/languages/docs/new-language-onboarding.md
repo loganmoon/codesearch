@@ -181,8 +181,12 @@ crates/languages/
 │   │       └── tests/              # Handler unit tests
 │   │
 │   ├── common/                     # Shared utilities
+│   │   ├── language_extractors.rs  # LanguageExtractors trait + define_handler! macro
 │   │   ├── import_map.rs           # Import resolution
-│   │   └── entity_building.rs      # Entity construction
+│   │   ├── entity_building.rs      # Entity construction
+│   │   └── js_ts_shared/           # Shared JS/TS infrastructure
+│   │       ├── extractors.rs       # JavaScript, TypeScript trait implementations
+│   │       └── ...
 │   │
 │   └── {language}/                 # Other languages follow same structure
 ```
@@ -286,66 +290,174 @@ pub const IMPL_TRAIT_QUERY: &str = r#"
 
 ## Step 3: Handler Implementations
 
-### 3.1 Handler Signature
+The extraction framework provides two approaches for implementing handlers:
+1. **Macro-based** (recommended): Use `define_handler!` with the `LanguageExtractors` trait for concise definitions
+2. **Manual**: Write handlers directly for complex cases requiring custom logic
+
+### 3.1 The LanguageExtractors Trait
+
+The `LanguageExtractors` trait defines language-specific extraction behavior. Implement this for each language:
 
 ```rust
-pub fn handle_function_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
+// crates/languages/src/common/language_extractors.rs
+
+pub trait LanguageExtractors {
+    /// The Language enum variant for this language
+    const LANGUAGE: Language;
+
+    /// String identifier used for qualified name building
+    const LANG_STR: &'static str;
+
+    /// Extract visibility from an AST node (e.g., `pub`, `export`)
+    fn extract_visibility(node: Node, source: &str) -> Visibility;
+
+    /// Extract documentation comments (e.g., `///`, `/** */`, docstrings)
+    fn extract_docs(node: Node, source: &str) -> Option<String>;
+}
+```
+
+Example implementation for JavaScript:
+
+```rust
+// crates/languages/src/common/js_ts_shared/extractors.rs
+
+pub struct JavaScript;
+
+impl LanguageExtractors for JavaScript {
+    const LANGUAGE: Language = Language::JavaScript;
+    const LANG_STR: &'static str = "javascript";
+
+    fn extract_visibility(node: Node, source: &str) -> Visibility {
+        extract_visibility(node, source)  // Language-specific function
+    }
+
+    fn extract_docs(node: Node, source: &str) -> Option<String> {
+        extract_preceding_doc_comments(node, source)  // JSDoc extraction
+    }
+}
+```
+
+### 3.2 Handler Signature
+
+All handlers take a single `ExtractionContext` parameter that bundles query match data and file context:
+
+```rust
+pub(crate) fn handle_function_impl(
+    ctx: &ExtractionContext,
 ) -> Result<Vec<CodeEntity>>
 ```
 
-### 3.2 Basic Handler Pattern
+The `ExtractionContext` contains:
+- `query_match: &QueryMatch` - Tree-sitter query match
+- `query: &Query` - Tree-sitter query (for capture name lookup)
+- `source: &str` - Source code
+- `file_path: &Path` - Path to the file
+- `repository_id: &str` - Repository identifier
+- `package_name: Option<&str>` - Package/crate name
+- `source_root: Option<&Path>` - Source root directory
+- `repo_root: &Path` - Repository root
+
+### 3.3 Using the define_handler! Macro (Recommended)
+
+The `define_handler!` macro generates handlers using the trait-based extraction framework:
 
 ```rust
-pub fn handle_function_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let function_node = require_capture_node(query_match, query, "function")?;
-    let name_node = require_capture_node(query_match, query, "name")?;
+use crate::common::js_ts_shared::JavaScript;
+use crate::define_handler;
 
-    let ctx = ExtractionContext {
-        query_match, query, source, file_path,
-        repository_id, package_name, source_root, repo_root,
+// Basic handler with default metadata and no relationships
+define_handler!(JavaScript, handle_let_impl, "let", Variable);
+
+// Handler with custom metadata function
+define_handler!(JavaScript, handle_function_impl, "function", Function,
+    metadata: function_metadata);
+
+// Handler with custom relationships function
+define_handler!(JavaScript, handle_class_impl, "class", Class,
+    relationships: extract_extends_relationships);
+
+// Handler with both custom metadata and relationships
+define_handler!(JavaScript, handle_method_impl, "method", Method,
+    metadata: method_metadata,
+    relationships: extract_implements);
+```
+
+The macro parameters:
+- `$lang:ty` - Language struct implementing `LanguageExtractors`
+- `$fn_name:ident` - Handler function name
+- `$capture:expr` - Tree-sitter capture name for the main node
+- `$entity_type:ident` - `EntityType` variant (e.g., `Function`, `Class`)
+- `metadata: $fn` - (optional) Function `fn(Node, &str) -> EntityMetadata`
+- `relationships: $fn` - (optional) Function `fn(&ExtractionContext, Node) -> EntityRelationshipData`
+
+### 3.4 Helper Functions for Metadata and Relationships
+
+Define helper functions for common metadata and relationship patterns:
+
+```rust
+// Metadata helper (JS/TS example)
+pub(crate) fn function_metadata(node: Node, source: &str) -> EntityMetadata {
+    EntityMetadata {
+        is_async: is_async(node),
+        is_generator: is_generator(node),
+        ..Default::default()
+    }
+}
+
+// Relationships helper
+pub(crate) fn extract_extends_relationships(
+    ctx: &ExtractionContext,
+    node: Node,
+) -> EntityRelationshipData {
+    let extends = extract_class_extends(node, ctx.source);
+    EntityRelationshipData {
+        extends,
+        ..Default::default()
+    }
+}
+```
+
+### 3.5 Manual Handler Pattern
+
+For complex cases requiring custom logic (e.g., TypeScript enums with const detection):
+
+```rust
+pub(crate) fn handle_enum_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["enum"]) {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
     };
 
-    let components = extract_common_components(&ctx, "name", function_node, "rust")?;
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
+    let visibility = extract_visibility(node, ctx.source);
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
 
-    // Parse imports for reference resolution
-    let import_map = parse_file_imports(function_node.parent().unwrap(), source, Language::Rust);
+    // Custom logic: detect const enums
+    let is_const = node.child_by_field_name("const").is_some()
+        || ctx.source[node.byte_range()].trim_start().starts_with("const");
 
-    // Extract relationship data (see Step 4)
-    let relationships = extract_function_relationships(
-        query_match, query, source, &import_map
-    )?;
+    let metadata = EntityMetadata {
+        is_const,
+        ..Default::default()
+    };
 
     let entity = build_entity(
         components,
         EntityDetails {
-            entity_type: EntityType::Function,
-            language: Language::Rust,
-            visibility: extract_visibility(query_match, query),
-            relationships,  // Typed EntityRelationshipData
-            // ...
+            entity_type: EntityType::Enum,
+            language: Language::TypeScript,
+            visibility: Some(visibility),
+            documentation,
+            content,
+            metadata,
+            signature: None,
+            relationships: Default::default(),
         },
     )?;
 
     Ok(vec![entity])
 }
-```
 
 ---
 
@@ -849,24 +961,25 @@ Maintain a coverage matrix in each test file:
 2. [ ] Create language directory: `crates/languages/src/{language}/`
 3. [ ] Add `mod.rs` with `define_language_extractor!` macro
 4. [ ] Create `queries.rs` with tree-sitter queries
-5. [ ] Create `handler_impls/` with handlers
-6. [ ] Populate `EntityRelationshipData` fields (not metadata.attributes)
-7. [ ] Use `SourceReference` with `is_external` flag
-8. [ ] Add import parser in `common/import_map.rs`
-9. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
+5. [ ] Implement `LanguageExtractors` trait for visibility and doc extraction
+6. [ ] Create `handler_impls/` with handlers using `define_handler!` macro
+7. [ ] Populate `EntityRelationshipData` fields (not metadata.attributes)
+8. [ ] Use `SourceReference` with `is_external` flag
+9. [ ] Add import parser in `common/import_map.rs`
+10. [ ] Add language to `Language` enum in `crates/core/src/entities.rs`
 
 ### Resolver Work (outbox-processor)
-10. [ ] Verify existing `RelationshipDef` definitions cover your language's relationships
-11. [ ] If needed: Add new `RelationshipDef` in `crates/core/src/resolution.rs`
-12. [ ] If needed: Add new `ReferenceExtractor` in `crates/outbox-processor/src/generic_resolver.rs`
-13. [ ] If needed: Add factory function and register in `processor.rs`
+11. [ ] Verify existing `RelationshipDef` definitions cover your language's relationships
+12. [ ] If needed: Add new `RelationshipDef` in `crates/core/src/resolution.rs`
+13. [ ] If needed: Add new `ReferenceExtractor` in `crates/outbox-processor/src/generic_resolver.rs`
+14. [ ] If needed: Add factory function and register in `processor.rs`
 
 ### Testing
-14. [ ] Write handler unit tests in `crates/languages/src/{language}/handler_impls/tests/`
-15. [ ] Create E2E spec validation tests in `crates/e2e-tests/tests/{language}_spec_validation.rs`
-16. [ ] Create test fixtures in `crates/e2e-tests/tests/fixtures/{language}/`
-17. [ ] Maintain spec coverage matrix in test file
-18. [ ] Run full E2E test suite: `cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored`
+15. [ ] Write handler unit tests in `crates/languages/src/{language}/handler_impls/tests/`
+16. [ ] Create E2E spec validation tests in `crates/e2e-tests/tests/{language}_spec_validation.rs`
+17. [ ] Create test fixtures in `crates/e2e-tests/tests/fixtures/{language}/`
+18. [ ] Maintain spec coverage matrix in test file
+19. [ ] Run full E2E test suite: `cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored`
 
 ---
 

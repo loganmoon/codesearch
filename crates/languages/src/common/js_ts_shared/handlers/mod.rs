@@ -2,6 +2,9 @@
 //!
 //! This module contains handler implementations for extracting code entities
 //! from JavaScript and TypeScript source code.
+//!
+//! Handlers use the generic [`define_handler!`] macro with language-specific
+//! extractors ([`JavaScript`], [`TypeScript`]) to minimize boilerplate.
 
 pub(crate) mod class_handlers;
 pub(crate) mod common;

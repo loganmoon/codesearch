@@ -1,11 +1,14 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
-use codesearch_core::entities::EntityMetadata;
+use crate::common::entity_building::ExtractionContext;
+use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, SourceReference};
 use im::HashMap as ImHashMap;
 use tree_sitter::{Node, Query, QueryMatch};
 
 // Re-export node_to_text for use by other handlers
 pub(crate) use crate::common::node_to_text;
+
+use super::super::visibility::{is_async, is_generator, is_getter, is_setter, is_static_member};
 
 /// Extract entity name from a query match
 ///
@@ -129,4 +132,74 @@ pub(crate) fn build_js_metadata(
         attributes,
         ..Default::default()
     }
+}
+
+// =============================================================================
+// Metadata helper functions for use with define_js_handler! macro
+// =============================================================================
+
+/// Build metadata for regular function declarations/expressions
+pub(crate) fn function_metadata(node: Node, _source: &str) -> EntityMetadata {
+    build_js_metadata(
+        false,
+        is_async(node),
+        is_generator(node),
+        false,
+        false,
+        false,
+    )
+}
+
+/// Build metadata for arrow functions
+pub(crate) fn arrow_function_metadata(node: Node, _source: &str) -> EntityMetadata {
+    build_js_metadata(false, is_async(node), false, false, false, true)
+}
+
+/// Build metadata for class methods
+pub(crate) fn method_metadata(node: Node, _source: &str) -> EntityMetadata {
+    build_js_metadata(
+        is_static_member(node),
+        is_async(node),
+        is_generator(node),
+        is_getter(node),
+        is_setter(node),
+        false,
+    )
+}
+
+/// Build metadata for const declarations
+pub(crate) fn const_metadata(_node: Node, _source: &str) -> EntityMetadata {
+    EntityMetadata {
+        is_const: true,
+        ..Default::default()
+    }
+}
+
+// =============================================================================
+// Relationship helper functions for use with define_js_handler! macro
+// =============================================================================
+
+/// Extract extends relationships from a class or interface declaration
+pub(crate) fn extract_extends_relationships(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> EntityRelationshipData {
+    let mut relationships = EntityRelationshipData::default();
+
+    if let Some(extends_index) = ctx.query.capture_index_for_name("extends") {
+        for capture in ctx.query_match.captures {
+            if capture.index == extends_index {
+                let extends_name = &ctx.source[capture.node.byte_range()];
+                if let Ok(source_ref) = SourceReference::builder()
+                    .target(extends_name.to_string())
+                    .simple_name(extends_name.to_string())
+                    .build()
+                {
+                    relationships.extends.push(source_ref);
+                }
+            }
+        }
+    }
+
+    relationships
 }

@@ -1,57 +1,59 @@
-//! JavaScript language extractor module (STUBBED)
-//!
-//! This module is temporarily stubbed pending the new macro architecture implementation.
-//! See issue #179 for the migration plan.
-//!
-//! ## Re-enabling JavaScript extraction
-//!
-//! When implementing the full extractor, ensure you:
-//! 1. Use `define_language_extractor!` macro with a `fqn:` block
-//! 2. Define `SCOPE_PATTERNS` for qualified name building
-//! 3. Provide `module_path_fn` if module path derivation is needed
-//!
-//! The macro will automatically register `ScopeConfiguration` via inventory.
+//! JavaScript language extractor module
 
-use codesearch_core::{error::Result, CodeEntity};
-use std::path::{Path, PathBuf};
+use crate::common::js_ts_shared::handlers as js_handlers;
+use crate::common::js_ts_shared::queries as js_queries;
+use crate::common::js_ts_shared::SCOPE_PATTERNS;
+use codesearch_languages_macros::define_language_extractor;
 
-/// JavaScript extractor (stubbed)
-///
-/// Returns empty entity vectors. Full implementation pending macro architecture migration.
-pub struct JavaScriptExtractor;
+define_language_extractor! {
+    language: JavaScript,
+    tree_sitter: tree_sitter_javascript::LANGUAGE,
+    extensions: ["js", "jsx"],
 
-impl JavaScriptExtractor {
-    /// Create a new JavaScript extractor
-    pub fn new(
-        _repository_id: String,
-        _package_name: Option<String>,
-        _source_root: Option<PathBuf>,
-        _repo_root: PathBuf,
-    ) -> Result<Self> {
-        Ok(Self)
-    }
-}
+    fqn: {
+        family: ModuleBased,
+    },
 
-impl crate::Extractor for JavaScriptExtractor {
-    fn extract(&self, _source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
-        tracing::warn!(
-            "JavaScript extraction is currently disabled (pending macro migration). \
-             File will not be indexed: {}",
-            file_path.display()
-        );
-        Ok(Vec::new())
-    }
-}
-
-inventory::submit! {
-    crate::LanguageDescriptor {
-        name: "javascript",
-        extensions: &["js", "jsx"],
-        factory: |repo_id, pkg_name, src_root, repo_root| Ok(Box::new(JavaScriptExtractor::new(
-            repo_id.to_string(),
-            pkg_name.map(String::from),
-            src_root.map(PathBuf::from),
-            repo_root.to_path_buf(),
-        )?)),
+    entities: {
+        function_decl => {
+            query: js_queries::FUNCTION_DECLARATION_QUERY,
+            handler: js_handlers::handle_function_declaration_impl
+        },
+        function_expr => {
+            query: js_queries::FUNCTION_EXPRESSION_QUERY,
+            handler: js_handlers::handle_function_expression_impl
+        },
+        arrow_function => {
+            query: js_queries::ARROW_FUNCTION_QUERY,
+            handler: js_handlers::handle_arrow_function_impl
+        },
+        class_decl => {
+            query: js_queries::CLASS_DECLARATION_QUERY,
+            handler: js_handlers::handle_class_declaration_impl
+        },
+        class_expr => {
+            query: js_queries::CLASS_EXPRESSION_QUERY,
+            handler: js_handlers::handle_class_expression_impl
+        },
+        method => {
+            query: js_queries::METHOD_QUERY,
+            handler: js_handlers::handle_method_impl
+        },
+        property => {
+            query: js_queries::PROPERTY_QUERY,
+            handler: js_handlers::handle_property_impl
+        },
+        constant => {
+            query: js_queries::CONST_QUERY,
+            handler: js_handlers::handle_const_impl
+        },
+        let_var => {
+            query: js_queries::LET_QUERY,
+            handler: js_handlers::handle_let_impl
+        },
+        var => {
+            query: js_queries::VAR_QUERY,
+            handler: js_handlers::handle_var_impl
+        }
     }
 }

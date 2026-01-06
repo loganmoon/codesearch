@@ -77,7 +77,7 @@ The extraction and resolution pipeline:
 - `implements_trait: Option<SourceReference>` - Trait being implemented
 - `for_type: Option<SourceReference>` - Type for impl block
 - `extends: Vec<SourceReference>` - Parent class/interface
-- `supertraits: Vec<SourceReference>` - Trait supertraits
+- `extended_types: Vec<SourceReference>` - Extended types (Rust trait bounds, TS interface extends)
 - `call_aliases: Vec<String>` - UFCS aliases for Rust
 
 **SourceReference**: Reference with resolution metadata:
@@ -527,7 +527,7 @@ let is_external = !lang_path.is_relative() && lang_path.is_external();
 | `implements_trait` | Impl | IMPLEMENTS |
 | `for_type` | Impl | ASSOCIATES |
 | `extends` | Class | INHERITS_FROM |
-| `supertraits` | Trait | EXTENDS_INTERFACE |
+| `extended_types` | Trait, Interface | EXTENDS_INTERFACE |
 | `call_aliases` | Method | (UFCS resolution) |
 
 ---

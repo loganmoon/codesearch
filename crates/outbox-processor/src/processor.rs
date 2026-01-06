@@ -1067,7 +1067,7 @@ impl OutboxProcessor {
     /// - uses_resolver: USES for type references
     /// - implements_resolver: IMPLEMENTS for trait implementations
     /// - associates_resolver: ASSOCIATES for impl blocks
-    /// - extends_resolver: EXTENDS_INTERFACE for trait supertraits
+    /// - extends_resolver: EXTENDS_INTERFACE for extended types (Rust trait bounds, TS interface extends)
     /// - inherits_resolver: INHERITS_FROM for class inheritance
     /// - imports_resolver: IMPORTS for module imports
     /// - reexports_resolver: REEXPORTS for module re-exports (barrel exports)

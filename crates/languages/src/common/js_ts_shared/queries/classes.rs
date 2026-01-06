@@ -71,7 +71,7 @@ pub(crate) const METHOD_QUERY: &str = r#"
       (private_property_identifier) @name
     ]
     parameters: (formal_parameters) @params
-    body: (statement_block) @body)) @method
+    body: (statement_block) @body) @method)
 "#;
 
 /// Query for class fields/properties
@@ -88,7 +88,7 @@ pub(crate) const PROPERTY_QUERY: &str = r#"
       (property_identifier) @name
       (private_property_identifier) @name
     ]
-    value: (_)? @value)) @property
+    value: (_)? @value) @property)
 
 (class_body
   (public_field_definition
@@ -96,5 +96,5 @@ pub(crate) const PROPERTY_QUERY: &str = r#"
       (property_identifier) @name
       (private_property_identifier) @name
     ]
-    value: (_)? @value)) @property
+    value: (_)? @value) @property)
 "#;

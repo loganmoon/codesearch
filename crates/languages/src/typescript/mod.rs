@@ -69,6 +69,14 @@ define_language_extractor! {
             query: ts_queries::INTERFACE_QUERY,
             handler: ts_handlers::handle_interface_impl
         },
+        interface_property => {
+            query: ts_queries::INTERFACE_PROPERTY_QUERY,
+            handler: ts_handlers::handle_interface_property_impl
+        },
+        interface_method => {
+            query: ts_queries::INTERFACE_METHOD_QUERY,
+            handler: ts_handlers::handle_interface_method_impl
+        },
         type_alias => {
             query: ts_queries::TYPE_ALIAS_QUERY,
             handler: ts_handlers::handle_type_alias_impl
@@ -76,6 +84,10 @@ define_language_extractor! {
         r#enum => {
             query: ts_queries::ENUM_QUERY,
             handler: ts_handlers::handle_enum_impl
+        },
+        enum_member => {
+            query: ts_queries::ENUM_MEMBER_QUERY,
+            handler: ts_handlers::handle_enum_member_impl
         },
         namespace => {
             query: ts_queries::NAMESPACE_QUERY,

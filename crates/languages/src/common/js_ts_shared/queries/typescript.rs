@@ -73,7 +73,7 @@ pub(crate) const TS_PROPERTY_QUERY: &str = r#"
       (property_identifier) @name
       (private_property_identifier) @name
     ]
-    value: (_)? @value)) @property
+    value: (_)? @value) @property)
 "#;
 
 /// Query for interface declarations
@@ -84,17 +84,28 @@ pub(crate) const TS_PROPERTY_QUERY: &str = r#"
 /// - `export interface Foo {}`
 pub(crate) const INTERFACE_QUERY: &str = r#"
 [
+  ;; Interface without extends
   (interface_declaration
     name: (type_identifier) @name
-    (extends_type_clause
-      (type_identifier) @extends)?
     body: (interface_body) @body) @interface
 
+  ;; Interface with extends
+  (interface_declaration
+    name: (type_identifier) @name
+    (extends_type_clause) @extends_clause
+    body: (interface_body) @body) @interface
+
+  ;; Exported interface without extends
   (export_statement
     declaration: (interface_declaration
       name: (type_identifier) @name
-      (extends_type_clause
-        (type_identifier) @extends)?
+      body: (interface_body) @body)) @interface
+
+  ;; Exported interface with extends
+  (export_statement
+    declaration: (interface_declaration
+      name: (type_identifier) @name
+      (extends_type_clause) @extends_clause
       body: (interface_body) @body)) @interface
 ]
 "#;
@@ -139,6 +150,29 @@ pub(crate) const ENUM_QUERY: &str = r#"
 ]
 "#;
 
+/// Query for enum members (variants)
+///
+/// Matches enum members inside enum bodies:
+/// - `Red` (simple member, no value)
+/// - `Active = 1` (member with numeric value)
+/// - `Info = "INFO"` (member with string value)
+///
+/// The qualified name (e.g., `module.EnumName.MemberName`) is built automatically
+/// via AST parent traversal since `enum_declaration` is registered as a scope pattern.
+pub(crate) const ENUM_MEMBER_QUERY: &str = r#"
+[
+  ;; Simple enum member: enum Color { Red, Green }
+  ;; property_identifier is a direct child of enum_body
+  (enum_body
+    (property_identifier) @name) @enum_member
+
+  ;; Enum member with value: enum Status { Active = 1 }
+  (enum_body
+    (enum_assignment
+      name: (property_identifier) @name)) @enum_member
+]
+"#;
+
 /// Query for namespace declarations (internal modules)
 ///
 /// Matches:
@@ -165,4 +199,27 @@ pub(crate) const NAMESPACE_QUERY: &str = r#"
       name: (nested_identifier) @name
       body: (statement_block) @body)) @namespace
 ]
+"#;
+
+/// Query for interface property signatures
+///
+/// Matches property signatures inside interface bodies:
+/// - `id: number`
+/// - `name?: string` (optional)
+/// - `readonly createdAt: Date`
+pub(crate) const INTERFACE_PROPERTY_QUERY: &str = r#"
+(interface_body
+  (property_signature
+    name: (property_identifier) @name) @interface_property)
+"#;
+
+/// Query for interface method signatures
+///
+/// Matches method signatures inside interface bodies:
+/// - `greet(): string`
+/// - `updateEmail(email: string): void`
+pub(crate) const INTERFACE_METHOD_QUERY: &str = r#"
+(interface_body
+  (method_signature
+    name: (property_identifier) @name) @interface_method)
 "#;

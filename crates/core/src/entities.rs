@@ -376,10 +376,10 @@ pub struct EntityRelationshipData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extends: Vec<SourceReference>,
 
-    /// Trait supertraits (Rust trait bounds like `trait Foo: Bar`).
+    /// Extended types (Rust trait bounds, TypeScript interface extends).
     /// Resolved to EXTENDS_INTERFACE relationships in Neo4j.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub supertraits: Vec<SourceReference>,
+    pub extended_types: Vec<SourceReference>,
 
     /// Pre-computed call aliases for language-specific resolution.
     /// E.g., Rust UFCS: "TypeFQN::method" for "<TypeFQN as TraitFQN>::method".
@@ -399,7 +399,7 @@ impl EntityRelationshipData {
             && self.implements.is_empty()
             && self.for_type.is_none()
             && self.extends.is_empty()
-            && self.supertraits.is_empty()
+            && self.extended_types.is_empty()
             && self.call_aliases.is_empty()
     }
 }

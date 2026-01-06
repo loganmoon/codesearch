@@ -46,6 +46,8 @@ pub const SCOPE_PATTERNS: &[ScopePattern] = &[
 ///
 /// Includes all JavaScript patterns plus:
 /// - `internal_module` - Namespace/module declarations: `namespace Foo { ... }`
+/// - `enum_declaration` - Enum declarations: `enum Color { ... }`
+/// - `interface_declaration` - Interface declarations: `interface Foo { ... }`
 ///
 /// Note: The JavaScript patterns are duplicated here rather than extended because
 /// Rust const arrays cannot be concatenated at compile time. This intentional
@@ -74,6 +76,16 @@ pub const TS_SCOPE_PATTERNS: &[ScopePattern] = &[
     // TypeScript namespaces/internal modules: namespace Foo { ... }
     ScopePattern {
         node_kind: "internal_module",
+        field_name: "name",
+    },
+    // Enum declarations: enum Color { Red, Green }
+    ScopePattern {
+        node_kind: "enum_declaration",
+        field_name: "name",
+    },
+    // Interface declarations: interface Foo { bar: string }
+    ScopePattern {
+        node_kind: "interface_declaration",
         field_name: "name",
     },
 ];

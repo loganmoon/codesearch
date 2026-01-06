@@ -1,7 +1,9 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
 use crate::common::entity_building::ExtractionContext;
-use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, SourceReference};
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, SourceLocation, SourceReference,
+};
 use im::HashMap as ImHashMap;
 use tree_sitter::Node;
 
@@ -171,7 +173,9 @@ pub(crate) fn property_metadata(node: Node, source: &str) -> EntityMetadata {
 // Relationship helper functions for use with define_handler! macro
 // =============================================================================
 
-/// Extract extends relationships from a class or interface declaration
+/// Extract extends relationships from a class declaration
+///
+/// Populates `relationships.extends` which becomes INHERITS_FROM in Neo4j.
 pub(crate) fn extract_extends_relationships(
     ctx: &ExtractionContext,
     _node: Node,
@@ -194,4 +198,95 @@ pub(crate) fn extract_extends_relationships(
     }
 
     relationships
+}
+
+/// Extract extends relationships from an interface declaration
+///
+/// Populates `relationships.extended_types` which becomes EXTENDS_INTERFACE in Neo4j.
+pub(crate) fn extract_interface_extends_relationships(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> EntityRelationshipData {
+    let mut relationships = EntityRelationshipData::default();
+
+    // Look for the extends_clause capture, which contains all extended types
+    if let Some(extends_clause_index) = ctx.query.capture_index_for_name("extends_clause") {
+        for capture in ctx.query_match.captures {
+            if capture.index == extends_clause_index {
+                // Walk the extends_type_clause to find all type_identifier children
+                extract_type_identifiers_from_extends(capture.node, ctx.source, &mut relationships);
+            }
+        }
+    }
+
+    relationships
+}
+
+/// Walk an extends_type_clause node to extract all type identifiers
+fn extract_type_identifiers_from_extends(
+    node: Node,
+    source: &str,
+    relationships: &mut EntityRelationshipData,
+) {
+    #[cfg(test)]
+    eprintln!(
+        "  extract_types: node={}, child_count={}",
+        node.kind(),
+        node.child_count()
+    );
+
+    // Use index-based iteration to avoid cursor reuse issues
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            #[cfg(test)]
+            eprintln!("    [{i}] child kind={}", child.kind());
+
+            match child.kind() {
+                "type_identifier" => {
+                    let type_name = &source[child.byte_range()];
+                    #[cfg(test)]
+                    eprintln!("    Building SourceReference for type: {type_name}");
+                    match SourceReference::builder()
+                        .target(type_name.to_string())
+                        .simple_name(type_name.to_string())
+                        .location(SourceLocation::default())
+                        .ref_type(codesearch_core::ReferenceType::Extends)
+                        .build()
+                    {
+                        Ok(source_ref) => {
+                            #[cfg(test)]
+                            eprintln!("    Successfully built SourceReference");
+                            relationships.extended_types.push(source_ref);
+                        }
+                        Err(_e) => {
+                            #[cfg(test)]
+                            eprintln!("    Failed to build SourceReference: {_e:?}");
+                        }
+                    }
+                }
+                // Generic types like Foo<Bar> - extract the base type
+                "generic_type" => {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let type_name = &source[name_node.byte_range()];
+                        if let Ok(source_ref) = SourceReference::builder()
+                            .target(type_name.to_string())
+                            .simple_name(type_name.to_string())
+                            .location(SourceLocation::default())
+                            .ref_type(codesearch_core::ReferenceType::Extends)
+                            .build()
+                        {
+                            relationships.extended_types.push(source_ref);
+                        }
+                    }
+                }
+                // Recursively handle nested structures (but skip simple tokens)
+                "extends" | "," => {
+                    // Skip keyword and punctuation nodes
+                }
+                _ => {
+                    extract_type_identifiers_from_extends(child, source, relationships);
+                }
+            }
+        }
+    }
 }

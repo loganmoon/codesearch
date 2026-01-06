@@ -275,4 +275,132 @@ mod language_labeling_tests {
             "TypeScript enum handler should produce Language::TypeScript"
         );
     }
+
+    #[test]
+    fn test_ts_function_expression_exported() {
+        let source = r#"export const onClick = function handleClick(event: Event): void {
+    console.log("Clicked", event);
+};"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        eprintln!("Found {} entities:", entities.len());
+        for e in &entities {
+            eprintln!("  - {} ({})", e.name, e.qualified_name);
+        }
+
+        assert_eq!(entities.len(), 1, "Should find 1 function expression");
+        assert_eq!(
+            entities[0].name, "handleClick",
+            "Should use function's own name"
+        );
+    }
+
+    #[test]
+    fn test_ts_function_expression_anonymous() {
+        let source = r#"export const onHover = function(event: Event): void {
+    console.log("Hovered", event);
+};"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should find 1 function expression");
+        assert_eq!(
+            entities[0].name, "onHover",
+            "Should use variable name for anonymous function"
+        );
+    }
+
+    #[test]
+    fn test_ts_function_expression_iife() {
+        let source = r#"const result = (function initialize(): number {
+    return 42;
+})();"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should find 1 IIFE");
+        assert_eq!(entities[0].name, "initialize", "Should use function's name");
+    }
+
+    #[test]
+    fn test_interface_extends_extraction() {
+        let source = r#"export interface Auditable extends Entity, Timestamped {
+    createdBy: string;
+}"#;
+
+        // Debug: Print the query and check captures
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .expect("failed to set language");
+        let tree = parser.parse(source, None).expect("failed to parse");
+        let query = Query::new(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            queries::INTERFACE_QUERY,
+        )
+        .expect("failed to create query");
+
+        eprintln!("\nQuery capture names:");
+        for i in 0..query.capture_names().len() {
+            eprintln!("  [{i}] {}", query.capture_names()[i]);
+        }
+
+        let mut cursor = QueryCursor::new();
+        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+        eprintln!("\nQuery matches:");
+        while let Some(query_match) = matches_iter.next() {
+            eprintln!("  Match pattern: {}", query_match.pattern_index);
+            for capture in query_match.captures {
+                let name = query.capture_names()[capture.index as usize];
+                let text = capture
+                    .node
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or("<error>");
+                let truncated = if text.len() > 50 {
+                    format!("{}...", &text[..50])
+                } else {
+                    text.to_string()
+                };
+                eprintln!("    @{name} (idx={}) = '{truncated}'", capture.index);
+            }
+        }
+
+        let entities = extract_ts_entities(
+            source,
+            queries::INTERFACE_QUERY,
+            handlers::handle_interface_impl,
+        )
+        .expect("extraction should succeed");
+
+        eprintln!("\nFound {} entities:", entities.len());
+        for e in &entities {
+            eprintln!("  - {} ({})", e.name, e.qualified_name);
+            eprintln!("    Extended types: {:?}", e.relationships.extended_types);
+        }
+
+        // Filter to unique interfaces (there may be duplicate matches)
+        assert!(!entities.is_empty(), "Should find at least 1 interface");
+        let interface = &entities[0];
+
+        // Should have 2 supertraits: Entity and Timestamped
+        assert_eq!(
+            interface.relationships.extended_types.len(),
+            2,
+            "Should have 2 extended interfaces"
+        );
+    }
 }

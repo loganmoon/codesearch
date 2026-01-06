@@ -12,11 +12,79 @@ use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 
 use super::super::visibility::extract_visibility;
-use super::common::{extract_extends_relationships, extract_preceding_doc_comments};
+use super::common::{extract_interface_extends_relationships, extract_preceding_doc_comments};
 
-define_handler!(TypeScript, handle_interface_impl, "interface", Interface, relationships: extract_extends_relationships);
+define_handler!(TypeScript, handle_interface_impl, "interface", Interface, relationships: extract_interface_extends_relationships);
 define_handler!(TypeScript, handle_type_alias_impl, "type_alias", TypeAlias);
 define_handler!(TypeScript, handle_namespace_impl, "namespace", Module);
+define_handler!(
+    TypeScript,
+    handle_enum_member_impl,
+    "enum_member",
+    EnumVariant
+);
+
+/// Handle interface property signature extraction
+///
+/// Interface members are always Public in TypeScript.
+pub(crate) fn handle_interface_property_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["interface_property"]) {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
+    };
+
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
+
+    // Interface members are always Public
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Property,
+            language: Language::TypeScript,
+            visibility: Some(codesearch_core::Visibility::Public),
+            documentation,
+            content,
+            metadata: EntityMetadata::default(),
+            signature: None,
+            relationships: Default::default(),
+        },
+    )?;
+
+    Ok(vec![entity])
+}
+
+/// Handle interface method signature extraction
+///
+/// Interface members are always Public in TypeScript.
+pub(crate) fn handle_interface_method_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &["interface_method"]) {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
+    };
+
+    let components = extract_common_components(ctx, "name", node, "typescript")?;
+    let documentation = extract_preceding_doc_comments(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
+
+    // Interface members are always Public
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Method,
+            language: Language::TypeScript,
+            visibility: Some(codesearch_core::Visibility::Public),
+            documentation,
+            content,
+            metadata: EntityMetadata::default(),
+            signature: None,
+            relationships: Default::default(),
+        },
+    )?;
+
+    Ok(vec![entity])
+}
 
 /// Handle enum declaration extraction
 ///

@@ -305,15 +305,15 @@ pub(crate) fn handle_trait_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntit
                 .insert("methods".to_string(), methods.join(","));
         }
 
-        // Store resolved supertraits separately for EXTENDS_INTERFACE relationships
+        // Store resolved extended types separately for EXTENDS_INTERFACE relationships
         // NOTE: Lifetimes are now excluded at query time (in extract_trait_bounds),
         // so no filtering is needed here
         // bounds are bare identifiers from AST, use as both name and simple_name
-        let supertrait_refs: Vec<ResolvedReference> = bounds
+        let extended_type_refs: Vec<ResolvedReference> = bounds
             .iter()
             .map(|b| resolve_reference(b, b, &resolution_ctx))
             .collect();
-        let supertraits: Vec<SourceReference> = supertrait_refs
+        let extended_types: Vec<SourceReference> = extended_type_refs
             .iter()
             .filter_map(|r| {
                 SourceReference::builder()
@@ -327,7 +327,7 @@ pub(crate) fn handle_trait_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntit
             })
             .collect();
 
-        // Build uses_types from generic bounds only (supertraits are stored separately)
+        // Build uses_types from generic bounds only (extended_types are stored separately)
         let uses_types_refs: Vec<ResolvedReference> = parsed_generics.bound_trait_refs.clone();
 
         // Build typed relationships
@@ -335,7 +335,7 @@ pub(crate) fn handle_trait_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntit
         // a module-level relationship. They are collected by module_handlers.
         let relationships = EntityRelationshipData {
             uses_types: resolved_refs_to_source_refs(&uses_types_refs),
-            supertraits,
+            extended_types,
             ..Default::default()
         };
 

@@ -107,56 +107,26 @@ fn extract_ts_visibility_modifier(node: Node) -> Option<Visibility> {
 
 /// Check if a node is exported (directly or as part of an export statement)
 ///
-/// Handles:
+/// Walks up the entire ancestor chain to find an export_statement.
+/// This handles nested entities like:
 /// - `export function foo() {}` - direct export
 /// - `export class Foo {}` - direct export
 /// - `export const foo = 1` - direct export
+/// - `export enum Color { Red }` - enum members inherit export from parent
 /// - `export default function() {}` - default export
-/// - `export { foo }` - named re-export (not handled here, handled at import level)
 pub(crate) fn is_exported(node: Node) -> bool {
     // Check if the node itself is an export statement
     if node.kind() == "export_statement" {
         return true;
     }
 
-    // Check if parent is an export statement
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "export_statement" {
+    // Walk up all ancestors looking for export_statement
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        if ancestor.kind() == "export_statement" {
             return true;
         }
-
-        // Handle lexical_declaration inside export: export const foo = 1
-        if parent.kind() == "lexical_declaration" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "export_statement" {
-                    return true;
-                }
-            }
-        }
-
-        // Handle variable_declaration inside export
-        if parent.kind() == "variable_declaration" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "export_statement" {
-                    return true;
-                }
-            }
-        }
-
-        // Handle variable_declarator -> variable_declaration -> export_statement
-        if parent.kind() == "variable_declarator" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "lexical_declaration"
-                    || grandparent.kind() == "variable_declaration"
-                {
-                    if let Some(great_grandparent) = grandparent.parent() {
-                        if great_grandparent.kind() == "export_statement" {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
+        current = ancestor.parent();
     }
 
     false

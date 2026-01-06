@@ -144,16 +144,16 @@ impl ReferenceExtractor for AssociatesExtractor {
     }
 }
 
-/// Extractor for EXTENDS (supertraits) relationships
-struct SupertraitsExtractor;
+/// Extractor for EXTENDS_INTERFACE (extended types) relationships
+struct ExtendedTypesExtractor;
 
-impl ReferenceExtractor for SupertraitsExtractor {
+impl ReferenceExtractor for ExtendedTypesExtractor {
     fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
         // NOTE: Lifetimes are now excluded at extraction time (tree-sitter query),
         // so no filtering is needed here
         entity
             .relationships
-            .supertraits
+            .extended_types
             .iter()
             .map(|src_ref| ExtractedRef {
                 target: src_ref.target().to_string(),
@@ -478,11 +478,11 @@ pub fn associates_resolver() -> GenericResolver {
     )
 }
 
-/// Create a GenericResolver for EXTENDS (supertraits) relationships
+/// Create a GenericResolver for EXTENDS_INTERFACE (extended types) relationships
 pub fn extends_resolver() -> GenericResolver {
     GenericResolver::new(
         &codesearch_core::resolution::definitions::EXTENDS,
-        Box::new(SupertraitsExtractor),
+        Box::new(ExtendedTypesExtractor),
     )
 }
 
@@ -655,17 +655,17 @@ mod tests {
     }
 
     #[test]
-    fn test_supertraits_extractor() {
+    fn test_extended_types_extractor() {
         // NOTE: Lifetimes are now excluded at extraction time (tree-sitter query
-        // in type_handlers.rs), so they won't appear in supertraits at all.
+        // in type_handlers.rs), so they won't appear in extended_types at all.
         // This test verifies the extractor works correctly with clean data.
-        let extractor = SupertraitsExtractor;
+        let extractor = ExtendedTypesExtractor;
         let entity = make_test_entity(
             EntityType::Trait,
             "MyTrait",
             "crate::MyTrait",
             EntityRelationshipData {
-                supertraits: vec![
+                extended_types: vec![
                     SourceReference::builder()
                         .target("crate::BaseTrait")
                         .simple_name("BaseTrait")

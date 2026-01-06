@@ -24,10 +24,10 @@ struct LanguageExtractorInput {
 
 /// FQN (Fully Qualified Name) configuration
 struct FqnConfig {
-    /// Optional language family for inherited defaults
-    /// When specified, separator/relative_prefixes/external_prefixes default to family values
-    family: Option<Ident>,
-    /// Separator (required if no family, optional if family provided)
+    /// Language family for inherited defaults (required)
+    /// Provides default separator/relative_prefixes/external_prefixes
+    family: Ident,
+    /// Optional separator override (defaults to family value)
     separator: Option<LitStr>,
     module_path_fn: Option<Expr>,
     relative_prefixes: Vec<RelativePrefixEntry>,
@@ -189,13 +189,13 @@ impl Parse for LanguageExtractorInput {
                         }
                     }
 
-                    // Validate: need either family or explicit separator
-                    if family.is_none() && separator.is_none() {
-                        return Err(syn::Error::new(
+                    // Validate: family is required
+                    let family = family.ok_or_else(|| {
+                        syn::Error::new(
                             input.span(),
-                            "Missing 'separator' in fqn block (required when no 'family' specified)",
-                        ));
-                    }
+                            "Missing 'family' in fqn block. Use one of: ModuleBased, CrateBased, PackageBased",
+                        )
+                    })?;
 
                     fqn_config = Some(FqnConfig {
                         family,
@@ -353,130 +353,37 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
             None => quote! { None },
         };
 
-        // Determine if using family-based configuration
-        if let Some(ref family_ident) = fqn_config.family {
-            // Family-based configuration: inherit from family with optional overrides
-            let family_name = family_ident.to_string();
+        // Family-based configuration: inherit from family with optional overrides
+        let family_ident = &fqn_config.family;
+        let family_name = family_ident.to_string();
 
-            // Validate family name
-            let family_path = match family_name.as_str() {
-                "ModuleBased" | "CrateBased" | "PackageBased" => {
-                    quote! { crate::common::path_config::LanguageFamily::#family_ident }
-                }
-                unknown => {
-                    let msg = format!(
-                        "Unknown language family '{}'. Expected one of: ModuleBased, CrateBased, PackageBased",
-                        unknown
-                    );
-                    return syn::Error::new(family_ident.span(), msg)
-                        .to_compile_error()
-                        .into();
-                }
-            };
-
-            // Generate separator: explicit override or inherited from family
-            let separator_value = match &fqn_config.separator {
-                Some(sep) => quote! { #sep },
-                None => {
-                    quote! { crate::common::path_config::get_family_config(#family_path).separator }
-                }
-            };
-
-            // Generate relative_prefixes: explicit override or inherited from family
-            let relative_prefixes_value = if fqn_config.has_explicit_relative_prefixes {
-                let entries: Vec<_> = fqn_config
-                    .relative_prefixes
-                    .iter()
-                    .map(|entry| {
-                        let prefix = &entry.prefix;
-                        let semantics_name = &entry.semantics;
-                        let chainable = entry.chainable;
-
-                        let semantics_str = semantics_name.to_string();
-                        let semantics_value = match semantics_str.as_str() {
-                            "Root" => quote! { crate::common::path_config::RelativeSemantics::Root },
-                            "Current" => quote! { crate::common::path_config::RelativeSemantics::Current },
-                            "Parent" => quote! { crate::common::path_config::RelativeSemantics::Parent { levels: 1 } },
-                            unknown => {
-                                let msg = format!(
-                                    "Unknown relative semantics '{}'. Expected one of: Root, Current, Parent",
-                                    unknown
-                                );
-                                return syn::Error::new(semantics_name.span(), msg).to_compile_error();
-                            }
-                        };
-
-                        quote! {
-                            crate::common::path_config::RelativePrefix {
-                                prefix: #prefix,
-                                semantics: #semantics_value,
-                                chainable: #chainable,
-                            }
-                        }
-                    })
-                    .collect();
-                quote! { &[#(#entries),*] }
-            } else {
-                quote! { crate::common::path_config::get_family_config(#family_path).relative_prefixes }
-            };
-
-            // Generate external_prefixes: explicit override or inherited from family
-            let external_prefixes_value = if fqn_config.has_explicit_external_prefixes {
-                let prefixes = &fqn_config.external_prefixes;
-                quote! { &[#(#prefixes),*] }
-            } else {
-                quote! { crate::common::path_config::get_family_config(#family_path).external_prefixes }
-            };
-
-            // unprefixed_is_external is always inherited from family (no override syntax yet)
-            let unprefixed_is_external_value = quote! { crate::common::path_config::get_family_config(#family_path).unprefixed_is_external };
-
-            // For the separator constant and scope config, we need a concrete value
-            // Use explicit separator if provided, otherwise use a placeholder that references family
-            let separator_for_const = match &fqn_config.separator {
-                Some(sep) => quote! { #sep },
-                None => {
-                    // We need to generate code that references the family's separator
-                    // Since this is a const context, we need to use the family config directly
-                    quote! { crate::common::path_config::get_family_config(#family_path).separator }
-                }
-            };
-
-            quote! {
-                /// FQN separator for this language (inherited from #family_ident family if not overridden)
-                pub const FQN_SEPARATOR: &str = #separator_for_const;
-
-                /// Path configuration for this language
-                /// Family: #family_ident (with optional overrides)
-                pub const PATH_CONFIG: crate::common::path_config::PathConfig =
-                    crate::common::path_config::PathConfig {
-                        separator: #separator_value,
-                        relative_prefixes: #relative_prefixes_value,
-                        external_prefixes: #external_prefixes_value,
-                        unprefixed_is_external: #unprefixed_is_external_value,
-                    };
-
-                // Register scope configuration with inventory
-                inventory::submit! {
-                    crate::qualified_name::ScopeConfiguration {
-                        language: #language_name_lower,
-                        separator: #separator_for_const,
-                        patterns: SCOPE_PATTERNS,
-                        module_path_fn: #module_path_fn_value,
-                        path_config: &PATH_CONFIG,
-                        edge_case_handlers: #edge_case_handlers_value,
-                    }
-                }
+        // Validate family name
+        let family_path = match family_name.as_str() {
+            "ModuleBased" | "CrateBased" | "PackageBased" => {
+                quote! { crate::common::path_config::LanguageFamily::#family_ident }
             }
-        } else {
-            // Explicit configuration: no family, all fields must be provided
-            let separator = fqn_config
-                .separator
-                .as_ref()
-                .expect("separator required when no family");
+            unknown => {
+                let msg = format!(
+                    "Unknown language family '{}'. Expected one of: ModuleBased, CrateBased, PackageBased",
+                    unknown
+                );
+                return syn::Error::new(family_ident.span(), msg)
+                    .to_compile_error()
+                    .into();
+            }
+        };
 
-            // Generate RelativePrefix entries
-            let relative_prefix_entries: Vec<_> = fqn_config
+        // Generate separator: explicit override or inherited from family
+        let separator_value = match &fqn_config.separator {
+            Some(sep) => quote! { #sep },
+            None => {
+                quote! { crate::common::path_config::get_family_config(#family_path).separator }
+            }
+        };
+
+        // Generate relative_prefixes: explicit override or inherited from family
+        let relative_prefixes_value = if fqn_config.has_explicit_relative_prefixes {
+            let entries: Vec<_> = fqn_config
                 .relative_prefixes
                 .iter()
                 .map(|entry| {
@@ -507,36 +414,56 @@ pub fn define_language_extractor(input: TokenStream) -> TokenStream {
                     }
                 })
                 .collect();
+            quote! { &[#(#entries),*] }
+        } else {
+            quote! { crate::common::path_config::get_family_config(#family_path).relative_prefixes }
+        };
 
-            let external_prefixes = &fqn_config.external_prefixes;
+        // Generate external_prefixes: explicit override or inherited from family
+        let external_prefixes_value = if fqn_config.has_explicit_external_prefixes {
+            let prefixes = &fqn_config.external_prefixes;
+            quote! { &[#(#prefixes),*] }
+        } else {
+            quote! { crate::common::path_config::get_family_config(#family_path).external_prefixes }
+        };
 
-            quote! {
-                /// FQN separator for this language
-                pub const FQN_SEPARATOR: &str = #separator;
+        // unprefixed_is_external is always inherited from family (no override syntax yet)
+        let unprefixed_is_external_value = quote! { crate::common::path_config::get_family_config(#family_path).unprefixed_is_external };
 
-                /// Path configuration for this language
-                pub const PATH_CONFIG: crate::common::path_config::PathConfig =
-                    crate::common::path_config::PathConfig {
-                        separator: #separator,
-                        relative_prefixes: &[
-                            #(#relative_prefix_entries),*
-                        ],
-                        external_prefixes: &[#(#external_prefixes),*],
-                        // Default: unprefixed paths are NOT external (crate-based behavior)
-                        // Languages using module-based resolution should use family: ModuleBased
-                        unprefixed_is_external: false,
-                    };
+        // For the separator constant and scope config, we need a concrete value
+        // Use explicit separator if provided, otherwise use a placeholder that references family
+        let separator_for_const = match &fqn_config.separator {
+            Some(sep) => quote! { #sep },
+            None => {
+                // We need to generate code that references the family's separator
+                // Since this is a const context, we need to use the family config directly
+                quote! { crate::common::path_config::get_family_config(#family_path).separator }
+            }
+        };
 
-                // Register scope configuration with inventory
-                inventory::submit! {
-                    crate::qualified_name::ScopeConfiguration {
-                        language: #language_name_lower,
-                        separator: #separator,
-                        patterns: SCOPE_PATTERNS,
-                        module_path_fn: #module_path_fn_value,
-                        path_config: &PATH_CONFIG,
-                        edge_case_handlers: #edge_case_handlers_value,
-                    }
+        quote! {
+            /// FQN separator for this language (inherited from #family_ident family if not overridden)
+            pub const FQN_SEPARATOR: &str = #separator_for_const;
+
+            /// Path configuration for this language
+            /// Family: #family_ident (with optional overrides)
+            pub const PATH_CONFIG: crate::common::path_config::PathConfig =
+                crate::common::path_config::PathConfig {
+                    separator: #separator_value,
+                    relative_prefixes: #relative_prefixes_value,
+                    external_prefixes: #external_prefixes_value,
+                    unprefixed_is_external: #unprefixed_is_external_value,
+                };
+
+            // Register scope configuration with inventory
+            inventory::submit! {
+                crate::qualified_name::ScopeConfiguration {
+                    language: #language_name_lower,
+                    separator: #separator_for_const,
+                    patterns: SCOPE_PATTERNS,
+                    module_path_fn: #module_path_fn_value,
+                    path_config: &PATH_CONFIG,
+                    edge_case_handlers: #edge_case_handlers_value,
                 }
             }
         }

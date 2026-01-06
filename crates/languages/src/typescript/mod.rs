@@ -1,6 +1,7 @@
 //! TypeScript language extractor module
 
 use crate::common::js_ts_shared::handlers as ts_handlers;
+use crate::common::js_ts_shared::module_path;
 use crate::common::js_ts_shared::queries as ts_queries;
 use crate::common::js_ts_shared::TS_SCOPE_PATTERNS as SCOPE_PATTERNS;
 use codesearch_languages_macros::define_language_extractor;
@@ -12,9 +13,15 @@ define_language_extractor! {
 
     fqn: {
         family: ModuleBased,
+        module_path_fn: module_path::derive_module_path,
     },
 
     entities: {
+        // File-level module entity
+        module => {
+            query: ts_queries::MODULE_QUERY,
+            handler: ts_handlers::handle_ts_module_impl
+        },
         // Shared entity types (using TypeScript-specific handlers for correct Language labeling)
         function_decl => {
             query: ts_queries::FUNCTION_DECLARATION_QUERY,
@@ -29,11 +36,11 @@ define_language_extractor! {
             handler: ts_handlers::handle_ts_arrow_function_impl
         },
         class_decl => {
-            query: ts_queries::CLASS_DECLARATION_QUERY,
+            query: ts_queries::TS_CLASS_DECLARATION_QUERY,
             handler: ts_handlers::handle_ts_class_declaration_impl
         },
         class_expr => {
-            query: ts_queries::CLASS_EXPRESSION_QUERY,
+            query: ts_queries::TS_CLASS_EXPRESSION_QUERY,
             handler: ts_handlers::handle_ts_class_expression_impl
         },
         method => {
@@ -41,7 +48,7 @@ define_language_extractor! {
             handler: ts_handlers::handle_ts_method_impl
         },
         property => {
-            query: ts_queries::PROPERTY_QUERY,
+            query: ts_queries::TS_PROPERTY_QUERY,
             handler: ts_handlers::handle_ts_property_impl
         },
         constant => {

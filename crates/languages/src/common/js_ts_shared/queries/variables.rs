@@ -10,20 +10,24 @@
 /// Note: This query excludes const declarations that are function expressions
 /// or arrow functions (those are handled by function queries).
 pub(crate) const CONST_QUERY: &str = r#"
-(lexical_declaration
-  kind: "const"
-  (variable_declarator
-    name: (identifier) @name
-    value: (_) @value)) @const
-  (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
-
-(export_statement
-  declaration: (lexical_declaration
+(
+  (lexical_declaration
     kind: "const"
     (variable_declarator
       name: (identifier) @name
-      value: (_) @value))) @const
+      value: (_) @value)) @const
   (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
+)
+
+(
+  (export_statement
+    declaration: (lexical_declaration
+      kind: "const"
+      (variable_declarator
+        name: (identifier) @name
+        value: (_) @value))) @const
+  (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
+)
 "#;
 
 /// Query for let declarations at module level

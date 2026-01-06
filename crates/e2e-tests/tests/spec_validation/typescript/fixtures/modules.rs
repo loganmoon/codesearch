@@ -87,7 +87,11 @@ function privateHelper(): void {
         },
     ],
     project_type: ProjectType::TypeScriptProject,
-    manifest: None,
+    // Use manifest without name to avoid package prefix in qualified names
+    manifest: Some(r#"{
+  "version": "1.0.0",
+  "type": "module"
+}"#),
 };
 
 /// Named and default imports

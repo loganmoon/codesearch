@@ -49,6 +49,21 @@ struct EntityBatch {
 /// Triple of (entity, embedding_id, sparse_embedding) for entities that have been embedded
 type EntityEmbeddingTriple = (CodeEntity, i64, Vec<(u32, f32)>);
 
+/// Check if a file is a JavaScript or TypeScript file
+///
+/// Used to determine whether to include package name in qualified names.
+/// JS/TS files don't use package names in their FQNs (unlike Rust where
+/// crate names are part of the fully qualified path).
+fn is_js_ts_file(path: &Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => matches!(
+            ext.to_lowercase().as_str(),
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+        ),
+        None => false,
+    }
+}
+
 struct EmbeddedBatch {
     // Entities paired with embedding IDs and sparse embeddings (skipped entities filtered out)
     entity_embedding_id_sparse_triples: Vec<EntityEmbeddingTriple>,
@@ -583,6 +598,14 @@ async fn stage_extract_entities(
                         .and_then(|pm| pm.find_package_for_file(&path))
                         .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
                         .unwrap_or((None, None));
+
+                    // For JS/TS files, don't include package name in qualified names
+                    // (unlike Rust where crate names are part of the FQN)
+                    let package_name = if is_js_ts_file(&path) {
+                        None
+                    } else {
+                        package_name
+                    };
 
                     match entity_processor::extract_entities_from_file(
                         &path,

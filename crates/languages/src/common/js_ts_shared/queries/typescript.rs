@@ -1,6 +1,80 @@
 //! TypeScript-specific queries
 //!
 //! These queries are specific to TypeScript and not applicable to JavaScript.
+//! TypeScript uses `type_identifier` for type names (classes, interfaces, etc.)
+//! instead of `identifier` which JavaScript uses.
+
+/// Query for class declarations (TypeScript version)
+///
+/// TypeScript uses `type_identifier` for class names.
+/// Matches:
+/// - `class Foo {}`
+/// - `class Foo extends Bar {}`
+/// - `export class Foo {}`
+pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
+[
+  (class_declaration
+    name: (type_identifier) @name
+    (class_heritage
+      (extends_clause
+        value: (_) @extends))?
+    body: (class_body) @body) @class
+
+  (export_statement
+    declaration: (class_declaration
+      name: (type_identifier) @name
+      (class_heritage
+        (extends_clause
+          value: (_) @extends))?
+      body: (class_body) @body)) @class
+]
+"#;
+
+/// Query for class expressions assigned to variables (TypeScript version)
+///
+/// Matches:
+/// - `const Foo = class {}`
+/// - `const Foo = class Bar {}`
+/// - `let Foo = class extends Base {}`
+pub(crate) const TS_CLASS_EXPRESSION_QUERY: &str = r#"
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (class
+      name: (type_identifier)? @class_name
+      (class_heritage
+        (extends_clause
+          value: (_) @extends))?
+      body: (class_body) @body))) @class
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (class
+      name: (type_identifier)? @class_name
+      (class_heritage
+        (extends_clause
+          value: (_) @extends))?
+      body: (class_body) @body))) @class
+"#;
+
+/// Query for class fields/properties (TypeScript version)
+///
+/// TypeScript only uses `public_field_definition` (not `field_definition`).
+/// Matches:
+/// - `field = value`
+/// - `static field = value`
+/// - `#privateField = value`
+/// - `field` (no initializer)
+pub(crate) const TS_PROPERTY_QUERY: &str = r#"
+(class_body
+  (public_field_definition
+    name: [
+      (property_identifier) @name
+      (private_property_identifier) @name
+    ]
+    value: (_)? @value)) @property
+"#;
 
 /// Query for interface declarations
 ///

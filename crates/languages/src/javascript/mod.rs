@@ -1,6 +1,7 @@
 //! JavaScript language extractor module
 
 use crate::common::js_ts_shared::handlers as js_handlers;
+use crate::common::js_ts_shared::module_path;
 use crate::common::js_ts_shared::queries as js_queries;
 use crate::common::js_ts_shared::SCOPE_PATTERNS;
 use codesearch_languages_macros::define_language_extractor;
@@ -12,9 +13,15 @@ define_language_extractor! {
 
     fqn: {
         family: ModuleBased,
+        module_path_fn: module_path::derive_module_path,
     },
 
     entities: {
+        // File-level module entity
+        module => {
+            query: js_queries::MODULE_QUERY,
+            handler: js_handlers::handle_module_impl
+        },
         function_decl => {
             query: js_queries::FUNCTION_DECLARATION_QUERY,
             handler: js_handlers::handle_function_declaration_impl

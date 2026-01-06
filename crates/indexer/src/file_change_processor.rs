@@ -17,6 +17,21 @@ use std::{
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+/// Check if a file is a JavaScript or TypeScript file
+///
+/// Used to determine whether to include package name in qualified names.
+/// JS/TS files don't use package names in their FQNs (unlike Rust where
+/// crate names are part of the fully qualified path).
+fn is_js_ts_file(path: &Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => matches!(
+            ext.to_lowercase().as_str(),
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+        ),
+        None => false,
+    }
+}
+
 /// Statistics for file change processing
 #[derive(Debug, Clone, Default)]
 pub struct ProcessingStats {
@@ -267,6 +282,14 @@ async fn process_file_batch(
             .and_then(|pm| pm.find_package_for_file(&canonical_path))
             .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
             .unwrap_or((None, None));
+
+        // For JS/TS files, don't include package name in qualified names
+        // (unlike Rust where crate names are part of the FQN)
+        let package_name = if is_js_ts_file(&canonical_path) {
+            None
+        } else {
+            package_name
+        };
 
         match entity_processor::extract_entities_from_file(
             &canonical_path,

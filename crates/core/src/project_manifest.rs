@@ -444,22 +444,21 @@ fn try_parse_package_json(repo_root: &Path) -> Result<Option<ProjectManifest>> {
     // Also scan subdirectories for package.json files not declared in workspaces
     scan_for_all_packages(repo_root, &mut packages)?;
 
-    // Also add the root package if it has a name
-    if let Some(name) = root_name {
-        let source_root = determine_node_source_root(repo_root);
-        packages.add(
-            repo_root.to_path_buf(),
-            PackageInfo {
-                name,
-                source_root,
-                crates: Vec::new(),
-            },
-        );
-    }
+    // Add the root package (with name if provided, or empty string for source_root derivation)
+    // This ensures files in the root package still get proper source_root for qualified name derivation
+    let source_root = determine_node_source_root(repo_root);
+    let package_name = root_name.unwrap_or_default();
+    packages.add(
+        repo_root.to_path_buf(),
+        PackageInfo {
+            name: package_name,
+            source_root,
+            crates: Vec::new(),
+        },
+    );
 
-    if packages.is_empty() {
-        return Ok(None);
-    }
+    // If we only have the root package with an empty name, still return a manifest
+    // so that source_root derivation works
 
     let project_type = if is_workspace || packages.len() > 1 {
         ProjectType::NodeWorkspace

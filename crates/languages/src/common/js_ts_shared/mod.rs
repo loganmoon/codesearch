@@ -14,6 +14,7 @@
 
 pub mod extractors;
 pub(crate) mod handlers;
+pub mod module_path;
 pub(crate) mod queries;
 pub mod scope_patterns;
 pub(crate) mod visibility;

@@ -53,22 +53,6 @@ pub(crate) const CLASS_EXPRESSION_QUERY: &str = r#"
       body: (class_body) @body))) @class
 "#;
 
-/// Query for default exported classes
-///
-/// Matches:
-/// - `export default class {}`
-/// - `export default class Foo {}`
-pub(crate) const _DEFAULT_EXPORT_CLASS_QUERY: &str = r#"
-(export_statement
-  (class_declaration
-    name: (identifier)? @name
-    (class_heritage
-      (extends_clause
-        value: (_) @extends))?
-    body: (class_body) @body) @value
-  "default" @default) @class
-"#;
-
 /// Query for class methods
 ///
 /// Matches:
@@ -113,13 +97,4 @@ pub(crate) const PROPERTY_QUERY: &str = r#"
       (private_property_identifier) @name
     ]
     value: (_)? @value)) @property
-"#;
-
-/// Query for static blocks (ES2022)
-///
-/// Matches:
-/// - `static { ... }`
-pub(crate) const _STATIC_BLOCK_QUERY: &str = r#"
-(class_body
-  (static_block) @static_block) @method
 "#;

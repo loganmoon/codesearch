@@ -100,25 +100,3 @@ pub(crate) const ARROW_FUNCTION_QUERY: &str = r#"
         (_)
       ] @body))) @function
 "#;
-
-/// Query for default exported functions
-///
-/// Matches:
-/// - `export default function() {}`
-/// - `export default function foo() {}`
-/// - `export default async function() {}`
-pub(crate) const _DEFAULT_EXPORT_FUNCTION_QUERY: &str = r#"
-(export_statement
-  (function_declaration
-    name: (identifier)? @name
-    parameters: (formal_parameters) @params
-    body: (statement_block) @body) @value
-  "default" @default) @function
-
-(export_statement
-  (generator_function_declaration
-    name: (identifier)? @name
-    parameters: (formal_parameters) @params
-    body: (statement_block) @body) @value
-  "default" @default) @function
-"#;

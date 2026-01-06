@@ -15,49 +15,49 @@ define_language_extractor! {
     },
 
     entities: {
-        // Shared with JavaScript
+        // Shared entity types (using TypeScript-specific handlers for correct Language labeling)
         function_decl => {
             query: ts_queries::FUNCTION_DECLARATION_QUERY,
-            handler: ts_handlers::handle_function_declaration_impl
+            handler: ts_handlers::handle_ts_function_declaration_impl
         },
         function_expr => {
             query: ts_queries::FUNCTION_EXPRESSION_QUERY,
-            handler: ts_handlers::handle_function_expression_impl
+            handler: ts_handlers::handle_ts_function_expression_impl
         },
         arrow_function => {
             query: ts_queries::ARROW_FUNCTION_QUERY,
-            handler: ts_handlers::handle_arrow_function_impl
+            handler: ts_handlers::handle_ts_arrow_function_impl
         },
         class_decl => {
             query: ts_queries::CLASS_DECLARATION_QUERY,
-            handler: ts_handlers::handle_class_declaration_impl
+            handler: ts_handlers::handle_ts_class_declaration_impl
         },
         class_expr => {
             query: ts_queries::CLASS_EXPRESSION_QUERY,
-            handler: ts_handlers::handle_class_expression_impl
+            handler: ts_handlers::handle_ts_class_expression_impl
         },
         method => {
             query: ts_queries::METHOD_QUERY,
-            handler: ts_handlers::handle_method_impl
+            handler: ts_handlers::handle_ts_method_impl
         },
         property => {
             query: ts_queries::PROPERTY_QUERY,
-            handler: ts_handlers::handle_property_impl
+            handler: ts_handlers::handle_ts_property_impl
         },
         constant => {
             query: ts_queries::CONST_QUERY,
-            handler: ts_handlers::handle_const_impl
+            handler: ts_handlers::handle_ts_const_impl
         },
         let_var => {
             query: ts_queries::LET_QUERY,
-            handler: ts_handlers::handle_let_impl
+            handler: ts_handlers::handle_ts_let_impl
         },
         var => {
             query: ts_queries::VAR_QUERY,
-            handler: ts_handlers::handle_var_impl
+            handler: ts_handlers::handle_ts_var_impl
         },
 
-        // TypeScript-specific
+        // TypeScript-specific entity types
         interface => {
             query: ts_queries::INTERFACE_QUERY,
             handler: ts_handlers::handle_interface_impl

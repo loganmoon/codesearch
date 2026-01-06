@@ -92,22 +92,3 @@ pub(crate) const NAMESPACE_QUERY: &str = r#"
       body: (statement_block) @body)) @namespace
 ]
 "#;
-
-/// Query for ambient declarations (declare statements)
-///
-/// Matches:
-/// - `declare function foo(): void`
-/// - `declare const bar: string`
-/// - `declare class Baz {}`
-pub(crate) const _AMBIENT_DECLARATION_QUERY: &str = r#"
-(ambient_declaration
-  [
-    (function_signature
-      name: (identifier) @name) @value
-    (variable_declaration
-      (variable_declarator
-        name: (identifier) @name)) @value
-    (class_declaration
-      name: (identifier) @name) @value
-  ]) @ambient
-"#;

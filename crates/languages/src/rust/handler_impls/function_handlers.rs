@@ -26,23 +26,11 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Process a function query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_function_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_function_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the function node for location and content
-    let function_node = require_capture_node(query_match, query, capture_names::FUNCTION)?;
+    let function_node = require_capture_node(ctx.query_match, ctx.query, capture_names::FUNCTION)?;
 
     // Skip functions inside impl blocks - those are handled by the impl extractor
     if let Some(parent) = function_node.parent() {
@@ -56,40 +44,28 @@ pub fn handle_function_impl(
         }
     }
 
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
-
     // Extract common components
-    let components = extract_common_components(&ctx, capture_names::NAME, function_node, "rust")?;
+    let components = extract_common_components(ctx, capture_names::NAME, function_node, "rust")?;
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(function_node, source);
-    let content = node_to_text(function_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(function_node, ctx.source);
+    let content = node_to_text(function_node, ctx.source).ok();
 
     // Extract and parse modifiers
     let (is_async, is_unsafe, is_const) =
-        find_capture_node(query_match, query, capture_names::MODIFIERS)
+        find_capture_node(ctx.query_match, ctx.query, capture_names::MODIFIERS)
             .map(extract_function_modifiers)
             .unwrap_or((false, false, false));
 
     // Build ImportMap from file's imports for qualified name resolution
-    let import_map = get_file_import_map(function_node, source);
+    let import_map = get_file_import_map(function_node, ctx.source);
 
     // Derive current module path for super:: resolution
     // This needs to include inline modules (from parent_scope) not just file-level modules
     // For example, if parent_scope is "test_crate::child::grandchild" and package is "test_crate",
     // current_module should be "child::grandchild" for proper super:: resolution
-    let current_module = match (components.parent_scope.as_deref(), package_name) {
+    let current_module = match (components.parent_scope.as_deref(), ctx.package_name) {
         (Some(parent), Some(pkg)) if !pkg.is_empty() => {
             let prefix = format!("{pkg}::");
             if let Some(rest) = parent.strip_prefix(&prefix) {
@@ -115,20 +91,21 @@ pub fn handle_function_impl(
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: components.parent_scope.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: current_module.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract generics with parsed bounds
-    let mut parsed_generics = find_capture_node(query_match, query, capture_names::GENERICS)
-        .map(|node| extract_generics_with_bounds(node, source, &resolution_ctx))
-        .unwrap_or_default();
+    let mut parsed_generics =
+        find_capture_node(ctx.query_match, ctx.query, capture_names::GENERICS)
+            .map(|node| extract_generics_with_bounds(node, ctx.source, &resolution_ctx))
+            .unwrap_or_default();
 
     // Merge where clause bounds if present
-    if let Some(where_node) = find_capture_node(query_match, query, capture_names::WHERE) {
-        let where_bounds = extract_where_clause_bounds(where_node, source, &resolution_ctx);
+    if let Some(where_node) = find_capture_node(ctx.query_match, ctx.query, capture_names::WHERE) {
+        let where_bounds = extract_where_clause_bounds(where_node, ctx.source, &resolution_ctx);
         merge_parsed_generics(&mut parsed_generics, where_bounds);
     }
 
@@ -143,29 +120,29 @@ pub fn handle_function_impl(
     let generic_bounds = build_generic_bounds_map(&parsed_generics);
 
     // Extract parameters
-    let parameters = find_capture_node(query_match, query, capture_names::PARAMS)
-        .map(|params_node| extract_function_parameters(params_node, source))
+    let parameters = find_capture_node(ctx.query_match, ctx.query, capture_names::PARAMS)
+        .map(|params_node| extract_function_parameters(params_node, ctx.source))
         .transpose()?
         .unwrap_or_default();
 
     // Extract return type
-    let return_type = find_capture_node(query_match, query, capture_names::RETURN)
-        .and_then(|node| node_to_text(node, source).ok());
+    let return_type = find_capture_node(ctx.query_match, ctx.query, capture_names::RETURN)
+        .and_then(|node| node_to_text(node, ctx.source).ok());
 
     // Extract local variable types for method call resolution
-    let local_vars = extract_local_var_types(function_node, source);
+    let local_vars = extract_local_var_types(function_node, ctx.source);
 
     // Extract function calls from the function body with qualified name resolution
     let calls = extract_function_calls(
         function_node,
-        source,
+        ctx.source,
         &resolution_ctx,
         &local_vars,
         &generic_bounds,
     );
 
     // Extract type references for USES relationships
-    let mut type_refs = extract_type_references(function_node, source, &resolution_ctx);
+    let mut type_refs = extract_type_references(function_node, ctx.source, &resolution_ctx);
 
     // Add trait bounds to type references (they also create USES relationships)
     let func_location = SourceLocation::from_tree_sitter_node(function_node);

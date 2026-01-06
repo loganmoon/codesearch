@@ -29,10 +29,9 @@ define_language_extractor! {
     extensions: ["py", "pyi"],
 
     fqn: {
-        separator: ".",
+        family: ModuleBased,
         module_path_fn: module_path::derive_module_path,
         relative_prefixes: {},
-        external_prefixes: [],
     },
 
     entities: {

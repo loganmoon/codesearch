@@ -7,36 +7,18 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
+use crate::common::entity_building::ExtractionContext;
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::{Path, PathBuf};
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language, Parser, Query, QueryCursor, QueryMatch};
+use tree_sitter::{Language, Parser, Query, QueryCursor};
 
 /// Handler function type for processing query matches into entities
 ///
-/// Arguments:
-/// - `query_match` - The tree-sitter query match
-/// - `query` - The tree-sitter query
-/// - `source` - The source code
-/// - `file_path` - Path to the source file
-/// - `repository_id` - Repository identifier
-/// - `package_name` - Optional package/crate name from manifest
-/// - `source_root` - Optional source root for module path derivation
-/// - `repo_root` - Repository root for deriving repo-relative paths
-pub type EntityHandler = Box<
-    dyn Fn(
-            &QueryMatch,
-            &Query,
-            &str,
-            &Path,
-            &str,
-            Option<&str>,
-            Option<&Path>,
-            &Path,
-        ) -> Result<Vec<CodeEntity>>
-        + Send
-        + Sync,
->;
+/// Takes an `ExtractionContext` containing all necessary information:
+/// - query_match, query, source, file_path
+/// - repository_id, package_name, source_root, repo_root
+pub type EntityHandler = Box<dyn Fn(&ExtractionContext) -> Result<Vec<CodeEntity>> + Send + Sync>;
 
 /// Defines how to extract a specific type of entity
 struct EntityExtractor {
@@ -247,17 +229,18 @@ impl<'a> GenericExtractor<'a> {
                         .iter()
                         .find(|e| e.name == extractor_name)
                     {
-                        // Call the handler with repository_id and package context
-                        let entities = (extractor.handler)(
+                        // Build extraction context and call handler
+                        let ctx = ExtractionContext {
                             query_match,
                             query,
                             source,
                             file_path,
-                            &self.repository_id,
-                            self.package_name.as_deref(),
-                            self.source_root.as_deref(),
-                            &self.repo_root,
-                        )?;
+                            repository_id: &self.repository_id,
+                            package_name: self.package_name.as_deref(),
+                            source_root: self.source_root.as_deref(),
+                            repo_root: &self.repo_root,
+                        };
+                        let entities = (extractor.handler)(&ctx)?;
                         all_entities.extend(entities);
                         processed = true;
                     }

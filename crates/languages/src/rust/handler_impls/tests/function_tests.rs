@@ -539,16 +539,17 @@ pub fn process_item<T: Processor>(item: &T) -> i32 {
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = matches_iter.next() {
-        if let Ok(entities) = handle_function_impl(
+        let ctx = crate::common::entity_building::ExtractionContext {
             query_match,
-            &query,
+            query: &query,
             source,
-            path,
+            file_path: path,
             repository_id,
             package_name,
-            None,
+            source_root: None,
             repo_root,
-        ) {
+        };
+        if let Ok(entities) = handle_function_impl(&ctx) {
             all_entities.extend(entities);
         }
     }

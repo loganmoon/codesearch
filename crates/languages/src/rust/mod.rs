@@ -31,13 +31,8 @@ define_language_extractor! {
     extensions: ["rs"],
 
     fqn: {
-        separator: "::",
+        family: CrateBased,
         module_path_fn: module_path::derive_module_path,
-        relative_prefixes: {
-            "crate::" => Root,
-            "self::" => Current,
-            "super::" => Parent { chainable: true },
-        },
         external_prefixes: ["std", "core", "alloc", "external"],
         edge_cases: edge_case_handlers::RUST_EDGE_CASE_HANDLERS,
     },

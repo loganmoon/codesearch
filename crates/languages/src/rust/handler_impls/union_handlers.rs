@@ -23,47 +23,25 @@ use crate::rust::handler_impls::type_handlers::build_field_entities;
 use codesearch_core::entities::{EntityMetadata, EntityType, Language, Visibility};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
-use std::path::Path;
-use tree_sitter::{Node, Query, QueryMatch};
+use tree_sitter::Node;
 
 /// Process a union query match and extract entity data
-#[allow(clippy::too_many_arguments)]
-pub fn handle_union_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
+pub(crate) fn handle_union_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
     // Get the union node
-    let union_node = require_capture_node(query_match, query, "union")?;
-
-    // Create extraction context
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+    let union_node = require_capture_node(ctx.query_match, ctx.query, "union")?;
 
     // Build ImportMap from file's imports for type resolution
-    let import_map = get_file_import_map(union_node, source);
+    let import_map = get_file_import_map(union_node, ctx.source);
 
     // Extract common components for parent_scope and qualified_name
-    let components = extract_common_components(&ctx, "name", union_node, "rust")?;
+    let components = extract_common_components(ctx, "name", union_node, "rust")?;
     let union_qualified_name = components.qualified_name.clone();
     let union_location = components.location.clone();
 
     // Derive module path from file path for qualified name resolution
-    let module_path =
-        source_root.and_then(|root| crate::rust::module_path::derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| crate::rust::module_path::derive_module_path(ctx.file_path, root));
 
     // Build resolution context for qualified name normalization
     // Clone parent_scope to avoid borrow conflict with components consumed later
@@ -72,19 +50,19 @@ pub fn handle_union_impl(
     let resolution_ctx = RustResolutionContext {
         import_map: &import_map,
         parent_scope: parent_scope_clone.as_deref(),
-        package_name,
+        package_name: ctx.package_name,
         current_module: module_path.as_deref(),
         path_config: &RUST_PATH_CONFIG,
         edge_case_handlers: Some(&edge_case_registry),
     };
 
     // Extract Rust-specific: visibility, documentation, content
-    let visibility = extract_visibility(query_match, query);
-    let documentation = extract_preceding_doc_comments(union_node, source);
-    let content = node_to_text(union_node, source).ok();
+    let visibility = extract_visibility(ctx.query_match, ctx.query);
+    let documentation = extract_preceding_doc_comments(union_node, ctx.source);
+    let content = node_to_text(union_node, ctx.source).ok();
 
     // Extract generics with parsed bounds
-    let parsed_generics = extract_generics_with_where(&ctx, &resolution_ctx);
+    let parsed_generics = extract_generics_with_where(ctx, &resolution_ctx);
 
     // Build backward-compatible generic_params
     let generics: Vec<String> = parsed_generics
@@ -97,8 +75,8 @@ pub fn handle_union_impl(
     let generic_bounds = build_generic_bounds_map(&parsed_generics);
 
     // Extract fields
-    let fields = find_capture_node(query_match, query, "fields")
-        .map(|node| parse_named_fields(node, source))
+    let fields = find_capture_node(ctx.query_match, ctx.query, "fields")
+        .map(|node| parse_named_fields(node, ctx.source))
         .unwrap_or_default();
 
     // Build metadata (no longer stores fields as JSON)
@@ -126,8 +104,8 @@ pub fn handle_union_impl(
     let field_entities = build_field_entities(
         &fields,
         &union_qualified_name,
-        file_path,
-        repository_id,
+        ctx.file_path,
+        ctx.repository_id,
         &resolution_ctx,
         &union_location,
     );

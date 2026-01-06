@@ -1,57 +1,78 @@
-//! TypeScript language extractor module (STUBBED)
-//!
-//! This module is temporarily stubbed pending the new macro architecture implementation.
-//! See issue #179 for the migration plan.
-//!
-//! ## Re-enabling TypeScript extraction
-//!
-//! When implementing the full extractor, ensure you:
-//! 1. Use `define_language_extractor!` macro with a `fqn:` block
-//! 2. Define `SCOPE_PATTERNS` for qualified name building
-//! 3. Provide `module_path_fn` if module path derivation is needed
-//!
-//! The macro will automatically register `ScopeConfiguration` via inventory.
+//! TypeScript language extractor module
 
-use codesearch_core::{error::Result, CodeEntity};
-use std::path::{Path, PathBuf};
+use crate::common::js_ts_shared::handlers as ts_handlers;
+use crate::common::js_ts_shared::queries as ts_queries;
+use crate::common::js_ts_shared::TS_SCOPE_PATTERNS as SCOPE_PATTERNS;
+use codesearch_languages_macros::define_language_extractor;
 
-/// TypeScript extractor (stubbed)
-///
-/// Returns empty entity vectors. Full implementation pending macro architecture migration.
-pub struct TypeScriptExtractor;
+define_language_extractor! {
+    language: TypeScript,
+    tree_sitter: tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
+    extensions: ["ts", "tsx"],
 
-impl TypeScriptExtractor {
-    /// Create a new TypeScript extractor
-    pub fn new(
-        _repository_id: String,
-        _package_name: Option<String>,
-        _source_root: Option<PathBuf>,
-        _repo_root: PathBuf,
-    ) -> Result<Self> {
-        Ok(Self)
-    }
-}
+    fqn: {
+        family: ModuleBased,
+    },
 
-impl crate::Extractor for TypeScriptExtractor {
-    fn extract(&self, _source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
-        tracing::warn!(
-            "TypeScript extraction is currently disabled (pending macro migration). \
-             File will not be indexed: {}",
-            file_path.display()
-        );
-        Ok(Vec::new())
-    }
-}
+    entities: {
+        // Shared entity types (using TypeScript-specific handlers for correct Language labeling)
+        function_decl => {
+            query: ts_queries::FUNCTION_DECLARATION_QUERY,
+            handler: ts_handlers::handle_ts_function_declaration_impl
+        },
+        function_expr => {
+            query: ts_queries::FUNCTION_EXPRESSION_QUERY,
+            handler: ts_handlers::handle_ts_function_expression_impl
+        },
+        arrow_function => {
+            query: ts_queries::ARROW_FUNCTION_QUERY,
+            handler: ts_handlers::handle_ts_arrow_function_impl
+        },
+        class_decl => {
+            query: ts_queries::CLASS_DECLARATION_QUERY,
+            handler: ts_handlers::handle_ts_class_declaration_impl
+        },
+        class_expr => {
+            query: ts_queries::CLASS_EXPRESSION_QUERY,
+            handler: ts_handlers::handle_ts_class_expression_impl
+        },
+        method => {
+            query: ts_queries::METHOD_QUERY,
+            handler: ts_handlers::handle_ts_method_impl
+        },
+        property => {
+            query: ts_queries::PROPERTY_QUERY,
+            handler: ts_handlers::handle_ts_property_impl
+        },
+        constant => {
+            query: ts_queries::CONST_QUERY,
+            handler: ts_handlers::handle_ts_const_impl
+        },
+        let_var => {
+            query: ts_queries::LET_QUERY,
+            handler: ts_handlers::handle_ts_let_impl
+        },
+        var => {
+            query: ts_queries::VAR_QUERY,
+            handler: ts_handlers::handle_ts_var_impl
+        },
 
-inventory::submit! {
-    crate::LanguageDescriptor {
-        name: "typescript",
-        extensions: &["ts", "tsx"],
-        factory: |repo_id, pkg_name, src_root, repo_root| Ok(Box::new(TypeScriptExtractor::new(
-            repo_id.to_string(),
-            pkg_name.map(String::from),
-            src_root.map(PathBuf::from),
-            repo_root.to_path_buf(),
-        )?)),
+        // TypeScript-specific entity types
+        interface => {
+            query: ts_queries::INTERFACE_QUERY,
+            handler: ts_handlers::handle_interface_impl
+        },
+        type_alias => {
+            query: ts_queries::TYPE_ALIAS_QUERY,
+            handler: ts_handlers::handle_type_alias_impl
+        },
+        r#enum => {
+            query: ts_queries::ENUM_QUERY,
+            handler: ts_handlers::handle_enum_impl
+        },
+        namespace => {
+            query: ts_queries::NAMESPACE_QUERY,
+            handler: ts_handlers::handle_namespace_impl
+        }
     }
 }

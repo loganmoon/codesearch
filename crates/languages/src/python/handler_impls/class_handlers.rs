@@ -19,52 +19,31 @@ use codesearch_core::{
     error::Result,
     CodeEntity,
 };
-use std::path::Path;
-use tree_sitter::{Query, QueryMatch};
 
 /// Handle Python class definitions
-#[allow(clippy::too_many_arguments)]
-pub fn handle_class_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let class_node = require_capture_node(query_match, query, "class")?;
-
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+pub(crate) fn handle_class_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let class_node = require_capture_node(ctx.query_match, ctx.query, "class")?;
 
     // Extract common components
-    let components = extract_common_components(&ctx, "name", class_node, "python")?;
+    let components = extract_common_components(ctx, "name", class_node, "python")?;
 
     // Extract base classes
-    let base_classes = extract_base_classes(class_node, source);
+    let base_classes = extract_base_classes(class_node, ctx.source);
 
     // Extract docstring
-    let documentation = extract_docstring(class_node, source);
+    let documentation = extract_docstring(class_node, ctx.source);
 
     // Extract decorators
-    let decorators = extract_decorators(class_node, source);
+    let decorators = extract_decorators(class_node, ctx.source);
 
     // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| derive_module_path(ctx.file_path, root));
 
     // Build import map for base class resolution
     let root = get_ast_root(class_node);
-    let import_map = parse_file_imports(root, source, Language::Python, module_path.as_deref());
+    let import_map = parse_file_imports(root, ctx.source, Language::Python, module_path.as_deref());
 
     // Build metadata
     let mut metadata = EntityMetadata {
@@ -97,7 +76,7 @@ pub fn handle_class_impl(
             language: Language::Python,
             visibility: Some(Visibility::Public),
             documentation,
-            content: node_to_text(class_node, source).ok(),
+            content: node_to_text(class_node, ctx.source).ok(),
             metadata,
             signature: None,
             relationships: Default::default(),
@@ -108,65 +87,46 @@ pub fn handle_class_impl(
 }
 
 /// Handle Python method definitions (functions inside class body)
-#[allow(clippy::too_many_arguments)]
-pub fn handle_method_impl(
-    query_match: &QueryMatch,
-    query: &Query,
-    source: &str,
-    file_path: &Path,
-    repository_id: &str,
-    package_name: Option<&str>,
-    source_root: Option<&Path>,
-    repo_root: &Path,
-) -> Result<Vec<CodeEntity>> {
-    let method_node = require_capture_node(query_match, query, "method")?;
-
-    let ctx = ExtractionContext {
-        query_match,
-        query,
-        source,
-        file_path,
-        repository_id,
-        package_name,
-        source_root,
-        repo_root,
-    };
+pub(crate) fn handle_method_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
+    let method_node = require_capture_node(ctx.query_match, ctx.query, "method")?;
 
     // Extract common components (name, qualified_name, entity_id, location)
-    let components = extract_common_components(&ctx, "name", method_node, "python")?;
+    let components = extract_common_components(ctx, "name", method_node, "python")?;
 
     // Extract parameters from query capture (filter self/cls for display)
-    let raw_parameters = if let Some(params_node) = find_capture_node(query_match, query, "params")
-    {
-        extract_python_parameters(params_node, source)?
-    } else {
-        Vec::new()
-    };
+    let raw_parameters =
+        if let Some(params_node) = find_capture_node(ctx.query_match, ctx.query, "params") {
+            extract_python_parameters(params_node, ctx.source)?
+        } else {
+            Vec::new()
+        };
     let parameters = filter_self_parameter(raw_parameters);
 
     // Extract return type annotation
-    let return_type = extract_return_type(method_node, source);
+    let return_type = extract_return_type(method_node, ctx.source);
 
     // Check for async modifier
     let is_async = is_async_function(method_node);
 
     // Extract docstring
-    let documentation = extract_docstring(method_node, source);
+    let documentation = extract_docstring(method_node, ctx.source);
 
     // Extract decorators
-    let decorators = extract_decorators(method_node, source);
+    let decorators = extract_decorators(method_node, ctx.source);
 
     // Derive module path for qualified name resolution
-    let module_path = source_root.and_then(|root| derive_module_path(file_path, root));
+    let module_path = ctx
+        .source_root
+        .and_then(|root| derive_module_path(ctx.file_path, root));
 
     // Build import map from file's imports for qualified name resolution
     let root = get_ast_root(method_node);
-    let import_map = parse_file_imports(root, source, Language::Python, module_path.as_deref());
+    let import_map = parse_file_imports(root, ctx.source, Language::Python, module_path.as_deref());
 
     // Extract function calls from the method body with qualified name resolution
     let calls = extract_function_calls(
         method_node,
-        source,
+        ctx.source,
         &import_map,
         components.parent_scope.as_deref(),
     );
@@ -174,7 +134,7 @@ pub fn handle_method_impl(
     // Extract type references from type hints for USES relationships
     let type_refs = extract_type_references(
         method_node,
-        source,
+        ctx.source,
         &import_map,
         components.parent_scope.as_deref(),
     );
@@ -237,7 +197,7 @@ pub fn handle_method_impl(
             language: Language::Python,
             visibility: Some(Visibility::Public),
             documentation,
-            content: node_to_text(method_node, source).ok(),
+            content: node_to_text(method_node, ctx.source).ok(),
             metadata,
             signature: Some(FunctionSignature {
                 parameters,

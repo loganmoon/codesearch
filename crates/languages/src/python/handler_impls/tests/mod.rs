@@ -4,6 +4,7 @@ mod class_tests;
 mod function_tests;
 mod utils_tests;
 
+use crate::common::entity_building::ExtractionContext;
 use crate::python::queries;
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
@@ -13,16 +14,7 @@ use tree_sitter::{Parser, Query, QueryCursor};
 /// Helper to extract entities from source code using a handler
 pub fn extract_with_handler<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<CodeEntity>>
 where
-    F: Fn(
-        &tree_sitter::QueryMatch,
-        &Query,
-        &str,
-        &Path,
-        &str,
-        Option<&str>,
-        Option<&Path>,
-        &Path,
-    ) -> Result<Vec<CodeEntity>>,
+    F: Fn(&ExtractionContext) -> Result<Vec<CodeEntity>>,
 {
     let mut parser = Parser::new();
     parser
@@ -41,17 +33,17 @@ where
 
     let mut all_entities = Vec::new();
     while let Some(query_match) = matches_iter.next() {
-        let entities = handler(
+        let ctx = ExtractionContext {
             query_match,
-            &query,
+            query: &query,
             source,
-            path,
+            file_path: path,
             repository_id,
-            None,
-            None,
+            package_name: None,
+            source_root: None,
             repo_root,
-        )
-        .expect("Handler should not fail during test extraction");
+        };
+        let entities = handler(&ctx).expect("Handler should not fail during test extraction");
         all_entities.extend(entities);
     }
 

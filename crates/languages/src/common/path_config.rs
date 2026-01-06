@@ -166,21 +166,6 @@ pub const PYTHON_PATH_CONFIG: PathConfig = PathConfig {
     unprefixed_is_external: true, // Python imports without dots are external (stdlib, pip)
 };
 
-/// Pre-defined path configuration for JavaScript/TypeScript
-///
-/// Note: This is the legacy config. New code should use `MODULE_BASED_PATH_CONFIG`
-/// via the language family system.
-pub const JAVASCRIPT_PATH_CONFIG: PathConfig = PathConfig {
-    separator: ".",
-    relative_prefixes: &[
-        // JavaScript uses "./" and "../" for relative imports, but these
-        // are typically handled at the import statement level.
-        // For now, JS/TS paths are treated as absolute.
-    ],
-    external_prefixes: &[],
-    unprefixed_is_external: true, // JS imports without ./ are external (npm packages)
-};
-
 // =============================================================================
 // Language Family Configurations
 // =============================================================================
@@ -299,14 +284,6 @@ mod tests {
     #[test]
     fn test_python_config() {
         let config = &PYTHON_PATH_CONFIG;
-        assert_eq!(config.separator, ".");
-        assert!(config.relative_prefixes.is_empty());
-        assert!(config.unprefixed_is_external);
-    }
-
-    #[test]
-    fn test_javascript_config() {
-        let config = &JAVASCRIPT_PATH_CONFIG;
         assert_eq!(config.separator, ".");
         assert!(config.relative_prefixes.is_empty());
         assert!(config.unprefixed_is_external);

@@ -46,6 +46,10 @@ pub const SCOPE_PATTERNS: &[ScopePattern] = &[
 ///
 /// Includes all JavaScript patterns plus:
 /// - `internal_module` - Namespace/module declarations: `namespace Foo { ... }`
+///
+/// Note: The JavaScript patterns are duplicated here rather than extended because
+/// Rust const arrays cannot be concatenated at compile time. This intentional
+/// duplication ensures both arrays remain `const` for optimal performance.
 pub const TS_SCOPE_PATTERNS: &[ScopePattern] = &[
     // Class declarations: class Foo { ... }
     ScopePattern {

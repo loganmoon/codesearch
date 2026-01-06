@@ -85,18 +85,14 @@ fn extract_ts_visibility_modifier(node: Node) -> Option<Visibility> {
     for child in node.children(&mut cursor) {
         match child.kind() {
             "accessibility_modifier" | "public" => {
-                // Need to look at the actual text
-                let parent_source_needed = true;
-                if parent_source_needed {
-                    // Check children for the actual modifier keyword
-                    let mut inner_cursor = child.walk();
-                    for inner in child.children(&mut inner_cursor) {
-                        match inner.kind() {
-                            "public" => return Some(Visibility::Public),
-                            "private" => return Some(Visibility::Private),
-                            "protected" => return Some(Visibility::Protected),
-                            _ => {}
-                        }
+                // Check children for the actual modifier keyword
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    match inner.kind() {
+                        "public" => return Some(Visibility::Public),
+                        "private" => return Some(Visibility::Private),
+                        "protected" => return Some(Visibility::Protected),
+                        _ => {}
                     }
                 }
             }

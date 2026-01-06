@@ -3,49 +3,9 @@
 use crate::common::entity_building::ExtractionContext;
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, SourceReference};
 use im::HashMap as ImHashMap;
-use tree_sitter::{Node, Query, QueryMatch};
-
-// Re-export node_to_text for use by other handlers
-pub(crate) use crate::common::node_to_text;
+use tree_sitter::Node;
 
 use super::super::visibility::{is_async, is_generator, is_getter, is_setter, is_static_member};
-
-/// Extract entity name from a query match
-///
-/// Looks for a capture named "name" in the query match.
-pub(crate) fn extract_name<'a>(
-    query_match: &QueryMatch<'a, 'a>,
-    query: &Query,
-    source: &'a str,
-) -> Option<&'a str> {
-    let name_index = query.capture_index_for_name("name")?;
-    for capture in query_match.captures {
-        if capture.index == name_index {
-            return Some(&source[capture.node.byte_range()]);
-        }
-    }
-    None
-}
-
-/// Extract the main captured node from a query match
-///
-/// Looks for captures like @function, @class, @method, etc.
-pub(crate) fn extract_main_node<'a>(
-    query_match: &QueryMatch<'a, 'a>,
-    query: &Query,
-    capture_names: &[&str],
-) -> Option<Node<'a>> {
-    for name in capture_names {
-        if let Some(index) = query.capture_index_for_name(name) {
-            for capture in query_match.captures {
-                if capture.index == index {
-                    return Some(capture.node);
-                }
-            }
-        }
-    }
-    None
-}
 
 /// Extract documentation comments preceding a node
 ///
@@ -135,7 +95,7 @@ pub(crate) fn build_js_metadata(
 }
 
 // =============================================================================
-// Metadata helper functions for use with define_js_handler! macro
+// Metadata helper functions for use with define_handler! macro
 // =============================================================================
 
 /// Build metadata for regular function declarations/expressions
@@ -175,8 +135,40 @@ pub(crate) fn const_metadata(_node: Node, _source: &str) -> EntityMetadata {
     }
 }
 
+/// Build metadata for class properties/fields
+///
+/// Extracts:
+/// - `is_static`: Whether the property has the `static` modifier
+/// - `is_private` (attribute): Whether the property name starts with `#`
+/// - `has_initializer` (attribute): Whether the property has an initial value
+pub(crate) fn property_metadata(node: Node, source: &str) -> EntityMetadata {
+    let is_static = is_static_member(node);
+
+    // Check if it's a private field (name starts with #)
+    let is_private = node
+        .child_by_field_name("name")
+        .is_some_and(|name_node| source[name_node.byte_range()].starts_with('#'));
+
+    // Check if there's an initializer (value field exists)
+    let has_initializer = node.child_by_field_name("value").is_some();
+
+    let mut attributes = ImHashMap::new();
+    if is_private {
+        attributes.insert("is_private".to_string(), "true".to_string());
+    }
+    if has_initializer {
+        attributes.insert("has_initializer".to_string(), "true".to_string());
+    }
+
+    EntityMetadata {
+        is_static,
+        attributes,
+        ..Default::default()
+    }
+}
+
 // =============================================================================
-// Relationship helper functions for use with define_js_handler! macro
+// Relationship helper functions for use with define_handler! macro
 // =============================================================================
 
 /// Extract extends relationships from a class or interface declaration

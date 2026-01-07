@@ -45,6 +45,7 @@ pub const SCOPE_PATTERNS: &[ScopePattern] = &[
 /// TypeScript-specific scope patterns
 ///
 /// Includes all JavaScript patterns plus:
+/// - `abstract_class_declaration` - Abstract class declarations: `abstract class Foo { ... }`
 /// - `internal_module` - Namespace/module declarations: `namespace Foo { ... }`
 /// - `enum_declaration` - Enum declarations: `enum Color { ... }`
 /// - `interface_declaration` - Interface declarations: `interface Foo { ... }`
@@ -56,6 +57,11 @@ pub const TS_SCOPE_PATTERNS: &[ScopePattern] = &[
     // Class declarations: class Foo { ... }
     ScopePattern {
         node_kind: "class_declaration",
+        field_name: "name",
+    },
+    // Abstract class declarations: abstract class Foo { ... }
+    ScopePattern {
+        node_kind: "abstract_class_declaration",
         field_name: "name",
     },
     // Class expressions: const Foo = class { ... }

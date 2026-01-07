@@ -52,3 +52,7 @@ define_handler!(TypeScript, handle_construct_signature_impl, "construct_signatur
 define_handler!(TypeScript, handle_index_signature_impl, "index_signature", Property,
     name_fn: derive_index_signature_name,
     visibility: Visibility::Public);
+
+// Abstract method - always Public (must be overridden by subclasses)
+define_handler!(TypeScript, handle_abstract_method_impl, "method", Method,
+    visibility: Visibility::Public);

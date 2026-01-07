@@ -13,6 +13,8 @@
 /// - `class Foo implements IFoo {}`
 /// - `class Foo extends Bar implements IFoo, IBar {}`
 /// - `export class Foo {}`
+/// - `abstract class Foo {}`
+/// - `export abstract class Foo {}`
 pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
 [
   (class_declaration
@@ -24,6 +26,15 @@ pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
     name: (type_identifier) @name
     body: (class_body) @body) @class
 
+  (abstract_class_declaration
+    name: (type_identifier) @name
+    (class_heritage) @heritage
+    body: (class_body) @body) @class
+
+  (abstract_class_declaration
+    name: (type_identifier) @name
+    body: (class_body) @body) @class
+
   (export_statement
     declaration: (class_declaration
       name: (type_identifier) @name
@@ -32,6 +43,17 @@ pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
 
   (export_statement
     declaration: (class_declaration
+      name: (type_identifier) @name
+      body: (class_body) @body)) @class
+
+  (export_statement
+    declaration: (abstract_class_declaration
+      name: (type_identifier) @name
+      (class_heritage) @heritage
+      body: (class_body) @body)) @class
+
+  (export_statement
+    declaration: (abstract_class_declaration
       name: (type_identifier) @name
       body: (class_body) @body)) @class
 ]
@@ -280,4 +302,15 @@ pub(crate) const CALL_SIGNATURE_QUERY: &str = r#"
 pub(crate) const CONSTRUCT_SIGNATURE_QUERY: &str = r#"
 (interface_body
   (construct_signature) @construct_signature)
+"#;
+
+/// Query for abstract methods in abstract classes
+///
+/// Matches abstract method signatures inside class bodies:
+/// - `abstract area(): number`
+/// - `abstract process(data: T): void`
+pub(crate) const ABSTRACT_METHOD_QUERY: &str = r#"
+(class_body
+  (abstract_method_signature
+    name: (property_identifier) @name) @method)
 "#;

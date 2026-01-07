@@ -405,6 +405,35 @@ mod language_labeling_tests {
     }
 
     #[test]
+    fn test_abstract_class_extraction() {
+        let source = r#"export abstract class Shape {
+    abstract area(): number;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .expect("failed to set language");
+        let tree = parser.parse(source, None).expect("failed to parse");
+
+        let query = Query::new(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            queries::TS_CLASS_DECLARATION_QUERY,
+        )
+        .expect("failed to create query");
+
+        let mut cursor = QueryCursor::new();
+        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+        let mut match_count = 0;
+        while matches_iter.next().is_some() {
+            match_count += 1;
+        }
+
+        assert!(match_count > 0, "Should match abstract class");
+    }
+
+    #[test]
     fn test_class_inheritance_extraction() {
         let source = r#"export class Dog extends Animal {
     name: string;

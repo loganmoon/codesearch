@@ -104,6 +104,10 @@ define_language_extractor! {
         namespace => {
             query: ts_queries::NAMESPACE_QUERY,
             handler: ts_handlers::handle_namespace_impl
+        },
+        abstract_method => {
+            query: ts_queries::ABSTRACT_METHOD_QUERY,
+            handler: ts_handlers::handle_abstract_method_impl
         }
     }
 }

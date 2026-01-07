@@ -1,9 +1,11 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
 use crate::common::entity_building::ExtractionContext;
+use crate::common::{find_capture_node, module_utils, node_to_text};
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, SourceLocation, SourceReference,
 };
+use codesearch_core::error::{Error, Result};
 use im::HashMap as ImHashMap;
 use tree_sitter::Node;
 
@@ -289,4 +291,113 @@ fn extract_type_identifiers_from_extends(
             }
         }
     }
+}
+
+// =============================================================================
+// Name derivation functions for use with define_handler! macro
+// =============================================================================
+
+/// Build metadata for enum declarations
+///
+/// Detects const enums by checking for the `const` keyword.
+pub(crate) fn enum_metadata(node: Node, source: &str) -> EntityMetadata {
+    let is_const = node.child_by_field_name("const").is_some()
+        || source[node.byte_range()].trim_start().starts_with("const");
+    EntityMetadata {
+        is_const,
+        ..Default::default()
+    }
+}
+
+/// Derive the name for an index signature from the index parameter type
+///
+/// Extracts the type of the index parameter (e.g., "string" from `[key: string]: T`)
+/// and returns it in brackets like `[string]`.
+pub(crate) fn derive_index_signature_name(node: Node, source: &str) -> String {
+    // Look for the index parameter type
+    // Tree structure: index_signature > ... > type_annotation > predefined_type/type_identifier
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            // Look for type annotation within the index signature
+            if child.kind() == ":" {
+                // The type should be next
+                if let Some(type_node) = node.child(i + 1) {
+                    if let Some(type_name) = get_simple_type_name(type_node, source) {
+                        return format!("[{type_name}]");
+                    }
+                }
+            }
+            // Try finding type_annotation child
+            if child.kind() == "type_annotation" {
+                if let Some(type_child) = child.child(1) {
+                    // Skip the ':'
+                    if let Some(type_name) = get_simple_type_name(type_child, source) {
+                        return format!("[{type_name}]");
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: try to find any predefined_type or type_identifier
+    if let Some(type_name) = find_first_type_in_node(node, source) {
+        return format!("[{type_name}]");
+    }
+    "[index]".to_string()
+}
+
+/// Get a simple type name from a type node
+fn get_simple_type_name(node: Node, source: &str) -> Option<String> {
+    match node.kind() {
+        "predefined_type" | "type_identifier" => Some(source[node.byte_range()].to_string()),
+        _ => None,
+    }
+}
+
+/// Find the first type identifier in a node tree
+fn find_first_type_in_node(node: Node, source: &str) -> Option<String> {
+    if node.kind() == "predefined_type" || node.kind() == "type_identifier" {
+        return Some(source[node.byte_range()].to_string());
+    }
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            if let Some(found) = find_first_type_in_node(child, source) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Derive module name from extraction context
+///
+/// Uses the file path to derive the module name.
+/// This is a context-aware name function for use with `name_ctx_fn:` macro parameter.
+pub(crate) fn derive_module_name_from_ctx(ctx: &ExtractionContext, _node: Node) -> Result<String> {
+    Ok(module_utils::derive_module_name(ctx.file_path))
+}
+
+/// Derive function expression name from extraction context
+///
+/// Prefers the function's own name (`@fn_name`) over the variable name (`@name`).
+/// For named function expressions like `const x = function bar() {}`, returns `bar`.
+/// For anonymous function expressions like `const x = function() {}`, returns `x`.
+///
+/// This is a context-aware name function for use with `name_ctx_fn:` macro parameter.
+pub(crate) fn derive_function_expression_name(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> Result<String> {
+    // Prefer @fn_name (function's own name) over @name (variable name)
+    let name = find_capture_node(ctx.query_match, ctx.query, "fn_name")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "name"))
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .unwrap_or_default();
+
+    if name.is_empty() {
+        return Err(Error::entity_extraction(
+            "Could not derive function expression name from captures",
+        ));
+    }
+
+    Ok(name)
 }

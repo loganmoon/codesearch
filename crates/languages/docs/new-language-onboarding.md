@@ -19,6 +19,15 @@ This guide covers adding new language support to codesearch, using Rust as the c
 
 ## Architecture Overview
 
+> **🔒 ARCHITECTURAL REQUIREMENT**
+>
+> All extraction handlers **MUST** be implemented using the `LanguageExtractors` trait with the `define_handler!` macro. This architecture is mandatory for:
+> - Entity extraction handlers
+> - Relationship data extraction
+> - Visibility and documentation extraction
+>
+> The macro supports all extraction patterns through various parameters (`metadata:`, `relationships:`, `visibility:`, `name:`, `name_fn:`, `name_ctx_fn:`, `module_name_fn:`). See [Step 3: Handler Implementations](#step-3-handler-implementations) for details.
+
 The extraction and resolution pipeline:
 
 ```
@@ -98,65 +107,7 @@ The extraction and resolution pipeline:
 
 Each language should have a specification file defining extraction rules. See `crates/languages/specs/rust.yaml` as the canonical example.
 
-### Spec File Structure
-
-```yaml
-version: "1.0"
-language: rust
-
-# Entity extraction rules
-entity_rules:
-  - id: E-FN-FREE
-    description: "A free function produces a Function entity"
-    construct: "fn name() { ... }"
-    produces: Function
-    tested_by: [free_functions, visibility]
-
-# Visibility rules (precedence-ordered)
-visibility_rules:
-  - id: V-PUB
-    description: "pub modifier results in Public visibility"
-    applies_to: "*"
-    result: Public
-    precedence: 10
-
-# Qualified name rules
-qualified_name_rules:
-  - id: Q-ITEM
-    description: "Top-level items are qualified under their module path"
-    pattern: "{module}::{name}"
-    applies_to: [Function, Struct, Enum, Trait]
-
-# Relationship rules
-relationship_rules:
-  - id: R-CALLS-FUNCTION
-    description: "Function/Method CALLS another function/method"
-    kind: Calls
-    from: [Function, Method]
-    to: [Function, Method]
-
-# Metadata rules
-metadata_rules:
-  - id: M-FN-ASYNC
-    description: "Async functions have is_async=true"
-    applies_to: [Function, Method]
-    field: is_async
-
-# Test fixture mapping
-fixtures:
-  free_functions:
-    tests: [E-FN-FREE, V-PUB, Q-ITEM, R-CALLS-FUNCTION]
-```
-
-### Rule ID Conventions
-
-| Prefix | Category |
-|--------|----------|
-| E-xxx | Entity extraction |
-| V-xxx | Visibility |
-| Q-xxx | Qualified names |
-| R-xxx | Relationships |
-| M-xxx | Metadata |
+Rule ID conventions: `E-xxx` (entity), `V-xxx` (visibility), `Q-xxx` (qualified names), `R-xxx` (relationships), `M-xxx` (metadata).
 
 ---
 
@@ -290,10 +241,6 @@ pub const IMPL_TRAIT_QUERY: &str = r#"
 
 ## Step 3: Handler Implementations
 
-The extraction framework provides two approaches for implementing handlers:
-1. **Macro-based** (recommended): Use `define_handler!` with the `LanguageExtractors` trait for concise definitions
-2. **Manual**: Write handlers directly for complex cases requiring custom logic
-
 ### 3.1 The LanguageExtractors Trait
 
 The `LanguageExtractors` trait defines language-specific extraction behavior. Implement this for each language:
@@ -357,13 +304,14 @@ The `ExtractionContext` contains:
 - `source_root: Option<&Path>` - Source root directory
 - `repo_root: &Path` - Repository root
 
-### 3.3 Using the define_handler! Macro (Recommended)
+### 3.3 Using the define_handler! Macro (Required)
 
-The `define_handler!` macro generates handlers using the trait-based extraction framework:
+The `define_handler!` macro generates handlers using the trait-based extraction framework. **All handlers must use this macro** - no manual handlers are permitted.
 
 ```rust
 use crate::common::js_ts_shared::JavaScript;
 use crate::define_handler;
+use codesearch_core::Visibility;
 
 // Basic handler with default metadata and no relationships
 define_handler!(JavaScript, handle_let_impl, "let", Variable);
@@ -380,6 +328,29 @@ define_handler!(JavaScript, handle_class_impl, "class", Class,
 define_handler!(JavaScript, handle_method_impl, "method", Method,
     metadata: method_metadata,
     relationships: extract_implements);
+
+// Handler with visibility override (for interface members that are always Public)
+define_handler!(TypeScript, handle_interface_property_impl, "interface_property", Property,
+    visibility: Visibility::Public);
+
+// Handler with static name and visibility (for call/construct signatures)
+define_handler!(TypeScript, handle_call_signature_impl, "call_signature", Method,
+    name: "()",
+    visibility: Visibility::Public);
+
+// Handler with name derivation function and visibility
+define_handler!(TypeScript, handle_index_signature_impl, "index_signature", Property,
+    name_fn: derive_index_signature_name,
+    visibility: Visibility::Public);
+
+// Handler with context-aware name function (for complex name resolution)
+define_handler!(JavaScript, handle_function_expression_impl, "function", Function,
+    name_ctx_fn: derive_function_expression_name,
+    metadata: function_metadata);
+
+// Module handler with file-path-based name derivation
+define_handler!(JavaScript, handle_module_impl, "program",
+    module_name_fn: derive_module_name_from_ctx);
 ```
 
 The macro parameters:
@@ -389,6 +360,11 @@ The macro parameters:
 - `$entity_type:ident` - `EntityType` variant (e.g., `Function`, `Class`)
 - `metadata: $fn` - (optional) Function `fn(Node, &str) -> EntityMetadata`
 - `relationships: $fn` - (optional) Function `fn(&ExtractionContext, Node) -> EntityRelationshipData`
+- `visibility: $expr` - (optional) Static visibility override (e.g., `Visibility::Public`)
+- `name: $expr` - (optional) Static name string (e.g., `"()"`, `"new()"`)
+- `name_fn: $fn` - (optional) Name derivation function `fn(Node, &str) -> String`
+- `name_ctx_fn: $fn` - (optional) Context-aware name function `fn(&ExtractionContext, Node) -> Result<String>`
+- `module_name_fn: $fn` - (for module entities) Module name derivation from file path
 
 ### 3.4 Helper Functions for Metadata and Relationships
 
@@ -417,53 +393,50 @@ pub(crate) fn extract_extends_relationships(
 }
 ```
 
-### 3.5 Manual Handler Pattern
+### 3.5 Helper Functions for Name Derivation
 
-For complex cases requiring custom logic (e.g., TypeScript enums with const detection):
+For entities requiring custom name derivation, use the appropriate macro parameter:
 
 ```rust
-pub(crate) fn handle_enum_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(ctx.query_match, ctx.query, &["enum"]) {
-        Some(n) => n,
-        None => return Ok(Vec::new()),
-    };
+// For static names (call/construct signatures)
+// Use `name:` parameter directly in the macro
 
-    let components = extract_common_components(ctx, "name", node, "typescript")?;
-    let visibility = extract_visibility(node, ctx.source);
-    let documentation = extract_preceding_doc_comments(node, ctx.source);
-    let content = node_to_text(node, ctx.source).ok();
-
-    // Custom logic: detect const enums
-    let is_const = node.child_by_field_name("const").is_some()
-        || ctx.source[node.byte_range()].trim_start().starts_with("const");
-
-    let metadata = EntityMetadata {
-        is_const,
-        ..Default::default()
-    };
-
-    let entity = build_entity(
-        components,
-        EntityDetails {
-            entity_type: EntityType::Enum,
-            language: Language::TypeScript,
-            visibility: Some(visibility),
-            documentation,
-            content,
-            metadata,
-            signature: None,
-            relationships: Default::default(),
-        },
-    )?;
-
-    Ok(vec![entity])
+// For names derived from AST (e.g., index signature type)
+pub(crate) fn derive_index_signature_name(node: Node, source: &str) -> String {
+    // Extract type from index signature: [key: string] -> "[string]"
+    find_first_type_in_node(node, source)
+        .map(|t| format!("[{t}]"))
+        .unwrap_or_else(|| "[index]".to_string())
 }
+
+// For names requiring context (e.g., file path or multiple captures)
+pub(crate) fn derive_function_expression_name(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> Result<String> {
+    // Prefer function's own name over variable name
+    find_capture_node(ctx.query_match, ctx.query, "fn_name")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "name"))
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .ok_or_else(|| Error::entity_extraction("Could not derive name"))
+}
+
+// For module entities (name from file path)
+pub(crate) fn derive_module_name_from_ctx(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> Result<String> {
+    Ok(module_utils::derive_module_name(ctx.file_path))
+}
+```
+
+> **Note:** The `define_handler!` macro now supports all extraction patterns through its various parameters. Manual handlers are not needed.
 
 ---
 
 ## Step 4: Relationship Data Extraction
 
-**Key change from legacy approach**: Relationship data is now stored in typed `EntityRelationshipData` fields, not as JSON strings in `metadata.attributes`.
+Relationship data is stored in typed `EntityRelationshipData` fields.
 
 ### 4.1 Using SourceReference
 
@@ -491,31 +464,7 @@ let relationships = EntityRelationshipData {
 
 ### 4.2 Determining is_external
 
-The `is_external` flag indicates whether a reference targets code outside the repository:
-
-```rust
-use crate::common::language_path::LanguagePath;
-use crate::common::path_config::RUST_PATH_CONFIG;
-
-fn create_source_reference(
-    resolved: &ResolvedReference,
-    ref_type: ReferenceType,
-) -> SourceReference {
-    SourceReference::new(
-        resolved.target.clone(),
-        resolved.simple_name.clone(),
-        resolved.is_external,  // Set at resolution time
-        SourceLocation::default(),
-        ref_type,
-    )
-}
-
-// For Rust, use LanguagePath to parse and determine externality
-let lang_path = LanguagePath::parse(&import_path, &RUST_PATH_CONFIG);
-// is_relative() checks for crate::/self::/super:: prefixes (internal references)
-// is_external() checks for known stdlib prefixes (std::/core::/alloc::)
-let is_external = !lang_path.is_relative() && lang_path.is_external();
-```
+The `is_external` flag indicates whether a reference targets code outside the repository. Use `LanguagePath` to determine externality based on path prefixes (e.g., Rust: `std::/core::/alloc::` are external, `crate::/self::/super::` are internal).
 
 ### 4.3 Relationship Field Usage
 
@@ -534,52 +483,20 @@ let is_external = !lang_path.is_relative() && lang_path.is_external();
 
 ## Step 5: Import Resolution
 
-### 5.1 Import Map
+Add a language-specific import parser in `common/import_map.rs`:
 
 ```rust
-use crate::common::import_map::{parse_file_imports, resolve_reference};
-
-// Parse imports from file
-let import_map = parse_file_imports(root_node, source, Language::Rust);
-
-// Resolve a reference
-let resolved = resolve_reference(
-    "HashMap",              // Name to resolve
-    &import_map,            // Import map
-    Some("crate::utils"),   // Parent scope
-    "::",                   // Separator
-);
-// Returns ResolvedReference with target, simple_name, is_external
-```
-
-### 5.2 ResolvedReference
-
-```rust
-pub struct ResolvedReference {
-    pub target: String,       // Fully qualified name
-    pub simple_name: String,  // Last path segment
-    pub is_external: bool,    // Outside repository
-}
-```
-
-### 5.3 Adding Language Support
-
-```rust
-// In common/import_map.rs
-
-pub fn parse_file_imports(
-    root: Node,
-    source: &str,
-    language: Language,
-) -> ImportMap {
+pub fn parse_file_imports(root: Node, source: &str, language: Language) -> ImportMap {
     match language {
         Language::Rust => parse_rust_imports(root, source),
         Language::JavaScript => parse_js_imports(root, source),
-        Language::NewLang => parse_newlang_imports(root, source),
+        // Add your language here
         _ => ImportMap::new("."),
     }
 }
 ```
+
+Use `resolve_reference()` to resolve names against the import map, returning a `ResolvedReference` with `target`, `simple_name`, and `is_external`.
 
 ---
 
@@ -604,51 +521,19 @@ Language implementations require two levels of testing. The table below clarifie
 
 ### Handler Unit Tests (`crates/languages/src/{lang}/handler_impls/tests/`)
 
-Handler unit tests verify that individual extraction handlers correctly parse source code and produce the expected entities and relationship data. These run without external infrastructure.
-
-```rust
-#[test]
-fn test_function_extracts_calls() {
-    let source = r#"
-        fn caller() {
-            helper();
-        }
-
-        fn helper() {}
-    "#;
-
-    let entities = extract_entities(source, Language::Rust);
-    let caller = entities.iter().find(|e| e.name == "caller").unwrap();
-
-    assert_eq!(caller.relationships.calls.len(), 1);
-    assert_eq!(caller.relationships.calls[0].simple_name, "helper");
-}
-
-#[test]
-fn test_impl_extracts_implements_trait() {
-    let source = r#"
-        trait Display {}
-        struct Foo;
-        impl Display for Foo {}
-    "#;
-
-    let entities = extract_entities(source, Language::Rust);
-    let impl_entity = entities.iter()
-        .find(|e| e.entity_type == EntityType::Impl)
-        .unwrap();
-
-    let implements = impl_entity.relationships.implements_trait.as_ref().unwrap();
-    assert!(implements.target.contains("Display"));
-}
-```
-
-Tests should reference spec rule IDs in comments:
+Test that handlers correctly extract entities and relationship data. Reference spec rule IDs in comments:
 
 ```rust
 /// Tests rule E-FN-FREE: Free functions produce Function entity
 #[test]
-fn test_free_function_extraction() {
-    // ...
+fn test_function_extracts_calls() {
+    let source = r#"
+        fn caller() { helper(); }
+        fn helper() {}
+    "#;
+    let entities = extract_entities(source, Language::Rust);
+    let caller = entities.iter().find(|e| e.name == "caller").unwrap();
+    assert_eq!(caller.relationships.calls[0].simple_name, "helper");
 }
 ```
 
@@ -656,22 +541,10 @@ fn test_free_function_extraction() {
 
 ## Entity Identifiers
 
-Each entity has two identifier fields:
-
-| Field | Purpose | Example |
-|-------|---------|---------|
-| `qualified_name` | Semantic, package-relative | `mypackage::utils::format` |
-| `path_entity_identifier` | File-path-based | `packages.mypackage.src.utils.format` |
-
-### qualified_name (Semantic)
-- Used for graph edge resolution
-- Matches LSP go-to-definition results
-- Format: `package_name + module_path + scope + entity_name`
-
-### path_entity_identifier (File-based)
-- Used for resolving relative imports
-- Always repo-relative
-- Format: `repo_relative_path + scope + entity_name`
+| Field | Purpose | Format |
+|-------|---------|--------|
+| `qualified_name` | Graph resolution, LSP-compatible | `package::module::entity` |
+| `path_entity_identifier` | Relative import resolution | `path.to.file.entity` |
 
 ---
 
@@ -714,235 +587,21 @@ pub const CALLS: RelationshipDef = RelationshipDef::new(
 | `UniqueSimpleName` | Match if only one entity has that simple name |
 | `SimpleName` | First match wins (logs warning on ambiguity) |
 
-### Adding a New Resolver (if needed)
+### Adding a New Resolver (rarely needed)
 
-Most relationships use the standard `RelationshipDef` definitions in `crates/core/src/resolution.rs`. If your language needs custom resolution logic:
-
-1. **Add a new `RelationshipDef`** in `crates/core/src/resolution.rs`:
-
-```rust
-/// CUSTOM relationship for NewLang-specific behavior
-pub const CUSTOM_REL: RelationshipDef = RelationshipDef::new(
-    "custom",
-    &[EntityType::Function],           // Source types
-    &[EntityType::Class],              // Target types
-    RelationshipType::Uses,            // Relationship type
-    &[
-        LookupStrategy::QualifiedName,
-        LookupStrategy::SimpleName,
-    ],
-);
-```
-
-2. **Create a ReferenceExtractor** in `crates/outbox-processor/src/generic_resolver.rs`:
-
-```rust
-/// Extractor for custom NewLang relationships
-pub struct CustomExtractor;
-
-impl ReferenceExtractor for CustomExtractor {
-    fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
-        // Extract from entity.relationships fields
-        entity.relationships.some_field
-            .iter()
-            .map(|src_ref| ExtractedRef {
-                target: src_ref.target.clone(),
-                simple_name: src_ref.simple_name.clone(),
-            })
-            .collect()
-    }
-}
-```
-
-3. **Add factory function** in `generic_resolver.rs`:
-
-```rust
-pub fn custom_resolver() -> GenericResolver {
-    GenericResolver::new(
-        &codesearch_core::resolution::definitions::CUSTOM_REL,
-        Box::new(CustomExtractor),
-    )
-}
-```
-
-4. **Register in processor** in `crates/outbox-processor/src/processor.rs`:
-
-```rust
-// In resolve_relationships_for_repository()
-let resolvers: Vec<Box<dyn RelationshipResolver>> = vec![
-    // ... existing resolvers
-    Box::new(custom_resolver()),
-];
-```
+Most relationships use standard `RelationshipDef` definitions in `crates/core/src/resolution.rs`. If custom resolution is needed: add a `RelationshipDef`, create a `ReferenceExtractor`, and register in `processor.rs`. See existing resolvers in `crates/outbox-processor/src/generic_resolver.rs` for examples.
 
 ---
 
 ### E2E Spec Validation Tests (`crates/e2e-tests/tests/spec_validation/{lang}/`)
 
-E2E spec validation tests run the full pipeline against test fixtures and validate that the resulting graph matches the expected entities and relationships defined in the language spec. These require Docker infrastructure (Postgres, Neo4j, Qdrant).
-
-#### Test Structure
-
-```
-crates/e2e-tests/tests/spec_validation/
-├── main.rs                           # Test orchestration
-├── rust/
-│   ├── mod.rs                        # Rust test functions
-│   └── fixtures/                     # Rust-specific fixtures
-│       ├── mod.rs
-│       ├── modules.rs
-│       ├── functions.rs
-│       └── ...
-├── typescript/
-│   ├── mod.rs                        # TypeScript test functions
-│   └── fixtures/                     # TypeScript-specific fixtures
-│       ├── mod.rs
-│       ├── modules.rs
-│       ├── classes.rs
-│       └── ...
-└── common/                           # Shared test utilities (if needed)
-```
-
-### Writing Spec Validation Tests
-
-Tests should validate each rule in the spec file:
-
-```rust
-// crates/e2e-tests/tests/rust_spec_validation.rs
-
-use codesearch_languages::extract_entities;
-use codesearch_core::entities::{EntityType, Language, Visibility};
-
-/// Fixture: free_functions
-/// Tests: E-FN-FREE, V-PUB, Q-ITEM, R-CALLS-FUNCTION
-mod free_functions {
-    use super::*;
-
-    const FIXTURE: &str = include_str!("fixtures/rust/free_functions.rs");
-
-    #[test]
-    fn e_fn_free_produces_function_entity() {
-        // Rule E-FN-FREE: A free function produces a Function entity
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let func = entities.iter().find(|e| e.name == "my_function").unwrap();
-
-        assert_eq!(func.entity_type, EntityType::Function);
-    }
-
-    #[test]
-    fn v_pub_results_in_public_visibility() {
-        // Rule V-PUB: pub modifier results in Public visibility
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let func = entities.iter().find(|e| e.name == "public_function").unwrap();
-
-        assert_eq!(func.visibility, Some(Visibility::Public));
-    }
-
-    #[test]
-    fn q_item_qualified_under_module() {
-        // Rule Q-ITEM: Top-level items are qualified under module path
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let func = entities.iter().find(|e| e.name == "my_function").unwrap();
-
-        assert!(func.qualified_name.ends_with("::my_function"));
-    }
-
-    #[test]
-    fn r_calls_function_extracts_calls() {
-        // Rule R-CALLS-FUNCTION: Function CALLS another function
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let caller = entities.iter().find(|e| e.name == "caller").unwrap();
-
-        assert!(!caller.relationships.calls.is_empty());
-        assert!(caller.relationships.calls.iter()
-            .any(|c| c.simple_name == "helper"));
-    }
-}
-
-/// Fixture: trait_impl
-/// Tests: E-IMPL-TRAIT, R-IMPLEMENTS, Q-IMPL-TRAIT
-mod trait_impl {
-    use super::*;
-
-    const FIXTURE: &str = include_str!("fixtures/rust/trait_impl.rs");
-
-    #[test]
-    fn e_impl_trait_produces_impl_entity() {
-        // Rule E-IMPL-TRAIT: A trait impl block produces an ImplBlock entity
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let impl_entity = entities.iter()
-            .find(|e| e.entity_type == EntityType::Impl)
-            .unwrap();
-
-        assert!(impl_entity.relationships.implements_trait.is_some());
-    }
-
-    #[test]
-    fn r_implements_links_to_trait() {
-        // Rule R-IMPLEMENTS: Trait impl block IMPLEMENTS the trait
-        let entities = extract_entities(FIXTURE, Language::Rust).unwrap();
-        let impl_entity = entities.iter()
-            .find(|e| e.entity_type == EntityType::Impl)
-            .unwrap();
-
-        let implements = impl_entity.relationships.implements_trait.as_ref().unwrap();
-        assert!(implements.target.contains("Display"));
-    }
-}
-```
-
-### Running E2E Tests
+E2E tests validate the full pipeline (parse → extract → resolve → graph). Require Docker (Postgres, Neo4j, Qdrant).
 
 ```bash
-# Run all e2e tests (requires Docker for infrastructure)
 cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored
-
-# Run specific language validation
-cargo test --manifest-path crates/e2e-tests/Cargo.toml rust_spec_validation -- --ignored
 ```
 
-### Fixture File Requirements
-
-Each fixture should be minimal but complete for testing specific rules:
-
-```rust
-// fixtures/rust/free_functions.rs
-
-/// A public free function
-pub fn public_function() {
-    helper();
-}
-
-/// A private free function
-fn private_function() {}
-
-/// Helper function for call testing
-fn helper() {}
-
-/// Caller function for R-CALLS-FUNCTION
-fn caller() {
-    helper();
-    private_function();
-}
-```
-
-### Spec Coverage Matrix
-
-Maintain a coverage matrix in each test file:
-
-```rust
-// Spec coverage for rust_spec_validation.rs
-//
-// | Rule ID | Description | Test | Status |
-// |---------|-------------|------|--------|
-// | E-FN-FREE | Free function → Function | e_fn_free_produces_function_entity | ✓ |
-// | E-METHOD-SELF | Self param → Method | e_method_self_produces_method | ✓ |
-// | V-PUB | pub → Public | v_pub_results_in_public_visibility | ✓ |
-// | V-PRIVATE | no modifier → Private | v_private_default | ✓ |
-// | Q-ITEM | Module::name format | q_item_qualified_under_module | ✓ |
-// | R-CALLS | CALLS relationship | r_calls_function_extracts_calls | ✓ |
-// | R-IMPLEMENTS | IMPLEMENTS relationship | r_implements_links_to_trait | ✓ |
-```
+Tests should reference spec rule IDs and use minimal fixtures. See existing language tests for examples.
 
 ---
 
@@ -961,8 +620,11 @@ Maintain a coverage matrix in each test file:
 2. [ ] Create language directory: `crates/languages/src/{language}/`
 3. [ ] Add `mod.rs` with `define_language_extractor!` macro
 4. [ ] Create `queries.rs` with tree-sitter queries
-5. [ ] Implement `LanguageExtractors` trait for visibility and doc extraction
-6. [ ] Create `handler_impls/` with handlers using `define_handler!` macro
+5. [ ] **REQUIRED**: Implement `LanguageExtractors` trait for visibility and doc extraction
+6. [ ] **REQUIRED**: Create `handler_impls/` with handlers using `define_handler!` macro
+   - All handlers MUST use the `define_handler!` macro with `LanguageExtractors`
+   - Use `metadata:` and `relationships:` parameters for custom logic
+   - Use `visibility:`, `name:`, `name_fn:`, `name_ctx_fn:`, or `module_name_fn:` for special cases
 7. [ ] Populate `EntityRelationshipData` fields (not metadata.attributes)
 8. [ ] Use `SourceReference` with `is_external` flag
 9. [ ] Add import parser in `common/import_map.rs`

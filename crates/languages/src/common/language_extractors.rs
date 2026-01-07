@@ -17,8 +17,8 @@
 //! 3. Use `define_handler!(MyLanguage, ...)` to create handlers
 
 use crate::common::entity_building::{
-    build_entity, extract_common_components, extract_common_components_with_name, EntityDetails,
-    ExtractionContext,
+    build_entity, extract_common_components, extract_common_components_with_name,
+    extract_common_components_with_scope_skip, EntityDetails, ExtractionContext,
 };
 use crate::common::node_to_text;
 use codesearch_core::entities::{
@@ -324,6 +324,72 @@ pub fn extract_entity_with_name_ctx_fn<L: LanguageExtractors>(
     Ok(vec![entity])
 }
 
+/// Entity extraction with scope filtering
+///
+/// Same as `extract_entity` but allows skipping specific AST node kinds during
+/// scope traversal. For example, skipping `method_definition` nodes places
+/// parameter properties directly under their enclosing class rather than under
+/// the constructor method.
+///
+/// # Arguments
+/// * `ctx` - Extraction context
+/// * `capture` - Name of the capture for the main node
+/// * `entity_type` - The type of entity being extracted
+/// * `skip_scope_kinds` - AST node kinds to skip during scope traversal (e.g., `&["method_definition"]`)
+/// * `metadata_fn` - Function to build entity metadata
+/// * `relationships_fn` - Function to build entity relationships
+pub fn extract_entity_with_scope_skip<L: LanguageExtractors>(
+    ctx: &ExtractionContext,
+    capture: &str,
+    entity_type: EntityType,
+    skip_scope_kinds: &[&str],
+    metadata_fn: fn(Node, &str) -> EntityMetadata,
+    relationships_fn: fn(&ExtractionContext, Node) -> EntityRelationshipData,
+) -> Result<Vec<CodeEntity>> {
+    let node = match extract_main_node(ctx.query_match, ctx.query, &[capture]) {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
+    };
+
+    // Extract the name from query capture
+    let name = crate::common::find_capture_node(ctx.query_match, ctx.query, "name")
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .unwrap_or_default();
+
+    if name.is_empty() {
+        tracing::warn!(
+            file = %ctx.file_path.display(),
+            node_kind = node.kind(),
+            "Skipping entity extraction: empty name from 'name' capture"
+        );
+        return Ok(Vec::new());
+    }
+
+    let components =
+        extract_common_components_with_scope_skip(ctx, &name, node, L::LANG_STR, skip_scope_kinds)?;
+    let visibility = L::extract_visibility(node, ctx.source);
+    let documentation = L::extract_docs(node, ctx.source);
+    let content = node_to_text(node, ctx.source).ok();
+    let metadata = metadata_fn(node, ctx.source);
+    let relationships = relationships_fn(ctx, node);
+
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type,
+            language: L::LANGUAGE,
+            visibility: Some(visibility),
+            documentation,
+            content,
+            metadata,
+            signature: None,
+            relationships,
+        },
+    )?;
+
+    Ok(vec![entity])
+}
+
 /// Entity extraction for module/file-level entities
 ///
 /// Unlike other entity types, modules derive their qualified name from the file path
@@ -587,6 +653,32 @@ macro_rules! define_handler {
     };
 
     // =========================================================================
+    // Scope skip variants (for parameter properties)
+    // =========================================================================
+
+    // With scope skip only
+    (
+        $lang:ty,
+        $fn_name:ident,
+        $capture:expr,
+        $entity_type:ident,
+        skip_scopes: $skip:expr
+    ) => {
+        pub(crate) fn $fn_name(
+            ctx: &$crate::common::entity_building::ExtractionContext,
+        ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
+            $crate::common::language_extractors::extract_entity_with_scope_skip::<$lang>(
+                ctx,
+                $capture,
+                codesearch_core::entities::EntityType::$entity_type,
+                $skip,
+                $crate::common::language_extractors::default_metadata,
+                $crate::common::language_extractors::no_relationships,
+            )
+        }
+    };
+
+    // =========================================================================
     // Static name variants (for call/construct signatures)
     // =========================================================================
 
@@ -841,6 +933,12 @@ macro_rules! define_ts_family_handler {
     ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, visibility: $visibility:expr, metadata: $metadata_fn:expr) => {
         $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, visibility: $visibility, metadata: $metadata_fn);
         $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, visibility: $visibility, metadata: $metadata_fn);
+    };
+
+    // With scope skip (for parameter properties)
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, skip_scopes: $skip:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, skip_scopes: $skip);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, skip_scopes: $skip);
     };
 
     // With static name and visibility

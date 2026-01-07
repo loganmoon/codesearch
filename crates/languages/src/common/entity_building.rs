@@ -4,7 +4,7 @@
 //! components and building CodeEntity instances across all languages.
 
 use crate::common::{find_capture_node, node_to_text};
-use crate::qualified_name::build_qualified_name_from_ast;
+use crate::qualified_name::{build_qualified_name_from_ast, build_qualified_name_with_skip};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
     Language, SourceLocation, Visibility,
@@ -178,12 +178,36 @@ pub fn extract_common_components_with_name(
     main_node: Node,
     language: &str,
 ) -> Result<CommonEntityComponents> {
+    extract_common_components_with_scope_skip(ctx, name, main_node, language, &[])
+}
+
+/// Extract common entity components with scope filtering
+///
+/// Same as `extract_common_components_with_name` but allows skipping specific
+/// AST node kinds during scope traversal. For example, skipping `method_definition`
+/// nodes places parameter properties directly under their enclosing class rather
+/// than under the constructor method.
+///
+/// # Arguments
+/// * `ctx` - Extraction context
+/// * `name` - The entity name
+/// * `main_node` - The main AST node for this entity
+/// * `language` - Language identifier
+/// * `skip_scope_kinds` - AST node kinds to skip during scope traversal (e.g., `&["method_definition"]`)
+pub fn extract_common_components_with_scope_skip(
+    ctx: &ExtractionContext,
+    name: &str,
+    main_node: Node,
+    language: &str,
+    skip_scope_kinds: &[&str],
+) -> Result<CommonEntityComponents> {
     if name.is_empty() {
         return Err(Error::entity_extraction("Empty name provided"));
     }
 
-    // Build qualified name via parent traversal using language-specific separator
-    let scope_result = build_qualified_name_from_ast(main_node, ctx.source, language);
+    // Build qualified name with scope filtering
+    let scope_result =
+        build_qualified_name_with_skip(main_node, ctx.source, language, skip_scope_kinds);
     let ast_scope = scope_result.parent_scope;
     let separator = scope_result.separator;
 
@@ -211,6 +235,7 @@ pub fn extract_common_components_with_name(
     );
 
     // Generate path_entity_identifier using repo-relative path (for import resolution)
+    // Uses the already-filtered ast_scope to stay consistent with qualified_name
     let path_module = crate::common::module_utils::derive_path_entity_identifier(
         ctx.file_path,
         ctx.repo_root,

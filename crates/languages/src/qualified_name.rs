@@ -54,6 +54,27 @@ pub fn build_qualified_name_from_ast(
     source: &str,
     language: &str,
 ) -> QualifiedNameResult {
+    build_qualified_name_with_skip(node, source, language, &[])
+}
+
+/// Build parent scope with optional scope filtering
+///
+/// Same as `build_qualified_name_from_ast` but allows skipping specific AST node
+/// kinds during scope traversal. For example, skipping `method_definition` nodes
+/// places parameter properties directly under their enclosing class rather than
+/// under the constructor method.
+///
+/// # Arguments
+/// * `node` - The AST node to start from
+/// * `source` - The source code
+/// * `language` - Language identifier for scope configuration lookup
+/// * `skip_kinds` - AST node kinds to skip during scope traversal (e.g., `&["method_definition"]`)
+pub fn build_qualified_name_with_skip(
+    node: Node,
+    source: &str,
+    language: &str,
+    skip_kinds: &[&str],
+) -> QualifiedNameResult {
     let mut scope_parts = Vec::new();
     let mut current = node;
 
@@ -80,10 +101,13 @@ pub fn build_qualified_name_from_ast(
 
     // Walk up the tree collecting scope names
     while let Some(parent) = current.parent() {
-        let scope_name = extract_scope_name_generic(parent, source, patterns);
+        // Skip nodes whose kind is in the skip list
+        if !skip_kinds.contains(&parent.kind()) {
+            let scope_name = extract_scope_name_generic(parent, source, patterns);
 
-        if let Some(name) = scope_name {
-            scope_parts.push(name);
+            if let Some(name) = scope_name {
+                scope_parts.push(name);
+            }
         }
 
         current = parent;

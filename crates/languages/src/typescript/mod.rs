@@ -129,11 +129,9 @@ define_language_extractor! {
             query: ts_queries::AMBIENT_CLASS_QUERY,
             handler: ts_handlers::handle_ambient_class_impl
         },
-        // TODO #186: Parameter property extraction needs special qualified name handling
-        // to skip the constructor scope. Disabled for now.
-        // parameter_property => {
-        //     query: ts_queries::PARAMETER_PROPERTY_QUERY,
-        //     handler: ts_handlers::handle_parameter_property_impl
-        // }
+        parameter_property => {
+            query: ts_queries::PARAMETER_PROPERTY_QUERY,
+            handler: ts_handlers::handle_parameter_property_impl
+        }
     }
 }

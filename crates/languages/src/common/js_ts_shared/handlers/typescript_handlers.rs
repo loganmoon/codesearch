@@ -88,6 +88,12 @@ define_ts_family_handler!(handle_ambient_var_impl, handle_tsx_ambient_var_impl, 
 define_ts_family_handler!(handle_ambient_class_impl, handle_tsx_ambient_class_impl, "class", Class,
     visibility: Visibility::Public);
 
-// TODO #186: Constructor parameter property - public x: number in constructor
-// Needs special qualified name handling to skip constructor scope
-// define_ts_family_handler!(handle_parameter_property_impl, handle_tsx_parameter_property_impl, "property", Property);
+// Constructor parameter property - public x: number in constructor
+// Skips method_definition (constructor) scope to place property under class
+define_ts_family_handler!(
+    handle_parameter_property_impl,
+    handle_tsx_parameter_property_impl,
+    "property",
+    Property,
+    skip_scopes: &["method_definition"]
+);

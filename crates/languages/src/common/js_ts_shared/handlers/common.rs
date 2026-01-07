@@ -1,7 +1,7 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
 use crate::common::entity_building::ExtractionContext;
-use crate::common::{find_capture_node, module_utils, node_to_text};
+use crate::common::{find_capture_node, node_to_text};
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, ReferenceType, SourceLocation, SourceReference,
 };
@@ -187,10 +187,10 @@ fn collect_type_refs_recursive(
     }
 }
 
-/// Extract extends/implements relationships from class heritage
+/// Extract extends/implements relationships from class heritage and USES from class body
 pub(crate) fn extract_extends_relationships(
     ctx: &ExtractionContext,
-    _node: Node,
+    node: Node,
 ) -> EntityRelationshipData {
     let mut rels = EntityRelationshipData::default();
 
@@ -213,28 +213,153 @@ pub(crate) fn extract_extends_relationships(
             }
         }
     }
+
+    // Extract USES from class body type references
+    if let Some(body) = find_child_by_kind(node, "class_body") {
+        rels.uses_types = extract_class_type_uses(body, ctx.source);
+    }
+
     rels
 }
 
-/// Extract extends relationships from interface declaration
+/// Extract extends relationships from interface declaration and USES from interface body
 pub(crate) fn extract_interface_extends_relationships(
     ctx: &ExtractionContext,
-    _node: Node,
+    node: Node,
 ) -> EntityRelationshipData {
     let mut rels = EntityRelationshipData::default();
     if let Some(extends_clause) = find_capture_node(ctx.query_match, ctx.query, "extends_clause") {
         rels.extended_types = collect_type_refs(extends_clause, ctx.source, ReferenceType::Extends);
     }
+
+    // Extract USES from interface body type references
+    if let Some(body) = find_child_by_kind(node, "interface_body")
+        .or_else(|| find_child_by_kind(node, "object_type"))
+    {
+        rels.uses_types = extract_interface_type_uses(body, ctx.source);
+    }
+
     rels
+}
+
+/// Find a child node by its kind
+fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut cursor = node.walk();
+    let result = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == kind);
+    result
+}
+
+/// TypeScript/JavaScript primitive types to skip in type reference extraction
+const TS_PRIMITIVE_TYPES: &[&str] = &[
+    "string",
+    "number",
+    "boolean",
+    "void",
+    "null",
+    "undefined",
+    "never",
+    "any",
+    "unknown",
+    "object",
+    "symbol",
+    "bigint",
+    "Array",
+    "Promise",
+    "Map",
+    "Set",
+    "Record",
+    "Partial",
+    "Required",
+    "Readonly",
+    "Pick",
+    "Omit",
+    "Exclude",
+    "Extract",
+    "NonNullable",
+    "ReturnType",
+    "Parameters",
+    "InstanceType",
+];
+
+/// Check if a type name is a primitive/built-in type
+fn is_ts_primitive_type(name: &str) -> bool {
+    TS_PRIMITIVE_TYPES.contains(&name)
+}
+
+/// Extract type usage references from a class body, filtering primitives
+fn extract_class_type_uses(body: Node, source: &str) -> Vec<SourceReference> {
+    let mut refs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    extract_type_uses_recursive(body, source, &mut refs, &mut seen);
+    refs
+}
+
+/// Extract type usage references from an interface body, filtering primitives
+fn extract_interface_type_uses(body: Node, source: &str) -> Vec<SourceReference> {
+    let mut refs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    extract_type_uses_recursive(body, source, &mut refs, &mut seen);
+    refs
+}
+
+/// Recursively extract type identifiers, filtering primitives and deduplicating
+fn extract_type_uses_recursive(
+    node: Node,
+    source: &str,
+    refs: &mut Vec<SourceReference>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    match node.kind() {
+        "type_identifier" => {
+            let name = &source[node.byte_range()];
+            if !is_ts_primitive_type(name) && seen.insert(name.to_string()) {
+                if let Ok(r) = SourceReference::builder()
+                    .target(name.to_string())
+                    .simple_name(name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(node))
+                    .ref_type(ReferenceType::TypeUsage)
+                    .build()
+                {
+                    refs.push(r);
+                }
+            }
+        }
+        "generic_type" => {
+            // Extract base type name from generic: Foo<T> -> Foo
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = &source[name_node.byte_range()];
+                if !is_ts_primitive_type(name) && seen.insert(name.to_string()) {
+                    if let Ok(r) = SourceReference::builder()
+                        .target(name.to_string())
+                        .simple_name(name.to_string())
+                        .location(SourceLocation::from_tree_sitter_node(name_node))
+                        .ref_type(ReferenceType::TypeUsage)
+                        .build()
+                    {
+                        refs.push(r);
+                    }
+                }
+            }
+            // Also process type arguments
+            if let Some(type_args) = node.child_by_field_name("type_arguments") {
+                extract_type_uses_recursive(type_args, source, refs, seen);
+            }
+        }
+        _ => {
+            // Recurse into children
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                extract_type_uses_recursive(child, source, refs, seen);
+            }
+        }
+    }
 }
 
 // =============================================================================
 // Name derivation helpers for define_handler! macro
 // =============================================================================
-
-pub(crate) fn derive_module_name_from_ctx(ctx: &ExtractionContext, _node: Node) -> Result<String> {
-    Ok(module_utils::derive_module_name(ctx.file_path))
-}
 
 pub(crate) fn derive_function_expression_name(
     ctx: &ExtractionContext,

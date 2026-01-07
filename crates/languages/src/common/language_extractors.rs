@@ -858,6 +858,31 @@ macro_rules! define_handler {
         }
     };
 
+    // With context-aware name function, metadata, and relationships (uses trait visibility)
+    (
+        $lang:ty,
+        $fn_name:ident,
+        $capture:expr,
+        $entity_type:ident,
+        name_ctx_fn: $name_ctx_fn:expr,
+        metadata: $metadata_fn:expr,
+        relationships: $rel_fn:expr
+    ) => {
+        pub(crate) fn $fn_name(
+            ctx: &$crate::common::entity_building::ExtractionContext,
+        ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
+            $crate::common::language_extractors::extract_entity_with_name_ctx_fn::<$lang>(
+                ctx,
+                $capture,
+                codesearch_core::entities::EntityType::$entity_type,
+                $name_ctx_fn,
+                None,
+                $metadata_fn,
+                $rel_fn,
+            )
+        }
+    };
+
     // =========================================================================
     // Module entity variant (file-level entities with path-based qualified names)
     // =========================================================================
@@ -975,6 +1000,12 @@ macro_rules! define_ts_family_handler {
     ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, relationships: $rel_fn:expr) => {
         $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, relationships: $rel_fn);
         $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, relationships: $rel_fn);
+    };
+
+    // With context-aware name function, metadata, and relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, metadata: $metadata_fn:expr, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn, relationships: $rel_fn);
     };
 
     // Module entity variant

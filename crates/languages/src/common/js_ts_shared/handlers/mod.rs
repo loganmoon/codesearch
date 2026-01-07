@@ -30,6 +30,7 @@ pub(crate) mod function_handlers;
 pub(crate) mod method_handlers;
 pub(crate) mod module_handlers;
 pub(crate) mod property_handlers;
+pub(crate) mod relationships;
 pub(crate) mod typescript_handlers;
 pub(crate) mod variable_handlers;
 

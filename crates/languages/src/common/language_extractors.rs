@@ -327,14 +327,15 @@ pub fn extract_entity_with_name_ctx_fn<L: LanguageExtractors>(
 /// Entity extraction with scope filtering
 ///
 /// Same as `extract_entity` but allows skipping specific AST node kinds during
-/// scope traversal. Useful for parameter properties where the constructor scope
-/// should be skipped.
+/// scope traversal. For example, skipping `method_definition` nodes places
+/// parameter properties directly under their enclosing class rather than under
+/// the constructor method.
 ///
 /// # Arguments
 /// * `ctx` - Extraction context
 /// * `capture` - Name of the capture for the main node
 /// * `entity_type` - The type of entity being extracted
-/// * `skip_scope_kinds` - AST node kinds to skip during scope traversal
+/// * `skip_scope_kinds` - AST node kinds to skip during scope traversal (e.g., `&["method_definition"]`)
 /// * `metadata_fn` - Function to build entity metadata
 /// * `relationships_fn` - Function to build entity relationships
 pub fn extract_entity_with_scope_skip<L: LanguageExtractors>(
@@ -356,6 +357,11 @@ pub fn extract_entity_with_scope_skip<L: LanguageExtractors>(
         .unwrap_or_default();
 
     if name.is_empty() {
+        tracing::warn!(
+            file = %ctx.file_path.display(),
+            node_kind = node.kind(),
+            "Skipping entity extraction: empty name from 'name' capture"
+        );
         return Ok(Vec::new());
     }
 

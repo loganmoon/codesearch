@@ -371,11 +371,12 @@ pub(crate) const AMBIENT_CLASS_QUERY: &str = r#"
 
 /// Query for constructor parameter properties
 ///
-/// In TypeScript, constructor parameters with visibility modifiers are automatically
-/// class properties:
+/// In TypeScript, constructor parameters with visibility modifiers or `readonly`
+/// are automatically class properties:
 /// - `constructor(public x: number)` - public property x
 /// - `constructor(private _label?: string)` - private property _label
 /// - `constructor(protected readonly id: number = 0)` - protected readonly property id
+/// - `constructor(readonly name: string)` - readonly property (no visibility modifier)
 pub(crate) const PARAMETER_PROPERTY_QUERY: &str = r#"
 [
   ;; Required parameter with accessibility modifier
@@ -392,6 +393,22 @@ pub(crate) const PARAMETER_PROPERTY_QUERY: &str = r#"
       parameters: (formal_parameters
         (optional_parameter
           (accessibility_modifier)
+          pattern: (identifier) @name) @property)))
+
+  ;; Required parameter with readonly only (no visibility modifier)
+  (class_body
+    (method_definition
+      parameters: (formal_parameters
+        (required_parameter
+          "readonly"
+          pattern: (identifier) @name) @property)))
+
+  ;; Optional parameter with readonly only (no visibility modifier)
+  (class_body
+    (method_definition
+      parameters: (formal_parameters
+        (optional_parameter
+          "readonly"
           pattern: (identifier) @name) @property)))
 ]
 "#;

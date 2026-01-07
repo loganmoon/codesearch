@@ -10,6 +10,8 @@
 //! Run by language:
 //!   cargo test --manifest-path crates/e2e-tests/Cargo.toml spec_validation::rust -- --ignored
 //!   cargo test --manifest-path crates/e2e-tests/Cargo.toml spec_validation::typescript -- --ignored
+//!   cargo test --manifest-path crates/e2e-tests/Cargo.toml spec_validation::javascript -- --ignored
 
+mod javascript;
 mod rust;
 mod typescript;

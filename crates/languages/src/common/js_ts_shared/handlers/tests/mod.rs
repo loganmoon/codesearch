@@ -1,8 +1,9 @@
-//! Test suite for JavaScript and TypeScript entity handlers
+//! Test suite for JavaScript, TypeScript, and TSX entity handlers
 //!
 //! These tests verify that:
 //! - JavaScript handlers produce entities with `Language::JavaScript`
 //! - TypeScript handlers produce entities with `Language::TypeScript`
+//! - TSX handlers produce entities with `Language::Tsx`
 
 #![allow(clippy::expect_used)]
 
@@ -87,6 +88,48 @@ where
     let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
 
     let path = Path::new("test.ts");
+    let repository_id = "test-repo-id";
+    let repo_root = Path::new("/test-repo");
+
+    let mut all_entities = Vec::new();
+    while let Some(query_match) = matches_iter.next() {
+        let ctx = ExtractionContext {
+            query_match,
+            query: &query,
+            source,
+            file_path: path,
+            repository_id,
+            package_name: None,
+            source_root: None,
+            repo_root,
+        };
+        let entities = handler(&ctx)?;
+        all_entities.extend(entities);
+    }
+
+    Ok(all_entities)
+}
+
+/// Extract entities using a TSX handler
+fn extract_tsx_entities<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<CodeEntity>>
+where
+    F: Fn(&ExtractionContext) -> Result<Vec<CodeEntity>>,
+{
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
+        .map_err(|e| parse_error("test.tsx", e.to_string()))?;
+
+    let tree = parser
+        .parse(source, None)
+        .ok_or_else(|| parse_error("test.tsx", "Failed to parse"))?;
+    let query = Query::new(&tree_sitter_typescript::LANGUAGE_TSX.into(), query_str)
+        .map_err(|e| parse_error("test.tsx", e.to_string()))?;
+
+    let mut cursor = QueryCursor::new();
+    let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+    let path = Path::new("test.tsx");
     let repository_id = "test-repo-id";
     let repo_root = Path::new("/test-repo");
 
@@ -276,6 +319,65 @@ mod language_labeling_tests {
         );
     }
 
+    // =========================================================================
+    // TSX language labeling tests
+    // TSX handlers produce Language::TypeScript since TSX is TypeScript + JSX
+    // =========================================================================
+
+    #[test]
+    fn test_tsx_function_has_typescript_language() {
+        let source = "function Component(): JSX.Element { return <div />; }";
+        let entities = extract_tsx_entities(
+            source,
+            queries::FUNCTION_DECLARATION_QUERY,
+            handlers::handle_tsx_function_declaration_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX function handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_tsx_const_has_typescript_language() {
+        let source = "const x: number = 42;";
+        let entities = extract_tsx_entities(
+            source,
+            queries::CONST_QUERY,
+            handlers::handle_tsx_const_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX const handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_tsx_interface_has_typescript_language() {
+        let source = "interface Props { name: string; }";
+        let entities = extract_tsx_entities(
+            source,
+            queries::INTERFACE_QUERY,
+            handlers::handle_tsx_interface_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX interface handler should produce Language::TypeScript"
+        );
+    }
+
     #[test]
     fn test_ts_function_expression_exported() {
         let source = r#"export const onClick = function handleClick(event: Event): void {
@@ -287,11 +389,6 @@ mod language_labeling_tests {
             handlers::handle_ts_function_expression_impl,
         )
         .expect("extraction should succeed");
-
-        eprintln!("Found {} entities:", entities.len());
-        for e in &entities {
-            eprintln!("  - {} ({})", e.name, e.qualified_name);
-        }
 
         assert_eq!(entities.len(), 1, "Should find 1 function expression");
         assert_eq!(
@@ -341,44 +438,6 @@ mod language_labeling_tests {
     createdBy: string;
 }"#;
 
-        // Debug: Print the query and check captures
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-            .expect("failed to set language");
-        let tree = parser.parse(source, None).expect("failed to parse");
-        let query = Query::new(
-            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            queries::INTERFACE_QUERY,
-        )
-        .expect("failed to create query");
-
-        eprintln!("\nQuery capture names:");
-        for i in 0..query.capture_names().len() {
-            eprintln!("  [{i}] {}", query.capture_names()[i]);
-        }
-
-        let mut cursor = QueryCursor::new();
-        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
-
-        eprintln!("\nQuery matches:");
-        while let Some(query_match) = matches_iter.next() {
-            eprintln!("  Match pattern: {}", query_match.pattern_index);
-            for capture in query_match.captures {
-                let name = query.capture_names()[capture.index as usize];
-                let text = capture
-                    .node
-                    .utf8_text(source.as_bytes())
-                    .unwrap_or("<error>");
-                let truncated = if text.len() > 50 {
-                    format!("{}...", &text[..50])
-                } else {
-                    text.to_string()
-                };
-                eprintln!("    @{name} (idx={}) = '{truncated}'", capture.index);
-            }
-        }
-
         let entities = extract_ts_entities(
             source,
             queries::INTERFACE_QUERY,
@@ -386,17 +445,10 @@ mod language_labeling_tests {
         )
         .expect("extraction should succeed");
 
-        eprintln!("\nFound {} entities:", entities.len());
-        for e in &entities {
-            eprintln!("  - {} ({})", e.name, e.qualified_name);
-            eprintln!("    Extended types: {:?}", e.relationships.extended_types);
-        }
-
-        // Filter to unique interfaces (there may be duplicate matches)
         assert!(!entities.is_empty(), "Should find at least 1 interface");
         let interface = &entities[0];
 
-        // Should have 2 supertraits: Entity and Timestamped
+        // Should have 2 extended types: Entity and Timestamped
         assert_eq!(
             interface.relationships.extended_types.len(),
             2,
@@ -439,44 +491,6 @@ mod language_labeling_tests {
     name: string;
 }"#;
 
-        // Debug: Print the query and check captures
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-            .expect("failed to set language");
-        let tree = parser.parse(source, None).expect("failed to parse");
-        let query = Query::new(
-            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            queries::TS_CLASS_DECLARATION_QUERY,
-        )
-        .expect("failed to create query");
-
-        eprintln!("\nQuery capture names:");
-        for i in 0..query.capture_names().len() {
-            eprintln!("  [{i}] {}", query.capture_names()[i]);
-        }
-
-        let mut cursor = QueryCursor::new();
-        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
-
-        eprintln!("\nQuery matches:");
-        while let Some(query_match) = matches_iter.next() {
-            eprintln!("  Match pattern: {}", query_match.pattern_index);
-            for capture in query_match.captures {
-                let name = query.capture_names()[capture.index as usize];
-                let text = capture
-                    .node
-                    .utf8_text(source.as_bytes())
-                    .unwrap_or("<error>");
-                let truncated = if text.len() > 50 {
-                    format!("{}...", &text[..50])
-                } else {
-                    text.to_string()
-                };
-                eprintln!("    @{name} (idx={}) = '{truncated}'", capture.index);
-            }
-        }
-
         let entities = extract_ts_entities(
             source,
             queries::TS_CLASS_DECLARATION_QUERY,
@@ -484,13 +498,6 @@ mod language_labeling_tests {
         )
         .expect("extraction should succeed");
 
-        eprintln!("\nFound {} entities:", entities.len());
-        for e in &entities {
-            eprintln!("  - {} ({})", e.name, e.qualified_name);
-            eprintln!("    Extends: {:?}", e.relationships.extends);
-        }
-
-        // Filter to unique classes (there may be duplicate matches)
         assert!(!entities.is_empty(), "Should find at least 1 class");
         let class = &entities[0];
 

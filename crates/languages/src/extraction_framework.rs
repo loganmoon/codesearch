@@ -103,10 +103,11 @@ impl LanguageConfigurationBuilder {
             current_offset += temp_query.capture_names().len();
 
             // Add to combined query with a unique pattern name
-            // Remove the outer pattern capture to avoid duplicates
+            // Wrap in brackets to create an alternation, ensuring the extractor marker
+            // applies to ALL patterns in the query, not just the last one
             let trimmed_query = extractor.query.trim();
             combined_parts.push(format!(
-                "{} @__extractor_{}",
+                "[{}] @__extractor_{}",
                 trimmed_query,
                 extractor.name.replace('-', "_")
             ));

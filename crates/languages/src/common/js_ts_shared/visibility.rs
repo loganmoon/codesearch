@@ -107,56 +107,53 @@ fn extract_ts_visibility_modifier(node: Node) -> Option<Visibility> {
 
 /// Check if a node is exported (directly or as part of an export statement)
 ///
-/// Handles:
+/// Walks up the entire ancestor chain to find an export_statement or ambient_declaration.
+/// This handles nested entities like:
 /// - `export function foo() {}` - direct export
 /// - `export class Foo {}` - direct export
 /// - `export const foo = 1` - direct export
+/// - `export enum Color { Red }` - enum members inherit export from parent
 /// - `export default function() {}` - default export
-/// - `export { foo }` - named re-export (not handled here, handled at import level)
+/// - `declare const VERSION: string;` - ambient declarations (TypeScript .d.ts files)
+///
+/// Special case for namespaces (internal_module):
+/// - Functions/classes inside a namespace need their OWN export keyword
+/// - `export namespace N { function inner() {} }` - inner is Private
+/// - `export namespace N { export function inner() {} }` - inner is Public
 pub(crate) fn is_exported(node: Node) -> bool {
-    // Check if the node itself is an export statement
-    if node.kind() == "export_statement" {
+    // Check if the node itself is an export statement or ambient declaration
+    if node.kind() == "export_statement" || node.kind() == "ambient_declaration" {
         return true;
     }
 
-    // Check if parent is an export statement
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "export_statement" {
-            return true;
-        }
-
-        // Handle lexical_declaration inside export: export const foo = 1
-        if parent.kind() == "lexical_declaration" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "export_statement" {
-                    return true;
-                }
-            }
-        }
-
-        // Handle variable_declaration inside export
-        if parent.kind() == "variable_declaration" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "export_statement" {
-                    return true;
-                }
-            }
-        }
-
-        // Handle variable_declarator -> variable_declaration -> export_statement
-        if parent.kind() == "variable_declarator" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "lexical_declaration"
-                    || grandparent.kind() == "variable_declaration"
-                {
-                    if let Some(great_grandparent) = grandparent.parent() {
-                        if great_grandparent.kind() == "export_statement" {
-                            return true;
-                        }
+    // Walk up ancestors, but stop at namespace boundaries for non-exported items
+    let mut prev_node = node;
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        match ancestor.kind() {
+            "export_statement" => {
+                // Check if this export_statement directly exports a namespace
+                // that CONTAINS our node (vs directly exporting our node)
+                if let Some(decl) = ancestor.child_by_field_name("declaration") {
+                    if decl.kind() == "internal_module" && decl.id() != prev_node.id() {
+                        // The export_statement exports a namespace, but our node
+                        // is inside that namespace - need own export
+                        return false;
                     }
                 }
+                return true;
             }
+            "ambient_declaration" => return true,
+            "internal_module" | "module" => {
+                // Inside a namespace - need own export keyword
+                // If we got here without finding export_statement as direct parent,
+                // the item is private to the namespace
+                return false;
+            }
+            _ => {}
         }
+        prev_node = ancestor;
+        current = ancestor.parent();
     }
 
     false

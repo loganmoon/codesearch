@@ -42,6 +42,21 @@ pub fn has_supported_extension(path: &Path) -> bool {
     codesearch_languages::detect_language(path).is_some()
 }
 
+/// Check if a file is a JavaScript or TypeScript file
+///
+/// Used to determine whether to include package name in qualified names.
+/// JS/TS files don't use package names in their FQNs (unlike Rust where
+/// crate names are part of the fully qualified path).
+pub fn is_js_ts_file(path: &Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => matches!(
+            ext.to_lowercase().as_str(),
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+        ),
+        None => false,
+    }
+}
+
 /// Check if a file should be included in indexing
 pub fn should_include_file(file_path: &Path) -> bool {
     // Single metadata call to avoid redundant syscalls and TOCTOU race conditions
@@ -175,5 +190,31 @@ mod tests {
 
         assert!(converted.is_ok());
         assert_eq!(converted.expect("Should be Ok"), 42);
+    }
+
+    #[test]
+    fn test_is_js_ts_file() {
+        // JavaScript files
+        assert!(is_js_ts_file(Path::new("app.js")));
+        assert!(is_js_ts_file(Path::new("component.jsx")));
+        assert!(is_js_ts_file(Path::new("module.mjs")));
+        assert!(is_js_ts_file(Path::new("common.cjs")));
+
+        // TypeScript files
+        assert!(is_js_ts_file(Path::new("app.ts")));
+        assert!(is_js_ts_file(Path::new("component.tsx")));
+        assert!(is_js_ts_file(Path::new("module.mts")));
+        assert!(is_js_ts_file(Path::new("common.cts")));
+
+        // Case insensitive
+        assert!(is_js_ts_file(Path::new("app.JS")));
+        assert!(is_js_ts_file(Path::new("app.TS")));
+
+        // Non-JS/TS files
+        assert!(!is_js_ts_file(Path::new("main.rs")));
+        assert!(!is_js_ts_file(Path::new("main.py")));
+        assert!(!is_js_ts_file(Path::new("main.go")));
+        assert!(!is_js_ts_file(Path::new("README.md")));
+        assert!(!is_js_ts_file(Path::new("no_extension")));
     }
 }

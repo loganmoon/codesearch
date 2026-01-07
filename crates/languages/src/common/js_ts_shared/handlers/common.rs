@@ -1,50 +1,47 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
 use crate::common::entity_building::ExtractionContext;
-use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, SourceReference};
+use crate::common::{find_capture_node, module_utils, node_to_text};
+use codesearch_core::entities::{
+    EntityMetadata, EntityRelationshipData, ReferenceType, SourceLocation, SourceReference,
+};
+use codesearch_core::error::{Error, Result};
 use im::HashMap as ImHashMap;
 use tree_sitter::Node;
 
 use super::super::visibility::{is_async, is_generator, is_getter, is_setter, is_static_member};
 
-/// Extract documentation comments preceding a node
-///
-/// For JavaScript/TypeScript, looks for JSDoc-style comments (/* * */)
-/// and single-line comments (//).
+// =============================================================================
+// Documentation extraction
+// =============================================================================
+
+/// Extract JSDoc-style documentation comments preceding a node
 pub(crate) fn extract_preceding_doc_comments(node: Node, source: &str) -> Option<String> {
     let mut doc_lines = Vec::new();
     let mut current = node.prev_sibling();
 
     while let Some(sibling) = current {
-        // Limit doc collection to prevent unbounded resource consumption
         if doc_lines.len() >= 100 {
             break;
         }
-
-        match sibling.kind() {
-            "comment" => {
-                if let Ok(text) = crate::common::node_to_text(sibling, source) {
-                    // Handle JSDoc comments: /** ... */
-                    if text.starts_with("/**") && text.ends_with("*/") {
-                        let content = &text[3..text.len() - 2];
-                        // Clean up JSDoc formatting
-                        for line in content.lines() {
-                            let trimmed = line.trim().trim_start_matches('*').trim();
-                            if !trimmed.is_empty() {
-                                doc_lines.push(trimmed.to_string());
-                            }
-                        }
-                    }
-                    // Handle single-line doc comments: // ...
-                    else if let Some(content) = text.strip_prefix("//") {
-                        let content = content.trim();
-                        if !content.is_empty() {
-                            doc_lines.push(content.to_string());
-                        }
+        if sibling.kind() != "comment" {
+            break;
+        }
+        if let Ok(text) = node_to_text(sibling, source) {
+            if text.starts_with("/**") && text.ends_with("*/") {
+                // JSDoc comment
+                for line in text[3..text.len() - 2].lines() {
+                    let trimmed = line.trim().trim_start_matches('*').trim();
+                    if !trimmed.is_empty() {
+                        doc_lines.push(trimmed.to_string());
                     }
                 }
+            } else if let Some(content) = text.strip_prefix("//") {
+                let content = content.trim();
+                if !content.is_empty() {
+                    doc_lines.push(content.to_string());
+                }
             }
-            _ => break, // Stop at non-comment nodes
         }
         current = sibling.prev_sibling();
     }
@@ -52,82 +49,56 @@ pub(crate) fn extract_preceding_doc_comments(node: Node, source: &str) -> Option
     if doc_lines.is_empty() {
         None
     } else {
-        // Reverse since we collected from bottom to top
         doc_lines.reverse();
         Some(doc_lines.join("\n"))
     }
 }
 
-/// Build common entity metadata for JavaScript/TypeScript functions/methods
-///
-/// Uses `attributes` HashMap for JS-specific boolean flags:
-/// - `is_generator`, `is_getter`, `is_setter`, `is_arrow`
-pub(crate) fn build_js_metadata(
-    is_static: bool,
-    is_async_fn: bool,
-    is_generator_fn: bool,
-    is_getter_fn: bool,
-    is_setter_fn: bool,
-    is_arrow: bool,
-) -> EntityMetadata {
-    let mut attributes = ImHashMap::new();
+// =============================================================================
+// Metadata helpers for define_handler! macro
+// =============================================================================
 
-    // Store JS-specific flags in attributes
-    if is_generator_fn {
+pub(crate) fn function_metadata(node: Node, _source: &str) -> EntityMetadata {
+    let mut attributes = ImHashMap::new();
+    if is_generator(node) {
         attributes.insert("is_generator".to_string(), "true".to_string());
     }
-    if is_getter_fn {
-        attributes.insert("is_getter".to_string(), "true".to_string());
-    }
-    if is_setter_fn {
-        attributes.insert("is_setter".to_string(), "true".to_string());
-    }
-    if is_arrow {
-        attributes.insert("is_arrow".to_string(), "true".to_string());
-    }
-
     EntityMetadata {
-        is_static,
-        is_async: is_async_fn,
+        is_async: is_async(node),
         attributes,
         ..Default::default()
     }
 }
 
-// =============================================================================
-// Metadata helper functions for use with define_handler! macro
-// =============================================================================
-
-/// Build metadata for regular function declarations/expressions
-pub(crate) fn function_metadata(node: Node, _source: &str) -> EntityMetadata {
-    build_js_metadata(
-        false,
-        is_async(node),
-        is_generator(node),
-        false,
-        false,
-        false,
-    )
-}
-
-/// Build metadata for arrow functions
 pub(crate) fn arrow_function_metadata(node: Node, _source: &str) -> EntityMetadata {
-    build_js_metadata(false, is_async(node), false, false, false, true)
+    let mut attributes = ImHashMap::new();
+    attributes.insert("is_arrow".to_string(), "true".to_string());
+    EntityMetadata {
+        is_async: is_async(node),
+        attributes,
+        ..Default::default()
+    }
 }
 
-/// Build metadata for class methods
 pub(crate) fn method_metadata(node: Node, _source: &str) -> EntityMetadata {
-    build_js_metadata(
-        is_static_member(node),
-        is_async(node),
-        is_generator(node),
-        is_getter(node),
-        is_setter(node),
-        false,
-    )
+    let mut attributes = ImHashMap::new();
+    if is_generator(node) {
+        attributes.insert("is_generator".to_string(), "true".to_string());
+    }
+    if is_getter(node) {
+        attributes.insert("is_getter".to_string(), "true".to_string());
+    }
+    if is_setter(node) {
+        attributes.insert("is_setter".to_string(), "true".to_string());
+    }
+    EntityMetadata {
+        is_static: is_static_member(node),
+        is_async: is_async(node),
+        attributes,
+        ..Default::default()
+    }
 }
 
-/// Build metadata for const declarations
 pub(crate) fn const_metadata(_node: Node, _source: &str) -> EntityMetadata {
     EntityMetadata {
         is_const: true,
@@ -135,63 +106,171 @@ pub(crate) fn const_metadata(_node: Node, _source: &str) -> EntityMetadata {
     }
 }
 
-/// Build metadata for class properties/fields
-///
-/// Extracts:
-/// - `is_static`: Whether the property has the `static` modifier
-/// - `is_private` (attribute): Whether the property name starts with `#`
-/// - `has_initializer` (attribute): Whether the property has an initial value
 pub(crate) fn property_metadata(node: Node, source: &str) -> EntityMetadata {
-    let is_static = is_static_member(node);
-
-    // Check if it's a private field (name starts with #)
-    let is_private = node
-        .child_by_field_name("name")
-        .is_some_and(|name_node| source[name_node.byte_range()].starts_with('#'));
-
-    // Check if there's an initializer (value field exists)
-    let has_initializer = node.child_by_field_name("value").is_some();
-
     let mut attributes = ImHashMap::new();
-    if is_private {
+    if node
+        .child_by_field_name("name")
+        .is_some_and(|n| source[n.byte_range()].starts_with('#'))
+    {
         attributes.insert("is_private".to_string(), "true".to_string());
     }
-    if has_initializer {
+    if node.child_by_field_name("value").is_some() {
         attributes.insert("has_initializer".to_string(), "true".to_string());
     }
-
     EntityMetadata {
-        is_static,
+        is_static: is_static_member(node),
         attributes,
         ..Default::default()
     }
 }
 
+pub(crate) fn enum_metadata(node: Node, source: &str) -> EntityMetadata {
+    let is_const = source[node.byte_range()].trim_start().starts_with("const");
+    EntityMetadata {
+        is_const,
+        ..Default::default()
+    }
+}
+
 // =============================================================================
-// Relationship helper functions for use with define_handler! macro
+// Relationship extraction helpers
 // =============================================================================
 
-/// Extract extends relationships from a class or interface declaration
-pub(crate) fn extract_extends_relationships(
-    ctx: &ExtractionContext,
-    _node: Node,
-) -> EntityRelationshipData {
-    let mut relationships = EntityRelationshipData::default();
+/// Collect type identifiers from a node tree, returning SourceReferences
+fn collect_type_refs(node: Node, source: &str, ref_type: ReferenceType) -> Vec<SourceReference> {
+    let mut refs = Vec::new();
+    collect_type_refs_recursive(node, source, ref_type, &mut refs);
+    refs
+}
 
-    if let Some(extends_index) = ctx.query.capture_index_for_name("extends") {
-        for capture in ctx.query_match.captures {
-            if capture.index == extends_index {
-                let extends_name = &ctx.source[capture.node.byte_range()];
-                if let Ok(source_ref) = SourceReference::builder()
-                    .target(extends_name.to_string())
-                    .simple_name(extends_name.to_string())
+fn collect_type_refs_recursive(
+    node: Node,
+    source: &str,
+    ref_type: ReferenceType,
+    refs: &mut Vec<SourceReference>,
+) {
+    match node.kind() {
+        "type_identifier" | "identifier" => {
+            let name = &source[node.byte_range()];
+            if let Ok(r) = SourceReference::builder()
+                .target(name.to_string())
+                .simple_name(name.to_string())
+                .location(SourceLocation::from_tree_sitter_node(node))
+                .ref_type(ref_type)
+                .build()
+            {
+                refs.push(r);
+            }
+        }
+        "generic_type" => {
+            // Extract base type name from generic: Foo<T> -> Foo
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = &source[name_node.byte_range()];
+                if let Ok(r) = SourceReference::builder()
+                    .target(name.to_string())
+                    .simple_name(name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(name_node))
+                    .ref_type(ref_type)
                     .build()
                 {
-                    relationships.extends.push(source_ref);
+                    refs.push(r);
+                }
+            }
+        }
+        _ => {
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    collect_type_refs_recursive(child, source, ref_type, refs);
                 }
             }
         }
     }
+}
 
-    relationships
+/// Extract extends/implements relationships from class heritage
+pub(crate) fn extract_extends_relationships(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+
+    if let Some(heritage) = find_capture_node(ctx.query_match, ctx.query, "heritage") {
+        for i in 0..heritage.child_count() {
+            if let Some(child) = heritage.child(i) {
+                match child.kind() {
+                    "extends_clause" => {
+                        if let Some(value) = child.child_by_field_name("value") {
+                            rels.extends =
+                                collect_type_refs(value, ctx.source, ReferenceType::Extends);
+                        }
+                    }
+                    "implements_clause" => {
+                        rels.implements =
+                            collect_type_refs(child, ctx.source, ReferenceType::Implements);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    rels
+}
+
+/// Extract extends relationships from interface declaration
+pub(crate) fn extract_interface_extends_relationships(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+    if let Some(extends_clause) = find_capture_node(ctx.query_match, ctx.query, "extends_clause") {
+        rels.extended_types = collect_type_refs(extends_clause, ctx.source, ReferenceType::Extends);
+    }
+    rels
+}
+
+// =============================================================================
+// Name derivation helpers for define_handler! macro
+// =============================================================================
+
+pub(crate) fn derive_module_name_from_ctx(ctx: &ExtractionContext, _node: Node) -> Result<String> {
+    Ok(module_utils::derive_module_name(ctx.file_path))
+}
+
+pub(crate) fn derive_function_expression_name(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> Result<String> {
+    find_capture_node(ctx.query_match, ctx.query, "fn_name")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "name"))
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| Error::entity_extraction("Could not derive function expression name"))
+}
+
+pub(crate) fn derive_class_expression_name(ctx: &ExtractionContext, _node: Node) -> Result<String> {
+    find_capture_node(ctx.query_match, ctx.query, "class_name")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "name"))
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| Error::entity_extraction("Could not derive class expression name"))
+}
+
+pub(crate) fn derive_index_signature_name(node: Node, source: &str) -> String {
+    // Find first type identifier in the index signature
+    fn find_type(node: Node, source: &str) -> Option<String> {
+        if matches!(node.kind(), "predefined_type" | "type_identifier") {
+            return Some(source[node.byte_range()].to_string());
+        }
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                if let Some(found) = find_type(child, source) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    find_type(node, source)
+        .map(|t| format!("[{t}]"))
+        .unwrap_or_else(|| "[index]".to_string())
 }

@@ -1,8 +1,9 @@
-//! Test suite for JavaScript and TypeScript entity handlers
+//! Test suite for JavaScript, TypeScript, and TSX entity handlers
 //!
 //! These tests verify that:
 //! - JavaScript handlers produce entities with `Language::JavaScript`
 //! - TypeScript handlers produce entities with `Language::TypeScript`
+//! - TSX handlers produce entities with `Language::Tsx`
 
 #![allow(clippy::expect_used)]
 
@@ -87,6 +88,48 @@ where
     let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
 
     let path = Path::new("test.ts");
+    let repository_id = "test-repo-id";
+    let repo_root = Path::new("/test-repo");
+
+    let mut all_entities = Vec::new();
+    while let Some(query_match) = matches_iter.next() {
+        let ctx = ExtractionContext {
+            query_match,
+            query: &query,
+            source,
+            file_path: path,
+            repository_id,
+            package_name: None,
+            source_root: None,
+            repo_root,
+        };
+        let entities = handler(&ctx)?;
+        all_entities.extend(entities);
+    }
+
+    Ok(all_entities)
+}
+
+/// Extract entities using a TSX handler
+fn extract_tsx_entities<F>(source: &str, query_str: &str, handler: F) -> Result<Vec<CodeEntity>>
+where
+    F: Fn(&ExtractionContext) -> Result<Vec<CodeEntity>>,
+{
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
+        .map_err(|e| parse_error("test.tsx", e.to_string()))?;
+
+    let tree = parser
+        .parse(source, None)
+        .ok_or_else(|| parse_error("test.tsx", "Failed to parse"))?;
+    let query = Query::new(&tree_sitter_typescript::LANGUAGE_TSX.into(), query_str)
+        .map_err(|e| parse_error("test.tsx", e.to_string()))?;
+
+    let mut cursor = QueryCursor::new();
+    let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+    let path = Path::new("test.tsx");
     let repository_id = "test-repo-id";
     let repo_root = Path::new("/test-repo");
 
@@ -273,6 +316,201 @@ mod language_labeling_tests {
             entities[0].language,
             Language::TypeScript,
             "TypeScript enum handler should produce Language::TypeScript"
+        );
+    }
+
+    // =========================================================================
+    // TSX language labeling tests
+    // TSX handlers produce Language::TypeScript since TSX is TypeScript + JSX
+    // =========================================================================
+
+    #[test]
+    fn test_tsx_function_has_typescript_language() {
+        let source = "function Component(): JSX.Element { return <div />; }";
+        let entities = extract_tsx_entities(
+            source,
+            queries::FUNCTION_DECLARATION_QUERY,
+            handlers::handle_tsx_function_declaration_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX function handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_tsx_const_has_typescript_language() {
+        let source = "const x: number = 42;";
+        let entities = extract_tsx_entities(
+            source,
+            queries::CONST_QUERY,
+            handlers::handle_tsx_const_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX const handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_tsx_interface_has_typescript_language() {
+        let source = "interface Props { name: string; }";
+        let entities = extract_tsx_entities(
+            source,
+            queries::INTERFACE_QUERY,
+            handlers::handle_tsx_interface_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX interface handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_ts_function_expression_exported() {
+        let source = r#"export const onClick = function handleClick(event: Event): void {
+    console.log("Clicked", event);
+};"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should find 1 function expression");
+        assert_eq!(
+            entities[0].name, "handleClick",
+            "Should use function's own name"
+        );
+    }
+
+    #[test]
+    fn test_ts_function_expression_anonymous() {
+        let source = r#"export const onHover = function(event: Event): void {
+    console.log("Hovered", event);
+};"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should find 1 function expression");
+        assert_eq!(
+            entities[0].name, "onHover",
+            "Should use variable name for anonymous function"
+        );
+    }
+
+    #[test]
+    fn test_ts_function_expression_iife() {
+        let source = r#"const result = (function initialize(): number {
+    return 42;
+})();"#;
+        let entities = extract_ts_entities(
+            source,
+            queries::FUNCTION_EXPRESSION_QUERY,
+            handlers::handle_ts_function_expression_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should find 1 IIFE");
+        assert_eq!(entities[0].name, "initialize", "Should use function's name");
+    }
+
+    #[test]
+    fn test_interface_extends_extraction() {
+        let source = r#"export interface Auditable extends Entity, Timestamped {
+    createdBy: string;
+}"#;
+
+        let entities = extract_ts_entities(
+            source,
+            queries::INTERFACE_QUERY,
+            handlers::handle_interface_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert!(!entities.is_empty(), "Should find at least 1 interface");
+        let interface = &entities[0];
+
+        // Should have 2 extended types: Entity and Timestamped
+        assert_eq!(
+            interface.relationships.extended_types.len(),
+            2,
+            "Should have 2 extended interfaces"
+        );
+    }
+
+    #[test]
+    fn test_abstract_class_extraction() {
+        let source = r#"export abstract class Shape {
+    abstract area(): number;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .expect("failed to set language");
+        let tree = parser.parse(source, None).expect("failed to parse");
+
+        let query = Query::new(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            queries::TS_CLASS_DECLARATION_QUERY,
+        )
+        .expect("failed to create query");
+
+        let mut cursor = QueryCursor::new();
+        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+        let mut match_count = 0;
+        while matches_iter.next().is_some() {
+            match_count += 1;
+        }
+
+        assert!(match_count > 0, "Should match abstract class");
+    }
+
+    #[test]
+    fn test_class_inheritance_extraction() {
+        let source = r#"export class Dog extends Animal {
+    name: string;
+}"#;
+
+        let entities = extract_ts_entities(
+            source,
+            queries::TS_CLASS_DECLARATION_QUERY,
+            handlers::handle_ts_class_declaration_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert!(!entities.is_empty(), "Should find at least 1 class");
+        let class = &entities[0];
+
+        // Should have 1 parent: Animal
+        assert_eq!(
+            class.relationships.extends.len(),
+            1,
+            "Should have 1 parent class"
+        );
+        assert_eq!(
+            class.relationships.extends[0].target(),
+            "Animal",
+            "Should extend Animal"
         );
     }
 }

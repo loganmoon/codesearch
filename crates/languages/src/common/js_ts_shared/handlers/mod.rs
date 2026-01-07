@@ -1,4 +1,4 @@
-//! Entity handlers for JavaScript and TypeScript
+//! Entity handlers for JavaScript, TypeScript, and TSX
 //!
 //! This module contains handler implementations for extracting code entities
 //! from JavaScript and TypeScript source code.
@@ -6,7 +6,7 @@
 //! # Handler Architecture
 //!
 //! Handlers use the [`define_handler!`] macro with language-specific extractors
-//! ([`JavaScript`], [`TypeScript`]) from the [`LanguageExtractors`] trait.
+//! ([`JavaScript`], [`TypeScript`], [`Tsx`]) from the [`LanguageExtractors`] trait.
 //!
 //! **Important:** The first type parameter to `define_handler!` determines the
 //! `Language` enum value in extracted entities. For shared entity types (functions,
@@ -14,17 +14,21 @@
 //!
 //! - `handle_function_declaration_impl` → `Language::JavaScript`
 //! - `handle_ts_function_declaration_impl` → `Language::TypeScript`
+//! - `handle_tsx_function_declaration_impl` → `Language::Tsx`
 //!
-//! Always use the correct handler for your language to ensure proper labeling.
+//! The [`define_ts_family_handler!`] macro generates handlers for both TypeScript
+//! and TSX simultaneously since they share identical extraction logic.
 //!
 //! [`LanguageExtractors`]: crate::common::language_extractors::LanguageExtractors
 //! [`JavaScript`]: super::JavaScript
 //! [`TypeScript`]: super::TypeScript
+//! [`Tsx`]: super::Tsx
 
 pub(crate) mod class_handlers;
 pub(crate) mod common;
 pub(crate) mod function_handlers;
 pub(crate) mod method_handlers;
+pub(crate) mod module_handlers;
 pub(crate) mod property_handlers;
 pub(crate) mod typescript_handlers;
 pub(crate) mod variable_handlers;
@@ -35,6 +39,7 @@ mod tests;
 pub(crate) use class_handlers::*;
 pub(crate) use function_handlers::*;
 pub(crate) use method_handlers::*;
+pub(crate) use module_handlers::*;
 pub(crate) use property_handlers::*;
 pub(crate) use typescript_handlers::*;
 pub(crate) use variable_handlers::*;

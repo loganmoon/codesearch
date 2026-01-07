@@ -14,12 +14,13 @@
 
 pub mod extractors;
 pub(crate) mod handlers;
+pub mod module_path;
 pub(crate) mod queries;
 pub mod scope_patterns;
 pub(crate) mod visibility;
 
 // Re-export language extractors for use with define_handler! macro
-pub use extractors::{JavaScript, TypeScript};
+pub use extractors::{JavaScript, Tsx, TypeScript};
 
 // Scope patterns are needed by the macro (public)
 pub use scope_patterns::{SCOPE_PATTERNS, TS_SCOPE_PATTERNS};

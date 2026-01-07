@@ -11,5 +11,6 @@ pub(crate) mod variables;
 
 pub(crate) use classes::*;
 pub(crate) use functions::*;
+pub(crate) use modules::*;
 pub(crate) use typescript::*;
 pub(crate) use variables::*;

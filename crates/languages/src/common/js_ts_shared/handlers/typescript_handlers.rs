@@ -1,63 +1,93 @@
-//! TypeScript-specific entity handlers
+//! TypeScript and TSX specific entity handlers
 
-use crate::common::entity_building::{
-    build_entity, extract_common_components, EntityDetails, ExtractionContext,
+use crate::define_ts_family_handler;
+use codesearch_core::Visibility;
+
+use super::common::{
+    const_metadata, derive_index_signature_name, enum_metadata,
+    extract_interface_extends_relationships,
 };
-use crate::common::js_ts_shared::TypeScript;
-use crate::common::language_extractors::extract_main_node;
-use crate::common::node_to_text;
-use crate::define_handler;
-use codesearch_core::entities::{EntityMetadata, EntityType, Language};
-use codesearch_core::error::Result;
-use codesearch_core::CodeEntity;
 
-use super::super::visibility::extract_visibility;
-use super::common::{extract_extends_relationships, extract_preceding_doc_comments};
+// Interface
+define_ts_family_handler!(handle_interface_impl, handle_tsx_interface_impl, "interface", Interface,
+    relationships: extract_interface_extends_relationships);
 
-define_handler!(TypeScript, handle_interface_impl, "interface", Interface, relationships: extract_extends_relationships);
-define_handler!(TypeScript, handle_type_alias_impl, "type_alias", TypeAlias);
-define_handler!(TypeScript, handle_namespace_impl, "namespace", Module);
+// Type alias
+define_ts_family_handler!(
+    handle_type_alias_impl,
+    handle_tsx_type_alias_impl,
+    "type_alias",
+    TypeAlias
+);
 
-/// Handle enum declaration extraction
-///
-/// This handler has custom logic to detect const enums,
-/// so it cannot use the macro.
-pub(crate) fn handle_enum_impl(ctx: &ExtractionContext) -> Result<Vec<CodeEntity>> {
-    let node = match extract_main_node(ctx.query_match, ctx.query, &["enum"]) {
-        Some(n) => n,
-        None => return Ok(Vec::new()),
-    };
+// Namespace (produces Module entity)
+define_ts_family_handler!(
+    handle_namespace_impl,
+    handle_tsx_namespace_impl,
+    "namespace",
+    Module
+);
 
-    let components = extract_common_components(ctx, "name", node, "typescript")?;
+// Enum member
+define_ts_family_handler!(
+    handle_enum_member_impl,
+    handle_tsx_enum_member_impl,
+    "enum_member",
+    EnumVariant
+);
 
-    let visibility = extract_visibility(node, ctx.source);
-    let documentation = extract_preceding_doc_comments(node, ctx.source);
-    let content = node_to_text(node, ctx.source).ok();
+// Enum - with const detection metadata
+define_ts_family_handler!(handle_enum_impl, handle_tsx_enum_impl, "enum", Enum,
+    metadata: enum_metadata);
 
-    // Check if it's a const enum
-    let is_const = node.child_by_field_name("const").is_some()
-        || ctx.source[node.byte_range()]
-            .trim_start()
-            .starts_with("const");
+// Interface property - always Public visibility
+define_ts_family_handler!(handle_interface_property_impl, handle_tsx_interface_property_impl, "interface_property", Property,
+    visibility: Visibility::Public);
 
-    let metadata = EntityMetadata {
-        is_const,
-        ..Default::default()
-    };
+// Interface method - always Public visibility
+define_ts_family_handler!(handle_interface_method_impl, handle_tsx_interface_method_impl, "interface_method", Method,
+    visibility: Visibility::Public);
 
-    let entity = build_entity(
-        components,
-        EntityDetails {
-            entity_type: EntityType::Enum,
-            language: Language::TypeScript,
-            visibility: Some(visibility),
-            documentation,
-            content,
-            metadata,
-            signature: None,
-            relationships: Default::default(),
-        },
-    )?;
+// Call signature - static name "()", always Public
+define_ts_family_handler!(handle_call_signature_impl, handle_tsx_call_signature_impl, "call_signature", Method,
+    name: "()",
+    visibility: Visibility::Public);
 
-    Ok(vec![entity])
-}
+// Construct signature - static name "new()", always Public
+define_ts_family_handler!(handle_construct_signature_impl, handle_tsx_construct_signature_impl, "construct_signature", Method,
+    name: "new()",
+    visibility: Visibility::Public);
+
+// Index signature - derived name from type, always Public
+define_ts_family_handler!(handle_index_signature_impl, handle_tsx_index_signature_impl, "index_signature", Property,
+    name_fn: derive_index_signature_name,
+    visibility: Visibility::Public);
+
+// Abstract method - always Public (must be overridden by subclasses)
+define_ts_family_handler!(handle_abstract_method_impl, handle_tsx_abstract_method_impl, "method", Method,
+    visibility: Visibility::Public);
+
+// Ambient function declaration - declare function foo(): T
+define_ts_family_handler!(handle_ambient_function_impl, handle_tsx_ambient_function_impl, "function", Function,
+    visibility: Visibility::Public);
+
+// Ambient const declaration - declare const FOO: T
+define_ts_family_handler!(handle_ambient_const_impl, handle_tsx_ambient_const_impl, "const", Constant,
+    visibility: Visibility::Public,
+    metadata: const_metadata);
+
+// Ambient let declaration - declare let foo: T
+define_ts_family_handler!(handle_ambient_let_impl, handle_tsx_ambient_let_impl, "let", Variable,
+    visibility: Visibility::Public);
+
+// Ambient var declaration - declare var foo: T
+define_ts_family_handler!(handle_ambient_var_impl, handle_tsx_ambient_var_impl, "var", Variable,
+    visibility: Visibility::Public);
+
+// Ambient class declaration - declare class Foo { ... }
+define_ts_family_handler!(handle_ambient_class_impl, handle_tsx_ambient_class_impl, "class", Class,
+    visibility: Visibility::Public);
+
+// TODO #186: Constructor parameter property - public x: number in constructor
+// Needs special qualified name handling to skip constructor scope
+// define_ts_family_handler!(handle_parameter_property_impl, handle_tsx_parameter_property_impl, "property", Property);

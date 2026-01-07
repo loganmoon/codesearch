@@ -2,7 +2,7 @@
 //!
 //! Provides the main pipelined indexing pipeline for processing repositories.
 
-use crate::common::{get_current_commit, path_to_str, ResultExt};
+use crate::common::{get_current_commit, is_js_ts_file, path_to_str, ResultExt};
 use crate::config::IndexerConfig;
 use crate::entity_processor;
 use crate::{IndexResult, IndexStats};
@@ -583,6 +583,14 @@ async fn stage_extract_entities(
                         .and_then(|pm| pm.find_package_for_file(&path))
                         .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
                         .unwrap_or((None, None));
+
+                    // For JS/TS files, don't include package name in qualified names
+                    // (unlike Rust where crate names are part of the FQN)
+                    let package_name = if is_js_ts_file(&path) {
+                        None
+                    } else {
+                        package_name
+                    };
 
                     match entity_processor::extract_entities_from_file(
                         &path,

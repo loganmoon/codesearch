@@ -2,7 +2,7 @@
 //!
 //! Processes file change events from the watcher in batches for optimal throughput.
 
-use crate::common::{get_current_commit, path_to_str};
+use crate::common::{get_current_commit, is_js_ts_file, path_to_str};
 use crate::entity_processor;
 use crate::Result;
 use codesearch_core::config::SparseEmbeddingsConfig;
@@ -267,6 +267,14 @@ async fn process_file_batch(
             .and_then(|pm| pm.find_package_for_file(&canonical_path))
             .map(|pkg| (Some(pkg.name.as_str()), Some(pkg.source_root.as_path())))
             .unwrap_or((None, None));
+
+        // For JS/TS files, don't include package name in qualified names
+        // (unlike Rust where crate names are part of the FQN)
+        let package_name = if is_js_ts_file(&canonical_path) {
+            None
+        } else {
+            package_name
+        };
 
         match entity_processor::extract_entities_from_file(
             &canonical_path,

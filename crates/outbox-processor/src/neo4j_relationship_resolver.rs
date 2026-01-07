@@ -12,7 +12,7 @@
 //! - `implements_trait`: Trait being implemented by Rust impl blocks (for IMPLEMENTS)
 //! - `implements`: Interfaces implemented by TS/JS classes (for IMPLEMENTS)
 //! - `for_type`: Type that impl block is for (for ASSOCIATES)
-//! - `supertraits`: Trait supertraits (for EXTENDS_INTERFACE)
+//! - `extended_types`: Extended types - Rust trait bounds, TS interface extends (for EXTENDS_INTERFACE)
 //! - `extends`: Parent class names (for INHERITS_FROM)
 //! - `imports`: Imported module names (for IMPORTS)
 //!
@@ -311,10 +311,10 @@ pub async fn resolve_external_references(
             }
         }
 
-        // Check supertraits (for Rust traits - typed SourceReference)
-        for supertrait_ref in &entity.relationships.supertraits {
-            if supertrait_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(supertrait_ref.target()));
+        // Check extended_types (Rust trait bounds, TS interface extends - typed SourceReference)
+        for extended_type_ref in &entity.relationships.extended_types {
+            if extended_type_ref.is_external() {
+                let ext_ref = ExternalRef::new(normalize_external_ref(extended_type_ref.target()));
                 let ext_id = ext_ref.entity_id();
                 external_refs.insert(ext_ref);
                 relationships.push((

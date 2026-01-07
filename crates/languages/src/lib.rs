@@ -9,6 +9,7 @@ use std::path::Path;
 mod extraction_framework;
 mod javascript;
 mod python;
+mod tsx;
 mod typescript;
 
 // Public language-specific modules (for external use)

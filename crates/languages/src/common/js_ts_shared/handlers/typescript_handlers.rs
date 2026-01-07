@@ -56,3 +56,29 @@ define_handler!(TypeScript, handle_index_signature_impl, "index_signature", Prop
 // Abstract method - always Public (must be overridden by subclasses)
 define_handler!(TypeScript, handle_abstract_method_impl, "method", Method,
     visibility: Visibility::Public);
+
+// Ambient function declaration - declare function foo(): T
+define_handler!(TypeScript, handle_ambient_function_impl, "function", Function,
+    visibility: Visibility::Public);
+
+// Ambient const declaration - declare const FOO: T
+// Uses const metadata to mark it as const
+define_handler!(TypeScript, handle_ambient_const_impl, "const", Constant,
+    visibility: Visibility::Public,
+    metadata: super::common::const_metadata);
+
+// Ambient let declaration - declare let foo: T
+define_handler!(TypeScript, handle_ambient_let_impl, "let", Variable,
+    visibility: Visibility::Public);
+
+// Ambient var declaration - declare var foo: T
+define_handler!(TypeScript, handle_ambient_var_impl, "var", Variable,
+    visibility: Visibility::Public);
+
+// Ambient class declaration - declare class Foo { ... }
+define_handler!(TypeScript, handle_ambient_class_impl, "class", Class,
+    visibility: Visibility::Public);
+
+// TODO #186: Constructor parameter property - public x: number in constructor
+// Needs special qualified name handling to skip constructor scope
+// define_handler!(TypeScript, handle_parameter_property_impl, "property", Property);

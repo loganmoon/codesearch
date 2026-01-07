@@ -65,6 +65,32 @@ impl LanguageExtractors for TypeScript {
     }
 }
 
+/// TSX language extractor (TypeScript with JSX)
+///
+/// TSX uses the same extraction behavior as TypeScript but requires
+/// a separate tree-sitter parser to handle JSX syntax.
+///
+/// # Example
+///
+/// ```ignore
+/// define_handler!(Tsx, handle_component_impl, "function", Function,
+///     metadata: component_metadata);
+/// ```
+pub struct Tsx;
+
+impl LanguageExtractors for Tsx {
+    const LANGUAGE: Language = Language::TypeScript;
+    const LANG_STR: &'static str = "tsx";
+
+    fn extract_visibility(node: Node, source: &str) -> Visibility {
+        extract_visibility(node, source)
+    }
+
+    fn extract_docs(node: Node, source: &str) -> Option<String> {
+        extract_preceding_doc_comments(node, source)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -314,3 +314,93 @@ pub(crate) const ABSTRACT_METHOD_QUERY: &str = r#"
   (abstract_method_signature
     name: (property_identifier) @name) @method)
 "#;
+
+/// Query for ambient function declarations
+///
+/// Matches:
+/// - `declare function getEnv(key: string): string | undefined;`
+pub(crate) const AMBIENT_FUNCTION_QUERY: &str = r#"
+(ambient_declaration
+  (function_signature
+    name: (identifier) @name) @function)
+"#;
+
+/// Query for ambient const declarations
+///
+/// Matches:
+/// - `declare const VERSION: string;`
+pub(crate) const AMBIENT_CONST_QUERY: &str = r#"
+(ambient_declaration
+  (lexical_declaration
+    kind: "const"
+    (variable_declarator
+      name: (identifier) @name)) @const)
+"#;
+
+/// Query for ambient let declarations
+///
+/// Matches:
+/// - `declare let debug: boolean;`
+pub(crate) const AMBIENT_LET_QUERY: &str = r#"
+(ambient_declaration
+  (lexical_declaration
+    kind: "let"
+    (variable_declarator
+      name: (identifier) @name)) @let)
+"#;
+
+/// Query for ambient var declarations
+///
+/// Matches:
+/// - `declare var legacyGlobal: any;`
+pub(crate) const AMBIENT_VAR_QUERY: &str = r#"
+(ambient_declaration
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name)) @var)
+"#;
+
+/// Query for ambient class declarations
+///
+/// Matches:
+/// - `declare class ExternalLibrary { ... }`
+pub(crate) const AMBIENT_CLASS_QUERY: &str = r#"
+(ambient_declaration
+  (class_declaration
+    name: (type_identifier) @name
+    body: (class_body) @body) @class)
+
+(ambient_declaration
+  (abstract_class_declaration
+    name: (type_identifier) @name
+    body: (class_body) @body) @class)
+"#;
+
+// TODO #186: Query for constructor parameter properties
+//
+// In TypeScript, constructor parameters with visibility modifiers are automatically
+// class properties:
+// - `constructor(public x: number)` - public property x
+// - `constructor(private _label?: string)` - private property _label
+// - `constructor(protected readonly id: number = 0)` - protected readonly property id
+//
+// Needs special qualified name handling to skip constructor scope.
+// pub(crate) const PARAMETER_PROPERTY_QUERY: &str = r#"
+// [
+//   ;; Required parameter with accessibility modifier
+//   (class_body
+//     (method_definition
+//       parameters: (formal_parameters
+//         (required_parameter
+//           (accessibility_modifier)
+//           name: (identifier) @name) @property)))
+//
+//   ;; Optional parameter with accessibility modifier
+//   (class_body
+//     (method_definition
+//       parameters: (formal_parameters
+//         (optional_parameter
+//           (accessibility_modifier)
+//           name: (identifier) @name) @property)))
+// ]
+// "#;

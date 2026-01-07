@@ -4,7 +4,7 @@
 ///
 /// Matches:
 /// - `const foo = 1`
-/// - `const { a, b } = obj` (destructuring)
+/// - `const { a, b } = obj` (destructuring - each property as separate entity)
 /// - `export const foo = 1`
 ///
 /// Note: This query excludes const declarations that are function expressions
@@ -28,6 +28,21 @@ pub(crate) const CONST_QUERY: &str = r#"
         value: (_) @value))) @const
   (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
 )
+
+;; Object destructuring: const { a, b } = obj
+(lexical_declaration
+  kind: "const"
+  (variable_declarator
+    name: (object_pattern
+      (shorthand_property_identifier_pattern) @name))) @const
+
+;; Exported object destructuring: export const { a, b } = obj
+(export_statement
+  declaration: (lexical_declaration
+    kind: "const"
+    (variable_declarator
+      name: (object_pattern
+        (shorthand_property_identifier_pattern) @name)))) @const
 "#;
 
 /// Query for let declarations at module level

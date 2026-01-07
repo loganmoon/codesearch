@@ -742,6 +742,30 @@ macro_rules! define_handler {
         }
     };
 
+    // With context-aware name function and relationships (uses trait visibility)
+    (
+        $lang:ty,
+        $fn_name:ident,
+        $capture:expr,
+        $entity_type:ident,
+        name_ctx_fn: $name_ctx_fn:expr,
+        relationships: $rel_fn:expr
+    ) => {
+        pub(crate) fn $fn_name(
+            ctx: &$crate::common::entity_building::ExtractionContext,
+        ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
+            $crate::common::language_extractors::extract_entity_with_name_ctx_fn::<$lang>(
+                ctx,
+                $capture,
+                codesearch_core::entities::EntityType::$entity_type,
+                $name_ctx_fn,
+                None,
+                $crate::common::language_extractors::default_metadata,
+                $rel_fn,
+            )
+        }
+    };
+
     // =========================================================================
     // Module entity variant (file-level entities with path-based qualified names)
     // =========================================================================

@@ -650,6 +650,7 @@ Tests should reference spec rule IDs and use minimal fixtures. See existing lang
 | Language | Extraction | Resolution | Notes |
 |----------|-----------|------------|-------|
 | **Rust** | Full | Full | Canonical implementation with spec file |
-| **JavaScript** | Full | Full | Complete with typed relationships |
-| **TypeScript** | Full | Full | Complete with typed relationships |
+| **JavaScript** | Full | Partial | Entity extraction complete; relationship extraction in progress (#185) |
+| **TypeScript** | Full | Partial | Entity extraction complete; relationship extraction in progress (#185) |
+| **TSX** | Full | Partial | TypeScript with JSX; uses separate tree-sitter parser |
 | **Python** | Full | Full | Complete with typed relationships |

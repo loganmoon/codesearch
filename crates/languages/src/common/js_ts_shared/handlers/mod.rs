@@ -27,6 +27,7 @@ pub(crate) mod function_handlers;
 pub(crate) mod method_handlers;
 pub(crate) mod module_handlers;
 pub(crate) mod property_handlers;
+pub(crate) mod tsx_handlers;
 pub(crate) mod typescript_handlers;
 pub(crate) mod variable_handlers;
 
@@ -38,5 +39,6 @@ pub(crate) use function_handlers::*;
 pub(crate) use method_handlers::*;
 pub(crate) use module_handlers::*;
 pub(crate) use property_handlers::*;
+pub(crate) use tsx_handlers::*;
 pub(crate) use typescript_handlers::*;
 pub(crate) use variable_handlers::*;

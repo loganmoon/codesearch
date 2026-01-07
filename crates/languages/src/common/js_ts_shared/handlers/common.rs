@@ -480,3 +480,26 @@ pub(crate) fn derive_function_expression_name(
 
     Ok(name)
 }
+
+/// Derive class expression name from extraction context
+///
+/// Prefers the class's own name (`@class_name`) over the variable name (`@name`).
+/// For named class expressions like `const Foo = class Bar {}`, returns `Bar`.
+/// For anonymous class expressions like `const Foo = class {}`, returns `Foo`.
+///
+/// This is a context-aware name function for use with `name_ctx_fn:` macro parameter.
+pub(crate) fn derive_class_expression_name(ctx: &ExtractionContext, _node: Node) -> Result<String> {
+    // Prefer @class_name (class's own name) over @name (variable name)
+    let name = find_capture_node(ctx.query_match, ctx.query, "class_name")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "name"))
+        .and_then(|n| node_to_text(n, ctx.source).ok())
+        .unwrap_or_default();
+
+    if name.is_empty() {
+        return Err(Error::entity_extraction(
+            "Could not derive class expression name from captures",
+        ));
+    }
+
+    Ok(name)
+}

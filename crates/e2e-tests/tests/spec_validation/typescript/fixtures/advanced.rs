@@ -253,8 +253,8 @@ declare class ExternalLibrary {
     destroy(): void;
 }
 
-// Ambient interface (no declare needed)
-interface GlobalConfig {
+// Ambient interface (no declare needed, export makes it public)
+export interface GlobalConfig {
     apiUrl: string;
     timeout: number;
 }

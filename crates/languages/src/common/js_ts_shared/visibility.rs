@@ -107,25 +107,52 @@ fn extract_ts_visibility_modifier(node: Node) -> Option<Visibility> {
 
 /// Check if a node is exported (directly or as part of an export statement)
 ///
-/// Walks up the entire ancestor chain to find an export_statement.
+/// Walks up the entire ancestor chain to find an export_statement or ambient_declaration.
 /// This handles nested entities like:
 /// - `export function foo() {}` - direct export
 /// - `export class Foo {}` - direct export
 /// - `export const foo = 1` - direct export
 /// - `export enum Color { Red }` - enum members inherit export from parent
 /// - `export default function() {}` - default export
+/// - `declare const VERSION: string;` - ambient declarations (TypeScript .d.ts files)
+///
+/// Special case for namespaces (internal_module):
+/// - Functions/classes inside a namespace need their OWN export keyword
+/// - `export namespace N { function inner() {} }` - inner is Private
+/// - `export namespace N { export function inner() {} }` - inner is Public
 pub(crate) fn is_exported(node: Node) -> bool {
-    // Check if the node itself is an export statement
-    if node.kind() == "export_statement" {
+    // Check if the node itself is an export statement or ambient declaration
+    if node.kind() == "export_statement" || node.kind() == "ambient_declaration" {
         return true;
     }
 
-    // Walk up all ancestors looking for export_statement
+    // Walk up ancestors, but stop at namespace boundaries for non-exported items
+    let mut prev_node = node;
     let mut current = node.parent();
     while let Some(ancestor) = current {
-        if ancestor.kind() == "export_statement" {
-            return true;
+        match ancestor.kind() {
+            "export_statement" => {
+                // Check if this export_statement directly exports a namespace
+                // that CONTAINS our node (vs directly exporting our node)
+                if let Some(decl) = ancestor.child_by_field_name("declaration") {
+                    if decl.kind() == "internal_module" && decl.id() != prev_node.id() {
+                        // The export_statement exports a namespace, but our node
+                        // is inside that namespace - need own export
+                        return false;
+                    }
+                }
+                return true;
+            }
+            "ambient_declaration" => return true,
+            "internal_module" | "module" => {
+                // Inside a namespace - need own export keyword
+                // If we got here without finding export_statement as direct parent,
+                // the item is private to the namespace
+                return false;
+            }
+            _ => {}
         }
+        prev_node = ancestor;
         current = ancestor.parent();
     }
 

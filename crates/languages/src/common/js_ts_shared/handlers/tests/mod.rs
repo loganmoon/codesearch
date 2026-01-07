@@ -403,4 +403,78 @@ mod language_labeling_tests {
             "Should have 2 extended interfaces"
         );
     }
+
+    #[test]
+    fn test_class_inheritance_extraction() {
+        let source = r#"export class Dog extends Animal {
+    name: string;
+}"#;
+
+        // Debug: Print the query and check captures
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .expect("failed to set language");
+        let tree = parser.parse(source, None).expect("failed to parse");
+        let query = Query::new(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            queries::TS_CLASS_DECLARATION_QUERY,
+        )
+        .expect("failed to create query");
+
+        eprintln!("\nQuery capture names:");
+        for i in 0..query.capture_names().len() {
+            eprintln!("  [{i}] {}", query.capture_names()[i]);
+        }
+
+        let mut cursor = QueryCursor::new();
+        let mut matches_iter = cursor.matches(&query, tree.root_node(), source.as_bytes());
+
+        eprintln!("\nQuery matches:");
+        while let Some(query_match) = matches_iter.next() {
+            eprintln!("  Match pattern: {}", query_match.pattern_index);
+            for capture in query_match.captures {
+                let name = query.capture_names()[capture.index as usize];
+                let text = capture
+                    .node
+                    .utf8_text(source.as_bytes())
+                    .unwrap_or("<error>");
+                let truncated = if text.len() > 50 {
+                    format!("{}...", &text[..50])
+                } else {
+                    text.to_string()
+                };
+                eprintln!("    @{name} (idx={}) = '{truncated}'", capture.index);
+            }
+        }
+
+        let entities = extract_ts_entities(
+            source,
+            queries::TS_CLASS_DECLARATION_QUERY,
+            handlers::handle_ts_class_declaration_impl,
+        )
+        .expect("extraction should succeed");
+
+        eprintln!("\nFound {} entities:", entities.len());
+        for e in &entities {
+            eprintln!("  - {} ({})", e.name, e.qualified_name);
+            eprintln!("    Extends: {:?}", e.relationships.extends);
+        }
+
+        // Filter to unique classes (there may be duplicate matches)
+        assert!(!entities.is_empty(), "Should find at least 1 class");
+        let class = &entities[0];
+
+        // Should have 1 parent: Animal
+        assert_eq!(
+            class.relationships.extends.len(),
+            1,
+            "Should have 1 parent class"
+        );
+        assert_eq!(
+            class.relationships.extends[0].target(),
+            "Animal",
+            "Should extend Animal"
+        );
+    }
 }

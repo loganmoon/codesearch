@@ -191,6 +191,8 @@ pub(crate) fn extract_extends_relationships(
                 if let Ok(source_ref) = SourceReference::builder()
                     .target(extends_name.to_string())
                     .simple_name(extends_name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(capture.node))
+                    .ref_type(codesearch_core::ReferenceType::Extends)
                     .build()
                 {
                     relationships.extends.push(source_ref);

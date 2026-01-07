@@ -2,7 +2,7 @@
 //!
 //! Provides the main pipelined indexing pipeline for processing repositories.
 
-use crate::common::{get_current_commit, path_to_str, ResultExt};
+use crate::common::{get_current_commit, is_js_ts_file, path_to_str, ResultExt};
 use crate::config::IndexerConfig;
 use crate::entity_processor;
 use crate::{IndexResult, IndexStats};
@@ -48,21 +48,6 @@ struct EntityBatch {
 
 /// Triple of (entity, embedding_id, sparse_embedding) for entities that have been embedded
 type EntityEmbeddingTriple = (CodeEntity, i64, Vec<(u32, f32)>);
-
-/// Check if a file is a JavaScript or TypeScript file
-///
-/// Used to determine whether to include package name in qualified names.
-/// JS/TS files don't use package names in their FQNs (unlike Rust where
-/// crate names are part of the fully qualified path).
-fn is_js_ts_file(path: &Path) -> bool {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => matches!(
-            ext.to_lowercase().as_str(),
-            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
-        ),
-        None => false,
-    }
-}
 
 struct EmbeddedBatch {
     // Entities paired with embedding IDs and sparse embeddings (skipped entities filtered out)

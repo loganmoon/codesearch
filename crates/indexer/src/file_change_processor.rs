@@ -2,7 +2,7 @@
 //!
 //! Processes file change events from the watcher in batches for optimal throughput.
 
-use crate::common::{get_current_commit, path_to_str};
+use crate::common::{get_current_commit, is_js_ts_file, path_to_str};
 use crate::entity_processor;
 use crate::Result;
 use codesearch_core::config::SparseEmbeddingsConfig;
@@ -16,21 +16,6 @@ use std::{
 };
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-
-/// Check if a file is a JavaScript or TypeScript file
-///
-/// Used to determine whether to include package name in qualified names.
-/// JS/TS files don't use package names in their FQNs (unlike Rust where
-/// crate names are part of the fully qualified path).
-fn is_js_ts_file(path: &Path) -> bool {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => matches!(
-            ext.to_lowercase().as_str(),
-            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
-        ),
-        None => false,
-    }
-}
 
 /// Statistics for file change processing
 #[derive(Debug, Clone, Default)]

@@ -789,6 +789,105 @@ macro_rules! define_handler {
 
 pub use define_handler;
 
+/// Define handlers for both TypeScript and TSX languages
+///
+/// Since TSX is essentially TypeScript with JSX support, they share identical
+/// handler logic. This macro generates handlers for both languages to eliminate
+/// duplication.
+///
+/// # Example
+///
+/// ```ignore
+/// // Instead of writing both handlers separately:
+/// define_handler!(TypeScript, handle_ts_interface_impl, "interface", Interface);
+/// define_handler!(Tsx, handle_tsx_interface_impl, "interface", Interface);
+///
+/// // Use this macro to generate both:
+/// define_ts_family_handler!(handle_ts_interface_impl, handle_tsx_interface_impl, "interface", Interface);
+/// ```
+#[macro_export]
+macro_rules! define_ts_family_handler {
+    // Basic: default metadata, no relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type);
+    };
+
+    // With custom metadata
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, metadata: $metadata_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, metadata: $metadata_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, metadata: $metadata_fn);
+    };
+
+    // With custom relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, relationships: $rel_fn);
+    };
+
+    // With both metadata and relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, metadata: $metadata_fn:expr, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, metadata: $metadata_fn, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, metadata: $metadata_fn, relationships: $rel_fn);
+    };
+
+    // With visibility override
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, visibility: $visibility:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, visibility: $visibility);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, visibility: $visibility);
+    };
+
+    // With visibility and metadata
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, visibility: $visibility:expr, metadata: $metadata_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, visibility: $visibility, metadata: $metadata_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, visibility: $visibility, metadata: $metadata_fn);
+    };
+
+    // With static name and visibility
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name: $name:expr, visibility: $visibility:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name: $name, visibility: $visibility);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name: $name, visibility: $visibility);
+    };
+
+    // With name function and visibility
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_fn: $name_fn:expr, visibility: $visibility:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_fn: $name_fn, visibility: $visibility);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_fn: $name_fn, visibility: $visibility);
+    };
+
+    // With context-aware name function
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn);
+    };
+
+    // With context-aware name function and visibility
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, visibility: $visibility:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, visibility: $visibility);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, visibility: $visibility);
+    };
+
+    // With context-aware name function and metadata
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, metadata: $metadata_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn);
+    };
+
+    // With context-aware name function and relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, relationships: $rel_fn);
+    };
+
+    // Module entity variant
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, module_name_fn: $name_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, module_name_fn: $name_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, module_name_fn: $name_fn);
+    };
+}
+
+pub use define_ts_family_handler;
+
 #[cfg(test)]
 mod tests {
     use super::*;

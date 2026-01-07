@@ -7,14 +7,7 @@
 /// Query for class declarations (TypeScript version)
 ///
 /// TypeScript uses `type_identifier` for class names.
-/// Matches:
-/// - `class Foo {}`
-/// - `class Foo extends Bar {}`
-/// - `class Foo implements IFoo {}`
-/// - `class Foo extends Bar implements IFoo, IBar {}`
-/// - `export class Foo {}`
-/// - `abstract class Foo {}`
-/// - `export abstract class Foo {}`
+/// The `@heritage` capture is used for relationship extraction.
 pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
 [
   (class_declaration

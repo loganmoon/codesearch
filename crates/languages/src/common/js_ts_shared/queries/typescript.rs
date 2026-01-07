@@ -10,22 +10,29 @@
 /// Matches:
 /// - `class Foo {}`
 /// - `class Foo extends Bar {}`
+/// - `class Foo implements IFoo {}`
+/// - `class Foo extends Bar implements IFoo, IBar {}`
 /// - `export class Foo {}`
 pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
 [
   (class_declaration
     name: (type_identifier) @name
-    (class_heritage
-      (extends_clause
-        value: (_) @extends))?
+    (class_heritage) @heritage
+    body: (class_body) @body) @class
+
+  (class_declaration
+    name: (type_identifier) @name
     body: (class_body) @body) @class
 
   (export_statement
     declaration: (class_declaration
       name: (type_identifier) @name
-      (class_heritage
-        (extends_clause
-          value: (_) @extends))?
+      (class_heritage) @heritage
+      body: (class_body) @body)) @class
+
+  (export_statement
+    declaration: (class_declaration
+      name: (type_identifier) @name
       body: (class_body) @body)) @class
 ]
 "#;
@@ -36,26 +43,39 @@ pub(crate) const TS_CLASS_DECLARATION_QUERY: &str = r#"
 /// - `const Foo = class {}`
 /// - `const Foo = class Bar {}`
 /// - `let Foo = class extends Base {}`
+/// - `let Foo = class implements IFoo {}`
 pub(crate) const TS_CLASS_EXPRESSION_QUERY: &str = r#"
-(lexical_declaration
-  (variable_declarator
-    name: (identifier) @name
-    value: (class
-      name: (type_identifier)? @class_name
-      (class_heritage
-        (extends_clause
-          value: (_) @extends))?
-      body: (class_body) @body))) @class
+[
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (class
+        name: (type_identifier)? @class_name
+        (class_heritage) @heritage
+        body: (class_body) @body))) @class
 
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @name
-    value: (class
-      name: (type_identifier)? @class_name
-      (class_heritage
-        (extends_clause
-          value: (_) @extends))?
-      body: (class_body) @body))) @class
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (class
+        name: (type_identifier)? @class_name
+        body: (class_body) @body))) @class
+
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (class
+        name: (type_identifier)? @class_name
+        (class_heritage) @heritage
+        body: (class_body) @body))) @class
+
+  (variable_declaration
+    (variable_declarator
+      name: (identifier) @name
+      value: (class
+        name: (type_identifier)? @class_name
+        body: (class_body) @body))) @class
+]
 "#;
 
 /// Query for class fields/properties (TypeScript version)

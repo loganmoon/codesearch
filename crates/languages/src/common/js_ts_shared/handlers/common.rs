@@ -175,33 +175,110 @@ pub(crate) fn property_metadata(node: Node, source: &str) -> EntityMetadata {
 // Relationship helper functions for use with define_handler! macro
 // =============================================================================
 
-/// Extract extends relationships from a class declaration
+/// Extract extends and implements relationships from a class declaration
 ///
-/// Populates `relationships.extends` which becomes INHERITS_FROM in Neo4j.
+/// Populates:
+/// - `relationships.extends` which becomes INHERITS_FROM in Neo4j
+/// - `relationships.implements` which becomes IMPLEMENTS in Neo4j
 pub(crate) fn extract_extends_relationships(
     ctx: &ExtractionContext,
     _node: Node,
 ) -> EntityRelationshipData {
     let mut relationships = EntityRelationshipData::default();
 
-    if let Some(extends_index) = ctx.query.capture_index_for_name("extends") {
+    // Look for the heritage capture which contains both extends and implements clauses
+    if let Some(heritage_index) = ctx.query.capture_index_for_name("heritage") {
         for capture in ctx.query_match.captures {
-            if capture.index == extends_index {
-                let extends_name = &ctx.source[capture.node.byte_range()];
-                if let Ok(source_ref) = SourceReference::builder()
-                    .target(extends_name.to_string())
-                    .simple_name(extends_name.to_string())
-                    .location(SourceLocation::from_tree_sitter_node(capture.node))
-                    .ref_type(codesearch_core::ReferenceType::Extends)
-                    .build()
-                {
-                    relationships.extends.push(source_ref);
-                }
+            if capture.index == heritage_index {
+                // Walk the class_heritage node to find extends_clause and implements_clause
+                extract_class_heritage_relationships(capture.node, ctx.source, &mut relationships);
             }
         }
     }
 
     relationships
+}
+
+/// Walk a class_heritage node to extract extends and implements relationships
+fn extract_class_heritage_relationships(
+    node: Node,
+    source: &str,
+    relationships: &mut EntityRelationshipData,
+) {
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            match child.kind() {
+                "extends_clause" => {
+                    // The extends_clause has a "value" field with the parent class
+                    if let Some(value) = child.child_by_field_name("value") {
+                        let extends_name = &source[value.byte_range()];
+                        if let Ok(source_ref) = SourceReference::builder()
+                            .target(extends_name.to_string())
+                            .simple_name(extends_name.to_string())
+                            .location(SourceLocation::from_tree_sitter_node(value))
+                            .ref_type(codesearch_core::ReferenceType::Extends)
+                            .build()
+                        {
+                            relationships.extends.push(source_ref);
+                        }
+                    }
+                }
+                "implements_clause" => {
+                    // Walk the implements_clause to find all type_identifier children
+                    extract_type_identifiers_from_implements(child, source, relationships);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Walk an implements_clause node to extract all type identifiers
+fn extract_type_identifiers_from_implements(
+    node: Node,
+    source: &str,
+    relationships: &mut EntityRelationshipData,
+) {
+    // Use index-based iteration to avoid cursor reuse issues
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            match child.kind() {
+                "type_identifier" => {
+                    let type_name = &source[child.byte_range()];
+                    if let Ok(source_ref) = SourceReference::builder()
+                        .target(type_name.to_string())
+                        .simple_name(type_name.to_string())
+                        .location(SourceLocation::from_tree_sitter_node(child))
+                        .ref_type(codesearch_core::ReferenceType::Implements)
+                        .build()
+                    {
+                        relationships.implements.push(source_ref);
+                    }
+                }
+                // Generic types like Foo<Bar> - extract the base type
+                "generic_type" => {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let type_name = &source[name_node.byte_range()];
+                        if let Ok(source_ref) = SourceReference::builder()
+                            .target(type_name.to_string())
+                            .simple_name(type_name.to_string())
+                            .location(SourceLocation::from_tree_sitter_node(name_node))
+                            .ref_type(codesearch_core::ReferenceType::Implements)
+                            .build()
+                        {
+                            relationships.implements.push(source_ref);
+                        }
+                    }
+                }
+                // Skip keyword and punctuation nodes
+                "implements" | "," => {}
+                // Recursively handle nested structures
+                _ => {
+                    extract_type_identifiers_from_implements(child, source, relationships);
+                }
+            }
+        }
+    }
 }
 
 /// Extract extends relationships from an interface declaration

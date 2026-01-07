@@ -369,31 +369,29 @@ pub(crate) const AMBIENT_CLASS_QUERY: &str = r#"
     body: (class_body) @body) @class)
 "#;
 
-// TODO #186: Query for constructor parameter properties
-//
-// In TypeScript, constructor parameters with visibility modifiers are automatically
-// class properties:
-// - `constructor(public x: number)` - public property x
-// - `constructor(private _label?: string)` - private property _label
-// - `constructor(protected readonly id: number = 0)` - protected readonly property id
-//
-// Needs special qualified name handling to skip constructor scope.
-// pub(crate) const PARAMETER_PROPERTY_QUERY: &str = r#"
-// [
-//   ;; Required parameter with accessibility modifier
-//   (class_body
-//     (method_definition
-//       parameters: (formal_parameters
-//         (required_parameter
-//           (accessibility_modifier)
-//           name: (identifier) @name) @property)))
-//
-//   ;; Optional parameter with accessibility modifier
-//   (class_body
-//     (method_definition
-//       parameters: (formal_parameters
-//         (optional_parameter
-//           (accessibility_modifier)
-//           name: (identifier) @name) @property)))
-// ]
-// "#;
+/// Query for constructor parameter properties
+///
+/// In TypeScript, constructor parameters with visibility modifiers are automatically
+/// class properties:
+/// - `constructor(public x: number)` - public property x
+/// - `constructor(private _label?: string)` - private property _label
+/// - `constructor(protected readonly id: number = 0)` - protected readonly property id
+pub(crate) const PARAMETER_PROPERTY_QUERY: &str = r#"
+[
+  ;; Required parameter with accessibility modifier
+  (class_body
+    (method_definition
+      parameters: (formal_parameters
+        (required_parameter
+          (accessibility_modifier)
+          pattern: (identifier) @name) @property)))
+
+  ;; Optional parameter with accessibility modifier
+  (class_body
+    (method_definition
+      parameters: (formal_parameters
+        (optional_parameter
+          (accessibility_modifier)
+          pattern: (identifier) @name) @property)))
+]
+"#;

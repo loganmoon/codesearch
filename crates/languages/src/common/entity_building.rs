@@ -4,7 +4,7 @@
 //! components and building CodeEntity instances across all languages.
 
 use crate::common::{find_capture_node, node_to_text};
-use crate::qualified_name::build_qualified_name_from_ast;
+use crate::qualified_name::{build_qualified_name_from_ast, build_qualified_name_with_skip};
 use codesearch_core::entities::{
     CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, FunctionSignature,
     Language, SourceLocation, Visibility,
@@ -211,6 +211,99 @@ pub fn extract_common_components_with_name(
     );
 
     // Generate path_entity_identifier using repo-relative path (for import resolution)
+    let path_module = crate::common::module_utils::derive_path_entity_identifier(
+        ctx.file_path,
+        ctx.repo_root,
+        separator,
+    );
+    let path_entity_identifier = compose_qualified_name(
+        None, // No package prefix for path-based identifier
+        Some(&path_module),
+        &ast_scope,
+        name,
+        separator,
+    );
+
+    // Generate entity_id from repository + file_path + qualified name
+    let file_path_str = ctx
+        .file_path
+        .to_str()
+        .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
+
+    // Get location
+    let location = SourceLocation::from_tree_sitter_node(main_node);
+
+    Ok(CommonEntityComponents {
+        entity_id,
+        repository_id: ctx.repository_id.to_string(),
+        name: name.to_string(),
+        qualified_name,
+        path_entity_identifier: Some(path_entity_identifier),
+        parent_scope: if parent_scope.is_empty() {
+            None
+        } else {
+            Some(parent_scope)
+        },
+        file_path: ctx.file_path.to_path_buf(),
+        location,
+    })
+}
+
+/// Extract common entity components with scope filtering
+///
+/// Same as `extract_common_components_with_name` but allows skipping specific
+/// AST node kinds during scope traversal. Useful for parameter properties where
+/// the constructor scope should be skipped.
+///
+/// # Arguments
+/// * `ctx` - Extraction context
+/// * `name` - The entity name
+/// * `main_node` - The main AST node for this entity
+/// * `language` - Language identifier
+/// * `skip_scope_kinds` - AST node kinds to skip during scope traversal
+pub fn extract_common_components_with_scope_skip(
+    ctx: &ExtractionContext,
+    name: &str,
+    main_node: Node,
+    language: &str,
+    skip_scope_kinds: &[&str],
+) -> Result<CommonEntityComponents> {
+    if name.is_empty() {
+        return Err(Error::entity_extraction("Empty name provided"));
+    }
+
+    // Build qualified name with scope filtering
+    let scope_result =
+        build_qualified_name_with_skip(main_node, ctx.source, language, skip_scope_kinds);
+    let ast_scope = scope_result.parent_scope;
+    let separator = scope_result.separator;
+
+    // Derive module path from file path (if source_root is available)
+    let module_prefix = ctx.source_root.and_then(|root| {
+        crate::qualified_name::derive_module_path_for_language(ctx.file_path, root, language)
+    });
+
+    // Compose fully qualified name: package::module::ast_scope::name
+    let qualified_name = compose_qualified_name(
+        ctx.package_name,
+        module_prefix.as_deref(),
+        &ast_scope,
+        name,
+        separator,
+    );
+
+    // Calculate parent_scope (everything except the final name)
+    let parent_scope = compose_qualified_name(
+        ctx.package_name,
+        module_prefix.as_deref(),
+        &ast_scope,
+        "", // empty name to get just the parent scope
+        separator,
+    );
+
+    // Generate path_entity_identifier using repo-relative path (for import resolution)
+    // Note: path_entity_identifier also uses scope filtering to match qualified_name
     let path_module = crate::common::module_utils::derive_path_entity_identifier(
         ctx.file_path,
         ctx.repo_root,

@@ -513,4 +513,111 @@ mod language_labeling_tests {
             "Should extend Animal"
         );
     }
+
+    #[test]
+    fn test_parameter_property_qualified_name() {
+        use crate::common::js_ts_shared::handlers::typescript_handlers;
+        use crate::common::js_ts_shared::queries::typescript::PARAMETER_PROPERTY_QUERY;
+        use codesearch_core::entities::{EntityType, Visibility};
+
+        let source = r#"export class Point {
+    constructor(
+        public x: number,
+        private _label?: string,
+        protected readonly id: number = 0
+    ) {}
+}"#;
+
+        let entities = extract_ts_entities(
+            source,
+            PARAMETER_PROPERTY_QUERY,
+            typescript_handlers::handle_parameter_property_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 3, "Should extract 3 parameter properties");
+
+        // Verify qualified names skip the constructor
+        let x = entities
+            .iter()
+            .find(|e| e.name == "x")
+            .expect("should find x");
+        assert!(
+            !x.qualified_name.contains("constructor"),
+            "qualified name '{}' should not contain 'constructor'",
+            x.qualified_name
+        );
+        assert_eq!(x.entity_type, EntityType::Property);
+        assert_eq!(x.visibility, Some(Visibility::Public));
+
+        let label = entities
+            .iter()
+            .find(|e| e.name == "_label")
+            .expect("should find _label");
+        assert!(
+            !label.qualified_name.contains("constructor"),
+            "qualified name '{}' should not contain 'constructor'",
+            label.qualified_name
+        );
+        assert_eq!(label.visibility, Some(Visibility::Private));
+
+        let id = entities
+            .iter()
+            .find(|e| e.name == "id")
+            .expect("should find id");
+        assert!(
+            !id.qualified_name.contains("constructor"),
+            "qualified name '{}' should not contain 'constructor'",
+            id.qualified_name
+        );
+        assert_eq!(id.visibility, Some(Visibility::Protected));
+    }
+
+    #[test]
+    fn test_parameter_property_has_typescript_language() {
+        use crate::common::js_ts_shared::handlers::typescript_handlers;
+        use crate::common::js_ts_shared::queries::typescript::PARAMETER_PROPERTY_QUERY;
+
+        let source = r#"class Point {
+    constructor(public x: number) {}
+}"#;
+
+        let entities = extract_ts_entities(
+            source,
+            PARAMETER_PROPERTY_QUERY,
+            typescript_handlers::handle_parameter_property_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should extract 1 parameter property");
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TypeScript parameter property handler should produce Language::TypeScript"
+        );
+    }
+
+    #[test]
+    fn test_tsx_parameter_property_has_typescript_language() {
+        use crate::common::js_ts_shared::handlers::typescript_handlers;
+        use crate::common::js_ts_shared::queries::typescript::PARAMETER_PROPERTY_QUERY;
+
+        let source = r#"class Point {
+    constructor(public x: number) {}
+}"#;
+
+        let entities = extract_tsx_entities(
+            source,
+            PARAMETER_PROPERTY_QUERY,
+            typescript_handlers::handle_tsx_parameter_property_impl,
+        )
+        .expect("extraction should succeed");
+
+        assert_eq!(entities.len(), 1, "Should extract 1 parameter property");
+        assert_eq!(
+            entities[0].language,
+            Language::TypeScript,
+            "TSX parameter property handler should produce Language::TypeScript"
+        );
+    }
 }

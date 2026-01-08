@@ -128,11 +128,9 @@ mod tests {
         assert!(has_supported_extension(Path::new("module.ts")));
         assert!(has_supported_extension(Path::new("component.tsx")));
 
-        // Python is now implemented (Phase 5 complete)
-        assert!(has_supported_extension(Path::new("lib.py")));
-        assert!(has_supported_extension(Path::new("stubs.pyi")));
-
-        // Other languages not yet implemented (Phase 6+ pending)
+        // Other languages not yet implemented
+        assert!(!has_supported_extension(Path::new("lib.py")));
+        assert!(!has_supported_extension(Path::new("stubs.pyi")));
         assert!(!has_supported_extension(Path::new("main.go")));
 
         // Non-code files should never be supported

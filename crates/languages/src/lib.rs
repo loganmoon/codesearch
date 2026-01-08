@@ -8,7 +8,6 @@ use std::path::Path;
 // Internal modules (private implementation details)
 mod extraction_framework;
 mod javascript;
-mod python;
 mod tsx;
 mod typescript;
 

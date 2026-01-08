@@ -29,61 +29,7 @@ codesearch/
 
 This project uses git worktrees with a separate git directory for parallel development. Each issue or feature gets its own worktree.
 
-**Directory structure:**
-```
-/path/to/codesearch/              # Parent directory (NOT a worktree itself)
-├── .git/                         # Shared git directory
-├── main/                         # READ-ONLY - never edit files here during feature work
-└── feature--my-feature/          # Your working directory - all edits happen here
-```
-
 **Important:** The parent directory containing `.git/` is NOT a worktree. All worktrees (`main/`, `feature--xyz/`, etc.) are subdirectories. All worktree management commands must be run from this parent directory.
-
-**Branch/worktree naming convention:**
-- `feature--<issue-number>-short-description` - New features
-- `bug--<issue-number>-short-description` - Bug fixes
-- `docs--short-description` - Documentation changes
-- `chore--short-description` - Maintenance tasks
-- `refactor--short-description` - Code refactoring
-
-**Initial clone setup:**
-```bash
-# Clone with separate git directory (one-time setup)
-git clone --separate-git-dir=.git <repo-url> main
-cd ..  # Stay in parent directory for worktree management
-```
-
-**Creating a new worktree for an issue:**
-```bash
-# From the parent directory (containing .git/)
-git worktree add <branch-name> -b <branch-name>
-cd <branch-name>
-```
-
-**Working with main:**
-The `main/` directory is the worktree for the main branch and is READ-ONLY during feature work:
-- **NEVER edit files in `main/`** while working on a feature/bug branch
-- To reference main's code, read files using their absolute path (e.g., `/path/to/codesearch/main/crates/...`) without changing directories
-- Pulling latest changes: `cd main && git pull` (only when not in the middle of feature work)
-- Never commit directly to main (blocked by pre-commit hook)
-
-**During feature/bug work (IMPORTANT):**
-- **Stay in your feature worktree for ALL operations** - edits, builds, tests, and cargo commands
-- **NEVER switch between worktrees without explicit user instruction** - Claude Code must remain in the current worktree unless the user explicitly requests a worktree change
-- **Never switch directories to another worktree to make edits** - this causes code to end up in the wrong place
-- If you need to compare with main, READ from main's path but WRITE only in your feature worktree
-- Example: You're in `bug--123/`. To see main's version of a file, read `/path/to/codesearch/main/crates/foo/src/lib.rs`. To edit, use `bug--123/crates/foo/src/lib.rs`
-- All `cargo build`, `cargo test`, etc. commands should run from within your feature worktree
-
-**Listing worktrees:**
-```bash
-git worktree list
-```
-
-**Removing a worktree after merging:**
-```bash
-git worktree remove <branch-name>
-```
 
 **Important:** Never use `git checkout <branch>` inside a worktree. Worktrees are permanently tied to their specific branch.
 
@@ -91,7 +37,7 @@ git worktree remove <branch-name>
 
 **Architecture Principles:**
 - IMPORTANT: Design narrow, abstract public APIs centered around traits
-- IMPORTANT: Limit public exports to traits, models, errors, and factory functions
+- IMPORTANT: Minimize public exports from lib crates. Minimize visibility within crates (default to private)
 - Implement From/Into traits for API boundary conversions
 
 **LSP Usage (MANDATORY):**
@@ -102,10 +48,6 @@ git worktree remove <branch-name>
 - Never assume you know what exists - verify with LSP first
 - This applies to ALL code exploration, not just specific crates
 
-**Source of Truth:**
-- The user's instructions and explicitly referenced resources (issues, PRs, docs, websites) are the only source of truth
-- Neither existing code nor documentation should be assumed correct, complete, or up-to-date
-- When uncertain about intended patterns or architecture, ASK rather than assume
 
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests
@@ -128,82 +70,3 @@ git worktree remove <branch-name>
 
 **Reference Documentation:** `crates/languages/docs/new-language-onboarding.md`
 - This doc exists but may not be fully current - verify requirements with user when starting work
-
-**Before Writing Code:**
-1. Use LSP to discover what utilities/patterns already exist
-2. ASK the user about intended architecture if requirements are unclear
-3. Do not assume existing implementations are correct patterns to follow
-
-## CRATE ARCHITECTURE
-
-This is a workspace with these crates:
-
-**Foundation:**
-- **core**: Foundation types, entities, configuration, error handling
-- **languages**: AST parsing and entity extraction using spec-driven YAML configuration. Fully implemented for Rust, JavaScript/TypeScript. Python removed (to be reimplemented).
-
-**Indexing & Storage:**
-- **indexer**: Repository indexing logic with Git integration
-- **watcher**: Real-time file system monitoring with ignore patterns
-- **storage**: Persistent storage layer (Postgres, Qdrant, Neo4j)
-- **outbox-processor**: Background processor for Neo4j relationship resolution using typed `EntityRelationshipData`
-
-**Search & Retrieval:**
-- **embeddings**: Vector embedding providers (Jina, LocalApi/vLLM)
-- **reranking**: Cross-encoder reranking providers for improved relevance
-- **agentic-search**: Multi-agent search orchestration with dual-track pipeline
-
-**Servers & Interfaces:**
-- **cli**: Command-line interface (`codesearch` binary)
-- **server**: REST API server with filesystem watching integration
-- **mcp-server**: Model Context Protocol server for AI tool integration
-
-**Testing:**
-- **e2e-tests**: E2E test infrastructure (excluded from default builds, run with `--manifest-path`)
-
-## DEVELOPMENT COMMANDS
-
-**Build & Test:**
-```bash
-cargo build --workspace --all-targets                                        # Build all
-cargo test --workspace                                                       # Unit & integration tests
-cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored          # E2E tests (require Docker)
-cargo clippy --workspace && cargo fmt                                        # Lint & format
-```
-
-**Run:**
-```bash
-cargo run -- index        # Index current repository
-cargo run -- serve        # Start REST API server
-```
-
-**Infrastructure:**
-- Shared Docker infrastructure at `~/.codesearch/infrastructure/`
-- Services: Postgres, Qdrant, Neo4j, vLLM (embeddings + reranker when `provider = "localapi"`)
-- vLLM container only starts when `embeddings.provider = "localapi"` (requires GPU)
-- Default Jina provider requires no local containers for embeddings
-- Auto-starts on first `codesearch index`
-- Multi-repository support: `codesearch serve` serves all indexed repositories
-- Check status: `docker ps --filter "name=codesearch"`
-- Stop: `cd ~/.codesearch/infrastructure && docker compose down`
-
-## KEY FEATURES
-
-**Search Architecture:**
-- **Hybrid Search**: Combines sparse retrieval (Granite/BM25) + dense vector embeddings using RRF fusion in Qdrant (default)
-- **Reranking**: Optional cross-encoder reranking for improved relevance (configure in `~/.codesearch/config.toml`)
-- **Graph Queries**: Neo4j stores code relationships (calls, inherits, implements, etc.)
-
-**Embedding Providers:**
-- **Jina (default)**: Uses Jina AI API for embeddings. Zero-config, no GPU required. Set `JINA_API_KEY` or `embeddings.api_key` in config.
-- **LocalApi**: Self-hosted vLLM with BGE models. Requires GPU. Set `embeddings.provider = "localapi"` in config.
-- Provider handles query vs passage formatting internally via `EmbeddingTask` enum
-- Jina: Uses task parameter (`retrieval.query`, `retrieval.passage`)
-- BGE (LocalApi): Uses instruction prefix for queries only (`<instruct>...\n<query>...`)
-
-**Neo4j Relationships:**
-- Forward: CONTAINS, IMPLEMENTS, ASSOCIATES, EXTENDS_INTERFACE, INHERITS_FROM, USES, CALLS, IMPORTS
-- Reciprocal: IMPLEMENTED_BY, ASSOCIATED_WITH, EXTENDED_BY, HAS_SUBCLASS, USED_BY, CALLED_BY, IMPORTED_BY
-- Relationship data extracted at parse time into typed `EntityRelationshipData` fields (calls, uses_types, imports, etc.)
-- `GenericResolver` resolves references using configurable `LookupStrategy` chains
-- Database per repository: `codesearch_{repository_uuid}`

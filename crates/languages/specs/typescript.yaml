@@ -1105,6 +1105,521 @@ metadata_rules:
 
 
 # =============================================================================
+# EXTRACTION HINTS
+# =============================================================================
+# These hints drive code generation for entity handlers. They extend the
+# declarative rules above with implementation details needed for extraction.
+#
+# TypeScript extends JavaScript with:
+# - Interfaces, type aliases, enums
+# - Namespace modules (internal modules)
+# - Abstract classes and methods
+# - Ambient declarations (declare)
+# - Parameter properties in constructors
+# - Call/construct/index signatures
+
+extraction_hints:
+
+  # ---------------------------------------------------------------------------
+  # Pattern Groups
+  # ---------------------------------------------------------------------------
+  # TypeScript shares most pattern groups with JavaScript, with additional
+  # TypeScript-specific considerations.
+
+  pattern_groups:
+
+    # Inherits variable_initializer from JavaScript
+    variable_initializer:
+      inherits_from: javascript
+      description: "Variable declarations - same precedence as JavaScript"
+
+    # Inherits class_field_initializer from JavaScript
+    class_field_initializer:
+      inherits_from: javascript
+      description: "Class fields - same precedence as JavaScript"
+
+  # ---------------------------------------------------------------------------
+  # Tree-sitter Queries
+  # ---------------------------------------------------------------------------
+  # TypeScript-specific query definitions. Note that TypeScript uses
+  # `type_identifier` for type names instead of `identifier`.
+
+  queries:
+
+    # Inherits all JavaScript queries plus the following TypeScript-specific ones:
+
+    # --- Class queries (TypeScript version uses type_identifier) ---
+
+    TS_CLASS_DECLARATION:
+      description: "TypeScript class declarations (including abstract)"
+      capture: "class"
+      query: |
+        [
+          (class_declaration
+            name: (type_identifier) @name
+            (class_heritage)? @heritage
+            body: (class_body) @body) @class
+
+          (abstract_class_declaration
+            name: (type_identifier) @name
+            (class_heritage)? @heritage
+            body: (class_body) @body) @class
+
+          (export_statement
+            declaration: (class_declaration
+              name: (type_identifier) @name
+              (class_heritage)? @heritage
+              body: (class_body) @body)) @class
+
+          (export_statement
+            declaration: (abstract_class_declaration
+              name: (type_identifier) @name
+              (class_heritage)? @heritage
+              body: (class_body) @body)) @class
+        ]
+
+    TS_CLASS_EXPRESSION:
+      description: "TypeScript class expressions"
+      capture: "class"
+      query: |
+        [
+          (lexical_declaration
+            (variable_declarator
+              name: (identifier) @name
+              value: (class
+                name: (type_identifier)? @class_name
+                (class_heritage)? @heritage
+                body: (class_body) @body))) @class
+
+          (variable_declaration
+            (variable_declarator
+              name: (identifier) @name
+              value: (class
+                name: (type_identifier)? @class_name
+                (class_heritage)? @heritage
+                body: (class_body) @body))) @class
+        ]
+
+    TS_PROPERTY:
+      description: "TypeScript class fields (uses public_field_definition)"
+      capture: "property"
+      query: |
+        (class_body
+          (public_field_definition
+            name: [
+              (property_identifier) @name
+              (private_property_identifier) @name
+            ]
+            value: (_)? @value) @property)
+
+    # --- Interface queries ---
+
+    INTERFACE:
+      description: "Interface declarations"
+      capture: "interface"
+      query: |
+        [
+          (interface_declaration
+            name: (type_identifier) @name
+            (extends_type_clause)? @extends_clause
+            body: (interface_body) @body) @interface
+
+          (export_statement
+            declaration: (interface_declaration
+              name: (type_identifier) @name
+              (extends_type_clause)? @extends_clause
+              body: (interface_body) @body)) @interface
+        ]
+
+    INTERFACE_PROPERTY:
+      description: "Interface property signatures"
+      capture: "interface_property"
+      query: |
+        (interface_body
+          (property_signature
+            name: (property_identifier) @name) @interface_property)
+
+    INTERFACE_METHOD:
+      description: "Interface method signatures"
+      capture: "interface_method"
+      query: |
+        (interface_body
+          (method_signature
+            name: (property_identifier) @name) @interface_method)
+
+    CALL_SIGNATURE:
+      description: "Call signatures in interfaces"
+      capture: "call_signature"
+      query: |
+        (interface_body
+          (call_signature) @call_signature)
+
+    CONSTRUCT_SIGNATURE:
+      description: "Construct signatures in interfaces"
+      capture: "construct_signature"
+      query: |
+        (interface_body
+          (construct_signature) @construct_signature)
+
+    INDEX_SIGNATURE:
+      description: "Index signatures in interfaces"
+      capture: "index_signature"
+      query: |
+        (interface_body
+          (index_signature) @index_signature)
+
+    # --- Type alias queries ---
+
+    TYPE_ALIAS:
+      description: "Type alias declarations"
+      capture: "type_alias"
+      query: |
+        [
+          (type_alias_declaration
+            name: (type_identifier) @name
+            type_parameters: (type_parameters)? @type_params
+            value: (_) @value) @type_alias
+
+          (export_statement
+            declaration: (type_alias_declaration
+              name: (type_identifier) @name
+              type_parameters: (type_parameters)? @type_params
+              value: (_) @value)) @type_alias
+        ]
+
+    # --- Enum queries ---
+
+    ENUM:
+      description: "Enum declarations (including const enum)"
+      capture: "enum"
+      query: |
+        [
+          (enum_declaration
+            name: (identifier) @name
+            body: (enum_body) @body) @enum
+
+          (export_statement
+            declaration: (enum_declaration
+              name: (identifier) @name
+              body: (enum_body) @body)) @enum
+        ]
+
+    ENUM_MEMBER:
+      description: "Enum member variants"
+      capture: "enum_member"
+      query: |
+        [
+          (enum_body
+            (property_identifier) @name) @enum_member
+
+          (enum_body
+            (enum_assignment
+              name: (property_identifier) @name)) @enum_member
+        ]
+
+    # --- Namespace queries ---
+
+    NAMESPACE:
+      description: "Namespace/module declarations"
+      capture: "namespace"
+      query: |
+        [
+          (internal_module
+            name: (identifier) @name
+            body: (statement_block) @body) @namespace
+
+          (internal_module
+            name: (nested_identifier) @name
+            body: (statement_block) @body) @namespace
+
+          (export_statement
+            declaration: (internal_module
+              name: (identifier) @name
+              body: (statement_block) @body)) @namespace
+
+          (export_statement
+            declaration: (internal_module
+              name: (nested_identifier) @name
+              body: (statement_block) @body)) @namespace
+        ]
+
+    # --- Abstract method queries ---
+
+    ABSTRACT_METHOD:
+      description: "Abstract method signatures in abstract classes"
+      capture: "method"
+      query: |
+        (class_body
+          (abstract_method_signature
+            name: (property_identifier) @name) @method)
+
+    # --- Ambient declaration queries ---
+
+    AMBIENT_FUNCTION:
+      description: "Ambient function declarations (declare function)"
+      capture: "function"
+      query: |
+        (ambient_declaration
+          (function_signature
+            name: (identifier) @name) @function)
+
+    AMBIENT_CONST:
+      description: "Ambient const declarations (declare const)"
+      capture: "const"
+      query: |
+        (ambient_declaration
+          (lexical_declaration
+            kind: "const"
+            (variable_declarator
+              name: (identifier) @name)) @const)
+
+    AMBIENT_LET:
+      description: "Ambient let declarations (declare let)"
+      capture: "let"
+      query: |
+        (ambient_declaration
+          (lexical_declaration
+            kind: "let"
+            (variable_declarator
+              name: (identifier) @name)) @let)
+
+    AMBIENT_VAR:
+      description: "Ambient var declarations (declare var)"
+      capture: "var"
+      query: |
+        (ambient_declaration
+          (variable_declaration
+            (variable_declarator
+              name: (identifier) @name)) @var)
+
+    AMBIENT_CLASS:
+      description: "Ambient class declarations (declare class)"
+      capture: "class"
+      query: |
+        [
+          (ambient_declaration
+            (class_declaration
+              name: (type_identifier) @name
+              body: (class_body) @body) @class)
+
+          (ambient_declaration
+            (abstract_class_declaration
+              name: (type_identifier) @name
+              body: (class_body) @body) @class)
+        ]
+
+    # --- Parameter property queries ---
+
+    PARAMETER_PROPERTY:
+      description: "Constructor parameter properties"
+      capture: "property"
+      query: |
+        [
+          (class_body
+            (method_definition
+              parameters: (formal_parameters
+                (required_parameter
+                  (accessibility_modifier)
+                  pattern: (identifier) @name) @property)))
+
+          (class_body
+            (method_definition
+              parameters: (formal_parameters
+                (optional_parameter
+                  (accessibility_modifier)
+                  pattern: (identifier) @name) @property)))
+
+          (class_body
+            (method_definition
+              parameters: (formal_parameters
+                (required_parameter
+                  "readonly"
+                  pattern: (identifier) @name) @property)))
+
+          (class_body
+            (method_definition
+              parameters: (formal_parameters
+                (optional_parameter
+                  "readonly"
+                  pattern: (identifier) @name) @property)))
+        ]
+
+  # ---------------------------------------------------------------------------
+  # Extractors
+  # ---------------------------------------------------------------------------
+  # TypeScript inherits JavaScript extractors and adds:
+
+  extractors:
+
+    # Inherits from JavaScript:
+    # - function_metadata
+    # - arrow_function_metadata
+    # - method_metadata
+    # - const_metadata
+    # - property_metadata
+    # - extract_function_relationships
+    # - extract_class_relationships
+    # - extract_module_relationships
+
+    enum_metadata:
+      description: "Extract enum metadata (is_const)"
+      metadata_fields:
+        - is_const: "Check for const keyword before enum"
+
+    extract_interface_relationships:
+      description: "Extract interface extends and type usages"
+      relationship_fields:
+        - extended_types: "Types from extends clause"
+        - uses_types: "Type references in body"
+
+  # ---------------------------------------------------------------------------
+  # Handlers
+  # ---------------------------------------------------------------------------
+  # TypeScript handlers extend JavaScript handlers with TS-specific entities.
+
+  handlers:
+
+    # --- Inherits all JavaScript handlers ---
+    # FunctionDeclaration, ArrowFunction, FunctionExpression, Const, Let, Var,
+    # ClassDeclaration, ClassExpression, MethodDefinition, FieldDefinition, Module
+
+    # --- Interface handlers ---
+
+    Interface:
+      entity_rule: E-INTERFACE
+      query: INTERFACE
+      capture: "interface"
+      name_strategy: capture
+      relationships: extract_interface_relationships
+
+    InterfaceProperty:
+      entity_rule: E-INTERFACE-PROPERTY
+      query: INTERFACE_PROPERTY
+      capture: "interface_property"
+      name_strategy: capture
+      visibility_override: Public
+
+    InterfaceMethod:
+      entity_rule: E-INTERFACE-METHOD
+      query: INTERFACE_METHOD
+      capture: "interface_method"
+      name_strategy: capture
+      visibility_override: Public
+
+    CallSignature:
+      entity_rule: E-INTERFACE-CALL-SIG
+      query: CALL_SIGNATURE
+      capture: "call_signature"
+      name_strategy: static
+      static_name: "()"
+      visibility_override: Public
+
+    ConstructSignature:
+      entity_rule: E-INTERFACE-CONSTRUCT-SIG
+      query: CONSTRUCT_SIGNATURE
+      capture: "construct_signature"
+      name_strategy: static
+      static_name: "new()"
+      visibility_override: Public
+
+    IndexSignature:
+      entity_rule: E-INTERFACE-INDEX-SIG
+      query: INDEX_SIGNATURE
+      capture: "index_signature"
+      name_strategy: derive  # Derive from index type, e.g., [string]
+      name_derive_fn: derive_index_signature_name
+      visibility_override: Public
+
+    # --- Type alias handlers ---
+
+    TypeAlias:
+      entity_rule: E-TYPE-ALIAS
+      query: TYPE_ALIAS
+      capture: "type_alias"
+      name_strategy: capture
+
+    # --- Enum handlers ---
+
+    Enum:
+      entity_rule: E-ENUM
+      query: ENUM
+      capture: "enum"
+      name_strategy: capture
+      metadata: enum_metadata
+
+    EnumMember:
+      entity_rule: E-ENUM-MEMBER
+      query: ENUM_MEMBER
+      capture: "enum_member"
+      name_strategy: capture
+
+    # --- Namespace handlers ---
+
+    Namespace:
+      entity_rule: E-MOD-NAMESPACE
+      query: NAMESPACE
+      capture: "namespace"
+      name_strategy: capture
+
+    # --- Abstract method handlers ---
+
+    AbstractMethod:
+      entity_rule: E-METHOD-ABSTRACT
+      query: ABSTRACT_METHOD
+      capture: "method"
+      name_strategy: capture
+      visibility_override: Public
+
+    # --- Ambient declaration handlers ---
+
+    AmbientFunction:
+      entity_rule: E-AMBIENT-FN
+      query: AMBIENT_FUNCTION
+      capture: "function"
+      name_strategy: capture
+      visibility_override: Public
+
+    AmbientConst:
+      entity_rule: E-AMBIENT-CONST
+      query: AMBIENT_CONST
+      capture: "const"
+      name_strategy: capture
+      visibility_override: Public
+      metadata: const_metadata
+
+    AmbientLet:
+      entity_rule: E-AMBIENT-LET
+      query: AMBIENT_LET
+      capture: "let"
+      name_strategy: capture
+      visibility_override: Public
+
+    AmbientVar:
+      entity_rule: E-AMBIENT-VAR
+      query: AMBIENT_VAR
+      capture: "var"
+      name_strategy: capture
+      visibility_override: Public
+
+    AmbientClass:
+      entity_rule: E-AMBIENT-CLASS
+      query: AMBIENT_CLASS
+      capture: "class"
+      name_strategy: capture
+      visibility_override: Public
+      relationships: extract_class_relationships
+
+    # --- Parameter property handlers ---
+
+    ParameterProperty:
+      entity_rule: E-PARAM-PROPERTY
+      query: PARAMETER_PROPERTY
+      capture: "property"
+      name_strategy: capture
+      skip_scopes: ["method_definition"]  # Place under class, not constructor
+
+
+# =============================================================================
 # TEST FIXTURE MAPPING
 # =============================================================================
 # Maps test fixtures to the rules they verify.

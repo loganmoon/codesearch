@@ -20,6 +20,7 @@ mod test_language;
 // Public modules
 pub mod common;
 pub mod qualified_name;
+pub mod spec_driven;
 
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {

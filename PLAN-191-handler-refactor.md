@@ -35,6 +35,17 @@ Replace the 16+ variant `define_handler!` macro with spec-driven code generation
 - Added `qualified_name_template` to all handlers for declarative qname construction
 - Added new name strategies: `crate_name`, `positional_index`
 
+### Phase 4: Build-Time Code Generation
+- Created `crates/languages/build.rs` with YAML spec parsing
+- Generates per-language modules with:
+  - **Query constants**: Tree-sitter queries from `extraction_hints.queries`
+  - **Handler configs**: `HandlerConfig` structs from `extraction_hints.handlers`
+- Created `crates/languages/src/spec_driven/mod.rs`:
+  - Core types: `HandlerConfig`, `NameStrategy`, `MetadataExtractor`, `RelationshipExtractor`
+  - Includes generated modules via `include!(concat!(env!("OUT_DIR"), "/*_generated.rs"))`
+- All specs (JS, TS, Rust) now generate compilable code
+- Build dependencies: `serde`, `serde_yaml`
+
 ## Extraction Hints Schema
 
 ```yaml
@@ -76,21 +87,24 @@ extraction_hints:
 
 ## Remaining Phases
 
-### Phase 4: Build-Time Code Generation
+### Phase 5: Create Spec-Driven Extraction Engine
 
-1. Add spec parser to `crates/languages/build.rs`
-2. Parse YAML extraction_hints at compile time
-3. Generate handler code from specs
-4. Wire generated handlers into `define_language_extractor!`
+1. Implement extraction logic that uses `HandlerConfig` to:
+   - Run tree-sitter queries from config
+   - Derive entity names using `NameStrategy`
+   - Build qualified names from `qualified_name_template`
+   - Call metadata/relationship extractors
+2. Wire the spec-driven engine into extractor implementations
+3. Verify tests pass
 
-### Phase 5: Migrate Handlers
+### Phase 6: Migrate Languages
 
-For each language:
-1. Generate handlers from spec
+For each language (JS, TS, Rust):
+1. Replace old handlers with spec-driven extraction
 2. Delete old `define_handler!` calls
 3. Verify tests pass
 
-### Phase 6: Cleanup
+### Phase 7: Cleanup
 
 1. Delete old `define_handler!` macro variants
 2. Delete `define_ts_family_handler!` macro

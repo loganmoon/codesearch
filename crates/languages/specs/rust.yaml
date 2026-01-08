@@ -776,6 +776,713 @@ metadata_rules:
 
 
 # =============================================================================
+# EXTRACTION HINTS
+# =============================================================================
+# These hints drive code generation for entity handlers. They extend the
+# declarative rules above with implementation details needed for extraction.
+#
+# Key design principles:
+# - Queries use tree-sitter captures to extract AST components (no string parsing)
+# - Query-level scoping distinguishes contexts (inherent impl vs trait impl vs trait def)
+# - Engine provides contextual placeholders: {crate}, {module_path}, {scope}
+# - Import resolution is deferred to outbox-processor, not extraction time
+
+extraction_hints:
+
+  # ---------------------------------------------------------------------------
+  # Tree-sitter Queries
+  # ---------------------------------------------------------------------------
+  #
+  # Queries are scoped to specific contexts using parent node matching.
+  # This eliminates the need for runtime disambiguation.
+
+  queries:
+
+    # --- Module queries ---
+
+    MODULE_DECLARATION:
+      description: "Module declarations (mod foo;)"
+      capture: "module"
+      query: |
+        (mod_item
+          name: (identifier) @name
+          body: (declaration_list)? @body) @module
+
+    # --- Function queries (free functions, not in impl/trait) ---
+
+    FUNCTION_FREE:
+      description: "Free functions at module level"
+      capture: "function"
+      query: |
+        (function_item
+          name: (identifier) @name
+          parameters: (parameters) @params
+          return_type: (_)? @return_type
+          body: (block) @body) @function
+
+    # --- Impl block queries ---
+
+    IMPL_INHERENT:
+      description: "Inherent impl blocks (impl Type)"
+      capture: "impl"
+      query: |
+        (impl_item
+          type_parameters: (type_parameters)? @type_params
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type
+              type: (type_identifier) @impl_type_name
+              type_arguments: (type_arguments) @impl_type_args)
+            (scoped_type_identifier
+              path: (_) @impl_type_path
+              name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list) @body) @impl
+        (#not-has-child? @impl trait)
+
+    IMPL_TRAIT:
+      description: "Trait impl blocks (impl Trait for Type)"
+      capture: "impl"
+      query: |
+        (impl_item
+          type_parameters: (type_parameters)? @type_params
+          trait: [
+            (type_identifier) @trait_name
+            (generic_type
+              type: (type_identifier) @trait_name
+              type_arguments: (type_arguments) @trait_type_args)
+            (scoped_type_identifier
+              path: (_) @trait_path
+              name: (type_identifier) @trait_name)
+          ]
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type
+              type: (type_identifier) @impl_type_name
+              type_arguments: (type_arguments) @impl_type_args)
+            (scoped_type_identifier
+              path: (_) @impl_type_path
+              name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list) @body) @impl
+
+    # --- Method queries (scoped to impl blocks) ---
+
+    METHOD_IN_INHERENT_IMPL:
+      description: "Methods with self parameter in inherent impl"
+      capture: "method"
+      query: |
+        (impl_item
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (function_item
+              name: (identifier) @name
+              parameters: (parameters
+                (self_parameter) @self_param)
+              return_type: (_)? @return_type
+              body: (block) @body) @method))
+        (#not-has-child? @impl_item trait)
+
+    METHOD_RETURNS_SELF_IN_INHERENT_IMPL:
+      description: "Constructor methods returning Self in inherent impl"
+      capture: "method"
+      query: |
+        (impl_item
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (function_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (type_identifier) @return_type
+              body: (block) @body) @method))
+        (#not-has-child? @impl_item trait)
+        (#not-has-child? @params self_parameter)
+        (#eq? @return_type "Self")
+
+    ASSOCIATED_FUNCTION_IN_INHERENT_IMPL:
+      description: "Associated functions (no self, not returning Self) in inherent impl"
+      capture: "function"
+      query: |
+        (impl_item
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (function_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (_)? @return_type
+              body: (block) @body) @function))
+        (#not-has-child? @impl_item trait)
+        (#not-has-child? @params self_parameter)
+        (#not-eq? @return_type "Self")
+
+    METHOD_IN_TRAIT_IMPL:
+      description: "Methods in trait impl blocks"
+      capture: "method"
+      query: |
+        (impl_item
+          trait: [
+            (type_identifier) @trait_name
+            (generic_type type: (type_identifier) @trait_name)
+            (scoped_type_identifier name: (type_identifier) @trait_name)
+          ]
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (function_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (_)? @return_type
+              body: (block) @body) @method))
+
+    # --- Trait definition queries ---
+
+    TRAIT:
+      description: "Trait definitions"
+      capture: "trait"
+      query: |
+        (trait_item
+          name: (type_identifier) @name
+          type_parameters: (type_parameters)? @type_params
+          bounds: (trait_bounds)? @bounds
+          body: (declaration_list) @body) @trait
+
+    METHOD_IN_TRAIT_DEF:
+      description: "Method signatures in trait definitions"
+      capture: "method"
+      query: |
+        (trait_item
+          name: (type_identifier) @trait_name
+          body: (declaration_list
+            (function_signature_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (_)? @return_type) @method))
+
+    METHOD_WITH_DEFAULT_IN_TRAIT_DEF:
+      description: "Methods with default implementation in trait definitions"
+      capture: "method"
+      query: |
+        (trait_item
+          name: (type_identifier) @trait_name
+          body: (declaration_list
+            (function_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (_)? @return_type
+              body: (block) @body) @method))
+
+    # --- Type definition queries ---
+
+    STRUCT:
+      description: "Struct definitions"
+      capture: "struct"
+      query: |
+        (struct_item
+          name: (type_identifier) @name
+          type_parameters: (type_parameters)? @type_params
+          body: [
+            (field_declaration_list) @fields
+            (ordered_field_declaration_list) @tuple_fields
+          ]?) @struct
+
+    STRUCT_FIELD:
+      description: "Named struct fields"
+      capture: "field"
+      query: |
+        (struct_item
+          name: (type_identifier) @struct_name
+          body: (field_declaration_list
+            (field_declaration
+              name: (field_identifier) @name
+              type: (_) @field_type) @field))
+
+    TUPLE_STRUCT_FIELD:
+      description: "Tuple struct fields (positional)"
+      capture: "field"
+      query: |
+        (struct_item
+          name: (type_identifier) @struct_name
+          body: (ordered_field_declaration_list
+            (field_declaration
+              type: (_) @field_type) @field))
+
+    ENUM:
+      description: "Enum definitions"
+      capture: "enum"
+      query: |
+        (enum_item
+          name: (type_identifier) @name
+          type_parameters: (type_parameters)? @type_params
+          body: (enum_variant_list) @variants) @enum
+
+    ENUM_VARIANT:
+      description: "Enum variants"
+      capture: "variant"
+      query: |
+        (enum_item
+          name: (type_identifier) @enum_name
+          body: (enum_variant_list
+            (enum_variant
+              name: (identifier) @name
+              body: [
+                (field_declaration_list) @fields
+                (ordered_field_declaration_list) @tuple_fields
+              ]?
+              value: (_)? @discriminant) @variant))
+
+    UNION:
+      description: "Union definitions"
+      capture: "union"
+      query: |
+        (union_item
+          name: (type_identifier) @name
+          body: (field_declaration_list) @fields) @union
+
+    UNION_FIELD:
+      description: "Union fields"
+      capture: "field"
+      query: |
+        (union_item
+          name: (type_identifier) @union_name
+          body: (field_declaration_list
+            (field_declaration
+              name: (field_identifier) @name
+              type: (_) @field_type) @field))
+
+    TYPE_ALIAS:
+      description: "Type alias definitions"
+      capture: "type_alias"
+      query: |
+        (type_item
+          name: (type_identifier) @name
+          type_parameters: (type_parameters)? @type_params
+          type: (_) @aliased_type) @type_alias
+
+    ASSOCIATED_TYPE_IN_TRAIT_IMPL:
+      description: "Associated types in trait impl blocks"
+      capture: "type_alias"
+      query: |
+        (impl_item
+          trait: [
+            (type_identifier) @trait_name
+            (generic_type type: (type_identifier) @trait_name)
+            (scoped_type_identifier name: (type_identifier) @trait_name)
+          ]
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (type_item
+              name: (type_identifier) @name
+              type: (_) @aliased_type) @type_alias))
+
+    # --- Constant and static queries ---
+
+    CONST:
+      description: "Constant definitions at module level"
+      capture: "const"
+      query: |
+        (const_item
+          name: (identifier) @name
+          type: (_) @const_type
+          value: (_) @value) @const
+
+    CONST_IN_IMPL:
+      description: "Associated constants in impl blocks"
+      capture: "const"
+      query: |
+        (impl_item
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (const_item
+              name: (identifier) @name
+              type: (_) @const_type
+              value: (_) @value) @const))
+
+    STATIC:
+      description: "Static definitions"
+      capture: "static"
+      query: |
+        (static_item
+          name: (identifier) @name
+          type: (_) @static_type
+          value: (_) @value) @static
+
+    # --- Extern block queries ---
+
+    EXTERN_BLOCK:
+      description: "Extern block declarations"
+      capture: "extern_block"
+      query: |
+        (extern_block
+          abi: (string_literal)? @abi
+          body: (declaration_list) @body) @extern_block
+
+    EXTERN_FUNCTION:
+      description: "Function declarations in extern blocks"
+      capture: "function"
+      query: |
+        (extern_block
+          body: (declaration_list
+            (function_signature_item
+              name: (identifier) @name
+              parameters: (parameters) @params
+              return_type: (_)? @return_type) @function))
+
+    EXTERN_STATIC:
+      description: "Static declarations in extern blocks"
+      capture: "static"
+      query: |
+        (extern_block
+          body: (declaration_list
+            (static_item
+              name: (identifier) @name
+              type: (_) @static_type) @static))
+
+    # --- Macro queries ---
+
+    MACRO_RULES:
+      description: "macro_rules! definitions"
+      capture: "macro"
+      query: |
+        (macro_definition
+          name: (identifier) @name) @macro
+
+  # ---------------------------------------------------------------------------
+  # Extractors
+  # ---------------------------------------------------------------------------
+  # Shared extraction functions for metadata and relationships.
+  # These are referenced by handlers and can be reused across entity types.
+
+  extractors:
+
+    function_metadata:
+      description: "Extract function/method metadata"
+      metadata_fields:
+        - is_async: "Check for async keyword"
+        - is_const: "Check for const keyword"
+        - is_unsafe: "Check for unsafe keyword"
+        - is_generic: "Check for type_parameters"
+        - generic_params: "Extract type parameter names"
+
+    struct_metadata:
+      description: "Extract struct metadata"
+      metadata_fields:
+        - is_generic: "Check for type_parameters"
+        - generic_params: "Extract type parameter names"
+        - is_tuple_struct: "Check for ordered_field_declaration_list"
+        - is_unit_struct: "Check for no body"
+
+    enum_metadata:
+      description: "Extract enum metadata"
+      metadata_fields:
+        - is_generic: "Check for type_parameters"
+        - generic_params: "Extract type parameter names"
+
+    trait_metadata:
+      description: "Extract trait metadata"
+      metadata_fields:
+        - is_generic: "Check for type_parameters"
+        - generic_params: "Extract type parameter names"
+        - bounds: "Extract supertrait bounds"
+
+    static_metadata:
+      description: "Extract static metadata"
+      metadata_fields:
+        - is_mutable: "Check for mutable_specifier"
+
+    extract_function_relationships:
+      description: "Extract function calls and type usages from body"
+      relationship_fields:
+        - calls: "Function/method calls in body"
+        - uses_types: "Type references in signature"
+
+    extract_type_relationships:
+      description: "Extract type usage relationships"
+      relationship_fields:
+        - uses_types: "Types referenced in definition"
+
+    extract_trait_relationships:
+      description: "Extract trait relationships"
+      relationship_fields:
+        - extends: "Supertrait bounds"
+
+  # ---------------------------------------------------------------------------
+  # Handlers
+  # ---------------------------------------------------------------------------
+  # Handler configurations that wire entity rules to queries and extractors.
+  #
+  # Qualified name templates use:
+  # - Engine-provided: {crate}, {module_path}, {scope}
+  # - Query captures: {name}, {impl_type_name}, {trait_name}, etc.
+
+  handlers:
+
+    # --- Module handlers ---
+
+    Module:
+      entity_rule: E-MOD-DECL
+      query: MODULE_DECLARATION
+      capture: "module"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+
+    CrateRoot:
+      entity_rule: E-MOD-CRATE
+      name_strategy: crate_name
+      qualified_name_template: "{crate}"
+
+    # --- Free function handlers ---
+
+    FreeFunction:
+      entity_rule: E-FN-FREE
+      query: FUNCTION_FREE
+      capture: "function"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    # --- Impl block handlers ---
+
+    ImplInherent:
+      entity_rule: E-IMPL-INHERENT
+      query: IMPL_INHERENT
+      capture: "impl"
+      name_strategy: template
+      name_template: "impl {impl_type_name}"
+      qualified_name_template: "{scope}::impl {impl_type_name}"
+
+    ImplTrait:
+      entity_rule: E-IMPL-TRAIT
+      query: IMPL_TRAIT
+      capture: "impl"
+      name_strategy: template
+      name_template: "<{impl_type_name} as {trait_name}>"
+      qualified_name_template: "{scope}::<{impl_type_name} as {trait_name}>"
+
+    # --- Method handlers (in inherent impl) ---
+
+    MethodInInherentImpl:
+      entity_rule: E-METHOD-SELF
+      query: METHOD_IN_INHERENT_IMPL
+      capture: "method"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name}>::{name}"
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    MethodReturnsSelfInInherentImpl:
+      entity_rule: E-METHOD-RETURNS-SELF
+      query: METHOD_RETURNS_SELF_IN_INHERENT_IMPL
+      capture: "method"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name}>::{name}"
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    AssociatedFunctionInInherentImpl:
+      entity_rule: E-FN-ASSOC
+      query: ASSOCIATED_FUNCTION_IN_INHERENT_IMPL
+      capture: "function"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name}>::{name}"
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    # --- Method handlers (in trait impl) ---
+
+    MethodInTraitImpl:
+      entity_rule: E-METHOD-TRAIT-IMPL
+      query: METHOD_IN_TRAIT_IMPL
+      capture: "method"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name} as {trait_name}>::{name}"
+      visibility_override: Public
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    # --- Method handlers (in trait definition) ---
+
+    MethodInTraitDef:
+      entity_rule: E-METHOD-TRAIT-DEF
+      query: METHOD_IN_TRAIT_DEF
+      capture: "method"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{trait_name}::{name}"
+      visibility_override: null  # None - inherits from trait
+      metadata: function_metadata
+
+    MethodWithDefaultInTraitDef:
+      entity_rule: E-METHOD-TRAIT-DEF
+      query: METHOD_WITH_DEFAULT_IN_TRAIT_DEF
+      capture: "method"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{trait_name}::{name}"
+      visibility_override: null
+      metadata: function_metadata
+      relationships: extract_function_relationships
+
+    # --- Type handlers ---
+
+    Struct:
+      entity_rule: E-STRUCT
+      query: STRUCT
+      capture: "struct"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      metadata: struct_metadata
+      relationships: extract_type_relationships
+
+    StructField:
+      entity_rule: E-PROPERTY
+      query: STRUCT_FIELD
+      capture: "field"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{struct_name}::{name}"
+
+    TupleStructField:
+      entity_rule: E-PROPERTY
+      query: TUPLE_STRUCT_FIELD
+      capture: "field"
+      name_strategy: positional_index
+      qualified_name_template: "{scope}::{struct_name}::{index}"
+
+    Enum:
+      entity_rule: E-ENUM
+      query: ENUM
+      capture: "enum"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      metadata: enum_metadata
+
+    EnumVariant:
+      entity_rule: E-ENUM-VARIANT
+      query: ENUM_VARIANT
+      capture: "variant"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{enum_name}::{name}"
+
+    Union:
+      entity_rule: E-UNION
+      query: UNION
+      capture: "union"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+
+    UnionField:
+      entity_rule: E-PROPERTY
+      query: UNION_FIELD
+      capture: "field"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{union_name}::{name}"
+
+    Trait:
+      entity_rule: E-TRAIT
+      query: TRAIT
+      capture: "trait"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      metadata: trait_metadata
+      relationships: extract_trait_relationships
+
+    TypeAlias:
+      entity_rule: E-TYPE-ALIAS
+      query: TYPE_ALIAS
+      capture: "type_alias"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+
+    AssociatedTypeInTraitImpl:
+      entity_rule: E-TYPE-ALIAS-ASSOC
+      query: ASSOCIATED_TYPE_IN_TRAIT_IMPL
+      capture: "type_alias"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name} as {trait_name}>::{name}"
+      visibility_override: Public
+
+    # --- Constant and static handlers ---
+
+    Const:
+      entity_rule: E-CONST
+      query: CONST
+      capture: "const"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+
+    ConstInImpl:
+      entity_rule: E-CONST-ASSOC
+      query: CONST_IN_IMPL
+      capture: "const"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name}>::{name}"
+
+    Static:
+      entity_rule: E-STATIC
+      query: STATIC
+      capture: "static"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      metadata: static_metadata
+
+    # --- Extern block handlers ---
+
+    ExternBlock:
+      entity_rule: E-EXTERN-BLOCK
+      query: EXTERN_BLOCK
+      capture: "extern_block"
+      name_strategy: template
+      name_template: 'extern "{abi}"'
+      qualified_name_template: '{scope}::extern "{abi}"'
+
+    ExternFunction:
+      entity_rule: E-EXTERN-FN
+      query: EXTERN_FUNCTION
+      capture: "function"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      visibility_override: Public
+
+    ExternStatic:
+      entity_rule: E-EXTERN-STATIC
+      query: EXTERN_STATIC
+      capture: "static"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+      visibility_override: Public
+
+    # --- Macro handlers ---
+
+    MacroRules:
+      entity_rule: E-MACRO-RULES
+      query: MACRO_RULES
+      capture: "macro"
+      name_strategy: capture
+      qualified_name_template: "{scope}::{name}"
+
+
+# =============================================================================
 # TEST FIXTURE MAPPING
 # =============================================================================
 # Maps test fixtures to the rules they verify.

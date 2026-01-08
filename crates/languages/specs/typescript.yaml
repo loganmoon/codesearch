@@ -1121,26 +1121,15 @@ metadata_rules:
 extraction_hints:
 
   # ---------------------------------------------------------------------------
-  # Pattern Groups
-  # ---------------------------------------------------------------------------
-  # TypeScript shares most pattern groups with JavaScript, with additional
-  # TypeScript-specific considerations.
-
-  pattern_groups:
-
-    # Inherits variable_initializer from JavaScript
-    variable_initializer:
-      inherits_from: javascript
-      description: "Variable declarations - same precedence as JavaScript"
-
-    # Inherits class_field_initializer from JavaScript
-    class_field_initializer:
-      inherits_from: javascript
-      description: "Class fields - same precedence as JavaScript"
-
-  # ---------------------------------------------------------------------------
   # Tree-sitter Queries
   # ---------------------------------------------------------------------------
+  #
+  # TypeScript inherits JavaScript's query precedence approach: overlapping
+  # patterns are disambiguated via tree-sitter predicates (#not-match?, etc.)
+  # directly in the queries rather than a separate mechanism.
+  #
+  # See javascript.yaml for precedence group documentation.
+  #
   # TypeScript-specific query definitions. Note that TypeScript uses
   # `type_identifier` for type names instead of `identifier`.
 
@@ -1266,7 +1255,10 @@ extraction_hints:
       capture: "index_signature"
       query: |
         (interface_body
-          (index_signature) @index_signature)
+          (index_signature
+            (index_signature_parameter
+              (type_annotation
+                (_) @index_type))) @index_signature)
 
     # --- Type alias queries ---
 
@@ -1526,8 +1518,8 @@ extraction_hints:
       entity_rule: E-INTERFACE-INDEX-SIG
       query: INDEX_SIGNATURE
       capture: "index_signature"
-      name_strategy: derive  # Derive from index type, e.g., [string]
-      name_derive_fn: derive_index_signature_name
+      name_strategy: template
+      name_template: "[{index_type}]"  # e.g., [string], [number]
       visibility_override: Public
 
     # --- Type alias handlers ---

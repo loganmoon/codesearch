@@ -115,40 +115,6 @@ impl ImportMap {
     }
 }
 
-/// Resolve a reference to a qualified name using import map and scope context
-///
-/// Resolution order:
-/// 1. If already scoped (contains separator), use as-is
-/// 2. Try import map
-/// 3. Try parent_scope::name
-/// 4. Mark as external::name
-pub(crate) fn resolve_reference(
-    name: &str,
-    import_map: &ImportMap,
-    parent_scope: Option<&str>,
-    separator: &str,
-) -> String {
-    // Already scoped? Use as-is
-    if ImportMap::is_scoped(name, separator) {
-        return name.to_string();
-    }
-
-    // Try import map
-    if let Some(resolved) = import_map.resolve(name) {
-        return resolved.to_string();
-    }
-
-    // Try parent scope
-    if let Some(scope) = parent_scope {
-        if !scope.is_empty() {
-            return format!("{scope}{separator}{name}");
-        }
-    }
-
-    // Mark as external
-    format!("external{separator}{name}")
-}
-
 /// Resolve a relative import path to an absolute module path
 ///
 /// Given the current module's path and a relative import path (starting with `.` or `..`),
@@ -243,11 +209,11 @@ pub(crate) fn parse_file_imports(
         Language::Rust => parse_rust_imports(root, source),
         Language::JavaScript => parse_js_imports(root, source, current_module_path),
         Language::TypeScript => parse_ts_imports(root, source, current_module_path),
-        Language::Python => parse_python_imports(root, source, current_module_path),
-        Language::Go => ImportMap::new("."), // Go not fully implemented
-        Language::Java => ImportMap::new("."), // Java not implemented
+        Language::Python => ImportMap::new("."), // Python not implemented
+        Language::Go => ImportMap::new("."),     // Go not implemented
+        Language::Java => ImportMap::new("."),   // Java not implemented
         Language::CSharp => ImportMap::new("."), // C# not implemented
-        Language::Cpp => ImportMap::new("::"), // C++ not implemented
+        Language::Cpp => ImportMap::new("::"),   // C++ not implemented
         Language::Unknown => ImportMap::new("."),
     }
 }
@@ -461,232 +427,6 @@ pub(crate) fn parse_ts_imports(
     import_map
 }
 
-/// Resolve a Python-style relative import to an absolute module path
-///
-/// Python relative imports use leading dots:
-/// - `.` means current package
-/// - `..` means parent package
-/// - `.module` means sibling module
-///
-/// # Arguments
-/// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
-/// * `relative_text` - The relative import text (e.g., ".", ".helpers", "..")
-/// * `import_name` - The name being imported (e.g., "foo", "bar")
-///
-/// # Returns
-/// The fully resolved qualified name
-fn resolve_python_relative_import(
-    current_module_path: &str,
-    relative_text: &str,
-    import_name: &str,
-) -> String {
-    // Count leading dots
-    let dot_count = relative_text.chars().take_while(|c| *c == '.').count();
-
-    // Get the module part after the dots (if any)
-    let module_suffix = relative_text.trim_start_matches('.');
-
-    // Split current module into parts
-    let mut parts: Vec<&str> = current_module_path.split('.').collect();
-
-    // Pop current module name and one additional level for each extra dot
-    // One dot = same package (pop current module)
-    // Two dots = parent package (pop current module and parent)
-    for _ in 0..dot_count {
-        if !parts.is_empty() {
-            parts.pop();
-        }
-    }
-
-    // Add the module suffix if present
-    if !module_suffix.is_empty() {
-        for segment in module_suffix.split('.') {
-            if !segment.is_empty() {
-                parts.push(segment);
-            }
-        }
-    }
-
-    // Add the imported name
-    parts.push(import_name);
-
-    parts.join(".")
-}
-
-/// Parse Python import statements
-///
-/// Handles absolute imports:
-/// - `from os.path import join` → ("join", "external.os.path.join") - stdlib
-/// - `from os.path import join as j` → ("j", "external.os.path.join")
-/// - `import os.path` → ("os", "external.os")
-/// - `import os.path as osp` → ("osp", "external.os.path")
-///
-/// Handles relative imports when current_module_path is provided:
-/// - `from . import foo` in `mypackage.utils` → ("foo", "mypackage.foo")
-/// - `from .helpers import bar` in `mypackage.utils` → ("bar", "mypackage.helpers.bar")
-/// - `from ..core import baz` in `mypackage.sub.utils` → ("baz", "mypackage.core.baz")
-///
-/// # Arguments
-/// * `root` - The AST root node
-/// * `source` - The source code
-/// * `current_module_path` - The module path of the current file (e.g., "mypackage.utils")
-pub(crate) fn parse_python_imports(
-    root: Node,
-    source: &str,
-    current_module_path: Option<&str>,
-) -> ImportMap {
-    let mut import_map = ImportMap::new(".");
-
-    // Query for various Python import patterns
-    // Note: relative_import captures imports like `from . import foo` or `from ..utils import bar`
-    let query_source = r#"
-        ; Absolute imports: from module import name
-        (import_from_statement
-          module_name: (dotted_name) @module
-          name: (dotted_name) @name)
-
-        ; Absolute imports with alias: from module import name as alias
-        (import_from_statement
-          module_name: (dotted_name) @from_module
-          (aliased_import
-            name: (dotted_name) @aliased_name
-            alias: (identifier) @alias))
-
-        ; Relative imports: from . import name OR from .module import name
-        (import_from_statement
-          module_name: (relative_import) @relative_module
-          name: (dotted_name) @rel_name)
-
-        ; Relative imports with alias
-        (import_from_statement
-          module_name: (relative_import) @rel_from_module
-          (aliased_import
-            name: (dotted_name) @rel_aliased_name
-            alias: (identifier) @rel_alias))
-
-        ; import module
-        (import_statement
-          name: (dotted_name) @import_name)
-
-        ; import module as alias
-        (import_statement
-          (aliased_import
-            name: (dotted_name) @import_aliased_name
-            alias: (identifier) @import_alias))
-    "#;
-
-    let language = tree_sitter_python::LANGUAGE.into();
-    let query = match Query::new(&language, query_source) {
-        Ok(q) => q,
-        Err(_) => return import_map,
-    };
-
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, root, source.as_bytes());
-
-    while let Some(query_match) = matches.next() {
-        let captures: Vec<_> = query_match.captures.iter().collect();
-
-        // Helper to find a capture by name
-        let find_capture = |cap_name: &str| {
-            captures
-                .iter()
-                .find(|c| query.capture_names().get(c.index as usize).copied() == Some(cap_name))
-        };
-
-        // Absolute imports: from module import name
-        if let (Some(m), Some(n)) = (find_capture("module"), find_capture("name")) {
-            if let (Ok(mod_text), Ok(name_text)) = (
-                m.node.utf8_text(source.as_bytes()),
-                n.node.utf8_text(source.as_bytes()),
-            ) {
-                // External/stdlib import - prefix with external
-                let full_path = format!("external.{mod_text}.{name_text}");
-                import_map.add(name_text, &full_path);
-            }
-        }
-
-        // Absolute imports with alias: from module import name as alias
-        if let (Some(m), Some(n), Some(a)) = (
-            find_capture("from_module"),
-            find_capture("aliased_name"),
-            find_capture("alias"),
-        ) {
-            if let (Ok(mod_text), Ok(name_text), Ok(alias_text)) = (
-                m.node.utf8_text(source.as_bytes()),
-                n.node.utf8_text(source.as_bytes()),
-                a.node.utf8_text(source.as_bytes()),
-            ) {
-                let full_path = format!("external.{mod_text}.{name_text}");
-                import_map.add(alias_text, &full_path);
-            }
-        }
-
-        // Relative imports: from . import name OR from .module import name
-        if let (Some(rel_mod), Some(n)) =
-            (find_capture("relative_module"), find_capture("rel_name"))
-        {
-            if let (Ok(rel_text), Ok(name_text)) = (
-                rel_mod.node.utf8_text(source.as_bytes()),
-                n.node.utf8_text(source.as_bytes()),
-            ) {
-                if let Some(module_path) = current_module_path {
-                    let resolved = resolve_python_relative_import(module_path, rel_text, name_text);
-                    import_map.add(name_text, &resolved);
-                } else {
-                    // No module path, use as-is
-                    import_map.add(name_text, &format!("{rel_text}.{name_text}"));
-                }
-            }
-        }
-
-        // Relative imports with alias
-        if let (Some(rel_mod), Some(n), Some(a)) = (
-            find_capture("rel_from_module"),
-            find_capture("rel_aliased_name"),
-            find_capture("rel_alias"),
-        ) {
-            if let (Ok(rel_text), Ok(name_text), Ok(alias_text)) = (
-                rel_mod.node.utf8_text(source.as_bytes()),
-                n.node.utf8_text(source.as_bytes()),
-                a.node.utf8_text(source.as_bytes()),
-            ) {
-                if let Some(module_path) = current_module_path {
-                    let resolved = resolve_python_relative_import(module_path, rel_text, name_text);
-                    import_map.add(alias_text, &resolved);
-                } else {
-                    import_map.add(alias_text, &format!("{rel_text}.{name_text}"));
-                }
-            }
-        }
-
-        // import module (absolute)
-        if let Some(n) = find_capture("import_name") {
-            if let Ok(name_text) = n.node.utf8_text(source.as_bytes()) {
-                // For `import os.path`, the local name is just `os`
-                let local_name = name_text.split('.').next().unwrap_or(name_text);
-                // External import
-                import_map.add(local_name, &format!("external.{local_name}"));
-            }
-        }
-
-        // import module as alias (absolute)
-        if let (Some(n), Some(a)) = (
-            find_capture("import_aliased_name"),
-            find_capture("import_alias"),
-        ) {
-            if let (Ok(name_text), Ok(alias_text)) = (
-                n.node.utf8_text(source.as_bytes()),
-                a.node.utf8_text(source.as_bytes()),
-            ) {
-                import_map.add(alias_text, &format!("external.{name_text}"));
-            }
-        }
-    }
-
-    import_map
-}
-
 /// Get the AST root node from any node in the tree
 pub(crate) fn get_ast_root(node: Node) -> Node {
     let mut root = node;
@@ -718,30 +458,6 @@ mod tests {
         assert!(!ImportMap::is_scoped("Read", "::"));
         assert!(ImportMap::is_scoped("os.path.join", "."));
         assert!(!ImportMap::is_scoped("join", "."));
-    }
-
-    #[test]
-    fn test_resolve_reference() {
-        let mut map = ImportMap::new("::");
-        map.add("Read", "std::io::Read");
-
-        // Already scoped - use as-is
-        assert_eq!(
-            resolve_reference("std::fmt::Display", &map, None, "::"),
-            "std::fmt::Display"
-        );
-
-        // Found in imports
-        assert_eq!(resolve_reference("Read", &map, None, "::"), "std::io::Read");
-
-        // Not in imports, use parent scope
-        assert_eq!(
-            resolve_reference("foo", &map, Some("my_module"), "::"),
-            "my_module::foo"
-        );
-
-        // Not found anywhere - mark as external
-        assert_eq!(resolve_reference("bar", &map, None, "::"), "external::bar");
     }
 
     #[test]
@@ -783,37 +499,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_python_from_import() {
-        let source = "from os.path import join";
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_python::LANGUAGE.into())
-            .ok();
-        let tree = parser.parse(source, None).unwrap();
-
-        let import_map = parse_python_imports(tree.root_node(), source, None);
-
-        // Absolute imports are marked as external
-        assert_eq!(import_map.resolve("join"), Some("external.os.path.join"));
-    }
-
-    #[test]
-    fn test_parse_python_from_import_alias() {
-        let source = "from os.path import join as j";
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_python::LANGUAGE.into())
-            .ok();
-        let tree = parser.parse(source, None).unwrap();
-
-        let import_map = parse_python_imports(tree.root_node(), source, None);
-
-        // Absolute imports are marked as external
-        assert_eq!(import_map.resolve("j"), Some("external.os.path.join"));
-        assert_eq!(import_map.resolve("join"), None);
-    }
-
-    #[test]
     fn test_rust_file_with_imports_and_calls() {
         // Test that imports are correctly parsed and can be used to resolve function calls
         let source = r#"
@@ -836,20 +521,6 @@ fn example() {
         assert_eq!(import_map.resolve("Read"), Some("std::io::Read"));
         assert_eq!(import_map.resolve("helper"), Some("crate::utils::helper"));
         assert_eq!(import_map.resolve("Alias"), Some("my_crate::MyType"));
-
-        // Verify resolution works
-        assert_eq!(
-            resolve_reference("Read", &import_map, None, "::"),
-            "std::io::Read"
-        );
-        assert_eq!(
-            resolve_reference("helper", &import_map, None, "::"),
-            "crate::utils::helper"
-        );
-        assert_eq!(
-            resolve_reference("unknown", &import_map, Some("my_module"), "::"),
-            "my_module::unknown"
-        );
     }
 
     #[test]
@@ -934,34 +605,6 @@ use network::{
         );
     }
 
-    #[test]
-    fn test_resolution_priority() {
-        // Test that resolution follows the priority: scoped > imports > parent_scope > external
-        let mut map = ImportMap::new("::");
-        map.add("Foo", "imported::Foo");
-
-        // 1. Already scoped takes priority
-        assert_eq!(
-            resolve_reference("other::Foo", &map, Some("parent"), "::"),
-            "other::Foo"
-        );
-
-        // 2. Import mapping takes priority over parent scope
-        assert_eq!(
-            resolve_reference("Foo", &map, Some("parent"), "::"),
-            "imported::Foo"
-        );
-
-        // 3. Parent scope used when not in imports
-        assert_eq!(
-            resolve_reference("Bar", &map, Some("parent"), "::"),
-            "parent::Bar"
-        );
-
-        // 4. External fallback when nothing else matches
-        assert_eq!(resolve_reference("Baz", &map, None, "::"), "external::Baz");
-    }
-
     // ========================================================================
     // Tests for relative import resolution
     // ========================================================================
@@ -1009,34 +652,6 @@ use network::{
 
         let result = resolve_relative_import("vanilla.atom", "./core.ts");
         assert_eq!(result, Some("vanilla.core".to_string()));
-    }
-
-    #[test]
-    fn test_resolve_python_relative_single_dot() {
-        // from . import foo in mypackage.utils -> mypackage.foo
-        let result = resolve_python_relative_import("mypackage.utils", ".", "foo");
-        assert_eq!(result, "mypackage.foo");
-    }
-
-    #[test]
-    fn test_resolve_python_relative_double_dot() {
-        // from .. import foo in mypackage.sub.utils -> mypackage.foo
-        let result = resolve_python_relative_import("mypackage.sub.utils", "..", "foo");
-        assert_eq!(result, "mypackage.foo");
-    }
-
-    #[test]
-    fn test_resolve_python_relative_with_module() {
-        // from .helpers import bar in mypackage.utils -> mypackage.helpers.bar
-        let result = resolve_python_relative_import("mypackage.utils", ".helpers", "bar");
-        assert_eq!(result, "mypackage.helpers.bar");
-    }
-
-    #[test]
-    fn test_resolve_python_relative_parent_with_module() {
-        // from ..core import baz in mypackage.sub.utils -> mypackage.core.baz
-        let result = resolve_python_relative_import("mypackage.sub.utils", "..core", "baz");
-        assert_eq!(result, "mypackage.core.baz");
     }
 
     #[test]

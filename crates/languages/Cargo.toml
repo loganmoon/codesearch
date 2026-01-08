@@ -15,7 +15,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tree-sitter = { workspace = true }
-tree-sitter-python = { workspace = true }
 tree-sitter-javascript = { workspace = true }
 tree-sitter-typescript = { workspace = true }
 tree-sitter-rust = { workspace = true }
@@ -24,6 +23,10 @@ im = { version = "15.1", features = ["serde"] }
 streaming-iterator = "0.1"
 inventory = "0.3"
 uuid = { workspace = true }
+
+[build-dependencies]
+serde = { workspace = true }
+serde_yaml = "0.9"
 
 [dev-dependencies]
 tokio = { workspace = true }

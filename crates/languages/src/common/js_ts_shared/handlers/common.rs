@@ -1,6 +1,7 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::common::entity_building::ExtractionContext;
 use crate::common::{find_capture_node, module_utils, node_to_text};
@@ -12,7 +13,97 @@ use im::HashMap as ImHashMap;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query};
 
+use super::super::queries::{
+    CALL_EXPRESSION_QUERY, IMPORT_STATEMENT_QUERY, REEXPORT_STATEMENT_QUERY, TYPE_ANNOTATION_QUERY,
+};
 use super::super::visibility::{is_async, is_generator, is_getter, is_setter, is_static_member};
+
+// =============================================================================
+// Lazy query compilation
+// =============================================================================
+
+/// Returns the lazily compiled call expression query.
+/// Returns None only if the query string is invalid (which should never happen
+/// since the query is a compile-time constant).
+fn get_call_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, CALL_EXPRESSION_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_type_annotation_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, TYPE_ANNOTATION_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_import_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, IMPORT_STATEMENT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_reexport_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, REEXPORT_STATEMENT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
+/// Find the index of a named capture in a query
+fn capture_index(query: &Query, name: &str) -> u32 {
+    query
+        .capture_names()
+        .iter()
+        .position(|n| *n == name)
+        .unwrap_or(0) as u32
+}
+
+/// Create a SourceReference with common fields
+fn create_source_ref(name: &str, node: Node, ref_type: ReferenceType) -> Option<SourceReference> {
+    SourceReference::builder()
+        .target(name.to_string())
+        .simple_name(name.to_string())
+        .location(SourceLocation::from_tree_sitter_node(node))
+        .ref_type(ref_type)
+        .build()
+        .ok()
+}
+
+/// Create a SourceReference with a custom target (different from simple_name)
+fn create_source_ref_with_target(
+    target: String,
+    simple_name: &str,
+    node: Node,
+    ref_type: ReferenceType,
+) -> Option<SourceReference> {
+    SourceReference::builder()
+        .target(target)
+        .simple_name(simple_name.to_string())
+        .location(SourceLocation::from_tree_sitter_node(node))
+        .ref_type(ref_type)
+        .build()
+        .ok()
+}
 
 // =============================================================================
 // Documentation extraction
@@ -31,9 +122,9 @@ pub(crate) fn extract_preceding_doc_comments(node: Node, source: &str) -> Option
             break;
         }
         if let Ok(text) = node_to_text(sibling, source) {
-            if text.starts_with("/**") && text.ends_with("*/") {
-                // JSDoc comment
-                for line in text[3..text.len() - 2].lines() {
+            if let Some(content) = text.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+                // JSDoc comment - use strip_prefix/suffix for UTF-8 safety
+                for line in content.lines() {
                     let trimmed = line.trim().trim_start_matches('*').trim();
                     if !trimmed.is_empty() {
                         doc_lines.push(trimmed.to_string());
@@ -155,13 +246,7 @@ fn collect_type_refs_recursive(
     match node.kind() {
         "type_identifier" | "identifier" => {
             let name = &source[node.byte_range()];
-            if let Ok(r) = SourceReference::builder()
-                .target(name.to_string())
-                .simple_name(name.to_string())
-                .location(SourceLocation::from_tree_sitter_node(node))
-                .ref_type(ref_type)
-                .build()
-            {
+            if let Some(r) = create_source_ref(name, node, ref_type) {
                 refs.push(r);
             }
         }
@@ -169,13 +254,7 @@ fn collect_type_refs_recursive(
             // Extract base type name from generic: Foo<T> -> Foo
             if let Some(name_node) = node.child_by_field_name("name") {
                 let name = &source[name_node.byte_range()];
-                if let Ok(r) = SourceReference::builder()
-                    .target(name.to_string())
-                    .simple_name(name.to_string())
-                    .location(SourceLocation::from_tree_sitter_node(name_node))
-                    .ref_type(ref_type)
-                    .build()
-                {
+                if let Some(r) = create_source_ref(name, name_node, ref_type) {
                     refs.push(r);
                 }
             }
@@ -242,38 +321,19 @@ pub(crate) fn extract_function_calls(
         return rels;
     };
 
-    let query_source = r#"
-        (call_expression
-          function: (identifier) @callee)
-        (call_expression
-          function: (member_expression
-            property: (property_identifier) @callee))
-    "#;
-
-    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let Ok(query) = Query::new(&language, query_source) else {
+    let Some(query) = get_call_query() else {
         return rels;
     };
 
+    let callee_idx = capture_index(query, "callee");
     let mut cursor = tree_sitter::QueryCursor::new();
-    let callee_idx = query
-        .capture_names()
-        .iter()
-        .position(|n| *n == "callee")
-        .unwrap_or(0) as u32;
+    let mut matches = cursor.matches(query, body, ctx.source.as_bytes());
 
-    let mut matches = cursor.matches(&query, body, ctx.source.as_bytes());
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
             if capture.index == callee_idx {
                 let name = &ctx.source[capture.node.byte_range()];
-                if let Ok(r) = SourceReference::builder()
-                    .target(name.to_string())
-                    .simple_name(name.to_string())
-                    .location(SourceLocation::from_tree_sitter_node(capture.node))
-                    .ref_type(ReferenceType::Call)
-                    .build()
-                {
+                if let Some(r) = create_source_ref(name, capture.node, ReferenceType::Call) {
                     rels.calls.push(r);
                 }
             }
@@ -282,6 +342,22 @@ pub(crate) fn extract_function_calls(
 
     rels
 }
+
+/// Primitive types to skip when extracting type usages
+const PRIMITIVES: &[&str] = &[
+    "string",
+    "number",
+    "boolean",
+    "void",
+    "null",
+    "undefined",
+    "any",
+    "never",
+    "unknown",
+    "object",
+    "symbol",
+    "bigint",
+];
 
 /// Extract type usages from type annotations in entity
 pub(crate) fn extract_type_usages(ctx: &ExtractionContext, _node: Node) -> EntityRelationshipData {
@@ -299,59 +375,28 @@ pub(crate) fn extract_type_usages(ctx: &ExtractionContext, _node: Node) -> Entit
         return rels;
     };
 
-    let query_source = r#"
-        (type_annotation (type_identifier) @type_ref)
-        (type_annotation (generic_type name: (type_identifier) @type_ref))
-    "#;
-
-    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let Ok(query) = Query::new(&language, query_source) else {
+    let Some(query) = get_type_annotation_query() else {
         return rels;
     };
 
+    let type_ref_idx = capture_index(query, "type_ref");
     let mut cursor = tree_sitter::QueryCursor::new();
-    let type_ref_idx = query
-        .capture_names()
-        .iter()
-        .position(|n| *n == "type_ref")
-        .unwrap_or(0) as u32;
+    let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
 
     // Track seen types to avoid duplicates
     let mut seen = std::collections::HashSet::new();
 
-    // Primitive types to skip
-    const PRIMITIVES: &[&str] = &[
-        "string",
-        "number",
-        "boolean",
-        "void",
-        "null",
-        "undefined",
-        "any",
-        "never",
-        "unknown",
-        "object",
-        "symbol",
-        "bigint",
-    ];
-
-    let mut matches = cursor.matches(&query, node, ctx.source.as_bytes());
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
-            if capture.index == type_ref_idx {
-                let name = &ctx.source[capture.node.byte_range()];
-                if PRIMITIVES.contains(&name) || !seen.insert(name.to_string()) {
-                    continue;
-                }
-                if let Ok(r) = SourceReference::builder()
-                    .target(name.to_string())
-                    .simple_name(name.to_string())
-                    .location(SourceLocation::from_tree_sitter_node(capture.node))
-                    .ref_type(ReferenceType::Uses)
-                    .build()
-                {
-                    rels.uses_types.push(r);
-                }
+            if capture.index != type_ref_idx {
+                continue;
+            }
+            let name = &ctx.source[capture.node.byte_range()];
+            if PRIMITIVES.contains(&name) || !seen.insert(name.to_string()) {
+                continue;
+            }
+            if let Some(r) = create_source_ref(name, capture.node, ReferenceType::Uses) {
+                rels.uses_types.push(r);
             }
         }
     }
@@ -367,82 +412,62 @@ pub(crate) fn extract_imports(ctx: &ExtractionContext, _node: Node) -> EntityRel
         return rels;
     };
 
-    let query_source = r#"
-        (import_statement
-          (import_clause
-            (identifier) @default_import)
-          source: (string) @source)
-
-        (import_statement
-          (import_clause
-            (named_imports
-              (import_specifier
-                name: (identifier) @named_import)))
-          source: (string) @source)
-
-        (import_statement
-          (import_clause
-            (namespace_import
-              (identifier) @ns_import))
-          source: (string) @source)
-    "#;
-
-    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let Ok(query) = Query::new(&language, query_source) else {
+    let Some(query) = get_import_query() else {
         return rels;
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
-    let mut matches = cursor.matches(&query, program, ctx.source.as_bytes());
+    let mut matches = cursor.matches(query, program, ctx.source.as_bytes());
 
     while let Some(query_match) = matches.next() {
-        let mut import_name: Option<&str> = None;
-        let mut import_node: Option<tree_sitter::Node> = None;
-        let mut source_path: Option<&str> = None;
-        let mut is_namespace = false;
-
-        for capture in query_match.captures {
-            let capture_name = query.capture_names().get(capture.index as usize).copied();
-            match capture_name {
-                Some("default_import") | Some("named_import") => {
-                    import_name = Some(&ctx.source[capture.node.byte_range()]);
-                    import_node = Some(capture.node);
-                }
-                Some("ns_import") => {
-                    import_name = Some(&ctx.source[capture.node.byte_range()]);
-                    import_node = Some(capture.node);
-                    is_namespace = true;
-                }
-                Some("source") => {
-                    let path = &ctx.source[capture.node.byte_range()];
-                    // Strip quotes
-                    source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
-                }
-                _ => {}
-            }
-        }
-
-        if let (Some(name), Some(node), Some(path)) = (import_name, import_node, source_path) {
-            let module_name = module_path_from_import(path, ctx);
-            let target = if is_namespace {
-                module_name.clone()
-            } else {
-                format!("{module_name}.{name}")
-            };
-
-            if let Ok(r) = SourceReference::builder()
-                .target(target)
-                .simple_name(name.to_string())
-                .location(SourceLocation::from_tree_sitter_node(node))
-                .ref_type(ReferenceType::Import)
-                .build()
-            {
-                rels.imports.push(r);
-            }
+        if let Some(import_ref) = parse_import_match(query, query_match, ctx) {
+            rels.imports.push(import_ref);
         }
     }
 
     rels
+}
+
+/// Parse a single import match into a SourceReference
+fn parse_import_match<'a>(
+    query: &Query,
+    query_match: &tree_sitter::QueryMatch<'a, 'a>,
+    ctx: &ExtractionContext,
+) -> Option<SourceReference> {
+    let mut import_name: Option<&str> = None;
+    let mut import_node: Option<tree_sitter::Node> = None;
+    let mut source_path: Option<&str> = None;
+    let mut is_namespace = false;
+
+    for capture in query_match.captures {
+        let capture_name = query.capture_names().get(capture.index as usize).copied();
+        match capture_name {
+            Some("default_import" | "named_import") => {
+                import_name = Some(&ctx.source[capture.node.byte_range()]);
+                import_node = Some(capture.node);
+            }
+            Some("ns_import") => {
+                import_name = Some(&ctx.source[capture.node.byte_range()]);
+                import_node = Some(capture.node);
+                is_namespace = true;
+            }
+            Some("source") => {
+                let path = &ctx.source[capture.node.byte_range()];
+                source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
+            }
+            _ => {}
+        }
+    }
+
+    let (name, node, path) = (import_name?, import_node?, source_path?);
+    let module_name = module_path_from_import(path, ctx);
+    let target = if is_namespace {
+        module_name
+    } else {
+        format!("{module_name}.{name}")
+    };
+
+    create_source_ref_with_target(target, name, node, ReferenceType::Import)
 }
 
 /// Extract reexport relationships from module (program node)
@@ -453,84 +478,67 @@ pub(crate) fn extract_reexports(ctx: &ExtractionContext, _node: Node) -> EntityR
         return rels;
     };
 
-    let query_source = r#"
-        (export_statement
-          (export_clause
-            (export_specifier
-              name: (identifier) @export_name))
-          source: (string) @source)
-
-        (export_statement
-          "*"
-          source: (string) @source) @star_export
-    "#;
-
-    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-    let Ok(query) = Query::new(&language, query_source) else {
+    let Some(query) = get_reexport_query() else {
         return rels;
     };
 
     let mut cursor = tree_sitter::QueryCursor::new();
-    let mut matches = cursor.matches(&query, program, ctx.source.as_bytes());
+    let mut matches = cursor.matches(query, program, ctx.source.as_bytes());
 
     while let Some(query_match) = matches.next() {
-        let mut export_name: Option<&str> = None;
-        let mut export_node: Option<tree_sitter::Node> = None;
-        let mut source_path: Option<&str> = None;
-        let mut is_star = false;
-        let mut star_node: Option<tree_sitter::Node> = None;
-
-        for capture in query_match.captures {
-            let capture_name = query.capture_names().get(capture.index as usize).copied();
-            match capture_name {
-                Some("export_name") => {
-                    export_name = Some(&ctx.source[capture.node.byte_range()]);
-                    export_node = Some(capture.node);
-                }
-                Some("source") => {
-                    let path = &ctx.source[capture.node.byte_range()];
-                    source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
-                }
-                Some("star_export") => {
-                    is_star = true;
-                    star_node = Some(capture.node);
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(path) = source_path {
-            let module_name = module_path_from_import(path, ctx);
-
-            if is_star {
-                // Star reexport: target is the module itself
-                let location_node = star_node.unwrap_or(program);
-                if let Ok(r) = SourceReference::builder()
-                    .target(module_name.clone())
-                    .simple_name(module_name)
-                    .location(SourceLocation::from_tree_sitter_node(location_node))
-                    .ref_type(ReferenceType::Reexport)
-                    .build()
-                {
-                    rels.reexports.push(r);
-                }
-            } else if let (Some(name), Some(node)) = (export_name, export_node) {
-                // Named reexport: target is module.name
-                let target = format!("{module_name}.{name}");
-                if let Ok(r) = SourceReference::builder()
-                    .target(target)
-                    .simple_name(name.to_string())
-                    .location(SourceLocation::from_tree_sitter_node(node))
-                    .ref_type(ReferenceType::Reexport)
-                    .build()
-                {
-                    rels.reexports.push(r);
-                }
-            }
+        if let Some(reexport_ref) = parse_reexport_match(query, query_match, ctx, program) {
+            rels.reexports.push(reexport_ref);
         }
     }
 
     rels
+}
+
+/// Parse a single reexport match into a SourceReference
+fn parse_reexport_match<'a>(
+    query: &Query,
+    query_match: &tree_sitter::QueryMatch<'a, 'a>,
+    ctx: &ExtractionContext,
+    fallback_node: Node,
+) -> Option<SourceReference> {
+    let mut export_name: Option<&str> = None;
+    let mut export_node: Option<tree_sitter::Node> = None;
+    let mut source_path: Option<&str> = None;
+    let mut is_star = false;
+    let mut star_node: Option<tree_sitter::Node> = None;
+
+    for capture in query_match.captures {
+        let capture_name = query.capture_names().get(capture.index as usize).copied();
+        match capture_name {
+            Some("export_name") => {
+                export_name = Some(&ctx.source[capture.node.byte_range()]);
+                export_node = Some(capture.node);
+            }
+            Some("source") => {
+                let path = &ctx.source[capture.node.byte_range()];
+                source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
+            }
+            Some("star_export") => {
+                is_star = true;
+                star_node = Some(capture.node);
+            }
+            _ => {}
+        }
+    }
+
+    let path = source_path?;
+    let module_name = module_path_from_import(path, ctx);
+
+    if is_star {
+        // Star reexport: target is the module itself
+        let location_node = star_node.unwrap_or(fallback_node);
+        create_source_ref(&module_name, location_node, ReferenceType::Reexport)
+    } else {
+        // Named reexport: target is module.name
+        let (name, node) = (export_name?, export_node?);
+        let target = format!("{module_name}.{name}");
+        create_source_ref_with_target(target, name, node, ReferenceType::Reexport)
+    }
 }
 
 /// Convert import path to module name, resolving relative to the current file

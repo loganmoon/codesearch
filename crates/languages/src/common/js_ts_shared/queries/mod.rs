@@ -6,11 +6,13 @@
 pub(crate) mod classes;
 pub(crate) mod functions;
 pub(crate) mod modules;
+pub(crate) mod relationships;
 pub(crate) mod typescript;
 pub(crate) mod variables;
 
 pub(crate) use classes::*;
 pub(crate) use functions::*;
 pub(crate) use modules::*;
+pub(crate) use relationships::*;
 pub(crate) use typescript::*;
 pub(crate) use variables::*;

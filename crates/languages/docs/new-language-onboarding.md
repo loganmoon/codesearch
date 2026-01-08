@@ -1,5 +1,20 @@
 # Language Onboarding Guide
 
+> **⚠️ DOCUMENTATION OUTDATED**
+>
+> This guide describes the legacy macro-based extraction system that has been replaced by
+> **spec-driven extraction**. New languages should be added by:
+>
+> 1. Creating a YAML spec file in `crates/languages/specs/<language>.yaml`
+> 2. Adding a `SpecDriven<Language>Extractor` in `crates/languages/src/spec_driven/extractors.rs`
+>
+> See `crates/languages/specs/rust.yaml` for a comprehensive example of the YAML spec format.
+> The old `define_handler!` and `define_language_extractor!` macros have been removed.
+>
+> This document will be updated to reflect the new architecture in a future revision.
+
+---
+
 This guide covers adding new language support to codesearch, using Rust as the canonical example.
 
 ## Table of Contents

@@ -140,8 +140,7 @@ This is a workspace with these crates:
 
 **Foundation:**
 - **core**: Foundation types, entities, configuration, error handling
-- **languages**: AST parsing and entity extraction. Fully implemented for Rust, JavaScript/TypeScript, and Python. Go has partial infrastructure but no actual parsing implementation.
-- **languages-macros**: Procedural macros for defining language extractors
+- **languages**: AST parsing and entity extraction using spec-driven YAML configuration. Fully implemented for Rust, JavaScript/TypeScript. Python removed (to be reimplemented).
 
 **Indexing & Storage:**
 - **indexer**: Repository indexing logic with Git integration

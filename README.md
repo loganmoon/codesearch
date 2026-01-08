@@ -78,8 +78,7 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 
 **Crates:**
 - `core` - Foundation types, configuration, error handling
-- `languages` - AST parsing (Rust, TypeScript, Python)
-- `languages-macros` - Procedural macros for language trait implementation
+- `languages` - AST parsing with spec-driven YAML configuration (Rust, JavaScript/TypeScript)
 - `embeddings` - Vector embedding providers (Jina, vLLM/OpenAI API)
 - `reranking` - Cross-encoder result reranking
 - `indexer` - Repository indexing with Git integration

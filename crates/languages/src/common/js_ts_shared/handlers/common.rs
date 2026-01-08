@@ -69,13 +69,14 @@ fn get_reexport_query() -> Option<&'static Query> {
 // Helper functions
 // =============================================================================
 
-/// Find the index of a named capture in a query
-fn capture_index(query: &Query, name: &str) -> u32 {
+/// Find the index of a named capture in a query.
+/// Returns None if the capture name is not found.
+fn capture_index(query: &Query, name: &str) -> Option<u32> {
     query
         .capture_names()
         .iter()
         .position(|n| *n == name)
-        .unwrap_or(0) as u32
+        .map(|i| i as u32)
 }
 
 /// Create a SourceReference with common fields
@@ -325,7 +326,10 @@ pub(crate) fn extract_function_calls(
         return rels;
     };
 
-    let callee_idx = capture_index(query, "callee");
+    let Some(callee_idx) = capture_index(query, "callee") else {
+        return rels;
+    };
+
     let mut cursor = tree_sitter::QueryCursor::new();
     let mut matches = cursor.matches(query, body, ctx.source.as_bytes());
 
@@ -379,7 +383,10 @@ pub(crate) fn extract_type_usages(ctx: &ExtractionContext, _node: Node) -> Entit
         return rels;
     };
 
-    let type_ref_idx = capture_index(query, "type_ref");
+    let Some(type_ref_idx) = capture_index(query, "type_ref") else {
+        return rels;
+    };
+
     let mut cursor = tree_sitter::QueryCursor::new();
     let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
 
@@ -579,14 +586,18 @@ fn module_path_from_import(import_path: &str, ctx: &ExtractionContext) -> String
         let mut parts = dir_prefix.clone();
         parts.extend(import_parts);
         parts.join(".")
-    } else if let Some(rest) = import_path.strip_prefix("../") {
-        // Parent directory: go up one level
-        let import_parts: Vec<&str> = rest.split('/').collect();
-        let mut parts: Vec<&str> = if !dir_prefix.is_empty() {
-            dir_prefix[..dir_prefix.len() - 1].to_vec()
-        } else {
-            vec![]
-        };
+    } else if import_path.starts_with("../") {
+        // Parent directory: count consecutive ../ and navigate up that many levels
+        let mut remaining = import_path;
+        let mut levels_up = 0;
+        while let Some(rest) = remaining.strip_prefix("../") {
+            levels_up += 1;
+            remaining = rest;
+        }
+
+        let import_parts: Vec<&str> = remaining.split('/').collect();
+        let keep = dir_prefix.len().saturating_sub(levels_up);
+        let mut parts: Vec<&str> = dir_prefix[..keep].to_vec();
         parts.extend(import_parts);
         parts.join(".")
     } else {

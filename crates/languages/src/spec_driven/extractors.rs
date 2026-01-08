@@ -5,12 +5,168 @@
 
 use super::engine::{extract_with_config, SpecDrivenContext};
 use super::HandlerConfig;
-use crate::Extractor;
+use crate::common::js_ts_shared::{
+    module_path as js_module_path, SCOPE_PATTERNS, TS_SCOPE_PATTERNS,
+};
+use crate::common::path_config::{CRATE_BASED_PATH_CONFIG, MODULE_BASED_PATH_CONFIG};
+use crate::qualified_name::{ScopeConfiguration, ScopePattern};
+use crate::rust::{edge_case_handlers::RUST_EDGE_CASE_HANDLERS, module_path as rust_module_path};
+use crate::{Extractor, LanguageDescriptor};
 use codesearch_core::entities::Language;
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 use std::path::{Path, PathBuf};
 use tree_sitter::Parser;
+
+/// Scope patterns for Rust qualified name building
+const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
+    ScopePattern {
+        node_kind: "mod_item",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "impl_item",
+        field_name: "type",
+    },
+];
+
+// Register scope configurations for qualified name building
+inventory::submit! {
+    ScopeConfiguration {
+        language: "rust",
+        separator: "::",
+        patterns: RUST_SCOPE_PATTERNS,
+        module_path_fn: Some(rust_module_path::derive_module_path),
+        path_config: &CRATE_BASED_PATH_CONFIG,
+        edge_case_handlers: Some(RUST_EDGE_CASE_HANDLERS),
+    }
+}
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "javascript",
+        separator: ".",
+        patterns: SCOPE_PATTERNS,
+        module_path_fn: Some(js_module_path::derive_module_path),
+        path_config: &MODULE_BASED_PATH_CONFIG,
+        edge_case_handlers: None,
+    }
+}
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "typescript",
+        separator: ".",
+        patterns: TS_SCOPE_PATTERNS,
+        module_path_fn: Some(js_module_path::derive_module_path),
+        path_config: &MODULE_BASED_PATH_CONFIG,
+        edge_case_handlers: None,
+    }
+}
+
+inventory::submit! {
+    ScopeConfiguration {
+        language: "tsx",
+        separator: ".",
+        patterns: TS_SCOPE_PATTERNS,
+        module_path_fn: Some(js_module_path::derive_module_path),
+        path_config: &MODULE_BASED_PATH_CONFIG,
+        edge_case_handlers: None,
+    }
+}
+
+// Register language descriptors for spec-driven extractors
+inventory::submit! {
+    LanguageDescriptor {
+        name: "rust",
+        extensions: &["rs"],
+        factory: create_rust_extractor,
+    }
+}
+
+inventory::submit! {
+    LanguageDescriptor {
+        name: "javascript",
+        extensions: &["js", "jsx"],
+        factory: create_javascript_extractor,
+    }
+}
+
+inventory::submit! {
+    LanguageDescriptor {
+        name: "typescript",
+        extensions: &["ts"],
+        factory: create_typescript_extractor,
+    }
+}
+
+inventory::submit! {
+    LanguageDescriptor {
+        name: "tsx",
+        extensions: &["tsx"],
+        factory: create_tsx_extractor,
+    }
+}
+
+/// Factory function for Rust extractor
+fn create_rust_extractor(
+    repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Box<dyn Extractor>> {
+    Ok(Box::new(SpecDrivenRustExtractor::new(
+        repository_id.to_string(),
+        package_name.map(String::from),
+        source_root.map(PathBuf::from),
+        repo_root.to_path_buf(),
+    )?))
+}
+
+/// Factory function for JavaScript extractor
+fn create_javascript_extractor(
+    repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Box<dyn Extractor>> {
+    Ok(Box::new(SpecDrivenJavaScriptExtractor::new(
+        repository_id.to_string(),
+        package_name.map(String::from),
+        source_root.map(PathBuf::from),
+        repo_root.to_path_buf(),
+    )?))
+}
+
+/// Factory function for TypeScript extractor
+fn create_typescript_extractor(
+    repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Box<dyn Extractor>> {
+    Ok(Box::new(SpecDrivenTypeScriptExtractor::new(
+        repository_id.to_string(),
+        package_name.map(String::from),
+        source_root.map(PathBuf::from),
+        repo_root.to_path_buf(),
+    )?))
+}
+
+/// Factory function for TSX extractor
+fn create_tsx_extractor(
+    repository_id: &str,
+    package_name: Option<&str>,
+    source_root: Option<&Path>,
+    repo_root: &Path,
+) -> Result<Box<dyn Extractor>> {
+    Ok(Box::new(SpecDrivenTsxExtractor::new(
+        repository_id.to_string(),
+        package_name.map(String::from),
+        source_root.map(PathBuf::from),
+        repo_root.to_path_buf(),
+    )?))
+}
 
 /// Spec-driven Rust extractor
 ///
@@ -191,6 +347,70 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             language_str: "typescript",
         };
 
+        use super::typescript::handler_configs::ALL_HANDLERS;
+
+        let mut all_entities = Vec::new();
+
+        for config in ALL_HANDLERS {
+            let entities = extract_with_config(config, &ctx, tree.root_node())?;
+            all_entities.extend(entities);
+        }
+
+        Ok(all_entities)
+    }
+}
+
+/// Spec-driven TSX extractor
+///
+/// Uses TypeScript handlers with the TSX parser for JSX support.
+pub struct SpecDrivenTsxExtractor {
+    repository_id: String,
+    package_name: Option<String>,
+    source_root: Option<PathBuf>,
+    repo_root: PathBuf,
+}
+
+impl SpecDrivenTsxExtractor {
+    /// Create a new spec-driven TSX extractor
+    pub fn new(
+        repository_id: String,
+        package_name: Option<String>,
+        source_root: Option<PathBuf>,
+        repo_root: PathBuf,
+    ) -> Result<Self> {
+        Ok(Self {
+            repository_id,
+            package_name,
+            source_root,
+            repo_root,
+        })
+    }
+}
+
+impl Extractor for SpecDrivenTsxExtractor {
+    fn extract(&self, source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
+            .map_err(|e| anyhow::anyhow!("Failed to set TSX language: {e}"))?;
+
+        let tree = parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse source code"))?;
+
+        // TSX uses TypeScript language enum since they share the same type system
+        let ctx = SpecDrivenContext {
+            source,
+            file_path,
+            repository_id: &self.repository_id,
+            package_name: self.package_name.as_deref(),
+            source_root: self.source_root.as_deref(),
+            repo_root: &self.repo_root,
+            language: Language::TypeScript,
+            language_str: "tsx",
+        };
+
+        // TSX uses the same handlers as TypeScript
         use super::typescript::handler_configs::ALL_HANDLERS;
 
         let mut all_entities = Vec::new();

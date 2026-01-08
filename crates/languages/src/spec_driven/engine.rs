@@ -429,7 +429,7 @@ fn entity_type_from_rule(rule: &str) -> Result<EntityType> {
         "E-CONST" | "E-CONST-ASSOC" | "E-STATIC" => Ok(EntityType::Constant),
 
         // Macros
-        "E-MACRO" => Ok(EntityType::Macro),
+        "E-MACRO" | "E-MACRO-RULES" => Ok(EntityType::Macro),
 
         // Classes (JS/TS)
         r if r.starts_with("E-CLASS") => Ok(EntityType::Class),
@@ -488,10 +488,68 @@ fn extract_relationships(
 }
 
 /// Extract visibility from a node (language-agnostic)
-fn extract_visibility_from_node(_node: Node, _source: &str) -> Option<Visibility> {
-    // TODO: Implement visibility extraction
-    // This is language-specific and needs to be delegated
+fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> {
+    // First, check for standard visibility modifiers (pub, pub(crate), etc.)
+    if let Some(vis) = extract_standard_visibility(node, source) {
+        return Some(vis);
+    }
+
+    // For macros, check for #[macro_export] attribute
+    if node.kind() == "macro_definition" {
+        return Some(extract_macro_visibility(node, source));
+    }
+
     None
+}
+
+/// Extract standard visibility modifier from a node
+fn extract_standard_visibility(node: Node, source: &str) -> Option<Visibility> {
+    // Look for a visibility_modifier child
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "visibility_modifier" {
+            if let Ok(text) = node_to_text(child, source) {
+                let trimmed = text.trim();
+                if trimmed == "pub" {
+                    return Some(Visibility::Public);
+                } else if trimmed.starts_with("pub(crate)") {
+                    // pub(crate) is similar to C#/Java's internal
+                    return Some(Visibility::Internal);
+                } else if trimmed.starts_with("pub(super)")
+                    || trimmed.starts_with("pub(in")
+                    || trimmed.starts_with("pub(self)")
+                {
+                    // Restricted pub variants are effectively private outside scope
+                    return Some(Visibility::Private);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract visibility for Rust macros based on #[macro_export] attribute
+fn extract_macro_visibility(node: Node, source: &str) -> Visibility {
+    // Check preceding siblings for attribute_item with macro_export
+    let mut current = node;
+    while let Some(prev) = current.prev_sibling() {
+        if prev.kind() == "attribute_item" {
+            if let Ok(text) = node_to_text(prev, source) {
+                if text.contains("macro_export") {
+                    return Visibility::Public;
+                }
+            }
+            current = prev;
+        } else if prev.kind() == "line_comment" || prev.kind() == "block_comment" {
+            // Skip comments
+            current = prev;
+        } else {
+            // Stop at non-attribute, non-comment node
+            break;
+        }
+    }
+    // Default to Private for macros without #[macro_export]
+    Visibility::Private
 }
 
 /// Extract documentation from a node

@@ -4,23 +4,14 @@
 //! language extractors, including:
 //!
 //! - **Scope patterns**: AST node patterns that contribute to qualified names
-//! - **Visibility extraction**: Logic to determine entity visibility from exports
-//! - **Queries**: Tree-sitter query patterns for entity extraction
-//! - **Handlers**: Entity handler implementations
+//! - **Module path**: Logic to derive module paths from file paths
 
 #![deny(warnings)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-pub mod extractors;
-pub(crate) mod handlers;
 pub mod module_path;
-pub(crate) mod queries;
 pub mod scope_patterns;
-pub(crate) mod visibility;
 
-// Re-export language extractors for use with define_handler! macro
-pub use extractors::{JavaScript, Tsx, TypeScript};
-
-// Scope patterns are needed by the macro (public)
+// Scope patterns are needed by the spec-driven extractors
 pub use scope_patterns::{SCOPE_PATTERNS, TS_SCOPE_PATTERNS};

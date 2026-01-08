@@ -1,94 +1,14 @@
 //! Rust language extractor module
+//!
+//! This module previously contained the old handler-based extractor.
+//! Rust extraction is now handled by the spec-driven engine in
+//! `spec_driven::extractors::SpecDrivenRustExtractor`.
+//!
+//! The following submodules are still used by other parts of the system:
+//! - `edge_case_handlers`: Rust-specific FQN edge case handling
+//! - `import_resolution`: Import statement parsing for qualified name resolution
+//! - `module_path`: Module path derivation from file paths
 
 pub mod edge_case_handlers;
-pub(crate) mod entities;
-pub(crate) mod handler_impls;
 pub mod import_resolution;
 pub mod module_path;
-pub(crate) mod queries;
-
-use crate::qualified_name::ScopePattern;
-use codesearch_languages_macros::define_language_extractor;
-
-/// Scope patterns for Rust qualified name building
-///
-/// These patterns identify AST nodes that contribute to qualified names.
-/// Used by the macro-generated ScopeConfiguration.
-const SCOPE_PATTERNS: &[ScopePattern] = &[
-    ScopePattern {
-        node_kind: "mod_item",
-        field_name: "name",
-    },
-    ScopePattern {
-        node_kind: "impl_item",
-        field_name: "type",
-    },
-];
-
-define_language_extractor! {
-    language: Rust,
-    tree_sitter: tree_sitter_rust::LANGUAGE,
-    extensions: ["rs"],
-
-    fqn: {
-        family: CrateBased,
-        module_path_fn: module_path::derive_module_path,
-        external_prefixes: ["std", "core", "alloc", "external"],
-        edge_cases: edge_case_handlers::RUST_EDGE_CASE_HANDLERS,
-    },
-
-    entities: {
-        function => {
-            query: queries::FUNCTION_QUERY,
-            handler: handler_impls::handle_function_impl
-        },
-        r#struct => {
-            query: queries::STRUCT_QUERY,
-            handler: handler_impls::handle_struct_impl
-        },
-        r#enum => {
-            query: queries::ENUM_QUERY,
-            handler: handler_impls::handle_enum_impl
-        },
-        r#trait => {
-            query: queries::TRAIT_QUERY,
-            handler: handler_impls::handle_trait_impl
-        },
-        r#impl => {
-            query: queries::IMPL_QUERY,
-            handler: handler_impls::handle_impl_impl
-        },
-        impl_trait => {
-            query: queries::IMPL_TRAIT_QUERY,
-            handler: handler_impls::handle_impl_trait_impl
-        },
-        module => {
-            query: queries::MODULE_QUERY,
-            handler: handler_impls::handle_module_impl
-        },
-        constant => {
-            query: queries::CONSTANT_QUERY,
-            handler: handler_impls::handle_constant_impl
-        },
-        r#static => {
-            query: queries::STATIC_QUERY,
-            handler: handler_impls::handle_static_impl
-        },
-        r#union => {
-            query: queries::UNION_QUERY,
-            handler: handler_impls::handle_union_impl
-        },
-        extern_block => {
-            query: queries::EXTERN_BLOCK_QUERY,
-            handler: handler_impls::handle_extern_block_impl
-        },
-        type_alias => {
-            query: queries::TYPE_ALIAS_QUERY,
-            handler: handler_impls::handle_type_alias_impl
-        },
-        r#macro => {
-            query: queries::MACRO_QUERY,
-            handler: handler_impls::handle_macro_impl
-        }
-    }
-}

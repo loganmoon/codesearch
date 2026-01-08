@@ -28,6 +28,7 @@ pub struct JavaScript;
 impl LanguageExtractors for JavaScript {
     const LANGUAGE: Language = Language::JavaScript;
     const LANG_STR: &'static str = "javascript";
+    const SEPARATOR: &'static str = ".";
 
     fn extract_visibility(node: Node, source: &str) -> Visibility {
         extract_visibility(node, source)
@@ -55,6 +56,7 @@ pub struct TypeScript;
 impl LanguageExtractors for TypeScript {
     const LANGUAGE: Language = Language::TypeScript;
     const LANG_STR: &'static str = "typescript";
+    const SEPARATOR: &'static str = ".";
 
     fn extract_visibility(node: Node, source: &str) -> Visibility {
         extract_visibility(node, source)
@@ -81,6 +83,7 @@ pub struct Tsx;
 impl LanguageExtractors for Tsx {
     const LANGUAGE: Language = Language::TypeScript;
     const LANG_STR: &'static str = "tsx";
+    const SEPARATOR: &'static str = ".";
 
     fn extract_visibility(node: Node, source: &str) -> Visibility {
         extract_visibility(node, source)

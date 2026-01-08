@@ -60,6 +60,9 @@ pub trait LanguageExtractors {
     /// String identifier used for qualified name building (e.g., "rust", "javascript")
     const LANG_STR: &'static str;
 
+    /// Separator used for qualified names (e.g., "::" for Rust, "." for JS/TS/Python)
+    const SEPARATOR: &'static str;
+
     /// Extract visibility from an AST node
     ///
     /// Different languages have different visibility conventions:
@@ -396,67 +399,17 @@ pub fn extract_entity_with_scope_skip<L: LanguageExtractors>(
 /// rather than from AST scope traversal. This function handles that special case.
 ///
 /// The name function receives the ExtractionContext to derive the module name from file path.
+///
+/// This is a convenience wrapper around [`extract_module_entity_with_relationships`]
+/// that passes a no-op relationships function.
 pub fn extract_module_entity<L: LanguageExtractors>(
     ctx: &ExtractionContext,
     capture: &str,
     name_fn: fn(&ExtractionContext, Node) -> codesearch_core::error::Result<String>,
 ) -> Result<Vec<CodeEntity>> {
-    use crate::common::module_utils;
-    use codesearch_core::entity_id::generate_entity_id;
-
-    let node = match extract_main_node(ctx.query_match, ctx.query, &[capture]) {
-        Some(n) => n,
-        None => return Ok(Vec::new()),
-    };
-
-    let name = name_fn(ctx, node)?;
-
-    // For modules, derive qualified_name from file path, not AST scope
-    let qualified_name = module_utils::derive_qualified_name(
-        ctx.file_path,
-        ctx.source_root,
-        ctx.repo_root,
-        ".", // JS/TS use dot separator
-    );
-
-    // Build path_entity_identifier (repo-relative path for import resolution)
-    let path_entity_identifier =
-        module_utils::derive_path_entity_identifier(ctx.file_path, ctx.repo_root, ".");
-
-    // Generate entity ID
-    let file_path_str = ctx.file_path.to_string_lossy();
-    let entity_id = generate_entity_id(ctx.repository_id, &file_path_str, &qualified_name);
-
-    // Get location from node
-    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(node);
-
-    // Build components manually for module entities
-    let components = crate::common::entity_building::CommonEntityComponents {
-        entity_id,
-        repository_id: ctx.repository_id.to_string(),
-        name,
-        qualified_name,
-        path_entity_identifier: Some(path_entity_identifier),
-        parent_scope: None, // Module is the top-level entity
-        file_path: ctx.file_path.to_path_buf(),
-        location,
-    };
-
-    let entity = build_entity(
-        components,
-        EntityDetails {
-            entity_type: EntityType::Module,
-            language: L::LANGUAGE,
-            visibility: Some(Visibility::Public), // Modules are always public
-            documentation: None,
-            content: None, // Don't include full file content for performance
-            metadata: EntityMetadata::default(),
-            signature: None,
-            relationships: EntityRelationshipData::default(),
-        },
-    )?;
-
-    Ok(vec![entity])
+    extract_module_entity_with_relationships::<L>(ctx, capture, name_fn, |_, _| {
+        EntityRelationshipData::default()
+    })
 }
 
 /// Extract a module-level entity with relationships from a tree-sitter query match.
@@ -488,12 +441,12 @@ pub fn extract_module_entity_with_relationships<L: LanguageExtractors>(
         ctx.file_path,
         ctx.source_root,
         ctx.repo_root,
-        ".", // JS/TS use dot separator
+        L::SEPARATOR,
     );
 
     // Build path_entity_identifier (repo-relative path for import resolution)
     let path_entity_identifier =
-        module_utils::derive_path_entity_identifier(ctx.file_path, ctx.repo_root, ".");
+        module_utils::derive_path_entity_identifier(ctx.file_path, ctx.repo_root, L::SEPARATOR);
 
     // Generate entity ID
     let file_path_str = ctx.file_path.to_string_lossy();

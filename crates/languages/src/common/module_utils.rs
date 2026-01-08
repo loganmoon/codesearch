@@ -25,9 +25,11 @@ pub fn derive_module_name(file_path: &Path) -> String {
 ///
 /// Uses the file path relative to source root to build the qualified name.
 /// Falls back to repo_root if source_root doesn't match (never uses absolute paths).
+/// For JS/TS, index files in subdirectories are collapsed to the directory name.
 ///
 /// e.g., "/project/src/utils/helpers.js" relative to "/project/src" -> "utils.helpers"
 /// e.g., "/project/other/file.js" relative to "/project" (repo_root) -> "other.file"
+/// e.g., "/project/models/index.ts" relative to "/project" -> "models"
 pub fn derive_qualified_name(
     file_path: &Path,
     source_root: Option<&Path>,
@@ -48,13 +50,19 @@ pub fn derive_qualified_name(
             file_path
         });
 
-    build_qualified_name_from_relative(relative, separator)
+    build_qualified_name_from_relative(relative, separator, true)
 }
 
 /// Derive qualified name from a path relative to some root
 ///
 /// This is the core logic shared between qualified_name and path_entity_identifier.
-fn build_qualified_name_from_relative(relative: &Path, separator: &str) -> String {
+/// When `collapse_index` is true, index files in subdirectories collapse to the directory path
+/// (e.g., `models/index.ts` -> `models`).
+fn build_qualified_name_from_relative(
+    relative: &Path,
+    separator: &str,
+    collapse_index: bool,
+) -> String {
     let mut parts: Vec<&str> = Vec::new();
 
     for component in relative.components() {
@@ -71,6 +79,12 @@ fn build_qualified_name_from_relative(relative: &Path, separator: &str) -> Strin
                 parts.push(name);
             }
         }
+    }
+
+    // For JS/TS index files in subdirectories, collapse to just the directory path
+    // e.g., `models/index.ts` -> `models`, but `index.ts` at root stays as `index`
+    if collapse_index && parts.len() > 1 && parts.last() == Some(&"index") {
+        parts.pop();
     }
 
     parts.join(separator)
@@ -96,7 +110,7 @@ pub fn derive_path_entity_identifier(
         file_path
     });
 
-    build_qualified_name_from_relative(relative, separator)
+    build_qualified_name_from_relative(relative, separator, false)
 }
 
 #[cfg(test)]

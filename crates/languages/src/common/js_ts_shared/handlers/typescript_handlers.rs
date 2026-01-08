@@ -4,13 +4,12 @@ use crate::define_ts_family_handler;
 use codesearch_core::Visibility;
 
 use super::common::{
-    const_metadata, derive_index_signature_name, enum_metadata,
-    extract_interface_extends_relationships,
+    const_metadata, derive_index_signature_name, enum_metadata, extract_interface_relationships,
 };
 
 // Interface
 define_ts_family_handler!(handle_interface_impl, handle_tsx_interface_impl, "interface", Interface,
-    relationships: extract_interface_extends_relationships);
+    relationships: extract_interface_relationships);
 
 // Type alias
 define_ts_family_handler!(

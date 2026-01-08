@@ -94,6 +94,19 @@ git worktree remove <branch-name>
 - IMPORTANT: Limit public exports to traits, models, errors, and factory functions
 - Implement From/Into traits for API boundary conversions
 
+**LSP Usage (MANDATORY):**
+- ALWAYS use LSP tools to explore code before writing or modifying:
+  - `documentSymbol` to discover existing functions/types in a file
+  - `goToDefinition` to trace implementations and understand code flow
+  - `findReferences` to understand how code is used
+- Never assume you know what exists - verify with LSP first
+- This applies to ALL code exploration, not just specific crates
+
+**Source of Truth:**
+- The user's instructions and explicitly referenced resources (issues, PRs, docs, websites) are the only source of truth
+- Neither existing code nor documentation should be assumed correct, complete, or up-to-date
+- When uncertain about intended patterns or architecture, ASK rather than assume
+
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests
 - Use core::Error for all error types
@@ -110,6 +123,16 @@ git worktree remove <branch-name>
 
 **Style Rules:**
 - String formatting: `println!("The thing is {thing}");`, NOT `println!("The thing is {}", thing);`
+
+## Language Extraction (crates/languages)
+
+**Reference Documentation:** `crates/languages/docs/new-language-onboarding.md`
+- This doc exists but may not be fully current - verify requirements with user when starting work
+
+**Before Writing Code:**
+1. Use LSP to discover what utilities/patterns already exist
+2. ASK the user about intended architecture if requirements are unclear
+3. Do not assume existing implementations are correct patterns to follow
 
 ## CRATE ARCHITECTURE
 

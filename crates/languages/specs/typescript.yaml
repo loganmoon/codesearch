@@ -1255,10 +1255,7 @@ extraction_hints:
       capture: "index_signature"
       query: |
         (interface_body
-          (index_signature
-            (index_signature_parameter
-              (type_annotation
-                (_) @index_type))) @index_signature)
+          (index_signature) @index_signature)
 
     # --- Type alias queries ---
 
@@ -1518,8 +1515,8 @@ extraction_hints:
       entity_rule: E-INTERFACE-INDEX-SIG
       query: INDEX_SIGNATURE
       capture: "index_signature"
-      name_strategy: template
-      name_template: "[{index_type}]"  # e.g., [string], [number]
+      name_strategy: static
+      static_name: "[index]"
       visibility_override: Public
 
     # --- Type alias handlers ---

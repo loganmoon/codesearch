@@ -1,5 +1,7 @@
 //! Common utilities for JavaScript/TypeScript entity handlers
 
+use std::path::Path;
+
 use crate::common::entity_building::ExtractionContext;
 use crate::common::{find_capture_node, module_utils, node_to_text};
 use codesearch_core::entities::{
@@ -7,7 +9,8 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::{Error, Result};
 use im::HashMap as ImHashMap;
-use tree_sitter::Node;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Node, Query};
 
 use super::super::visibility::{is_async, is_generator, is_getter, is_setter, is_static_member};
 
@@ -225,6 +228,406 @@ pub(crate) fn extract_interface_extends_relationships(
     if let Some(extends_clause) = find_capture_node(ctx.query_match, ctx.query, "extends_clause") {
         rels.extended_types = collect_type_refs(extends_clause, ctx.source, ReferenceType::Extends);
     }
+    rels
+}
+
+/// Extract function calls from function body using tree-sitter query
+pub(crate) fn extract_function_calls(
+    ctx: &ExtractionContext,
+    _node: Node,
+) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+
+    let Some(body) = find_capture_node(ctx.query_match, ctx.query, "body") else {
+        return rels;
+    };
+
+    let query_source = r#"
+        (call_expression
+          function: (identifier) @callee)
+        (call_expression
+          function: (member_expression
+            property: (property_identifier) @callee))
+    "#;
+
+    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+    let Ok(query) = Query::new(&language, query_source) else {
+        return rels;
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let callee_idx = query
+        .capture_names()
+        .iter()
+        .position(|n| *n == "callee")
+        .unwrap_or(0) as u32;
+
+    let mut matches = cursor.matches(&query, body, ctx.source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if capture.index == callee_idx {
+                let name = &ctx.source[capture.node.byte_range()];
+                if let Ok(r) = SourceReference::builder()
+                    .target(name.to_string())
+                    .simple_name(name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(capture.node))
+                    .ref_type(ReferenceType::Call)
+                    .build()
+                {
+                    rels.calls.push(r);
+                }
+            }
+        }
+    }
+
+    rels
+}
+
+/// Extract type usages from type annotations in entity
+pub(crate) fn extract_type_usages(ctx: &ExtractionContext, _node: Node) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+
+    // Search the whole entity node for type annotations (including parameters, return types)
+    // Prefer the main entity capture, falling back to specific parts
+    let search_node = find_capture_node(ctx.query_match, ctx.query, "function")
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "interface"))
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "class"))
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "body"))
+        .or_else(|| find_capture_node(ctx.query_match, ctx.query, "params"));
+
+    let Some(node) = search_node else {
+        return rels;
+    };
+
+    let query_source = r#"
+        (type_annotation (type_identifier) @type_ref)
+        (type_annotation (generic_type name: (type_identifier) @type_ref))
+    "#;
+
+    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+    let Ok(query) = Query::new(&language, query_source) else {
+        return rels;
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let type_ref_idx = query
+        .capture_names()
+        .iter()
+        .position(|n| *n == "type_ref")
+        .unwrap_or(0) as u32;
+
+    // Track seen types to avoid duplicates
+    let mut seen = std::collections::HashSet::new();
+
+    // Primitive types to skip
+    const PRIMITIVES: &[&str] = &[
+        "string",
+        "number",
+        "boolean",
+        "void",
+        "null",
+        "undefined",
+        "any",
+        "never",
+        "unknown",
+        "object",
+        "symbol",
+        "bigint",
+    ];
+
+    let mut matches = cursor.matches(&query, node, ctx.source.as_bytes());
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            if capture.index == type_ref_idx {
+                let name = &ctx.source[capture.node.byte_range()];
+                if PRIMITIVES.contains(&name) || !seen.insert(name.to_string()) {
+                    continue;
+                }
+                if let Ok(r) = SourceReference::builder()
+                    .target(name.to_string())
+                    .simple_name(name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(capture.node))
+                    .ref_type(ReferenceType::Uses)
+                    .build()
+                {
+                    rels.uses_types.push(r);
+                }
+            }
+        }
+    }
+
+    rels
+}
+
+/// Extract import relationships from module (program node)
+pub(crate) fn extract_imports(ctx: &ExtractionContext, _node: Node) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+
+    let Some(program) = find_capture_node(ctx.query_match, ctx.query, "program") else {
+        return rels;
+    };
+
+    let query_source = r#"
+        (import_statement
+          (import_clause
+            (identifier) @default_import)
+          source: (string) @source)
+
+        (import_statement
+          (import_clause
+            (named_imports
+              (import_specifier
+                name: (identifier) @named_import)))
+          source: (string) @source)
+
+        (import_statement
+          (import_clause
+            (namespace_import
+              (identifier) @ns_import))
+          source: (string) @source)
+    "#;
+
+    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+    let Ok(query) = Query::new(&language, query_source) else {
+        return rels;
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, program, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        let mut import_name: Option<&str> = None;
+        let mut import_node: Option<tree_sitter::Node> = None;
+        let mut source_path: Option<&str> = None;
+        let mut is_namespace = false;
+
+        for capture in query_match.captures {
+            let capture_name = query.capture_names().get(capture.index as usize).copied();
+            match capture_name {
+                Some("default_import") | Some("named_import") => {
+                    import_name = Some(&ctx.source[capture.node.byte_range()]);
+                    import_node = Some(capture.node);
+                }
+                Some("ns_import") => {
+                    import_name = Some(&ctx.source[capture.node.byte_range()]);
+                    import_node = Some(capture.node);
+                    is_namespace = true;
+                }
+                Some("source") => {
+                    let path = &ctx.source[capture.node.byte_range()];
+                    // Strip quotes
+                    source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
+                }
+                _ => {}
+            }
+        }
+
+        if let (Some(name), Some(node), Some(path)) = (import_name, import_node, source_path) {
+            let module_name = module_path_from_import(path, ctx);
+            let target = if is_namespace {
+                module_name.clone()
+            } else {
+                format!("{module_name}.{name}")
+            };
+
+            if let Ok(r) = SourceReference::builder()
+                .target(target)
+                .simple_name(name.to_string())
+                .location(SourceLocation::from_tree_sitter_node(node))
+                .ref_type(ReferenceType::Import)
+                .build()
+            {
+                rels.imports.push(r);
+            }
+        }
+    }
+
+    rels
+}
+
+/// Extract reexport relationships from module (program node)
+pub(crate) fn extract_reexports(ctx: &ExtractionContext, _node: Node) -> EntityRelationshipData {
+    let mut rels = EntityRelationshipData::default();
+
+    let Some(program) = find_capture_node(ctx.query_match, ctx.query, "program") else {
+        return rels;
+    };
+
+    let query_source = r#"
+        (export_statement
+          (export_clause
+            (export_specifier
+              name: (identifier) @export_name))
+          source: (string) @source)
+
+        (export_statement
+          "*"
+          source: (string) @source) @star_export
+    "#;
+
+    let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+    let Ok(query) = Query::new(&language, query_source) else {
+        return rels;
+    };
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, program, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        let mut export_name: Option<&str> = None;
+        let mut export_node: Option<tree_sitter::Node> = None;
+        let mut source_path: Option<&str> = None;
+        let mut is_star = false;
+        let mut star_node: Option<tree_sitter::Node> = None;
+
+        for capture in query_match.captures {
+            let capture_name = query.capture_names().get(capture.index as usize).copied();
+            match capture_name {
+                Some("export_name") => {
+                    export_name = Some(&ctx.source[capture.node.byte_range()]);
+                    export_node = Some(capture.node);
+                }
+                Some("source") => {
+                    let path = &ctx.source[capture.node.byte_range()];
+                    source_path = Some(path.trim_matches(|c| c == '"' || c == '\''));
+                }
+                Some("star_export") => {
+                    is_star = true;
+                    star_node = Some(capture.node);
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(path) = source_path {
+            let module_name = module_path_from_import(path, ctx);
+
+            if is_star {
+                // Star reexport: target is the module itself
+                let location_node = star_node.unwrap_or(program);
+                if let Ok(r) = SourceReference::builder()
+                    .target(module_name.clone())
+                    .simple_name(module_name)
+                    .location(SourceLocation::from_tree_sitter_node(location_node))
+                    .ref_type(ReferenceType::Reexport)
+                    .build()
+                {
+                    rels.reexports.push(r);
+                }
+            } else if let (Some(name), Some(node)) = (export_name, export_node) {
+                // Named reexport: target is module.name
+                let target = format!("{module_name}.{name}");
+                if let Ok(r) = SourceReference::builder()
+                    .target(target)
+                    .simple_name(name.to_string())
+                    .location(SourceLocation::from_tree_sitter_node(node))
+                    .ref_type(ReferenceType::Reexport)
+                    .build()
+                {
+                    rels.reexports.push(r);
+                }
+            }
+        }
+    }
+
+    rels
+}
+
+/// Convert import path to module name, resolving relative to the current file
+///
+/// Uses repo_root to compute the relative directory path for proper resolution.
+///
+/// Examples (assuming current file is `models/index.ts` relative to repo root):
+/// - `./user` -> `models.user`
+/// - `./sub/mod` -> `models.sub.mod`
+/// - `../sibling` -> `sibling`
+///
+/// Examples (assuming current file is `utils.ts` - no parent dir):
+/// - `./helper` -> `helper`
+fn module_path_from_import(import_path: &str, ctx: &ExtractionContext) -> String {
+    // Get the relative path from repo_root (or source_root if available)
+    let relative_file_path = ctx
+        .source_root
+        .and_then(|root| ctx.file_path.strip_prefix(root).ok())
+        .or_else(|| ctx.file_path.strip_prefix(ctx.repo_root).ok())
+        .unwrap_or(ctx.file_path);
+
+    // Get the directory of the current file relative to the root
+    let current_dir = relative_file_path.parent().unwrap_or(Path::new(""));
+
+    // Convert current directory to module path prefix (e.g., "models" for "models/index.ts")
+    let dir_prefix: Vec<&str> = current_dir
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+
+    // Handle relative paths
+    if let Some(rest) = import_path.strip_prefix("./") {
+        // Same directory: prepend current directory path
+        let import_parts: Vec<&str> = rest.split('/').collect();
+        let mut parts = dir_prefix.clone();
+        parts.extend(import_parts);
+        parts.join(".")
+    } else if let Some(rest) = import_path.strip_prefix("../") {
+        // Parent directory: go up one level
+        let import_parts: Vec<&str> = rest.split('/').collect();
+        let mut parts: Vec<&str> = if !dir_prefix.is_empty() {
+            dir_prefix[..dir_prefix.len() - 1].to_vec()
+        } else {
+            vec![]
+        };
+        parts.extend(import_parts);
+        parts.join(".")
+    } else {
+        // Absolute/external module name - just use the path
+        import_path.replace('/', ".")
+    }
+}
+
+/// Extract function relationships (calls and type usages)
+pub(crate) fn extract_function_relationships(
+    ctx: &ExtractionContext,
+    node: Node,
+) -> EntityRelationshipData {
+    let mut rels = extract_function_calls(ctx, node);
+    let type_usages = extract_type_usages(ctx, node);
+    rels.uses_types = type_usages.uses_types;
+    rels
+}
+
+/// Extract interface relationships (extends and type usages)
+pub(crate) fn extract_interface_relationships(
+    ctx: &ExtractionContext,
+    node: Node,
+) -> EntityRelationshipData {
+    let mut rels = extract_interface_extends_relationships(ctx, node);
+    let type_usages = extract_type_usages(ctx, node);
+    rels.uses_types = type_usages.uses_types;
+    rels
+}
+
+/// Extract class relationships (extends, implements, and type usages)
+pub(crate) fn extract_class_relationships(
+    ctx: &ExtractionContext,
+    node: Node,
+) -> EntityRelationshipData {
+    let mut rels = extract_extends_relationships(ctx, node);
+    let type_usages = extract_type_usages(ctx, node);
+    rels.uses_types = type_usages.uses_types;
+    rels
+}
+
+/// Extract module relationships (imports and reexports)
+pub(crate) fn extract_module_relationships(
+    ctx: &ExtractionContext,
+    node: Node,
+) -> EntityRelationshipData {
+    let mut rels = extract_imports(ctx, node);
+    let reexports = extract_reexports(ctx, node);
+    rels.reexports = reexports.reexports;
     rels
 }
 

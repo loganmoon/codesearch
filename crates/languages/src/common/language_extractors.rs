@@ -459,6 +459,78 @@ pub fn extract_module_entity<L: LanguageExtractors>(
     Ok(vec![entity])
 }
 
+/// Extract a module-level entity with relationships from a tree-sitter query match.
+///
+/// Unlike other entity types, modules derive their qualified name from the file path
+/// rather than from AST scope traversal. This function handles that special case
+/// while also supporting relationship extraction.
+///
+/// The name function receives the ExtractionContext to derive the module name from file path.
+pub fn extract_module_entity_with_relationships<L: LanguageExtractors>(
+    ctx: &ExtractionContext,
+    capture: &str,
+    name_fn: fn(&ExtractionContext, Node) -> codesearch_core::error::Result<String>,
+    relationships_fn: fn(&ExtractionContext, Node) -> EntityRelationshipData,
+) -> Result<Vec<CodeEntity>> {
+    use crate::common::module_utils;
+    use codesearch_core::entity_id::generate_entity_id;
+
+    let node = match extract_main_node(ctx.query_match, ctx.query, &[capture]) {
+        Some(n) => n,
+        None => return Ok(Vec::new()),
+    };
+
+    let name = name_fn(ctx, node)?;
+    let relationships = relationships_fn(ctx, node);
+
+    // For modules, derive qualified_name from file path, not AST scope
+    let qualified_name = module_utils::derive_qualified_name(
+        ctx.file_path,
+        ctx.source_root,
+        ctx.repo_root,
+        ".", // JS/TS use dot separator
+    );
+
+    // Build path_entity_identifier (repo-relative path for import resolution)
+    let path_entity_identifier =
+        module_utils::derive_path_entity_identifier(ctx.file_path, ctx.repo_root, ".");
+
+    // Generate entity ID
+    let file_path_str = ctx.file_path.to_string_lossy();
+    let entity_id = generate_entity_id(ctx.repository_id, &file_path_str, &qualified_name);
+
+    // Get location from node
+    let location = codesearch_core::entities::SourceLocation::from_tree_sitter_node(node);
+
+    // Build components manually for module entities
+    let components = crate::common::entity_building::CommonEntityComponents {
+        entity_id,
+        repository_id: ctx.repository_id.to_string(),
+        name,
+        qualified_name,
+        path_entity_identifier: Some(path_entity_identifier),
+        parent_scope: None, // Module is the top-level entity
+        file_path: ctx.file_path.to_path_buf(),
+        location,
+    };
+
+    let entity = build_entity(
+        components,
+        EntityDetails {
+            entity_type: EntityType::Module,
+            language: L::LANGUAGE,
+            visibility: Some(Visibility::Public), // Modules are always public
+            documentation: None,
+            content: None, // Don't include full file content for performance
+            metadata: EntityMetadata::default(),
+            signature: None,
+            relationships,
+        },
+    )?;
+
+    Ok(vec![entity])
+}
+
 /// Default metadata function that returns empty metadata
 pub fn default_metadata(_node: Node, _source: &str) -> EntityMetadata {
     EntityMetadata::default()
@@ -858,6 +930,31 @@ macro_rules! define_handler {
         }
     };
 
+    // With context-aware name function, metadata, and relationships (uses trait visibility)
+    (
+        $lang:ty,
+        $fn_name:ident,
+        $capture:expr,
+        $entity_type:ident,
+        name_ctx_fn: $name_ctx_fn:expr,
+        metadata: $metadata_fn:expr,
+        relationships: $rel_fn:expr
+    ) => {
+        pub(crate) fn $fn_name(
+            ctx: &$crate::common::entity_building::ExtractionContext,
+        ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
+            $crate::common::language_extractors::extract_entity_with_name_ctx_fn::<$lang>(
+                ctx,
+                $capture,
+                codesearch_core::entities::EntityType::$entity_type,
+                $name_ctx_fn,
+                None,
+                $metadata_fn,
+                $rel_fn,
+            )
+        }
+    };
+
     // =========================================================================
     // Module entity variant (file-level entities with path-based qualified names)
     // =========================================================================
@@ -874,6 +971,23 @@ macro_rules! define_handler {
         ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
             $crate::common::language_extractors::extract_module_entity::<$lang>(
                 ctx, $capture, $name_fn,
+            )
+        }
+    };
+
+    // Module entity with context-aware name function and relationships
+    (
+        $lang:ty,
+        $fn_name:ident,
+        $capture:expr,
+        module_name_fn: $name_fn:expr,
+        relationships: $rel_fn:expr
+    ) => {
+        pub(crate) fn $fn_name(
+            ctx: &$crate::common::entity_building::ExtractionContext,
+        ) -> codesearch_core::error::Result<Vec<codesearch_core::CodeEntity>> {
+            $crate::common::language_extractors::extract_module_entity_with_relationships::<$lang>(
+                ctx, $capture, $name_fn, $rel_fn,
             )
         }
     };
@@ -977,10 +1091,22 @@ macro_rules! define_ts_family_handler {
         $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, relationships: $rel_fn);
     };
 
+    // With context-aware name function, metadata, and relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, $entity_type:ident, name_ctx_fn: $name_ctx_fn:expr, metadata: $metadata_fn:expr, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, $entity_type, name_ctx_fn: $name_ctx_fn, metadata: $metadata_fn, relationships: $rel_fn);
+    };
+
     // Module entity variant
     ($ts_fn:ident, $tsx_fn:ident, $capture:expr, module_name_fn: $name_fn:expr) => {
         $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, module_name_fn: $name_fn);
         $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, module_name_fn: $name_fn);
+    };
+
+    // Module entity variant with relationships
+    ($ts_fn:ident, $tsx_fn:ident, $capture:expr, module_name_fn: $name_fn:expr, relationships: $rel_fn:expr) => {
+        $crate::define_handler!($crate::common::js_ts_shared::TypeScript, $ts_fn, $capture, module_name_fn: $name_fn, relationships: $rel_fn);
+        $crate::define_handler!($crate::common::js_ts_shared::Tsx, $tsx_fn, $capture, module_name_fn: $name_fn, relationships: $rel_fn);
     };
 }
 

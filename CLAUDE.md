@@ -40,14 +40,11 @@ This project uses git worktrees with a separate git directory for parallel devel
 - IMPORTANT: Minimize public exports from lib crates. Minimize visibility within crates (default to private)
 - Implement From/Into traits for API boundary conversions
 
-**LSP Usage (MANDATORY):**
-- ALWAYS use LSP tools to explore code before writing or modifying:
+**LSP Usage (Should strongly prefer):**
+- Use LSP tools to explore code before writing or modifying:
   - `documentSymbol` to discover existing functions/types in a file
   - `goToDefinition` to trace implementations and understand code flow
   - `findReferences` to understand how code is used
-- Never assume you know what exists - verify with LSP first
-- This applies to ALL code exploration, not just specific crates
-
 
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests

@@ -882,7 +882,7 @@ extraction_hints:
             (function_item
               name: (identifier) @name
               parameters: (parameters
-                (self_parameter) @self_param)
+                . (self_parameter) @self_param)
               return_type: (_)? @return_type
               body: (block) @body) @method)) @impl
         (#not-has-child? @impl trait)

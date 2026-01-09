@@ -122,8 +122,9 @@ pub fn extract_with_config(
         // For entities where derivation fails (e.g., impl blocks where qualified_name has
         // no clear parent component), fall back to the original AST-derived parent_scope.
         //
-        // Note: We use `name` (the simple entity name from name_strategy), not `components.name`
-        // which may be the raw template value before FQN expansion.
+        // Note: We use `name` (the simple entity name from name_strategy, e.g., "handle"),
+        // not `components.name` which for template strategies may contain the unexpanded
+        // template (e.g., "<{impl_type_name} as {trait_name}>").
         let parent_scope = if config.qualified_name_template.is_some() {
             // Try to derive parent from the qualified name structure using the simple name
             derive_parent_from_qualified_name(&qualified_name, &name)
@@ -490,15 +491,10 @@ fn expand_qualified_name_template(
             // Case 2: Simple trait name - prepend module scope
             // Find the module-level scope (everything before the type in the scope)
             // For methods, scope is like "crate::Type", for impl blocks it's "crate"
-            let module_scope = if scope.contains("::") {
-                // For methods, we need to go up one more level to get module
-                scope
-                    .rsplit_once("::")
-                    .map(|(prefix, _)| prefix)
-                    .unwrap_or(scope)
-            } else {
-                scope.as_str()
-            };
+            let module_scope = scope
+                .rsplit_once("::")
+                .map(|(prefix, _)| prefix)
+                .unwrap_or(scope.as_str());
             format!("{module_scope}::{trait_name}")
         } else {
             // Case 3: No scope available
@@ -530,7 +526,8 @@ fn expand_qualified_name_template(
 /// Returns None when:
 /// - The qualified_name equals the entity_name (no parent in the FQN structure)
 /// - The qualified_name doesn't end with a standard `::name` or `.name` suffix
-///   (e.g., impl blocks like `<Type as Trait>` which have no clear parent in the FQN)
+///   containing the entity_name (e.g., impl blocks where the qualified_name IS
+///   the full signature `<Type as Trait>`, not a suffix-based derivation)
 ///
 /// The caller should fall back to AST-derived parent_scope when this returns None.
 fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) -> Option<String> {
@@ -541,6 +538,11 @@ fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) ->
         if qualified_name.ends_with(suffix) {
             let parent = &qualified_name[..qualified_name.len() - suffix.len()];
             if parent.is_empty() {
+                tracing::trace!(
+                    qualified_name = qualified_name,
+                    entity_name = entity_name,
+                    "Parent derivation yielded empty string"
+                );
                 return None;
             }
             return Some(parent.to_string());
@@ -552,13 +554,20 @@ fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) ->
     // - Module entities where qualified_name == name
     // - Impl blocks where qualified_name is the full type signature without a parent suffix
     //   (e.g., `<Type as Trait>` - the parent is the module, not derivable from FQN)
+    tracing::trace!(
+        qualified_name = qualified_name,
+        entity_name = entity_name,
+        "Could not derive parent - qualified_name doesn't end with expected suffix"
+    );
     None
 }
 
 /// Determine if a query match should be skipped based on implicit predicates.
 ///
-/// This handles cases where tree-sitter predicates like `#not-has-child?` aren't
-/// automatically evaluated. We implement the filtering logic here instead.
+/// Handles two cases:
+/// 1. `#not-has-child?` predicates that tree-sitter doesn't automatically evaluate
+///    (e.g., inherent impl handlers should skip trait impls)
+/// 2. Queries expecting specific captures (like `trait_name`) that weren't matched
 fn should_skip_match(
     config: &HandlerConfig,
     main_node: Node,
@@ -915,40 +924,33 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
 
 /// Check if a node is an ambient declaration (has 'declare' modifier)
 fn is_ambient_declaration(node: Node) -> bool {
-    // Check if this node or its parent has an ambient marker
-    // Ambient declarations have node types ending with "_declaration" and start with "declare"
-    let ambient_types = [
+    const AMBIENT_TYPES: &[&str] = &[
         "ambient_declaration",
         "ambient_class_declaration",
         "ambient_function_declaration",
         "ambient_variable_declaration",
     ];
 
-    // Check for explicit ambient node types
-    if ambient_types.contains(&node.kind()) {
+    // Check node or parent for ambient type
+    if AMBIENT_TYPES.contains(&node.kind()) {
+        return true;
+    }
+    if node
+        .parent()
+        .is_some_and(|p| AMBIENT_TYPES.contains(&p.kind()))
+    {
         return true;
     }
 
-    // Check if parent is an ambient declaration
-    if let Some(parent) = node.parent() {
-        if ambient_types.contains(&parent.kind()) {
-            return true;
-        }
-    }
-
-    // For lexical/variable declarations, check if first child is "declare" keyword
-    let decl_types = [
+    // For declarations, check for "declare" keyword as first child
+    const DECL_TYPES: &[&str] = &[
         "lexical_declaration",
         "variable_declaration",
         "function_declaration",
         "class_declaration",
     ];
-    if decl_types.contains(&node.kind()) {
-        if let Some(first_child) = node.child(0) {
-            if first_child.kind() == "declare" {
-                return true;
-            }
-        }
+    if DECL_TYPES.contains(&node.kind()) && node.child(0).is_some_and(|c| c.kind() == "declare") {
+        return true;
     }
 
     false

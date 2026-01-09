@@ -1586,6 +1586,7 @@ extraction_hints:
         ; - < (generic arrow function type params)
         ; - async\s*< (async generic arrow functions)
         ; - word => (single-param arrow functions)
+        ; NOTE: Some edge cases may still slip through - see REMAINING_ISSUES.md
         (
           (lexical_declaration
             kind: "const"

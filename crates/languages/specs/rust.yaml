@@ -1300,8 +1300,9 @@ extraction_hints:
       capture: "impl"
       name_strategy: template
       name_template: "<{impl_type_name} as {trait_name}>"
-      # Note: Uses just the fully-qualified type and trait names, no module prefix.
-      # This ensures methods contained by this impl block share the same prefix.
+      # Note: The engine resolves {impl_type_name} and {trait_name} to fully-qualified
+      # names (e.g., "my_crate::MyType as my_crate::MyTrait"). No additional module
+      # prefix is added, ensuring contained methods share the same prefix.
       qualified_name_template: "<{impl_type_name} as {trait_name}>"
       relationships: extract_impl_relationships
 

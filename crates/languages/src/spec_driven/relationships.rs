@@ -782,8 +782,11 @@ fn extract_bounds_recursive(
 // Impl block relationship extraction (Rust)
 // =============================================================================
 
-/// Extract IMPLEMENTS relationship from a Rust trait impl block
-/// For `impl Trait for Type`, extracts reference to Trait
+/// Extract IMPLEMENTS relationship from a Rust trait impl block.
+///
+/// For `impl Trait for Type`, extracts a reference to the Trait.
+/// Note: The implementing Type is not extracted here as a relationship;
+/// the impl block's qualified name already encodes this via the type name.
 pub fn extract_impl_trait_reference(
     node: Node,
     ctx: &SpecDrivenContext,
@@ -792,21 +795,34 @@ pub fn extract_impl_trait_reference(
     let mut refs = Vec::new();
 
     // Find the trait field in impl_item
-    if let Some(trait_node) = node.child_by_field_name("trait") {
-        let type_text = node_text(trait_node, ctx.source);
-        if !type_text.is_empty() {
-            let simple_name = extract_simple_name(type_text);
-            let resolution_ctx = build_resolution_context(ctx, parent_scope);
-            let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
-            if let Some(source_ref) = build_source_reference(
-                resolved.target,
-                resolved.simple_name,
-                resolved.is_external,
-                trait_node,
-                ReferenceType::Implements,
-            ) {
-                refs.push(source_ref);
+    match node.child_by_field_name("trait") {
+        Some(trait_node) => {
+            let type_text = node_text(trait_node, ctx.source);
+            if type_text.is_empty() {
+                tracing::trace!(
+                    node_kind = node.kind(),
+                    "Trait node found but text is empty"
+                );
+            } else {
+                let simple_name = extract_simple_name(type_text);
+                let resolution_ctx = build_resolution_context(ctx, parent_scope);
+                let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+                if let Some(source_ref) = build_source_reference(
+                    resolved.target,
+                    resolved.simple_name,
+                    resolved.is_external,
+                    trait_node,
+                    ReferenceType::Implements,
+                ) {
+                    refs.push(source_ref);
+                }
             }
+        }
+        None => {
+            tracing::trace!(
+                node_kind = node.kind(),
+                "extract_impl_trait_reference called on node without trait field"
+            );
         }
     }
 
@@ -952,6 +968,9 @@ fn extract_ts_imports(
 /// A folder module is an index file that represents its containing directory,
 /// like `models/index.ts` representing the `models` module. Root-level index
 /// files (e.g., `src/index.ts` at the source root) are NOT folder modules.
+///
+/// This matters for relative import resolution: folder modules resolve `./foo`
+/// relative to the folder they represent, not their parent directory.
 fn is_folder_module(ctx: &SpecDrivenContext) -> bool {
     // Must be named "index"
     let is_index = ctx
@@ -967,14 +986,27 @@ fn is_folder_module(ctx: &SpecDrivenContext) -> bool {
     // Must have a parent directory relative to source root
     // (i.e., not be at the root level)
     let Some(source_root) = ctx.source_root else {
+        tracing::debug!(
+            file_path = ?ctx.file_path,
+            "Cannot determine folder module status: no source_root configured for index file"
+        );
         return false;
     };
 
-    ctx.file_path
-        .strip_prefix(source_root)
-        .ok()
-        .and_then(|rel| rel.parent())
-        .is_some_and(|parent| !parent.as_os_str().is_empty())
+    match ctx.file_path.strip_prefix(source_root) {
+        Ok(rel) => rel
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty()),
+        Err(e) => {
+            tracing::debug!(
+                file_path = ?ctx.file_path,
+                source_root = ?source_root,
+                error = %e,
+                "Index file path not under source root - folder module detection failed"
+            );
+            false
+        }
+    }
 }
 
 /// Common implementation for JS/TS import extraction
@@ -1124,17 +1156,36 @@ fn resolve_js_import_path(
 ) -> String {
     // Handle relative imports
     if source_path.starts_with('.') {
-        if let Some(scope) = parent_scope {
-            // Use folder-aware resolution for index.ts/index.js files
-            let resolved = if is_folder_module {
-                crate::common::import_map::resolve_relative_import_for_folder_module(
-                    scope,
-                    source_path,
-                )
-            } else {
-                crate::common::import_map::resolve_relative_import(scope, source_path)
-            };
-            return resolved.unwrap_or_else(|| format!("external.{source_path}"));
+        match parent_scope {
+            Some(scope) => {
+                // Use folder-aware resolution for index.ts/index.js files
+                let resolved = if is_folder_module {
+                    crate::common::import_map::resolve_relative_import_for_folder_module(
+                        scope,
+                        source_path,
+                    )
+                } else {
+                    crate::common::import_map::resolve_relative_import(scope, source_path)
+                };
+                match resolved {
+                    Some(path) => return path,
+                    None => {
+                        tracing::debug!(
+                            source_path = source_path,
+                            parent_scope = scope,
+                            is_folder_module = is_folder_module,
+                            "Relative import resolution failed, treating as external"
+                        );
+                        return format!("external.{source_path}");
+                    }
+                }
+            }
+            None => {
+                tracing::debug!(
+                    source_path = source_path,
+                    "Relative import path has no parent_scope context, treating as external"
+                );
+            }
         }
     }
 

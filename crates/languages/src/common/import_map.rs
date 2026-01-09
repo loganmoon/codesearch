@@ -140,6 +140,26 @@ pub(crate) fn resolve_relative_import(
     current_module_path: &str,
     import_path: &str,
 ) -> Option<String> {
+    resolve_relative_import_impl(current_module_path, import_path, false)
+}
+
+/// Resolve a relative import for a folder module (index.ts/index.js)
+///
+/// Folder modules represent directories, so their module path IS the folder.
+/// For `./` imports, we don't need to pop to get the parent - we're already at the folder level.
+#[allow(dead_code)]
+pub(crate) fn resolve_relative_import_for_folder_module(
+    current_module_path: &str,
+    import_path: &str,
+) -> Option<String> {
+    resolve_relative_import_impl(current_module_path, import_path, true)
+}
+
+fn resolve_relative_import_impl(
+    current_module_path: &str,
+    import_path: &str,
+    is_folder_module: bool,
+) -> Option<String> {
     // Only handle relative imports (starting with . or ..)
     if !import_path.starts_with('.') {
         return None;
@@ -148,8 +168,11 @@ pub(crate) fn resolve_relative_import(
     // Split current module into parts
     let mut parts: Vec<&str> = current_module_path.split('.').collect();
 
-    // Pop the current module name to get parent directory
-    if !parts.is_empty() {
+    // For regular file modules, pop the file name to get the parent directory.
+    // For folder modules (index.ts), the module path IS the folder, so we don't pop
+    // for ./ imports - only for ../ imports.
+    let starts_with_parent = import_path.starts_with("..");
+    if (!is_folder_module || starts_with_parent) && !parts.is_empty() {
         parts.pop();
     }
 

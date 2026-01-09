@@ -110,8 +110,20 @@ pub fn extract_with_config(
         };
 
         // Create modified components with custom qualified name
+        // Also clear parent_scope if it equals qualified_name (entity IS the module itself)
+        let parent_scope = if components
+            .parent_scope
+            .as_ref()
+            .is_some_and(|ps| ps == &qualified_name)
+        {
+            None
+        } else {
+            components.parent_scope.clone()
+        };
+
         let components = CommonEntityComponents {
             qualified_name,
+            parent_scope,
             ..components
         };
 

@@ -912,6 +912,36 @@ fn extract_ts_imports(
     extract_js_ts_imports_with_query(node, ctx, parent_scope, query)
 }
 
+/// Check if the file is a folder module (index.ts/index.js in a subdirectory)
+///
+/// A folder module is an index file that represents its containing directory,
+/// like `models/index.ts` representing the `models` module. Root-level index
+/// files (e.g., `src/index.ts` at the source root) are NOT folder modules.
+fn is_folder_module(ctx: &SpecDrivenContext) -> bool {
+    // Must be named "index"
+    let is_index = ctx
+        .file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|name| name == "index");
+
+    if !is_index {
+        return false;
+    }
+
+    // Must have a parent directory relative to source root
+    // (i.e., not be at the root level)
+    let Some(source_root) = ctx.source_root else {
+        return false;
+    };
+
+    ctx.file_path
+        .strip_prefix(source_root)
+        .ok()
+        .and_then(|rel| rel.parent())
+        .is_some_and(|parent| !parent.as_os_str().is_empty())
+}
+
 /// Common implementation for JS/TS import extraction
 fn extract_js_ts_imports_with_query(
     node: Node,
@@ -922,6 +952,7 @@ fn extract_js_ts_imports_with_query(
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+    let folder_module = is_folder_module(ctx);
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
@@ -944,7 +975,8 @@ fn extract_js_ts_imports_with_query(
 
             for (local_name, original_name, spec_node) in specifiers {
                 // Resolve the import path
-                let resolved_path = resolve_js_import_path(source_path, parent_scope);
+                let resolved_path =
+                    resolve_js_import_path(source_path, parent_scope, folder_module);
 
                 // Build target qualified name
                 let target = if original_name == "*" {
@@ -1046,13 +1078,28 @@ fn extract_single_js_specifier(spec: Node, source: &str) -> Option<(String, Stri
 }
 
 /// Resolve JS/TS import path to absolute module path
-fn resolve_js_import_path(source_path: &str, parent_scope: Option<&str>) -> String {
+///
+/// The `is_folder_module` flag indicates whether the importing module is a folder
+/// entry point (index.ts/index.js). For folder modules, relative imports like `./foo`
+/// resolve differently because the module path already represents the folder.
+fn resolve_js_import_path(
+    source_path: &str,
+    parent_scope: Option<&str>,
+    is_folder_module: bool,
+) -> String {
     // Handle relative imports
     if source_path.starts_with('.') {
         if let Some(scope) = parent_scope {
-            // Use the same resolution logic as import_map
-            return crate::common::import_map::resolve_relative_import(scope, source_path)
-                .unwrap_or_else(|| format!("external.{source_path}"));
+            // Use folder-aware resolution for index.ts/index.js files
+            let resolved = if is_folder_module {
+                crate::common::import_map::resolve_relative_import_for_folder_module(
+                    scope,
+                    source_path,
+                )
+            } else {
+                crate::common::import_map::resolve_relative_import(scope, source_path)
+            };
+            return resolved.unwrap_or_else(|| format!("external.{source_path}"));
         }
     }
 
@@ -1110,7 +1157,8 @@ fn extract_js_ts_reexports_with_query(
             };
 
             // Resolve the source module path
-            let resolved_path = resolve_js_import_path(source_path, parent_scope);
+            let resolved_path =
+                resolve_js_import_path(source_path, parent_scope, is_folder_module(ctx));
 
             // Check if it's a star re-export or named re-export
             let specifiers = extract_js_export_specifiers(export_stmt, ctx.source);

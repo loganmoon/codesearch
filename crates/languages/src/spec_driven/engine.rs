@@ -365,9 +365,12 @@ fn expand_qualified_name_template(
         result = result.replace("{scope}", "");
     }
 
+    // Replace {name} with the entity's derived name
+    result = result.replace("{name}", &components.name);
+
     // Replace capture placeholders
-    for (name, value) in captures {
-        result = result.replace(&format!("{{{name}}}"), value);
+    for (capture_name, value) in captures {
+        result = result.replace(&format!("{{{capture_name}}}"), value);
     }
 
     result

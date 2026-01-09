@@ -1311,6 +1311,7 @@ extraction_hints:
       query: MODULE
       capture: "program"
       name_strategy: file_path  # Derive name from file path
+      qualified_name_template: "{name}"  # Module qname is just the file-derived name
       relationships: extract_module_relationships
 
 

@@ -140,7 +140,7 @@ pub fn extract_with_config(
         // Determine visibility
         let visibility = config
             .visibility_override
-            .or_else(|| extract_visibility_from_node(main_node, ctx.source));
+            .or_else(|| extract_visibility_from_node(main_node, ctx.source, ctx.language_str));
 
         // Build the entity
         let entity = build_entity(
@@ -520,8 +520,8 @@ fn extract_relationships(
     super::relationships::extract_relationships(extractor, node, ctx, parent_scope)
 }
 
-/// Extract visibility from a node (language-agnostic)
-fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> {
+/// Extract visibility from a node (language-aware)
+fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Option<Visibility> {
     // First, check for Rust visibility modifiers (pub, pub(crate), etc.)
     if let Some(vis) = extract_rust_visibility(node, source) {
         return Some(vis);
@@ -535,6 +535,33 @@ fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> 
     // For Rust macros, check for #[macro_export] attribute
     if node.kind() == "macro_definition" {
         return Some(extract_macro_visibility(node, source));
+    }
+
+    // Apply language-specific defaults
+    // In Rust, items without visibility modifier are private by default
+    if language == "rust" {
+        // Most Rust items (functions, structs, modules, etc.) are private by default
+        let rust_item_kinds = [
+            "function_item",
+            "struct_item",
+            "enum_item",
+            "type_item",
+            "mod_item",
+            "const_item",
+            "static_item",
+            "trait_item",
+            "impl_item",
+            "union_item",
+            "extern_crate_declaration",
+            "use_declaration",
+        ];
+        if rust_item_kinds.contains(&node.kind()) {
+            return Some(Visibility::Private);
+        }
+        // Module declarations are private by default
+        if node.kind() == "mod_item" {
+            return Some(Visibility::Private);
+        }
     }
 
     None

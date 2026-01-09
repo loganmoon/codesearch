@@ -402,19 +402,23 @@ fn entity_type_from_rule(rule: &str) -> Result<EntityType> {
         // Modules
         r if r.starts_with("E-MOD") => Ok(EntityType::Module),
 
-        // Functions
-        "E-FN-FREE" | "E-FN-ASSOC" | "E-FN-DECL" => Ok(EntityType::Function),
+        // Functions (including extern functions)
+        "E-FN-FREE" | "E-FN-ASSOC" | "E-FN-DECL" | "E-EXTERN-FN" => Ok(EntityType::Function),
 
         // Methods
         r if r.starts_with("E-METHOD") => Ok(EntityType::Method),
+
+        // Impl blocks
+        "E-IMPL-INHERENT" | "E-IMPL-TRAIT" => Ok(EntityType::Impl),
 
         // Types
         "E-STRUCT" => Ok(EntityType::Struct),
         "E-ENUM" => Ok(EntityType::Enum),
         "E-ENUM-VARIANT" => Ok(EntityType::EnumVariant),
-        "E-TRAIT" | "E-INTERFACE" => Ok(EntityType::Interface),
+        "E-TRAIT" => Ok(EntityType::Trait),
+        "E-INTERFACE" => Ok(EntityType::Interface),
         "E-TYPE-ALIAS" | "E-TYPE-ALIAS-ASSOC" => Ok(EntityType::TypeAlias),
-        "E-UNION" => Ok(EntityType::Struct), // Rust unions are struct-like
+        "E-UNION" => Ok(EntityType::Union),
 
         // Properties
         "E-PROPERTY" | "E-FIELD" | "E-INTERFACE-PROPERTY" => Ok(EntityType::Property),
@@ -425,8 +429,9 @@ fn entity_type_from_rule(rule: &str) -> Result<EntityType> {
         }
         "E-INTERFACE-INDEX-SIG" => Ok(EntityType::Property),
 
-        // Constants
-        "E-CONST" | "E-CONST-ASSOC" | "E-STATIC" => Ok(EntityType::Constant),
+        // Constants and statics
+        "E-CONST" | "E-CONST-ASSOC" => Ok(EntityType::Constant),
+        "E-STATIC" | "E-EXTERN-STATIC" => Ok(EntityType::Static),
 
         // Macros
         "E-MACRO" | "E-MACRO-RULES" => Ok(EntityType::Macro),
@@ -440,7 +445,7 @@ fn entity_type_from_rule(rule: &str) -> Result<EntityType> {
         }
 
         // Extern blocks
-        "E-EXTERN-BLOCK" => Ok(EntityType::Module), // Treat as module-like container
+        "E-EXTERN-BLOCK" => Ok(EntityType::ExternBlock),
 
         _ => Err(Error::entity_extraction(format!(
             "Unknown entity rule: {rule}"

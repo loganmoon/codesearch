@@ -28,6 +28,22 @@ const RUST_SCOPE_PATTERNS: &[ScopePattern] = &[
         node_kind: "impl_item",
         field_name: "type",
     },
+    ScopePattern {
+        node_kind: "struct_item",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "enum_item",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "trait_item",
+        field_name: "name",
+    },
+    ScopePattern {
+        node_kind: "union_item",
+        field_name: "name",
+    },
 ];
 
 // Register scope configurations for qualified name building

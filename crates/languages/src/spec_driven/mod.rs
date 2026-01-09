@@ -125,4 +125,5 @@ pub enum RelationshipExtractor {
     ExtractTypeRelationships,
     ExtractTraitRelationships,
     ExtractInterfaceRelationships,
+    ExtractImplRelationships,
 }

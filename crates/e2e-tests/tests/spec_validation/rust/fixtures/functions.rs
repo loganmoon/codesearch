@@ -119,13 +119,13 @@ impl Foo {
         // Q-INHERENT-METHOD: inherent methods use UFCS format <Type>::method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::Foo>::method",
+            qualified_name: "test_crate::Foo::method",
             visibility: Some(Visibility::Public),
         },
         // E-FN-ASSOC: no self, no Self return -> Function
         ExpectedEntity {
             kind: EntityKind::Function,
-            qualified_name: "<test_crate::Foo>::associated",
+            qualified_name: "test_crate::Foo::associated",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -142,13 +142,13 @@ impl Foo {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Foo",
-            to: "<test_crate::Foo>::method",
+            from: "test_crate::Foo",
+            to: "test_crate::Foo::method",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Foo",
-            to: "<test_crate::Foo>::associated",
+            from: "test_crate::Foo",
+            to: "test_crate::Foo::associated",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -285,25 +285,25 @@ impl Counter {
         // E-METHOD-RETURNS-SELF: returns Self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::Counter>::new",
+            qualified_name: "test_crate::Counter::new",
             visibility: Some(Visibility::Public),
         },
         // E-METHOD-RETURNS-SELF: returns Self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::Counter>::with_value",
+            qualified_name: "test_crate::Counter::with_value",
             visibility: Some(Visibility::Public),
         },
         // E-METHOD-SELF: has &mut self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::Counter>::increment",
+            qualified_name: "test_crate::Counter::increment",
             visibility: Some(Visibility::Public),
         },
         // E-METHOD-SELF: has &self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::Counter>::get",
+            qualified_name: "test_crate::Counter::get",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -320,23 +320,23 @@ impl Counter {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Counter",
-            to: "<test_crate::Counter>::new",
+            from: "test_crate::Counter",
+            to: "test_crate::Counter::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Counter",
-            to: "<test_crate::Counter>::with_value",
+            from: "test_crate::Counter",
+            to: "test_crate::Counter::with_value",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Counter",
-            to: "<test_crate::Counter>::increment",
+            from: "test_crate::Counter",
+            to: "test_crate::Counter::increment",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::Counter",
-            to: "<test_crate::Counter>::get",
+            from: "test_crate::Counter",
+            to: "test_crate::Counter::get",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -399,7 +399,7 @@ impl AsyncService {
         // Q-INHERENT-METHOD: UFCS format
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::AsyncService>::process",
+            qualified_name: "test_crate::AsyncService::process",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -426,8 +426,8 @@ impl AsyncService {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::AsyncService",
-            to: "<test_crate::AsyncService>::process",
+            from: "test_crate::AsyncService",
+            to: "test_crate::AsyncService::process",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
@@ -436,7 +436,7 @@ impl AsyncService {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
-            from: "<test_crate::AsyncService>::process",
+            from: "test_crate::AsyncService::process",
             to: "test_crate::async_callee",
         },
     ],
@@ -521,24 +521,24 @@ pub fn create_config() -> Config {
         // E-METHOD-RETURNS-SELF: returns Self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::ConfigBuilder>::new",
+            qualified_name: "test_crate::ConfigBuilder::new",
             visibility: Some(Visibility::Public),
         },
         // E-METHOD-RETURNS-SELF: takes self and returns Self -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::ConfigBuilder>::name",
+            qualified_name: "test_crate::ConfigBuilder::name",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::ConfigBuilder>::value",
+            qualified_name: "test_crate::ConfigBuilder::value",
             visibility: Some(Visibility::Public),
         },
         // E-METHOD-SELF: takes self (doesn't return Self but has self param) -> Method
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::ConfigBuilder>::build",
+            qualified_name: "test_crate::ConfigBuilder::build",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
@@ -570,43 +570,43 @@ pub fn create_config() -> Config {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::ConfigBuilder",
-            to: "<test_crate::ConfigBuilder>::new",
+            from: "test_crate::ConfigBuilder",
+            to: "test_crate::ConfigBuilder::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::ConfigBuilder",
-            to: "<test_crate::ConfigBuilder>::name",
+            from: "test_crate::ConfigBuilder",
+            to: "test_crate::ConfigBuilder::name",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::ConfigBuilder",
-            to: "<test_crate::ConfigBuilder>::value",
+            from: "test_crate::ConfigBuilder",
+            to: "test_crate::ConfigBuilder::value",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::ConfigBuilder",
-            to: "<test_crate::ConfigBuilder>::build",
+            from: "test_crate::ConfigBuilder",
+            to: "test_crate::ConfigBuilder::build",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_config",
-            to: "<test_crate::ConfigBuilder>::new",
+            to: "test_crate::ConfigBuilder::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_config",
-            to: "<test_crate::ConfigBuilder>::name",
+            to: "test_crate::ConfigBuilder::name",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_config",
-            to: "<test_crate::ConfigBuilder>::value",
+            to: "test_crate::ConfigBuilder::value",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_config",
-            to: "<test_crate::ConfigBuilder>::build",
+            to: "test_crate::ConfigBuilder::build",
         },
     ],
     project_type: ProjectType::SingleCrate,

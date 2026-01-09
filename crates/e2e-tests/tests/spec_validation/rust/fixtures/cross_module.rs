@@ -292,7 +292,7 @@ pub fn call_trait(d: &Data) -> String {
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::call_inherent",
-            to: "<test_crate::Data>::format",
+            to: "test_crate::Data::format",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
@@ -395,12 +395,12 @@ impl Widget {
         // Q-INHERENT-METHOD: methods use UFCS format
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::types::Widget>::display",
+            qualified_name: "test_crate::types::Widget::display",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::types::Widget>::new",
+            qualified_name: "test_crate::types::Widget::new",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -424,12 +424,12 @@ impl Widget {
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::caller",
-            to: "<test_crate::types::Widget>::new",
+            to: "test_crate::types::Widget::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::caller",
-            to: "<test_crate::types::Widget>::display",
+            to: "test_crate::types::Widget::display",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -862,12 +862,12 @@ pub fn create_with_value() -> AppConfig {
         // Q-INHERENT-METHOD: use UFCS format
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::RawConfig>::new",
+            qualified_name: "test_crate::RawConfig::new",
             visibility: Some(Visibility::Public),
         },
         ExpectedEntity {
             kind: EntityKind::Method,
-            qualified_name: "<test_crate::RawConfig>::with_value",
+            qualified_name: "test_crate::RawConfig::with_value",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -906,12 +906,12 @@ pub fn create_with_value() -> AppConfig {
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_settings",
-            to: "<test_crate::RawConfig>::new",
+            to: "test_crate::RawConfig::new",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Calls,
             from: "test_crate::create_with_value",
-            to: "<test_crate::RawConfig>::with_value",
+            to: "test_crate::RawConfig::with_value",
         },
     ],
     project_type: ProjectType::SingleCrate,
@@ -1125,12 +1125,12 @@ pub fn count_words_string(s: String) -> usize {
         // Impl blocks for foreign types
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::<String as test_crate::StringExt>",
+            qualified_name: "<String as test_crate::StringExt>",
             visibility: None,
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::<str as test_crate::StringExt>",
+            qualified_name: "<str as test_crate::StringExt>",
             visibility: None,
         },
         ExpectedEntity {
@@ -1179,12 +1179,12 @@ pub fn count_words_string(s: String) -> usize {
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate",
-            to: "test_crate::<String as test_crate::StringExt>",
+            to: "<String as test_crate::StringExt>",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate",
-            to: "test_crate::<str as test_crate::StringExt>",
+            to: "<str as test_crate::StringExt>",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
@@ -1203,12 +1203,12 @@ pub fn count_words_string(s: String) -> usize {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<String as test_crate::StringExt>",
+            from: "<String as test_crate::StringExt>",
             to: "test_crate::StringExt",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<str as test_crate::StringExt>",
+            from: "<str as test_crate::StringExt>",
             to: "test_crate::StringExt",
         },
         // Key test: CALLS distinguish between impls for String vs str

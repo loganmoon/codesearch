@@ -1539,7 +1539,7 @@ extraction_hints:
             (variable_declarator
               name: (identifier) @name
               value: (_) @value)) @const
-          (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
+          (#not-match? @value "^(function|async function|\\(|<|\\w+\\s*=>)")
         )
 
         (
@@ -1549,7 +1549,7 @@ extraction_hints:
               (variable_declarator
                 name: (identifier) @name
                 value: (_) @value))) @const
-          (#not-match? @value "^(function|async function|\\(|\\w+\\s*=>)")
+          (#not-match? @value "^(function|async function|\\(|<|\\w+\\s*=>)")
         )
 
     LET:

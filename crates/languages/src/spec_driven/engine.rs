@@ -97,14 +97,7 @@ pub fn extract_with_config(
         let captures = extract_capture_values(query_match, &query, ctx.source);
 
         // Evaluate name strategy to get entity name
-        let name = evaluate_name_strategy(
-            &config.name_strategy,
-            &captures,
-            ctx.file_path,
-            ctx.package_name,
-            main_node,
-            ctx.source,
-        )?;
+        let name = evaluate_name_strategy(&config.name_strategy, &captures, ctx, main_node)?;
 
         // Build common components with the derived name
         let components = build_common_components(ctx, &name, main_node)?;
@@ -130,8 +123,11 @@ pub fn extract_with_config(
             extract_metadata(config.metadata_extractor, main_node, ctx.source, &captures);
 
         // Extract relationships using the configured extractor
-        let relationships = extract_relationships(
+        // For Property entities (struct fields, class fields) without explicit relationship
+        // extractors, we auto-extract type references to ensure USES relationships are created.
+        let relationships = extract_relationships_with_fallback(
             config.relationship_extractor,
+            entity_type,
             main_node,
             ctx,
             Some(components.qualified_name.as_str()),
@@ -305,10 +301,8 @@ fn extract_capture_values(
 fn evaluate_name_strategy(
     strategy: &NameStrategy,
     captures: &HashMap<String, String>,
-    file_path: &Path,
-    package_name: Option<&str>,
+    ctx: &SpecDrivenContext,
     main_node: Node,
-    _source: &str,
 ) -> Result<String> {
     match strategy {
         NameStrategy::Capture { name } => captures
@@ -334,8 +328,22 @@ fn evaluate_name_strategy(
         NameStrategy::Static { name } => Ok((*name).to_string()),
 
         NameStrategy::FilePath => {
-            // Extract module name from file path
-            file_path
+            // For JS/TS, derive module path from file path relative to source root
+            // For other languages, just use the file stem
+            if matches!(ctx.language_str, "javascript" | "typescript" | "tsx") {
+                if let Some(root) = ctx.source_root {
+                    if let Some(module_path) =
+                        crate::common::js_ts_shared::module_path::derive_module_path(
+                            ctx.file_path,
+                            root,
+                        )
+                    {
+                        return Ok(module_path);
+                    }
+                }
+            }
+            // Fallback to file stem
+            ctx.file_path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .map(String::from)
@@ -344,7 +352,8 @@ fn evaluate_name_strategy(
                 })
         }
 
-        NameStrategy::CrateName => package_name
+        NameStrategy::CrateName => ctx
+            .package_name
             .map(String::from)
             .ok_or_else(|| Error::entity_extraction("No crate name available".to_string())),
 
@@ -385,8 +394,37 @@ fn expand_qualified_name_template(
     // Replace {name} with the entity's derived name
     result = result.replace("{name}", &components.name);
 
-    // Replace capture placeholders
+    // Special handling for {impl_type_name}: resolve to fully qualified name
+    // This is needed for impl blocks and methods where the type reference should
+    // include the full module path, not just the simple type name.
+    if let Some(impl_type_name) = captures.get("impl_type_name") {
+        // Check if there's a scoped path captured
+        let qualified_impl_type = if let Some(impl_type_path) = captures.get("impl_type_path") {
+            // Use the captured path + type name for scoped types like `mod::Type`
+            format!("{impl_type_path}::{impl_type_name}")
+        } else if let Some(ref scope) = components.parent_scope {
+            // For impl blocks (scope is module-level), qualify with scope
+            // For methods (scope is type-level, ends with the type name), use scope directly
+            // since it already is the qualified type name
+            if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
+                // Scope already contains the type (we're in a method context)
+                scope.clone()
+            } else {
+                // Scope is module-level (we're in an impl block context)
+                format!("{scope}::{impl_type_name}")
+            }
+        } else {
+            impl_type_name.clone()
+        };
+        result = result.replace("{impl_type_name}", &qualified_impl_type);
+    }
+
+    // Replace remaining capture placeholders
     for (capture_name, value) in captures {
+        // Skip impl_type_name as we already handled it
+        if capture_name == "impl_type_name" || capture_name == "impl_type_path" {
+            continue;
+        }
         result = result.replace(&format!("{{{capture_name}}}"), value);
     }
 
@@ -518,6 +556,34 @@ fn extract_relationships(
     };
 
     super::relationships::extract_relationships(extractor, node, ctx, parent_scope)
+}
+
+/// Extract relationships with fallback for entity types that commonly have type references.
+/// Property entities (struct fields, class fields) often have type annotations but may not
+/// have explicit relationship extractors configured. This ensures USES relationships are created.
+fn extract_relationships_with_fallback(
+    extractor: Option<RelationshipExtractor>,
+    entity_type: EntityType,
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> EntityRelationshipData {
+    // If an extractor is configured, use it
+    if extractor.is_some() {
+        return extract_relationships(extractor, node, ctx, parent_scope);
+    }
+
+    // For Property entities without explicit extractors, auto-extract type references
+    if entity_type == EntityType::Property {
+        return super::relationships::extract_relationships(
+            RelationshipExtractor::ExtractTypeRelationships,
+            node,
+            ctx,
+            parent_scope,
+        );
+    }
+
+    EntityRelationshipData::default()
 }
 
 /// Extract visibility from a node (language-aware)
@@ -660,14 +726,15 @@ fn extract_rust_visibility(node: Node, source: &str) -> Option<Visibility> {
                 let trimmed = text.trim();
                 if trimmed == "pub" {
                     return Some(Visibility::Public);
-                } else if trimmed.starts_with("pub(crate)") {
-                    // pub(crate) is similar to C#/Java's internal
-                    return Some(Visibility::Internal);
-                } else if trimmed.starts_with("pub(super)")
+                } else if trimmed.starts_with("pub(crate)")
+                    || trimmed.starts_with("pub(super)")
                     || trimmed.starts_with("pub(in")
-                    || trimmed.starts_with("pub(self)")
                 {
-                    // Restricted pub variants are effectively private outside scope
+                    // pub(crate), pub(super), and pub(in path) are internal visibility
+                    // They're accessible beyond the immediate scope but not publicly
+                    return Some(Visibility::Internal);
+                } else if trimmed.starts_with("pub(self)") {
+                    // pub(self) is effectively private to the current module
                     return Some(Visibility::Private);
                 }
             }

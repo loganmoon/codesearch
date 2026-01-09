@@ -350,15 +350,55 @@ pub fn extract_function_calls(
 // Type reference extraction
 // =============================================================================
 
+/// Node kinds that represent child entities - type references inside these should
+/// be attributed to the child entity, not the parent container.
+const RUST_CHILD_ENTITY_KINDS: &[&str] = &[
+    "field_declaration", // struct fields
+    "enum_variant",      // enum variants
+    "function_item",     // methods in impl blocks
+    "const_item",        // associated consts
+    "type_item",         // associated types
+];
+
+const JS_CHILD_ENTITY_KINDS: &[&str] = &[
+    "public_field_definition",  // class fields
+    "private_field_definition", // private class fields
+    "field_definition",         // generic field
+    "method_definition",        // class methods
+    "property_signature",       // interface properties
+    "method_signature",         // interface methods
+];
+
+/// Check if a type node is inside a child entity declaration (relative to the parent)
+fn is_inside_child_entity(type_node: Node, parent_node: Node, child_kinds: &[&str]) -> bool {
+    let mut current = type_node;
+    while let Some(ancestor) = current.parent() {
+        // Stop if we've reached the parent node
+        if ancestor.id() == parent_node.id() {
+            return false;
+        }
+        // Check if this ancestor is a child entity kind
+        if child_kinds.contains(&ancestor.kind()) {
+            return true;
+        }
+        current = ancestor;
+    }
+    false
+}
+
 /// Extract type references from a node
 pub fn extract_type_references(
     node: Node,
     ctx: &SpecDrivenContext,
     parent_scope: Option<&str>,
 ) -> Vec<SourceReference> {
-    let (query, primitives) = match ctx.language_str {
-        "rust" => (get_rust_type_query(), RUST_PRIMITIVES),
-        "typescript" | "tsx" => (get_ts_type_query(), JS_PRIMITIVES),
+    let (query, primitives, child_kinds) = match ctx.language_str {
+        "rust" => (
+            get_rust_type_query(),
+            RUST_PRIMITIVES,
+            RUST_CHILD_ENTITY_KINDS,
+        ),
+        "typescript" | "tsx" => (get_ts_type_query(), JS_PRIMITIVES, JS_CHILD_ENTITY_KINDS),
         _ => return Vec::new(),
     };
 
@@ -383,6 +423,12 @@ pub fn extract_type_references(
 
             // Filter primitive types
             if primitives.contains(&type_text) {
+                continue;
+            }
+
+            // Skip type references inside child entity declarations
+            // These will be attributed to the child entity, not the parent
+            if is_inside_child_entity(type_node, node, child_kinds) {
                 continue;
             }
 

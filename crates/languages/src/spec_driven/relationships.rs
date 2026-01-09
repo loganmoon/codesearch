@@ -134,7 +134,17 @@ fn get_rust_call_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_rust::LANGUAGE.into();
-            Query::new(&language, RUST_CALL_QUERY).ok()
+            match Query::new(&language, RUST_CALL_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "RUST_CALL_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - call extraction disabled for Rust"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -144,7 +154,17 @@ fn get_js_call_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_javascript::LANGUAGE.into();
-            Query::new(&language, JS_CALL_QUERY).ok()
+            match Query::new(&language, JS_CALL_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_CALL_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - call extraction disabled for JavaScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -154,7 +174,17 @@ fn get_ts_call_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, JS_CALL_QUERY).ok()
+            match Query::new(&language, JS_CALL_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_CALL_QUERY (TypeScript)",
+                        error = %e,
+                        "Failed to compile tree-sitter query - call extraction disabled for TypeScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -164,7 +194,17 @@ fn get_rust_type_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_rust::LANGUAGE.into();
-            Query::new(&language, RUST_TYPE_QUERY).ok()
+            match Query::new(&language, RUST_TYPE_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "RUST_TYPE_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - type extraction disabled for Rust"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -174,7 +214,17 @@ fn get_ts_type_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, JS_TYPE_QUERY).ok()
+            match Query::new(&language, JS_TYPE_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_TYPE_QUERY (TypeScript)",
+                        error = %e,
+                        "Failed to compile tree-sitter query - type extraction disabled for TypeScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -184,7 +234,17 @@ fn get_js_import_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_javascript::LANGUAGE.into();
-            Query::new(&language, JS_IMPORT_QUERY).ok()
+            match Query::new(&language, JS_IMPORT_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_IMPORT_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - import extraction disabled for JavaScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -194,7 +254,17 @@ fn get_ts_import_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, TS_IMPORT_QUERY).ok()
+            match Query::new(&language, TS_IMPORT_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "TS_IMPORT_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - import extraction disabled for TypeScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -204,7 +274,17 @@ fn get_js_reexport_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_javascript::LANGUAGE.into();
-            Query::new(&language, JS_REEXPORT_QUERY).ok()
+            match Query::new(&language, JS_REEXPORT_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_REEXPORT_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - reexport extraction disabled for JavaScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -214,7 +294,17 @@ fn get_ts_reexport_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-            Query::new(&language, JS_REEXPORT_QUERY).ok()
+            match Query::new(&language, JS_REEXPORT_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "JS_REEXPORT_QUERY (TypeScript)",
+                        error = %e,
+                        "Failed to compile tree-sitter query - reexport extraction disabled for TypeScript"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -224,7 +314,17 @@ fn get_rust_use_query() -> Option<&'static Query> {
     QUERY
         .get_or_init(|| {
             let language = tree_sitter_rust::LANGUAGE.into();
-            Query::new(&language, RUST_USE_QUERY).ok()
+            match Query::new(&language, RUST_USE_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "RUST_USE_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - use extraction disabled for Rust"
+                    );
+                    None
+                }
+            }
         })
         .as_ref()
 }
@@ -235,7 +335,19 @@ fn get_rust_use_query() -> Option<&'static Query> {
 
 /// Extract the text content of a node
 fn node_text<'a>(node: Node, source: &'a str) -> &'a str {
-    node.utf8_text(source.as_bytes()).unwrap_or("")
+    match node.utf8_text(source.as_bytes()) {
+        Ok(text) => text,
+        Err(e) => {
+            tracing::warn!(
+                node_kind = node.kind(),
+                start_byte = node.start_byte(),
+                end_byte = node.end_byte(),
+                error = %e,
+                "Failed to extract node text as UTF-8, treating as empty"
+            );
+            ""
+        }
+    }
 }
 
 /// Build a ResolutionContext from SpecDrivenContext
@@ -352,6 +464,11 @@ pub fn extract_function_calls(
 
 /// Node kinds that represent child entities - type references inside these should
 /// be attributed to the child entity, not the parent container.
+///
+/// When extracting type references from a container (e.g., a struct or impl block),
+/// we skip references inside child entities because those entities are extracted
+/// separately and will have their own type references. This prevents duplicate
+/// attribution and ensures each type reference is associated with its immediate owner.
 const RUST_CHILD_ENTITY_KINDS: &[&str] = &[
     "field_declaration", // struct fields
     "enum_variant",      // enum variants
@@ -360,6 +477,10 @@ const RUST_CHILD_ENTITY_KINDS: &[&str] = &[
     "type_item",         // associated types
 ];
 
+/// Node kinds that represent child entities for JS/TS - type references inside these
+/// should be attributed to the child entity, not the parent container.
+///
+/// See [`RUST_CHILD_ENTITY_KINDS`] for rationale.
 const JS_CHILD_ENTITY_KINDS: &[&str] = &[
     "public_field_definition",  // class fields
     "private_field_definition", // private class fields
@@ -369,7 +490,11 @@ const JS_CHILD_ENTITY_KINDS: &[&str] = &[
     "method_signature",         // interface methods
 ];
 
-/// Check if a type node is inside a child entity declaration (relative to the parent)
+/// Check if a type node is inside a child entity declaration (relative to the parent).
+///
+/// Walks up from `type_node` toward `parent_node`, returning true if any intermediate
+/// ancestor is a child entity kind. Returns false if we reach `parent_node` without
+/// encountering a child entity.
 fn is_inside_child_entity(type_node: Node, parent_node: Node, child_kinds: &[&str]) -> bool {
     let mut current = type_node;
     while let Some(ancestor) = current.parent() {
@@ -399,10 +524,17 @@ pub fn extract_type_references(
             RUST_CHILD_ENTITY_KINDS,
         ),
         "typescript" | "tsx" => (get_ts_type_query(), JS_PRIMITIVES, JS_CHILD_ENTITY_KINDS),
-        _ => return Vec::new(),
+        _ => {
+            tracing::trace!(
+                language = ctx.language_str,
+                "Type reference extraction not supported for language"
+            );
+            return Vec::new();
+        }
     };
 
     let Some(query) = query else {
+        // Query compilation already logged an error
         return Vec::new();
     };
 

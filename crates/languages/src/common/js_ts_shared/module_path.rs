@@ -8,13 +8,15 @@ use std::path::Path;
 /// Derive module path from file path relative to source root
 ///
 /// Converts a file path to its corresponding module path using `.` as separator.
+/// `index.ts`/`index.js` files act as folder entry points (like Rust's `mod.rs`).
 ///
 /// # Returns
 /// - `Some(module_path)` with the path components joined by `.`
 ///
 /// # Examples
-/// - `index.ts` -> `Some("index")`
+/// - `index.ts` -> `Some("index")` (root index)
 /// - `utils/helpers.ts` -> `Some("utils.helpers")`
+/// - `models/index.ts` -> `Some("models")` (folder entry point)
 /// - `src/components/Button.tsx` -> `Some("src.components.Button")`
 pub fn derive_module_path(file_path: &Path, source_root: &Path) -> Option<String> {
     let relative = file_path.strip_prefix(source_root).ok()?;
@@ -31,10 +33,16 @@ pub fn derive_module_path(file_path: &Path, source_root: &Path) -> Option<String
 
     // For TypeScript .d.ts files, also strip the .d suffix
     let module_name = filename.strip_suffix(".d").unwrap_or(filename);
-    components.push(module_name);
+
+    // index.ts/index.js acts as the folder's entry point (like Rust's mod.rs)
+    // It represents the folder module, not an "index" submodule
+    if module_name != "index" {
+        components.push(module_name);
+    }
 
     if components.is_empty() {
-        None
+        // Root-level index.ts still needs a name
+        Some("index".to_string())
     } else {
         Some(components.join("."))
     }
@@ -46,10 +54,29 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_simple_file() {
+    fn test_root_index_file() {
         let root = PathBuf::from("/project");
         let file = PathBuf::from("/project/index.ts");
+        // Root-level index.ts should be named "index"
         assert_eq!(derive_module_path(&file, &root), Some("index".to_string()));
+    }
+
+    #[test]
+    fn test_folder_index_file() {
+        let root = PathBuf::from("/project");
+        let file = PathBuf::from("/project/models/index.ts");
+        // Folder index.ts acts as folder entry point (like mod.rs)
+        assert_eq!(derive_module_path(&file, &root), Some("models".to_string()));
+    }
+
+    #[test]
+    fn test_nested_folder_index_file() {
+        let root = PathBuf::from("/project");
+        let file = PathBuf::from("/project/src/models/index.ts");
+        assert_eq!(
+            derive_module_path(&file, &root),
+            Some("src.models".to_string())
+        );
     }
 
     #[test]

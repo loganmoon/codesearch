@@ -641,9 +641,11 @@ fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Opt
         return Some(vis);
     }
 
-    // Check for JS/TS export-based visibility
-    if let Some(vis) = extract_js_ts_visibility(node) {
-        return Some(vis);
+    // Check for JS/TS export-based visibility (only for JavaScript/TypeScript)
+    if matches!(language, "javascript" | "typescript" | "tsx" | "jsx") {
+        if let Some(vis) = extract_js_ts_visibility(node) {
+            return Some(vis);
+        }
     }
 
     // For Rust macros, check for #[macro_export] attribute
@@ -698,6 +700,19 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         if parent.kind() == "export_statement" {
             return Some(Visibility::Public);
         }
+    }
+
+    // For items inside namespaces, check for export keyword
+    if is_inside_namespace(node) {
+        // Check if this node starts with 'export' keyword
+        // The export_statement wraps the actual declaration inside namespaces
+        if let Some(parent) = node.parent() {
+            if parent.kind() == "export_statement" {
+                return Some(Visibility::Public);
+            }
+        }
+        // Not exported from namespace → private to namespace
+        return Some(Visibility::Private);
     }
 
     // For JS/TS module-level declarations, check if we're at module level
@@ -762,6 +777,23 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
     }
 
     None
+}
+
+/// Check if a node is inside a TypeScript namespace declaration
+fn is_inside_namespace(node: Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        // Check for TypeScript namespace/module declaration
+        // The AST structure is: namespace_declaration > statement_block > declarations
+        if parent.kind() == "namespace_declaration"
+            || parent.kind() == "module_declaration"
+            || parent.kind() == "internal_module"
+        {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 /// Extract Rust visibility modifier from a node

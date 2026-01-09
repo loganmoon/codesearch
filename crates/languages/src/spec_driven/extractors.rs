@@ -5,6 +5,8 @@
 
 use super::engine::{extract_with_config, SpecDrivenContext};
 use super::HandlerConfig;
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
+use crate::common::import_map::parse_file_imports;
 use crate::common::js_ts_shared::{
     module_path as js_module_path, SCOPE_PATTERNS, TS_SCOPE_PATTERNS,
 };
@@ -227,6 +229,12 @@ impl SpecDrivenRustExtractor {
             .parse(source, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse source code"))?;
 
+        // Build import map for reference resolution
+        let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
+
+        // Create edge case registry for Rust-specific patterns
+        let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -236,6 +244,9 @@ impl SpecDrivenRustExtractor {
             repo_root: &self.repo_root,
             language: Language::Rust,
             language_str: "rust",
+            import_map: &import_map,
+            path_config: &CRATE_BASED_PATH_CONFIG,
+            edge_case_handlers: Some(&edge_case_registry),
         };
 
         let mut all_entities = Vec::new();
@@ -292,6 +303,20 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             .parse(source, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse source code"))?;
 
+        // Derive module path for relative import resolution
+        let module_path = self
+            .source_root
+            .as_deref()
+            .and_then(|root| js_module_path::derive_module_path(file_path, root));
+
+        // Build import map for reference resolution
+        let import_map = parse_file_imports(
+            tree.root_node(),
+            source,
+            Language::JavaScript,
+            module_path.as_deref(),
+        );
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -301,6 +326,9 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             repo_root: &self.repo_root,
             language: Language::JavaScript,
             language_str: "javascript",
+            import_map: &import_map,
+            path_config: &MODULE_BASED_PATH_CONFIG,
+            edge_case_handlers: None, // No JS-specific edge case handlers yet
         };
 
         use super::javascript::handler_configs::ALL_HANDLERS;
@@ -352,6 +380,20 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             .parse(source, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse source code"))?;
 
+        // Derive module path for relative import resolution
+        let module_path = self
+            .source_root
+            .as_deref()
+            .and_then(|root| js_module_path::derive_module_path(file_path, root));
+
+        // Build import map for reference resolution
+        let import_map = parse_file_imports(
+            tree.root_node(),
+            source,
+            Language::TypeScript,
+            module_path.as_deref(),
+        );
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -361,6 +403,9 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             repo_root: &self.repo_root,
             language: Language::TypeScript,
             language_str: "typescript",
+            import_map: &import_map,
+            path_config: &MODULE_BASED_PATH_CONFIG,
+            edge_case_handlers: None, // No TS-specific edge case handlers yet
         };
 
         use super::typescript::handler_configs::ALL_HANDLERS;
@@ -414,6 +459,20 @@ impl Extractor for SpecDrivenTsxExtractor {
             .parse(source, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse source code"))?;
 
+        // Derive module path for relative import resolution
+        let module_path = self
+            .source_root
+            .as_deref()
+            .and_then(|root| js_module_path::derive_module_path(file_path, root));
+
+        // Build import map for reference resolution (use TypeScript language)
+        let import_map = parse_file_imports(
+            tree.root_node(),
+            source,
+            Language::TypeScript,
+            module_path.as_deref(),
+        );
+
         // TSX uses TypeScript language enum since they share the same type system
         let ctx = SpecDrivenContext {
             source,
@@ -424,6 +483,9 @@ impl Extractor for SpecDrivenTsxExtractor {
             repo_root: &self.repo_root,
             language: Language::TypeScript,
             language_str: "tsx",
+            import_map: &import_map,
+            path_config: &MODULE_BASED_PATH_CONFIG,
+            edge_case_handlers: None, // No TSX-specific edge case handlers yet
         };
 
         // TSX uses the same handlers as TypeScript

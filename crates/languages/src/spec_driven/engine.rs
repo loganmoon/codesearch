@@ -4,7 +4,10 @@
 //! to extract entities from source code in a declarative way.
 
 use super::{HandlerConfig, MetadataExtractor, NameStrategy, RelationshipExtractor};
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::entity_building::{build_entity, CommonEntityComponents, EntityDetails};
+use crate::common::import_map::ImportMap;
+use crate::common::path_config::PathConfig;
 use crate::common::{find_capture_node, node_to_text};
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, EntityType, Language, Visibility,
@@ -45,6 +48,15 @@ pub struct SpecDrivenContext<'a> {
 
     /// Language string identifier (e.g., "rust", "javascript")
     pub language_str: &'a str,
+
+    /// Import map for resolving bare identifiers to qualified names
+    pub import_map: &'a ImportMap,
+
+    /// Language-specific path configuration for resolution
+    pub path_config: &'static PathConfig,
+
+    /// Optional edge case handlers for language-specific patterns
+    pub edge_case_handlers: Option<&'a EdgeCaseRegistry>,
 }
 
 /// Extract entities using a handler configuration
@@ -118,7 +130,12 @@ pub fn extract_with_config(
             extract_metadata(config.metadata_extractor, main_node, ctx.source, &captures);
 
         // Extract relationships using the configured extractor
-        let relationships = extract_relationships(config.relationship_extractor, main_node, ctx);
+        let relationships = extract_relationships(
+            config.relationship_extractor,
+            main_node,
+            ctx,
+            Some(components.qualified_name.as_str()),
+        );
 
         // Determine visibility
         let visibility = config
@@ -492,16 +509,15 @@ fn extract_metadata(
 /// Extract relationships using the configured extractor
 fn extract_relationships(
     extractor: Option<RelationshipExtractor>,
-    _node: Node,
-    _ctx: &SpecDrivenContext,
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
 ) -> EntityRelationshipData {
-    let Some(_extractor) = extractor else {
+    let Some(extractor) = extractor else {
         return EntityRelationshipData::default();
     };
 
-    // TODO: Implement relationship extraction
-    // This requires significant work to port from the existing handlers
-    EntityRelationshipData::default()
+    super::relationships::extract_relationships(extractor, node, ctx, parent_scope)
 }
 
 /// Extract visibility from a node (language-agnostic)

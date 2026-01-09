@@ -31,6 +31,7 @@
 
 pub mod engine;
 pub mod extractors;
+pub mod relationships;
 
 use codesearch_core::entities::Visibility;
 

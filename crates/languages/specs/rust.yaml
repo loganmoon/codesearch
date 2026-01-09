@@ -1096,11 +1096,33 @@ extraction_hints:
           type: (_) @const_type
           value: (_) @value) @const
 
-    CONST_IN_IMPL:
-      description: "Associated constants in impl blocks"
+    CONST_IN_INHERENT_IMPL:
+      description: "Associated constants in inherent impl blocks"
       capture: "const"
       query: |
         (impl_item
+          type: [
+            (type_identifier) @impl_type_name
+            (generic_type type: (type_identifier) @impl_type_name)
+            (scoped_type_identifier name: (type_identifier) @impl_type_name)
+          ]
+          body: (declaration_list
+            (const_item
+              name: (identifier) @name
+              type: (_) @const_type
+              value: (_) @value) @const)) @impl
+        (#not-has-child? @impl trait)
+
+    CONST_IN_TRAIT_IMPL:
+      description: "Associated constants in trait impl blocks"
+      capture: "const"
+      query: |
+        (impl_item
+          trait: [
+            (type_identifier) @trait_name
+            (generic_type type: (type_identifier) @trait_name)
+            (scoped_type_identifier name: (type_identifier) @trait_name)
+          ]
           type: [
             (type_identifier) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
@@ -1221,6 +1243,11 @@ extraction_hints:
       relationship_fields:
         - extends: "Supertrait bounds"
 
+    extract_impl_relationships:
+      description: "Extract impl block relationships"
+      relationship_fields:
+        - implements: "Trait being implemented"
+
   # ---------------------------------------------------------------------------
   # Handlers
   # ---------------------------------------------------------------------------
@@ -1273,7 +1300,10 @@ extraction_hints:
       capture: "impl"
       name_strategy: template
       name_template: "<{impl_type_name} as {trait_name}>"
-      qualified_name_template: "{scope}::<{impl_type_name} as {trait_name}>"
+      # Note: Uses just the fully-qualified type and trait names, no module prefix.
+      # This ensures methods contained by this impl block share the same prefix.
+      qualified_name_template: "<{impl_type_name} as {trait_name}>"
+      relationships: extract_impl_relationships
 
     # --- Method handlers (in inherent impl) ---
 
@@ -1282,7 +1312,7 @@ extraction_hints:
       query: METHOD_IN_INHERENT_IMPL
       capture: "method"
       name_strategy: capture
-      qualified_name_template: "<{impl_type_name}>::{name}"
+      qualified_name_template: "{scope}::{name}"
       metadata: function_metadata
       relationships: extract_function_relationships
 
@@ -1291,7 +1321,7 @@ extraction_hints:
       query: METHOD_RETURNS_SELF_IN_INHERENT_IMPL
       capture: "method"
       name_strategy: capture
-      qualified_name_template: "<{impl_type_name}>::{name}"
+      qualified_name_template: "{scope}::{name}"
       metadata: function_metadata
       relationships: extract_function_relationships
 
@@ -1300,7 +1330,7 @@ extraction_hints:
       query: ASSOCIATED_FUNCTION_IN_INHERENT_IMPL
       capture: "function"
       name_strategy: capture
-      qualified_name_template: "<{impl_type_name}>::{name}"
+      qualified_name_template: "{scope}::{name}"
       metadata: function_metadata
       relationships: extract_function_relationships
 
@@ -1420,12 +1450,20 @@ extraction_hints:
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
 
-    ConstInImpl:
+    ConstInInherentImpl:
       entity_rule: E-CONST-ASSOC
-      query: CONST_IN_IMPL
+      query: CONST_IN_INHERENT_IMPL
       capture: "const"
       name_strategy: capture
-      qualified_name_template: "<{impl_type_name}>::{name}"
+      qualified_name_template: "{scope}::{name}"
+
+    ConstInTraitImpl:
+      entity_rule: E-CONST-ASSOC
+      query: CONST_IN_TRAIT_IMPL
+      capture: "const"
+      name_strategy: capture
+      qualified_name_template: "<{impl_type_name} as {trait_name}>::{name}"
+      visibility_override: Public
 
     Static:
       entity_rule: E-STATIC

@@ -96,6 +96,13 @@ pub fn extract_with_config(
         // Extract capture values for template expansion
         let captures = extract_capture_values(query_match, &query, ctx.source);
 
+        // Skip matches that don't satisfy implicit predicates.
+        // The #not-has-child? predicate isn't automatically evaluated by tree-sitter,
+        // so we filter manually: inherent impl handlers should skip trait impls.
+        if should_skip_match(config, main_node, &captures) {
+            continue;
+        }
+
         // Evaluate name strategy to get entity name
         let name = evaluate_name_strategy(&config.name_strategy, &captures, ctx, main_node)?;
 
@@ -109,13 +116,25 @@ pub fn extract_with_config(
             components.qualified_name.clone()
         };
 
-        // Create modified components with custom qualified name
-        // Also clear parent_scope if it equals qualified_name (entity IS the module itself)
-        let parent_scope = if components
+        // Derive parent_scope for entities with custom qualified_name templates.
+        // For trait impl methods (e.g., `<Type as Trait>::method`), derive parent from
+        // the qualified name by removing the final `::name` component.
+        // For entities where derivation fails (e.g., impl blocks where qualified_name has
+        // no clear parent component), fall back to the original AST-derived parent_scope.
+        //
+        // Note: We use `name` (the simple entity name from name_strategy), not `components.name`
+        // which may be the raw template value before FQN expansion.
+        let parent_scope = if config.qualified_name_template.is_some() {
+            // Try to derive parent from the qualified name structure using the simple name
+            derive_parent_from_qualified_name(&qualified_name, &name)
+                // Fall back to original parent_scope if derivation returns None
+                .or_else(|| components.parent_scope.clone())
+        } else if components
             .parent_scope
             .as_ref()
             .is_some_and(|ps| ps == &qualified_name)
         {
+            // Clear parent_scope if it equals qualified_name (entity IS the module itself)
             None
         } else {
             components.parent_scope.clone()
@@ -461,15 +480,124 @@ fn expand_qualified_name_template(
         result = result.replace("{impl_type_name}", &qualified_impl_type);
     }
 
+    // Resolve {trait_name} to a fully qualified name for trait impls.
+    // This ensures `<Type as {trait_name}>::method` produces `<Type as my_crate::Trait>::method`
+    if let Some(trait_name) = captures.get("trait_name") {
+        let qualified_trait = if let Some(trait_path) = captures.get("trait_path") {
+            // Case 1: Scoped trait like `mod::Trait`
+            format!("{trait_path}::{trait_name}")
+        } else if let Some(ref scope) = components.parent_scope {
+            // Case 2: Simple trait name - prepend module scope
+            // Find the module-level scope (everything before the type in the scope)
+            // For methods, scope is like "crate::Type", for impl blocks it's "crate"
+            let module_scope = if scope.contains("::") {
+                // For methods, we need to go up one more level to get module
+                scope
+                    .rsplit_once("::")
+                    .map(|(prefix, _)| prefix)
+                    .unwrap_or(scope)
+            } else {
+                scope.as_str()
+            };
+            format!("{module_scope}::{trait_name}")
+        } else {
+            // Case 3: No scope available
+            trait_name.clone()
+        };
+        result = result.replace("{trait_name}", &qualified_trait);
+    }
+
     // Replace remaining capture placeholders (skip those with special handling above)
     for (capture_name, value) in captures {
-        if capture_name == "impl_type_name" || capture_name == "impl_type_path" {
+        if capture_name == "impl_type_name"
+            || capture_name == "impl_type_path"
+            || capture_name == "trait_name"
+            || capture_name == "trait_path"
+        {
             continue;
         }
         result = result.replace(&format!("{{{capture_name}}}"), value);
     }
 
     result
+}
+
+/// Derive parent scope from a qualified name by removing the entity name suffix.
+///
+/// For trait impl methods like `<Type as Trait>::method`, returns `<Type as Trait>`.
+/// For regular qualified names like `module::Type::method`, returns `module::Type`.
+///
+/// Returns None when:
+/// - The qualified_name equals the entity_name (no parent in the FQN structure)
+/// - The qualified_name doesn't end with a standard `::name` or `.name` suffix
+///   (e.g., impl blocks like `<Type as Trait>` which have no clear parent in the FQN)
+///
+/// The caller should fall back to AST-derived parent_scope when this returns None.
+fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) -> Option<String> {
+    // Find the suffix pattern (separator + entity_name)
+    let suffix_patterns = [format!("::{entity_name}"), format!(".{entity_name}")];
+
+    for suffix in &suffix_patterns {
+        if qualified_name.ends_with(suffix) {
+            let parent = &qualified_name[..qualified_name.len() - suffix.len()];
+            if parent.is_empty() {
+                return None;
+            }
+            return Some(parent.to_string());
+        }
+    }
+
+    // No suffix match - return None to signal caller should use AST-derived parent.
+    // This handles:
+    // - Module entities where qualified_name == name
+    // - Impl blocks where qualified_name is the full type signature without a parent suffix
+    //   (e.g., `<Type as Trait>` - the parent is the module, not derivable from FQN)
+    None
+}
+
+/// Determine if a query match should be skipped based on implicit predicates.
+///
+/// This handles cases where tree-sitter predicates like `#not-has-child?` aren't
+/// automatically evaluated. We implement the filtering logic here instead.
+fn should_skip_match(
+    config: &HandlerConfig,
+    main_node: Node,
+    captures: &HashMap<String, String>,
+) -> bool {
+    // For Rust: inherent impl handlers should skip trait impls.
+    // The queries use (#not-has-child? @impl trait) but this isn't evaluated automatically.
+    // Instead, we check: if this is an inherent impl query but we captured a trait_name,
+    // it means this is actually a trait impl and should be skipped.
+    if config.query.contains("#not-has-child?") && config.query.contains("trait") {
+        // This query expects NO trait field on the impl_item.
+        // main_node might be a nested node (e.g., the method), so we need to find
+        // the impl_item ancestor and check if IT has a trait field.
+        if let Some(impl_node) = find_ancestor_of_kind(main_node, "impl_item") {
+            if impl_node.child_by_field_name("trait").is_some() {
+                return true;
+            }
+        }
+    }
+
+    // For handlers that expect a trait_name but didn't capture one
+    if config.query.contains("trait:") && !captures.contains_key("trait_name") {
+        // Trait impl query that didn't match the trait capture
+        return true;
+    }
+
+    false
+}
+
+/// Find an ancestor node of a specific kind
+fn find_ancestor_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == kind {
+            return Some(parent);
+        }
+        current = parent;
+    }
+    None
 }
 
 /// Compute the positional index of a node among its same-kind siblings

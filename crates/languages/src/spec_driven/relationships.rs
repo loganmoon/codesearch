@@ -779,6 +779,41 @@ fn extract_bounds_recursive(
 }
 
 // =============================================================================
+// Impl block relationship extraction (Rust)
+// =============================================================================
+
+/// Extract IMPLEMENTS relationship from a Rust trait impl block
+/// For `impl Trait for Type`, extracts reference to Trait
+pub fn extract_impl_trait_reference(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let mut refs = Vec::new();
+
+    // Find the trait field in impl_item
+    if let Some(trait_node) = node.child_by_field_name("trait") {
+        let type_text = node_text(trait_node, ctx.source);
+        if !type_text.is_empty() {
+            let simple_name = extract_simple_name(type_text);
+            let resolution_ctx = build_resolution_context(ctx, parent_scope);
+            let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+            if let Some(source_ref) = build_source_reference(
+                resolved.target,
+                resolved.simple_name,
+                resolved.is_external,
+                trait_node,
+                ReferenceType::Implements,
+            ) {
+                refs.push(source_ref);
+            }
+        }
+    }
+
+    refs
+}
+
+// =============================================================================
 // Interface relationship extraction (TypeScript)
 // =============================================================================
 
@@ -1527,6 +1562,13 @@ pub fn extract_relationships(
             EntityRelationshipData {
                 imports,
                 reexports,
+                ..Default::default()
+            }
+        }
+        RelationshipExtractor::ExtractImplRelationships => {
+            let implements = extract_impl_trait_reference(node, ctx, parent_scope);
+            EntityRelationshipData {
+                implements,
                 ..Default::default()
             }
         }

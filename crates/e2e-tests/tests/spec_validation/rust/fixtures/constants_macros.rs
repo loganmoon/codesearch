@@ -302,7 +302,7 @@ impl MyType {
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::<test_crate::MyType as test_crate::WithConstant>",
+            qualified_name: "<test_crate::MyType as test_crate::WithConstant>",
             visibility: None,
         },
         ExpectedEntity {
@@ -319,7 +319,7 @@ impl MyType {
         // Inherent associated constant
         ExpectedEntity {
             kind: EntityKind::Constant,
-            qualified_name: "<test_crate::MyType>::INHERENT_CONST",
+            qualified_name: "test_crate::MyType::INHERENT_CONST",
             visibility: Some(Visibility::Public),
         },
     ],
@@ -337,7 +337,7 @@ impl MyType {
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate",
-            to: "test_crate::<test_crate::MyType as test_crate::WithConstant>",
+            to: "<test_crate::MyType as test_crate::WithConstant>",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
@@ -346,17 +346,17 @@ impl MyType {
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::<test_crate::MyType as test_crate::WithConstant>",
+            from: "<test_crate::MyType as test_crate::WithConstant>",
             to: "<test_crate::MyType as test_crate::WithConstant>::DEFAULT",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
-            from: "test_crate::impl test_crate::MyType",
-            to: "<test_crate::MyType>::INHERENT_CONST",
+            from: "test_crate::MyType",
+            to: "test_crate::MyType::INHERENT_CONST",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<test_crate::MyType as test_crate::WithConstant>",
+            from: "<test_crate::MyType as test_crate::WithConstant>",
             to: "test_crate::WithConstant",
         },
     ],

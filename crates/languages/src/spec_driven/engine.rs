@@ -702,6 +702,12 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         }
     }
 
+    // Check for ambient declarations (declare keyword) - these are public
+    // Ambient declarations describe external APIs and are always accessible
+    if is_ambient_declaration(node) {
+        return Some(Visibility::Public);
+    }
+
     // For items inside namespaces, check for export keyword
     if is_inside_namespace(node) {
         // Check if this node starts with 'export' keyword
@@ -777,6 +783,47 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
     }
 
     None
+}
+
+/// Check if a node is an ambient declaration (has 'declare' modifier)
+fn is_ambient_declaration(node: Node) -> bool {
+    // Check if this node or its parent has an ambient marker
+    // Ambient declarations have node types ending with "_declaration" and start with "declare"
+    let ambient_types = [
+        "ambient_declaration",
+        "ambient_class_declaration",
+        "ambient_function_declaration",
+        "ambient_variable_declaration",
+    ];
+
+    // Check for explicit ambient node types
+    if ambient_types.contains(&node.kind()) {
+        return true;
+    }
+
+    // Check if parent is an ambient declaration
+    if let Some(parent) = node.parent() {
+        if ambient_types.contains(&parent.kind()) {
+            return true;
+        }
+    }
+
+    // For lexical/variable declarations, check if first child is "declare" keyword
+    let decl_types = [
+        "lexical_declaration",
+        "variable_declaration",
+        "function_declaration",
+        "class_declaration",
+    ];
+    if decl_types.contains(&node.kind()) {
+        if let Some(first_child) = node.child(0) {
+            if first_child.kind() == "declare" {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 /// Check if a node is inside a TypeScript namespace declaration

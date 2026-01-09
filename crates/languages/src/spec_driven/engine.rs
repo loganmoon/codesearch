@@ -497,12 +497,17 @@ fn extract_relationships(
 
 /// Extract visibility from a node (language-agnostic)
 fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> {
-    // First, check for standard visibility modifiers (pub, pub(crate), etc.)
-    if let Some(vis) = extract_standard_visibility(node, source) {
+    // First, check for Rust visibility modifiers (pub, pub(crate), etc.)
+    if let Some(vis) = extract_rust_visibility(node, source) {
         return Some(vis);
     }
 
-    // For macros, check for #[macro_export] attribute
+    // Check for JS/TS export-based visibility
+    if let Some(vis) = extract_js_ts_visibility(node) {
+        return Some(vis);
+    }
+
+    // For Rust macros, check for #[macro_export] attribute
     if node.kind() == "macro_definition" {
         return Some(extract_macro_visibility(node, source));
     }
@@ -510,8 +515,63 @@ fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> 
     None
 }
 
-/// Extract standard visibility modifier from a node
-fn extract_standard_visibility(node: Node, source: &str) -> Option<Visibility> {
+/// Extract JS/TS visibility based on export keyword
+fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
+    // Module (program) nodes are implicitly public (can be imported)
+    if node.kind() == "program" {
+        return Some(Visibility::Public);
+    }
+
+    // Check if this node IS an export_statement
+    if node.kind() == "export_statement" {
+        return Some(Visibility::Public);
+    }
+
+    // Check if this node's parent is an export_statement
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "export_statement" {
+            return Some(Visibility::Public);
+        }
+    }
+
+    // For JS/TS module-level declarations, check if we're at module level
+    // (parent is program) - these are Private by default
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "program" {
+            return Some(Visibility::Private);
+        }
+    }
+
+    // For class members in JS/TS, check for private field syntax (#name)
+    if node.kind() == "public_field_definition" || node.kind() == "field_definition" {
+        // Check if the name starts with # (private field)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "private_property_identifier" {
+                return Some(Visibility::Private);
+            }
+        }
+        // Public field definitions without # are public
+        return Some(Visibility::Public);
+    }
+
+    // For method definitions in classes, check for private methods
+    if node.kind() == "method_definition" {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "private_property_identifier" {
+                return Some(Visibility::Private);
+            }
+        }
+        // Regular methods are public by default
+        return Some(Visibility::Public);
+    }
+
+    None
+}
+
+/// Extract Rust visibility modifier from a node
+fn extract_rust_visibility(node: Node, source: &str) -> Option<Visibility> {
     // Look for a visibility_modifier child
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {

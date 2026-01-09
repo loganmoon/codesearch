@@ -109,6 +109,7 @@ impl EdgeCaseRegistry {
     }
 
     /// Create a registry from a static slice of handlers
+    #[allow(dead_code)]
     pub fn from_handlers(handlers: &'static [&'static dyn EdgeCaseHandler]) -> Self {
         Self {
             handlers: handlers.to_vec(),

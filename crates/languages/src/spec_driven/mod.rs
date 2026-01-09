@@ -8,6 +8,30 @@
 //! - How to derive the entity name
 //! - Which extractors to use for metadata and relationships
 //! - What the qualified name template looks like
+//!
+//! # Architecture
+//!
+//! The spec-driven extraction works as follows:
+//!
+//! 1. YAML specs define queries, extractors, and handler configurations
+//! 2. Build script (`build.rs`) generates Rust code from specs
+//! 3. Generated code includes query constants and `HandlerConfig` structs
+//! 4. The extraction engine uses these configs to extract entities
+//!
+//! # Example
+//!
+//! ```ignore
+//! use codesearch_languages::spec_driven::{rust, engine};
+//!
+//! // Get handler configs from generated code
+//! for config in rust::handler_configs::ALL_HANDLERS {
+//!     let entities = engine::extract_with_config(config, &ctx, tree_root, source)?;
+//! }
+//! ```
+
+pub mod engine;
+pub mod extractors;
+pub mod relationships;
 
 use codesearch_core::entities::Visibility;
 

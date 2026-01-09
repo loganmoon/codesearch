@@ -884,8 +884,8 @@ extraction_hints:
               parameters: (parameters
                 (self_parameter) @self_param)
               return_type: (_)? @return_type
-              body: (block) @body) @method))
-        (#not-has-child? @impl_item trait)
+              body: (block) @body) @method)) @impl
+        (#not-has-child? @impl trait)
 
     METHOD_RETURNS_SELF_IN_INHERENT_IMPL:
       description: "Constructor methods returning Self in inherent impl"
@@ -902,8 +902,8 @@ extraction_hints:
               name: (identifier) @name
               parameters: (parameters) @params
               return_type: (type_identifier) @return_type
-              body: (block) @body) @method))
-        (#not-has-child? @impl_item trait)
+              body: (block) @body) @method)) @impl
+        (#not-has-child? @impl trait)
         (#not-has-child? @params self_parameter)
         (#eq? @return_type "Self")
 
@@ -922,8 +922,8 @@ extraction_hints:
               name: (identifier) @name
               parameters: (parameters) @params
               return_type: (_)? @return_type
-              body: (block) @body) @function))
-        (#not-has-child? @impl_item trait)
+              body: (block) @body) @function)) @impl
+        (#not-has-child? @impl trait)
         (#not-has-child? @params self_parameter)
         (#not-eq? @return_type "Self")
 
@@ -1004,22 +1004,14 @@ extraction_hints:
       description: "Named struct fields"
       capture: "field"
       query: |
-        (struct_item
-          name: (type_identifier) @struct_name
-          body: (field_declaration_list
-            (field_declaration
-              name: (field_identifier) @name
-              type: (_) @field_type) @field))
+        (field_declaration_list
+          (field_declaration
+            name: (field_identifier) @name
+            type: (_) @field_type) @field)
 
-    TUPLE_STRUCT_FIELD:
-      description: "Tuple struct fields (positional)"
-      capture: "field"
-      query: |
-        (struct_item
-          name: (type_identifier) @struct_name
-          body: (ordered_field_declaration_list
-            (field_declaration
-              type: (_) @field_type) @field))
+    # Note: Tuple struct fields are positional and don't have field_declaration nodes
+    # They would need special handling with PositionalIndex name strategy
+    # For now, we skip individual tuple field extraction
 
     ENUM:
       description: "Enum definitions"
@@ -1135,15 +1127,16 @@ extraction_hints:
       description: "Extern block declarations"
       capture: "extern_block"
       query: |
-        (extern_block
-          abi: (string_literal)? @abi
+        (foreign_mod_item
+          (extern_modifier
+            (string_literal)? @abi)
           body: (declaration_list) @body) @extern_block
 
     EXTERN_FUNCTION:
       description: "Function declarations in extern blocks"
       capture: "function"
       query: |
-        (extern_block
+        (foreign_mod_item
           body: (declaration_list
             (function_signature_item
               name: (identifier) @name
@@ -1154,7 +1147,7 @@ extraction_hints:
       description: "Static declarations in extern blocks"
       capture: "static"
       query: |
-        (extern_block
+        (foreign_mod_item
           body: (declaration_list
             (static_item
               name: (identifier) @name
@@ -1330,7 +1323,7 @@ extraction_hints:
       query: METHOD_IN_TRAIT_DEF
       capture: "method"
       name_strategy: capture
-      qualified_name_template: "{scope}::{trait_name}::{name}"
+      qualified_name_template: "{scope}::{name}"
       visibility_override: null  # None - inherits from trait
       metadata: function_metadata
 
@@ -1339,7 +1332,7 @@ extraction_hints:
       query: METHOD_WITH_DEFAULT_IN_TRAIT_DEF
       capture: "method"
       name_strategy: capture
-      qualified_name_template: "{scope}::{trait_name}::{name}"
+      qualified_name_template: "{scope}::{name}"
       visibility_override: null
       metadata: function_metadata
       relationships: extract_function_relationships
@@ -1360,14 +1353,10 @@ extraction_hints:
       query: STRUCT_FIELD
       capture: "field"
       name_strategy: capture
-      qualified_name_template: "{scope}::{struct_name}::{name}"
+      qualified_name_template: "{scope}::{name}"
 
-    TupleStructField:
-      entity_rule: E-PROPERTY
-      query: TUPLE_STRUCT_FIELD
-      capture: "field"
-      name_strategy: positional_index
-      qualified_name_template: "{scope}::{struct_name}::{index}"
+    # TupleStructField handler removed - tuple fields need special handling
+    # since ordered_field_declaration_list doesn't contain field_declaration nodes
 
     Enum:
       entity_rule: E-ENUM
@@ -1382,7 +1371,7 @@ extraction_hints:
       query: ENUM_VARIANT
       capture: "variant"
       name_strategy: capture
-      qualified_name_template: "{scope}::{enum_name}::{name}"
+      qualified_name_template: "{scope}::{name}"
 
     Union:
       entity_rule: E-UNION

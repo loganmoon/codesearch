@@ -135,6 +135,7 @@ impl ImportMap {
 /// import: "../utils" -> "utils"
 /// import: "lodash" -> None (not a relative import)
 /// ```
+#[allow(dead_code)]
 pub(crate) fn resolve_relative_import(
     current_module_path: &str,
     import_path: &str,
@@ -199,6 +200,7 @@ pub(crate) fn resolve_relative_import(
 /// * `language` - The programming language
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom").
 ///   Used to resolve relative imports to absolute qualified names that match entity qualified_names.
+#[allow(dead_code)]
 pub(crate) fn parse_file_imports(
     root: Node,
     source: &str,
@@ -231,6 +233,7 @@ pub(crate) fn parse_file_imports(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
+#[allow(dead_code)]
 pub(crate) fn parse_js_imports(
     root: Node,
     source: &str,
@@ -284,6 +287,7 @@ pub(crate) fn parse_js_imports(
 }
 
 /// Parse JavaScript import specifiers from an import statement
+#[allow(dead_code)]
 fn parse_js_import_specifiers(
     import_stmt: Node,
     source: &str,
@@ -300,6 +304,7 @@ fn parse_js_import_specifiers(
 }
 
 /// Parse a JavaScript import clause (default import, named imports, namespace import)
+#[allow(dead_code)]
 fn parse_js_import_clause(
     clause: Node,
     source: &str,
@@ -342,6 +347,7 @@ fn parse_js_import_clause(
 }
 
 /// Parse a single JavaScript import specifier
+#[allow(dead_code)]
 fn parse_js_import_specifier(
     spec: Node,
     source: &str,
@@ -378,6 +384,7 @@ fn parse_js_import_specifier(
 /// * `root` - The AST root node
 /// * `source` - The source code
 /// * `current_module_path` - The module path of the current file (e.g., "vanilla.atom")
+#[allow(dead_code)]
 pub(crate) fn parse_ts_imports(
     root: Node,
     source: &str,
@@ -428,6 +435,7 @@ pub(crate) fn parse_ts_imports(
 }
 
 /// Get the AST root node from any node in the tree
+#[allow(dead_code)]
 pub(crate) fn get_ast_root(node: Node) -> Node {
     let mut root = node;
     while let Some(parent) = root.parent() {

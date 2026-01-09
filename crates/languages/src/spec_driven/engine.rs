@@ -402,52 +402,61 @@ fn compute_positional_index(node: Node) -> usize {
 fn entity_type_from_rule(rule: &str) -> Result<EntityType> {
     // Parse rule ID format: E-XXX or E-XXX-YYY
     match rule {
-        // Modules
+        // Modules (including namespaces)
         r if r.starts_with("E-MOD") => Ok(EntityType::Module),
 
-        // Functions (including extern functions)
-        "E-FN-FREE" | "E-FN-ASSOC" | "E-FN-DECL" | "E-EXTERN-FN" => Ok(EntityType::Function),
+        // Functions (including extern, ambient, arrow functions)
+        r if r.starts_with("E-FN") || r == "E-EXTERN-FN" || r == "E-AMBIENT-FN" => {
+            Ok(EntityType::Function)
+        }
 
-        // Methods
-        r if r.starts_with("E-METHOD") => Ok(EntityType::Method),
+        // Methods (including interface methods, abstract methods)
+        r if r.starts_with("E-METHOD") || r == "E-INTERFACE-METHOD" => Ok(EntityType::Method),
 
-        // Impl blocks
+        // Interface signatures (TypeScript)
+        "E-INTERFACE-CALL-SIG" | "E-INTERFACE-CONSTRUCT-SIG" => Ok(EntityType::Method),
+        "E-INTERFACE-INDEX-SIG" => Ok(EntityType::Property),
+
+        // Impl blocks (Rust)
         "E-IMPL-INHERENT" | "E-IMPL-TRAIT" => Ok(EntityType::Impl),
 
         // Types
         "E-STRUCT" => Ok(EntityType::Struct),
         "E-ENUM" => Ok(EntityType::Enum),
-        "E-ENUM-VARIANT" => Ok(EntityType::EnumVariant),
+        "E-ENUM-VARIANT" | "E-ENUM-MEMBER" => Ok(EntityType::EnumVariant),
         "E-TRAIT" => Ok(EntityType::Trait),
         "E-INTERFACE" => Ok(EntityType::Interface),
         "E-TYPE-ALIAS" | "E-TYPE-ALIAS-ASSOC" => Ok(EntityType::TypeAlias),
         "E-UNION" => Ok(EntityType::Union),
 
-        // Properties
-        "E-PROPERTY" | "E-FIELD" | "E-INTERFACE-PROPERTY" => Ok(EntityType::Property),
-
-        // Interface signatures (TypeScript)
-        "E-INTERFACE-METHOD-SIG" | "E-INTERFACE-CALL-SIG" | "E-INTERFACE-CONSTRUCT-SIG" => {
-            Ok(EntityType::Method)
+        // Properties (including interface properties, parameter properties, fields)
+        r if r.starts_with("E-PROPERTY") || r == "E-FIELD" || r == "E-PARAM-PROPERTY" => {
+            Ok(EntityType::Property)
         }
-        "E-INTERFACE-INDEX-SIG" => Ok(EntityType::Property),
+        "E-INTERFACE-PROPERTY" => Ok(EntityType::Property),
 
         // Constants and statics
-        "E-CONST" | "E-CONST-ASSOC" => Ok(EntityType::Constant),
+        r if r.starts_with("E-CONST") && r != "E-CONST-VAR" => Ok(EntityType::Constant),
+        "E-AMBIENT-CONST" => Ok(EntityType::Constant),
         "E-STATIC" | "E-EXTERN-STATIC" => Ok(EntityType::Static),
 
         // Macros
         "E-MACRO" | "E-MACRO-RULES" => Ok(EntityType::Macro),
 
-        // Classes (JS/TS)
-        r if r.starts_with("E-CLASS") => Ok(EntityType::Class),
+        // Classes (JS/TS, including ambient classes)
+        r if r.starts_with("E-CLASS") || r == "E-AMBIENT-CLASS" => Ok(EntityType::Class),
 
-        // Variables (JS/TS)
-        r if r.starts_with("E-VAR") || r.starts_with("E-LET") || r.starts_with("E-CONST-VAR") => {
+        // Variables (JS/TS, including ambient)
+        r if r.starts_with("E-VAR")
+            || r.starts_with("E-LET")
+            || r == "E-CONST-VAR"
+            || r == "E-AMBIENT-LET"
+            || r == "E-AMBIENT-VAR" =>
+        {
             Ok(EntityType::Variable)
         }
 
-        // Extern blocks
+        // Extern blocks (Rust)
         "E-EXTERN-BLOCK" => Ok(EntityType::ExternBlock),
 
         _ => Err(Error::entity_extraction(format!(
@@ -515,7 +524,7 @@ fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> 
     None
 }
 
-/// Extract JS/TS visibility based on export keyword
+/// Extract JS/TS visibility based on export keyword and access modifiers
 fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
     // Module (program) nodes are implicitly public (can be imported)
     if node.kind() == "program" {
@@ -542,28 +551,56 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         }
     }
 
-    // For class members in JS/TS, check for private field syntax (#name)
-    if node.kind() == "public_field_definition" || node.kind() == "field_definition" {
-        // Check if the name starts with # (private field)
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "private_property_identifier" {
-                return Some(Visibility::Private);
+    // Enum members inherit visibility from parent enum (always public within enum)
+    // The captured node can be either:
+    // - property_identifier directly in enum_body (simple enum members)
+    // - enum_assignment (enum members with explicit values)
+    if node.kind() == "enum_assignment" {
+        return Some(Visibility::Public);
+    }
+    if node.kind() == "property_identifier" {
+        if let Some(parent) = node.parent() {
+            if parent.kind() == "enum_body" || parent.kind() == "enum_assignment" {
+                return Some(Visibility::Public);
             }
         }
-        // Public field definitions without # are public
+    }
+
+    // Interface members are always public
+    if node.kind() == "property_signature"
+        || node.kind() == "method_signature"
+        || node.kind() == "call_signature"
+        || node.kind() == "construct_signature"
+        || node.kind() == "index_signature"
+    {
         return Some(Visibility::Public);
     }
 
-    // For method definitions in classes, check for private methods
-    if node.kind() == "method_definition" {
+    // For class members, check for TypeScript accessibility modifiers
+    if node.kind() == "public_field_definition"
+        || node.kind() == "field_definition"
+        || node.kind() == "method_definition"
+    {
+        // Check for accessibility_modifier child (public/private/protected)
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
+            if child.kind() == "accessibility_modifier" {
+                // Get the text to determine which modifier
+                if let Some(first_child) = child.child(0) {
+                    return match first_child.kind() {
+                        "private" => Some(Visibility::Private),
+                        "protected" => Some(Visibility::Protected),
+                        "public" => Some(Visibility::Public),
+                        _ => None,
+                    };
+                }
+            }
+            // Check for # private field syntax
             if child.kind() == "private_property_identifier" {
                 return Some(Visibility::Private);
             }
         }
-        // Regular methods are public by default
+        // Default: public for class members without explicit modifier
         return Some(Visibility::Public);
     }
 

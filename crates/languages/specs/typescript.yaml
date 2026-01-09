@@ -1299,11 +1299,11 @@ extraction_hints:
       query: |
         [
           (enum_body
-            (property_identifier) @name) @enum_member
+            (property_identifier) @name @enum_member)
 
           (enum_body
             (enum_assignment
-              name: (property_identifier) @name)) @enum_member
+              name: (property_identifier) @name) @enum_member)
         ]
 
     # --- Namespace queries ---

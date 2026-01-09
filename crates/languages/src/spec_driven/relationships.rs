@@ -62,6 +62,33 @@ const JS_TYPE_QUERY: &str = r#"
 "#;
 
 // =============================================================================
+// Import/Export query constants
+// =============================================================================
+
+/// JavaScript import statement query
+const JS_IMPORT_QUERY: &str = r#"
+(import_statement
+  source: (string) @source)
+"#;
+
+/// TypeScript import statement query (same as JS)
+const TS_IMPORT_QUERY: &str = r#"
+(import_statement
+  source: (string) @source)
+"#;
+
+/// JavaScript re-export query (export statements with a source)
+const JS_REEXPORT_QUERY: &str = r#"
+(export_statement
+  source: (string) @source)
+"#;
+
+/// Rust use declaration query
+const RUST_USE_QUERY: &str = r#"
+(use_declaration) @use_decl
+"#;
+
+// =============================================================================
 // Primitive type filters
 // =============================================================================
 
@@ -148,6 +175,56 @@ fn get_ts_type_query() -> Option<&'static Query> {
         .get_or_init(|| {
             let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
             Query::new(&language, JS_TYPE_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_js_import_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_javascript::LANGUAGE.into();
+            Query::new(&language, JS_IMPORT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_ts_import_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, TS_IMPORT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_js_reexport_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_javascript::LANGUAGE.into();
+            Query::new(&language, JS_REEXPORT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_ts_reexport_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+            Query::new(&language, JS_REEXPORT_QUERY).ok()
+        })
+        .as_ref()
+}
+
+fn get_rust_use_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_rust::LANGUAGE.into();
+            Query::new(&language, RUST_USE_QUERY).ok()
         })
         .as_ref()
 }
@@ -602,6 +679,579 @@ fn extract_type_list(
 }
 
 // =============================================================================
+// Module relationship extraction (imports/reexports)
+// =============================================================================
+
+/// Extract import relationships from a module
+pub fn extract_module_imports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    match ctx.language_str {
+        "javascript" => extract_js_imports(node, ctx, parent_scope),
+        "typescript" | "tsx" => extract_ts_imports(node, ctx, parent_scope),
+        "rust" => extract_rust_imports(node, ctx, parent_scope),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract re-export relationships from a module
+pub fn extract_module_reexports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    match ctx.language_str {
+        "javascript" => extract_js_reexports(node, ctx, parent_scope),
+        "typescript" | "tsx" => extract_ts_reexports(node, ctx, parent_scope),
+        "rust" => extract_rust_reexports(node, ctx, parent_scope),
+        _ => Vec::new(),
+    }
+}
+
+/// Extract JavaScript imports
+fn extract_js_imports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_js_import_query() else {
+        return Vec::new();
+    };
+    extract_js_ts_imports_with_query(node, ctx, parent_scope, query)
+}
+
+/// Extract TypeScript imports
+fn extract_ts_imports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_ts_import_query() else {
+        return Vec::new();
+    };
+    extract_js_ts_imports_with_query(node, ctx, parent_scope, query)
+}
+
+/// Common implementation for JS/TS import extraction
+fn extract_js_ts_imports_with_query(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+    query: &Query,
+) -> Vec<SourceReference> {
+    let mut imports = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let source_node = capture.node;
+            let source_text = node_text(source_node, ctx.source);
+            // Remove quotes from source path
+            let source_path = source_text.trim_matches(|c| c == '"' || c == '\'');
+
+            if source_path.is_empty() {
+                continue;
+            }
+
+            // Get the parent import_statement to extract specifiers
+            let Some(import_stmt) = source_node.parent() else {
+                continue;
+            };
+
+            // Extract each import specifier
+            let specifiers = extract_js_import_specifiers_from_stmt(import_stmt, ctx.source);
+
+            for (local_name, original_name, spec_node) in specifiers {
+                // Resolve the import path
+                let resolved_path = resolve_js_import_path(source_path, parent_scope);
+
+                // Build target qualified name
+                let target = if original_name == "*" {
+                    // Namespace import: import * as Utils from './utils' -> utils
+                    resolved_path.clone()
+                } else if original_name == "default" {
+                    // Default import: import Foo from './utils' -> utils.default
+                    format!("{resolved_path}.default")
+                } else {
+                    // Named import: import { foo } from './utils' -> utils.foo
+                    format!("{resolved_path}.{original_name}")
+                };
+
+                if let Some(source_ref) = build_source_reference(
+                    target,
+                    local_name,
+                    resolved_path.starts_with("external."),
+                    spec_node,
+                    ReferenceType::Import,
+                ) {
+                    imports.push(source_ref);
+                }
+            }
+        }
+    }
+
+    imports
+}
+
+/// Extract import specifiers from a JS/TS import statement
+/// Returns Vec<(local_name, original_name, node)>
+fn extract_js_import_specifiers_from_stmt<'a>(
+    import_stmt: Node<'a>,
+    source: &str,
+) -> Vec<(String, String, Node<'a>)> {
+    let mut specifiers = Vec::new();
+    let mut cursor = import_stmt.walk();
+
+    for child in import_stmt.children(&mut cursor) {
+        if child.kind() == "import_clause" {
+            extract_js_import_clause_specifiers(child, source, &mut specifiers);
+        }
+    }
+
+    specifiers
+}
+
+/// Extract specifiers from an import clause
+fn extract_js_import_clause_specifiers<'a>(
+    clause: Node<'a>,
+    source: &str,
+    specifiers: &mut Vec<(String, String, Node<'a>)>,
+) {
+    let mut cursor = clause.walk();
+
+    for child in clause.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                // Default import: import foo from './bar'
+                let name = node_text(child, source).to_string();
+                specifiers.push((name, "default".to_string(), child));
+            }
+            "named_imports" => {
+                // Named imports: import { foo, bar as baz } from './mod'
+                let mut inner_cursor = child.walk();
+                for spec in child.children(&mut inner_cursor) {
+                    if spec.kind() == "import_specifier" {
+                        if let Some((local, orig)) = extract_single_js_specifier(spec, source) {
+                            specifiers.push((local, orig, spec));
+                        }
+                    }
+                }
+            }
+            "namespace_import" => {
+                // Namespace import: import * as foo from './bar'
+                let mut inner_cursor = child.walk();
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "identifier" {
+                        let name = node_text(inner, source).to_string();
+                        specifiers.push((name, "*".to_string(), child));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract a single import specifier's local and original names
+fn extract_single_js_specifier(spec: Node, source: &str) -> Option<(String, String)> {
+    let original = spec
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source).to_string())?;
+    let local = spec
+        .child_by_field_name("alias")
+        .map(|n| node_text(n, source).to_string())
+        .unwrap_or_else(|| original.clone());
+    Some((local, original))
+}
+
+/// Resolve JS/TS import path to absolute module path
+fn resolve_js_import_path(source_path: &str, parent_scope: Option<&str>) -> String {
+    // Handle relative imports
+    if source_path.starts_with('.') {
+        if let Some(scope) = parent_scope {
+            // Use the same resolution logic as import_map
+            return crate::common::import_map::resolve_relative_import(scope, source_path)
+                .unwrap_or_else(|| format!("external.{source_path}"));
+        }
+    }
+
+    // Bare specifier (external package)
+    format!("external.{source_path}")
+}
+
+/// Extract JavaScript re-exports
+fn extract_js_reexports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_js_reexport_query() else {
+        return Vec::new();
+    };
+    extract_js_ts_reexports_with_query(node, ctx, parent_scope, query)
+}
+
+/// Extract TypeScript re-exports
+fn extract_ts_reexports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_ts_reexport_query() else {
+        return Vec::new();
+    };
+    extract_js_ts_reexports_with_query(node, ctx, parent_scope, query)
+}
+
+/// Common implementation for JS/TS re-export extraction
+fn extract_js_ts_reexports_with_query(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+    query: &Query,
+) -> Vec<SourceReference> {
+    let mut reexports = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let source_node = capture.node;
+            let source_text = node_text(source_node, ctx.source);
+            let source_path = source_text.trim_matches(|c| c == '"' || c == '\'');
+
+            if source_path.is_empty() {
+                continue;
+            }
+
+            let Some(export_stmt) = source_node.parent() else {
+                continue;
+            };
+
+            // Resolve the source module path
+            let resolved_path = resolve_js_import_path(source_path, parent_scope);
+
+            // Check if it's a star re-export or named re-export
+            let specifiers = extract_js_export_specifiers(export_stmt, ctx.source);
+
+            if specifiers.is_empty() {
+                // Star re-export: export * from './module' -> re-export the whole module
+                if let Some(source_ref) = build_source_reference(
+                    resolved_path.clone(),
+                    source_path.to_string(),
+                    resolved_path.starts_with("external."),
+                    export_stmt,
+                    ReferenceType::Reexport,
+                ) {
+                    reexports.push(source_ref);
+                }
+            } else {
+                // Named re-exports
+                for (local_name, original_name, spec_node) in specifiers {
+                    let target = if original_name == "default" {
+                        format!("{resolved_path}.default")
+                    } else {
+                        format!("{resolved_path}.{original_name}")
+                    };
+
+                    if let Some(source_ref) = build_source_reference(
+                        target,
+                        local_name,
+                        resolved_path.starts_with("external."),
+                        spec_node,
+                        ReferenceType::Reexport,
+                    ) {
+                        reexports.push(source_ref);
+                    }
+                }
+            }
+        }
+    }
+
+    reexports
+}
+
+/// Extract export specifiers from an export statement
+fn extract_js_export_specifiers<'a>(
+    export_stmt: Node<'a>,
+    source: &str,
+) -> Vec<(String, String, Node<'a>)> {
+    let mut specifiers = Vec::new();
+    let mut cursor = export_stmt.walk();
+
+    for child in export_stmt.children(&mut cursor) {
+        if child.kind() == "export_clause" {
+            let mut inner_cursor = child.walk();
+            for spec in child.children(&mut inner_cursor) {
+                if spec.kind() == "export_specifier" {
+                    if let Some((local, orig)) = extract_single_js_export_specifier(spec, source) {
+                        specifiers.push((local, orig, spec));
+                    }
+                }
+            }
+        } else if child.kind() == "namespace_export" {
+            // export * as Namespace from './module'
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                if inner.kind() == "identifier" {
+                    let name = node_text(inner, source).to_string();
+                    specifiers.push((name.clone(), "*".to_string(), child));
+                }
+            }
+        }
+    }
+
+    specifiers
+}
+
+/// Extract local and original names from an export specifier
+fn extract_single_js_export_specifier(spec: Node, source: &str) -> Option<(String, String)> {
+    let original = spec
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source).to_string())?;
+    let local = spec
+        .child_by_field_name("alias")
+        .map(|n| node_text(n, source).to_string())
+        .unwrap_or_else(|| original.clone());
+    Some((local, original))
+}
+
+/// Extract Rust imports (use declarations)
+fn extract_rust_imports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    _parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_rust_use_query() else {
+        return Vec::new();
+    };
+
+    let mut imports = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let use_decl = capture.node;
+
+            // Check visibility - if public, it's a re-export, not an import
+            let is_pub = has_pub_visibility(use_decl);
+            if is_pub {
+                continue; // Skip pub use, handled by reexports
+            }
+
+            // Extract the imported paths
+            let paths = extract_rust_use_paths(use_decl, ctx.source);
+            for (qualified_path, simple_name, path_node) in paths {
+                // Determine if external (not starting with crate:: or self::)
+                let is_external = !qualified_path.starts_with("crate::")
+                    && !qualified_path.starts_with("self::")
+                    && !qualified_path.starts_with("super::");
+
+                if let Some(source_ref) = build_source_reference(
+                    qualified_path,
+                    simple_name,
+                    is_external,
+                    path_node,
+                    ReferenceType::Import,
+                ) {
+                    imports.push(source_ref);
+                }
+            }
+        }
+    }
+
+    imports
+}
+
+/// Extract Rust re-exports (pub use declarations)
+fn extract_rust_reexports(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    _parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let Some(query) = get_rust_use_query() else {
+        return Vec::new();
+    };
+
+    let mut reexports = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let use_decl = capture.node;
+
+            // Only process pub use
+            if !has_pub_visibility(use_decl) {
+                continue;
+            }
+
+            // Extract the re-exported paths
+            let paths = extract_rust_use_paths(use_decl, ctx.source);
+            for (qualified_path, simple_name, path_node) in paths {
+                let is_external = !qualified_path.starts_with("crate::")
+                    && !qualified_path.starts_with("self::")
+                    && !qualified_path.starts_with("super::");
+
+                if let Some(source_ref) = build_source_reference(
+                    qualified_path,
+                    simple_name,
+                    is_external,
+                    path_node,
+                    ReferenceType::Reexport,
+                ) {
+                    reexports.push(source_ref);
+                }
+            }
+        }
+    }
+
+    reexports
+}
+
+/// Check if a use declaration has pub visibility
+fn has_pub_visibility(use_decl: Node) -> bool {
+    let mut cursor = use_decl.walk();
+    for child in use_decl.children(&mut cursor) {
+        if child.kind() == "visibility_modifier" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extract paths from a Rust use declaration
+/// Returns Vec<(qualified_path, simple_name, node)>
+fn extract_rust_use_paths<'a>(use_decl: Node<'a>, source: &str) -> Vec<(String, String, Node<'a>)> {
+    let mut paths = Vec::new();
+    let mut cursor = use_decl.walk();
+
+    for child in use_decl.children(&mut cursor) {
+        match child.kind() {
+            "use_as_clause" => {
+                // use foo::bar as baz;
+                if let Some((path, alias)) = extract_rust_use_as_clause(child, source) {
+                    paths.push((path, alias, child));
+                }
+            }
+            "scoped_use_list" => {
+                // use foo::{bar, baz};
+                extract_rust_scoped_use_list(child, source, "", &mut paths);
+            }
+            "scoped_identifier" | "identifier" => {
+                // Simple use: use foo::bar;
+                let path = node_text(child, source).to_string();
+                let simple = extract_simple_name(&path).to_string();
+                paths.push((path, simple, child));
+            }
+            "use_wildcard" => {
+                // use foo::*;
+                if let Some(scope) = child.child_by_field_name("path") {
+                    let path = node_text(scope, source).to_string();
+                    paths.push((format!("{path}::*"), "*".to_string(), child));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    paths
+}
+
+/// Extract path and alias from a use_as_clause
+fn extract_rust_use_as_clause(clause: Node, source: &str) -> Option<(String, String)> {
+    let path = clause.child_by_field_name("path")?;
+    let alias = clause.child_by_field_name("alias")?;
+    Some((
+        node_text(path, source).to_string(),
+        node_text(alias, source).to_string(),
+    ))
+}
+
+/// Extract paths from a scoped use list
+fn extract_rust_scoped_use_list<'a>(
+    list: Node<'a>,
+    source: &str,
+    prefix: &str,
+    paths: &mut Vec<(String, String, Node<'a>)>,
+) {
+    // Get the path prefix
+    let full_prefix = if let Some(path_node) = list.child_by_field_name("path") {
+        let path_text = node_text(path_node, source);
+        if prefix.is_empty() {
+            path_text.to_string()
+        } else {
+            format!("{prefix}::{path_text}")
+        }
+    } else {
+        prefix.to_string()
+    };
+
+    // Find the use_list child
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        if child.kind() == "use_list" {
+            extract_rust_use_list_items(child, source, &full_prefix, paths);
+        }
+    }
+}
+
+/// Extract items from a use_list
+fn extract_rust_use_list_items<'a>(
+    list: Node<'a>,
+    source: &str,
+    prefix: &str,
+    paths: &mut Vec<(String, String, Node<'a>)>,
+) {
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "scoped_identifier" => {
+                let name = node_text(child, source);
+                let full_path = if prefix.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{prefix}::{name}")
+                };
+                let simple = extract_simple_name(name).to_string();
+                paths.push((full_path, simple, child));
+            }
+            "use_as_clause" => {
+                if let Some(path_node) = child.child_by_field_name("path") {
+                    if let Some(alias_node) = child.child_by_field_name("alias") {
+                        let path = node_text(path_node, source);
+                        let alias = node_text(alias_node, source);
+                        let full_path = if prefix.is_empty() {
+                            path.to_string()
+                        } else {
+                            format!("{prefix}::{path}")
+                        };
+                        paths.push((full_path, alias.to_string(), child));
+                    }
+                }
+            }
+            "scoped_use_list" => {
+                extract_rust_scoped_use_list(child, source, prefix, paths);
+            }
+            "use_wildcard" | "self" => {
+                // Glob import or self
+                let full_path = if prefix.is_empty() {
+                    "*".to_string()
+                } else {
+                    format!("{prefix}::*")
+                };
+                paths.push((full_path, "*".to_string(), child));
+            }
+            _ => {}
+        }
+    }
+}
+
+// =============================================================================
 // Main dispatch function
 // =============================================================================
 
@@ -646,9 +1296,13 @@ pub fn extract_relationships(
             ..Default::default()
         },
         RelationshipExtractor::ExtractModuleRelationships => {
-            // Module relationships (imports/reexports) require more complex handling
-            // For now, return empty - will implement in future phase
-            EntityRelationshipData::default()
+            let imports = extract_module_imports(node, ctx, parent_scope);
+            let reexports = extract_module_reexports(node, ctx, parent_scope);
+            EntityRelationshipData {
+                imports,
+                reexports,
+                ..Default::default()
+            }
         }
     }
 }

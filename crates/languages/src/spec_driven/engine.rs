@@ -106,8 +106,11 @@ pub fn extract_with_config(
         // Evaluate name strategy to get entity name
         let name = evaluate_name_strategy(&config.name_strategy, &captures, ctx, main_node)?;
 
+        // Determine entity type from entity_rule (needed for entity_id generation)
+        let entity_type = entity_type_from_rule(config.entity_rule)?;
+
         // Build common components with the derived name
-        let components = build_common_components(ctx, &name, main_node)?;
+        let components = build_common_components(ctx, &name, main_node, entity_type)?;
 
         // Build qualified name from template if provided
         let qualified_name = if let Some(template) = config.qualified_name_template {
@@ -146,9 +149,6 @@ pub fn extract_with_config(
             parent_scope,
             ..components
         };
-
-        // Determine entity type from entity_rule
-        let entity_type = entity_type_from_rule(config.entity_rule)?;
 
         // Extract metadata using the configured extractor
         let metadata =
@@ -196,6 +196,7 @@ fn build_common_components(
     ctx: &SpecDrivenContext,
     name: &str,
     main_node: Node,
+    entity_type: EntityType,
 ) -> Result<CommonEntityComponents> {
     use crate::qualified_name::{build_qualified_name_from_ast, derive_module_path_for_language};
     use codesearch_core::entities::SourceLocation;
@@ -247,12 +248,18 @@ fn build_common_components(
         separator,
     );
 
-    // Generate entity_id from repository + file_path + qualified name
+    // Generate entity_id from repository + file_path + qualified name + entity_type
     let file_path_str = ctx
         .file_path
         .to_str()
         .ok_or_else(|| Error::entity_extraction("Invalid file path".to_string()))?;
-    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
+    let entity_type_str = entity_type.to_string();
+    let entity_id = generate_entity_id(
+        ctx.repository_id,
+        file_path_str,
+        &qualified_name,
+        &entity_type_str,
+    );
 
     // Get location
     let location = SourceLocation::from_tree_sitter_node(main_node);

@@ -8,9 +8,11 @@ const DELIM: &str = " ";
 ///
 /// This extracts the most relevant text content from an entity for semantic operations.
 pub fn extract_embedding_content(entity: &CodeEntity) -> String {
+    let qualified_name_str = entity.qualified_name.to_string();
+
     // Calculate accurate capacity
     let estimated_size = entity.name.len()
-        + entity.qualified_name.len()
+        + qualified_name_str.len()
         + entity.documentation_summary.as_ref().map_or(0, |s| s.len())
         + entity.content.as_ref().map_or(0, |s| s.len())
         + 100; // Extra padding for delimiters and formatting
@@ -19,7 +21,7 @@ pub fn extract_embedding_content(entity: &CodeEntity) -> String {
 
     // Add entity type and name
     content.push_str(&format!("{} {}", entity.entity_type, entity.name));
-    chain_delim(&mut content, &entity.qualified_name);
+    chain_delim(&mut content, &qualified_name_str);
 
     // Add documentation summary if available
     if let Some(doc) = &entity.documentation_summary {

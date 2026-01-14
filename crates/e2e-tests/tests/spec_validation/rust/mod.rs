@@ -5,6 +5,7 @@
 pub mod fixtures;
 
 use anyhow::Result;
+use codesearch_core::QualifiedName;
 use codesearch_e2e_tests::common::spec_validation::run_spec_validation;
 use fixtures::*;
 
@@ -488,22 +489,20 @@ fn test_contains_relationships_have_matching_entities() {
                     fixture.name, rel.to
                 );
 
-                // Skip prefix check for impl blocks and extern blocks - they use special naming
-                // that doesn't follow the parent::child pattern
-                let from_is_special = fixture.entities.iter().any(|e| {
-                    e.qualified_name == rel.from
-                        && (e.kind == EntityKind::ImplBlock || e.kind == EntityKind::ExternBlock)
-                });
+                // Use structured QualifiedName for proper containment checking
+                // This handles impl blocks, trait impls, and other special cases
+                let parent_qn = QualifiedName::parse(rel.from)
+                    .expect(&format!("Failed to parse parent qualified name: {}", rel.from));
+                let child_qn = QualifiedName::parse(rel.to)
+                    .expect(&format!("Failed to parse child qualified name: {}", rel.to));
 
-                if !from_is_special {
-                    assert!(
-                        rel.to.starts_with(rel.from),
-                        "Fixture '{}': CONTAINS child '{}' should be prefixed by parent '{}'",
-                        fixture.name,
-                        rel.to,
-                        rel.from
-                    );
-                }
+                assert!(
+                    child_qn.is_child_of(&parent_qn),
+                    "Fixture '{}': CONTAINS child '{}' should be contained by parent '{}'",
+                    fixture.name,
+                    rel.to,
+                    rel.from
+                );
             }
         }
     }

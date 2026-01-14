@@ -11,6 +11,7 @@ use codesearch_core::entities::{
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
+use codesearch_core::qualified_name::QualifiedName;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
@@ -348,11 +349,22 @@ pub fn build_entity(
     components: CommonEntityComponents,
     details: EntityDetails,
 ) -> Result<CodeEntity> {
+    // Parse the qualified name string into a structured QualifiedName
+    let qualified_name = QualifiedName::parse(&components.qualified_name)?;
+
+    // For TraitImpl variants, set the scope from parent_scope if available
+    let qualified_name = if let Some(ref parent) = components.parent_scope {
+        let scope: Vec<String> = parent.split("::").map(String::from).collect();
+        qualified_name.with_scope(scope)
+    } else {
+        qualified_name
+    };
+
     CodeEntityBuilder::default()
         .entity_id(components.entity_id)
         .repository_id(components.repository_id)
         .name(components.name)
-        .qualified_name(components.qualified_name)
+        .qualified_name(qualified_name)
         .path_entity_identifier(components.path_entity_identifier)
         .parent_scope(components.parent_scope)
         .entity_type(details.entity_type)

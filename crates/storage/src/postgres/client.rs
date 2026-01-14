@@ -1309,7 +1309,7 @@ impl PostgresClient {
             )| {
                 b.push_bind(&entity.entity_id)
                     .push_bind(repository_id)
-                    .push_bind(&entity.qualified_name)
+                    .push_bind(entity.qualified_name.to_string())
                     .push_bind(&entity.path_entity_identifier)
                     .push_bind(&entity.name)
                     .push_bind(&entity.parent_scope)
@@ -1409,15 +1409,15 @@ impl PostgresClient {
         // Build name -> entity_id map for O(1) relationship resolution
         // Include both qualified_name and simple name as keys to handle parent_scope lookups
         // (parent_scope may be just the name, not the full qualified_name)
-        let mut name_to_id: std::collections::HashMap<&str, &str> =
+        let mut name_to_id: std::collections::HashMap<String, String> =
             std::collections::HashMap::with_capacity(entities_in_batch.len() * 2);
         for entity in &entities_in_batch {
             // Add qualified_name as primary key
-            name_to_id.insert(entity.qualified_name.as_str(), entity.entity_id.as_str());
+            name_to_id.insert(entity.qualified_name.to_string(), entity.entity_id.clone());
             // Also add simple name (only if not already present to avoid collisions)
             name_to_id
-                .entry(entity.name.as_str())
-                .or_insert(entity.entity_id.as_str());
+                .entry(entity.name.clone())
+                .or_insert_with(|| entity.entity_id.clone());
         }
 
         let mut neo4j_outbox_query: QueryBuilder<Postgres> = QueryBuilder::new(
@@ -2098,13 +2098,13 @@ impl PostgresClient {
     fn build_neo4j_payload(
         &self,
         entity: &CodeEntity,
-        name_to_id: &std::collections::HashMap<&str, &str>,
+        name_to_id: &std::collections::HashMap<String, String>,
     ) -> Result<serde_json::Value> {
         // Extract core properties using proper struct
         let properties = Neo4jNodeProperties {
             id: entity.entity_id.clone(),
             repository_id: entity.repository_id.to_string(),
-            qualified_name: entity.qualified_name.clone(),
+            qualified_name: entity.qualified_name.to_string(),
             name: entity.name.clone(),
             language: entity.language.to_string(),
             visibility: entity.visibility.map(|v| v.to_string()).unwrap_or_default(),

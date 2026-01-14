@@ -86,7 +86,7 @@ pub async fn search_semantic(
     let filtered_entities = if let Some(ref allowed_names) = structural_filter {
         entities
             .into_iter()
-            .filter(|e| allowed_names.contains(&e.qualified_name))
+            .filter(|e| allowed_names.contains(&e.qualified_name.to_string()))
             .collect()
     } else {
         entities

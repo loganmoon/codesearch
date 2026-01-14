@@ -21,9 +21,11 @@ const DELIM: &str = " ";
 
 /// Extract embeddable content from a CodeEntity
 pub fn extract_embedding_content(entity: &CodeEntity) -> String {
+    let qualified_name_str = entity.qualified_name.to_string();
+
     // Calculate accurate capacity
     let estimated_size = entity.name.len()
-        + entity.qualified_name.len()
+        + qualified_name_str.len()
         + entity.documentation_summary.as_ref().map_or(0, |s| s.len())
         + entity.content.as_ref().map_or(0, |s| s.len())
         + 100; // Extra padding for delimiters and formatting
@@ -32,7 +34,7 @@ pub fn extract_embedding_content(entity: &CodeEntity) -> String {
 
     // Add entity type and name
     content.push_str(&format!("{} {}", entity.entity_type, entity.name));
-    chain_delim(&mut content, &entity.qualified_name);
+    chain_delim(&mut content, &qualified_name_str);
 
     // Add documentation summary if available
     if let Some(doc) = &entity.documentation_summary {
@@ -400,7 +402,7 @@ async fn process_entity_chunk(
             .map(|(entity_idx, _)| {
                 let entity = &entities[*entity_idx];
                 EmbeddingContext {
-                    qualified_name: entity.qualified_name.clone(),
+                    qualified_name: entity.qualified_name.to_string(),
                     file_path: entity.file_path.clone(),
                     line_number: entity.location.start_line as u32,
                     entity_type: format!("{:?}", entity.entity_type),
@@ -682,7 +684,8 @@ pub async fn mark_file_entities_deleted(
 mod tests {
     use super::*;
     use codesearch_core::{
-        CodeEntity, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
+        CodeEntity, EntityType, FunctionSignature, Language, QualifiedName, SourceLocation,
+        Visibility,
     };
     use std::path::PathBuf;
     use uuid::Uuid;
@@ -693,7 +696,8 @@ mod tests {
             repository_id: Uuid::new_v4().to_string(),
             entity_type: EntityType::Function,
             name: "handle_request".to_string(),
-            qualified_name: "my_crate::handlers::handle_request".to_string(),
+            qualified_name: QualifiedName::parse("my_crate::handlers::handle_request")
+                .expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],
@@ -735,7 +739,7 @@ mod tests {
             "Content should contain entity name"
         );
         assert!(
-            content.contains(&entity.qualified_name),
+            content.contains(&entity.qualified_name.to_string()),
             "Content should contain qualified name"
         );
         if let Some(doc) = entity.documentation_summary.as_ref() {
@@ -802,7 +806,7 @@ mod tests {
             repository_id: Uuid::new_v4().to_string(),
             entity_type: EntityType::Struct,
             name: "Point".to_string(),
-            qualified_name: "geometry::Point".to_string(),
+            qualified_name: QualifiedName::parse("geometry::Point").expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],
@@ -847,7 +851,7 @@ mod tests {
             repository_id: Uuid::new_v4().to_string(),
             entity_type: EntityType::Function,
             name: "test<T>".to_string(),
-            qualified_name: "crate::utils::test<T>".to_string(),
+            qualified_name: QualifiedName::parse("crate::utils::test").expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
             dependencies: vec![],

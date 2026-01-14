@@ -15,7 +15,7 @@ use codesearch_core::entities::{
 };
 use codesearch_core::error::{Error, Result};
 use codesearch_core::project_manifest::{detect_manifest, PackageMap};
-use codesearch_core::CodeEntity;
+use codesearch_core::{CodeEntity, QualifiedName};
 use codesearch_embeddings::{EmbeddingContext, EmbeddingManager, EmbeddingTask};
 use codesearch_languages::common::language_path::LanguagePath;
 use codesearch_languages::common::path_config::RUST_PATH_CONFIG;
@@ -338,11 +338,21 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
                             ..Default::default()
                         };
 
+                        let qn = match QualifiedName::parse(&crate_info.name) {
+                            Ok(qn) => qn,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to parse qualified name for {}: {}",
+                                    crate_info.name, e
+                                );
+                                return None;
+                            }
+                        };
                         match CodeEntityBuilder::default()
                             .entity_id(entity_id)
                             .repository_id(repo_id.to_string())
                             .name(crate_info.name.clone())
-                            .qualified_name(crate_info.name.clone())
+                            .qualified_name(qn)
                             .entity_type(EntityType::Module)
                             .file_path(crate_info.entry_path.clone())
                             .location(SourceLocation {
@@ -393,11 +403,18 @@ fn create_crate_root_entities(package_map: &PackageMap, repo_id: &str) -> Vec<Co
                     ..Default::default()
                 };
 
+                let qn = match QualifiedName::parse(&info.name) {
+                    Ok(qn) => qn,
+                    Err(e) => {
+                        warn!("Failed to parse qualified name for {}: {}", info.name, e);
+                        return vec![];
+                    }
+                };
                 match CodeEntityBuilder::default()
                     .entity_id(entity_id)
                     .repository_id(repo_id.to_string())
                     .name(info.name.clone())
-                    .qualified_name(info.name.clone())
+                    .qualified_name(qn)
                     .entity_type(EntityType::Module)
                     .file_path(crate_root_file)
                     .location(SourceLocation {
@@ -763,11 +780,11 @@ async fn stage_generate_embeddings(
         );
 
         // Log first few entity names for debugging
-        let sample_entities: Vec<&String> = batch
+        let sample_entities: Vec<String> = batch
             .entities
             .iter()
             .take(3)
-            .map(|e| &e.qualified_name)
+            .map(|e| e.qualified_name.to_string())
             .collect();
         debug!("Stage 3: Sample entities: {:?}", sample_entities);
 
@@ -841,7 +858,7 @@ async fn stage_generate_embeddings(
                 .map(|entity_idx| {
                     let entity = &batch.entities[*entity_idx];
                     EmbeddingContext {
-                        qualified_name: entity.qualified_name.clone(),
+                        qualified_name: entity.qualified_name.to_string(),
                         file_path: entity.file_path.clone(),
                         line_number: entity.location.start_line as u32,
                         entity_type: format!("{:?}", entity.entity_type),
@@ -1517,7 +1534,7 @@ mod tests {
     use codesearch_core::entities::{
         EntityMetadata, EntityType, Language, SourceLocation, Visibility,
     };
-    use codesearch_core::CodeEntity;
+    use codesearch_core::{CodeEntity, QualifiedName};
     use codesearch_storage::MockPostgresClient;
     use codesearch_storage::PostgresClientTrait;
     use std::path::PathBuf;
@@ -1533,7 +1550,7 @@ mod tests {
             entity_id: entity_id.to_string(),
             repository_id: repo_id.to_string(),
             name: name.to_string(),
-            qualified_name: name.to_string(),
+            qualified_name: QualifiedName::parse(name).expect("Invalid qn"),
             path_entity_identifier: None,
             entity_type: EntityType::Function,
             language: Language::Rust,
@@ -2005,7 +2022,7 @@ mod tests {
             assert_eq!(entities.len(), 1);
             let entity = &entities[0];
             assert_eq!(entity.name, "my_crate");
-            assert_eq!(entity.qualified_name, "my_crate");
+            assert_eq!(entity.qualified_name.to_string(), "my_crate");
             assert!(entity.file_path.ends_with("lib.rs"));
         }
 

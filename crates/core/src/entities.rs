@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::qualified_name::QualifiedName;
 use derive_builder::Builder;
 use im::HashMap as ImHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -420,7 +421,7 @@ pub struct CodeEntity {
     /// Full qualified name of the entity (semantic, package-relative)
     /// e.g., "jotai.utils.helpers.formatNumber" or "codesearch_core::entities::CodeEntity"
     /// Used for LSP validation, graph edge resolution, and semantic lookups.
-    pub qualified_name: String,
+    pub qualified_name: QualifiedName,
 
     /// File-path-based identifier for import resolution
     /// e.g., "website.src.pages.index" or "crates.core.src.entities"

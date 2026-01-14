@@ -7,7 +7,7 @@ use anyhow::Result;
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, EntityType, Language, SourceLocation, Visibility,
 };
-use codesearch_core::CodeEntity;
+use codesearch_core::{CodeEntity, QualifiedName};
 use codesearch_e2e_tests::common::*;
 use codesearch_outbox_processor::OutboxProcessor;
 use codesearch_storage::{
@@ -24,7 +24,7 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
         entity_id: entity_id.to_string(),
         repository_id: repo_id.to_string(),
         name: name.to_string(),
-        qualified_name: name.to_string(),
+        qualified_name: QualifiedName::parse(name).expect("Invalid qualified name in test"),
         path_entity_identifier: None,
         entity_type: EntityType::Function,
         language: Language::Rust,

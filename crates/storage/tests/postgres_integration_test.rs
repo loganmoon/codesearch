@@ -4,6 +4,7 @@ mod common;
 
 use anyhow::Result;
 use codesearch_core::entities::EntityType;
+use codesearch_core::QualifiedName;
 use codesearch_e2e_tests::common::{
     create_test_database, drop_test_database, get_shared_postgres, with_timeout,
 };
@@ -1375,21 +1376,22 @@ async fn test_get_embeddings_by_qualified_names_found() -> Result<()> {
             EntityType::Function,
             &repository_id.to_string(),
         );
-        entity1.qualified_name = "module::test_func1".to_string();
+        entity1.qualified_name = QualifiedName::parse("module::test_func1").expect("Invalid qn");
 
         let mut entity2 = create_test_entity(
             "test_func2",
             EntityType::Function,
             &repository_id.to_string(),
         );
-        entity2.qualified_name = "module::test_func2".to_string();
+        entity2.qualified_name = QualifiedName::parse("module::test_func2").expect("Invalid qn");
 
         let mut entity3 = create_test_entity(
             "test_func3",
             EntityType::Function,
             &repository_id.to_string(),
         );
-        entity3.qualified_name = "other_module::test_func3".to_string();
+        entity3.qualified_name =
+            QualifiedName::parse("other_module::test_func3").expect("Invalid qn");
 
         // Store embeddings with distinct values
         let embedding1 = vec![0.1; 768];
@@ -1536,7 +1538,7 @@ async fn test_get_embeddings_by_qualified_names_partial() -> Result<()> {
             EntityType::Function,
             &repository_id.to_string(),
         );
-        entity.qualified_name = "module::test_func".to_string();
+        entity.qualified_name = QualifiedName::parse("module::test_func").expect("Invalid qn");
 
         let embedding = vec![0.5; 768];
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
@@ -1645,7 +1647,7 @@ async fn test_get_embeddings_by_qualified_names_deleted_entities() -> Result<()>
             EntityType::Function,
             &repository_id.to_string(),
         );
-        entity.qualified_name = "module::test_func".to_string();
+        entity.qualified_name = QualifiedName::parse("module::test_func").expect("Invalid qn");
 
         let embedding = vec![0.7; 768];
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
@@ -1717,11 +1719,11 @@ async fn test_get_entities_by_qualified_names_basic() -> Result<()> {
         // Create test entities
         let mut entity1 =
             create_test_entity("func1", EntityType::Function, &repository_id.to_string());
-        entity1.qualified_name = "module::func1".to_string();
+        entity1.qualified_name = QualifiedName::parse("module::func1").expect("Invalid qn");
 
         let mut entity2 =
             create_test_entity("func2", EntityType::Function, &repository_id.to_string());
-        entity2.qualified_name = "module::func2".to_string();
+        entity2.qualified_name = QualifiedName::parse("module::func2").expect("Invalid qn");
 
         // Store entities
         let embedding = vec![0.1; 768];
@@ -1820,7 +1822,7 @@ async fn test_get_entities_by_qualified_names_partial_match() -> Result<()> {
         // Create only one entity
         let mut entity =
             create_test_entity("func1", EntityType::Function, &repository_id.to_string());
-        entity.qualified_name = "module::func1".to_string();
+        entity.qualified_name = QualifiedName::parse("module::func1").expect("Invalid qn");
 
         let embedding = vec![0.1; 768];
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
@@ -1883,7 +1885,7 @@ async fn test_get_entities_by_qualified_names_duplicates() -> Result<()> {
         // Create test entity
         let mut entity =
             create_test_entity("func1", EntityType::Function, &repository_id.to_string());
-        entity.qualified_name = "module::func1".to_string();
+        entity.qualified_name = QualifiedName::parse("module::func1").expect("Invalid qn");
 
         let embedding = vec![0.1; 768];
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
@@ -1950,7 +1952,7 @@ async fn test_get_entities_by_qualified_names_deleted() -> Result<()> {
         // Create test entity
         let mut entity =
             create_test_entity("func1", EntityType::Function, &repository_id.to_string());
-        entity.qualified_name = "module::func1".to_string();
+        entity.qualified_name = QualifiedName::parse("module::func1").expect("Invalid qn");
 
         let embedding = vec![0.1; 768];
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());

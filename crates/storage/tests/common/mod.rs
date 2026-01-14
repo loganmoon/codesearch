@@ -3,7 +3,7 @@
 use codesearch_core::{
     config::StorageConfig,
     entities::{CodeEntityBuilder, EntityType, Language, SourceLocation, Visibility},
-    CodeEntity,
+    CodeEntity, QualifiedName,
 };
 use codesearch_storage::EmbeddedEntity;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub fn create_test_entity(name: &str, entity_type: EntityType, repository_id: &s
         .entity_id(format!("{}_{}", name, Uuid::new_v4()))
         .repository_id(repository_id.to_string())
         .name(name.to_string())
-        .qualified_name(format!("test::{name}"))
+        .qualified_name(QualifiedName::parse(&format!("test::{name}")).unwrap())
         .entity_type(entity_type)
         .file_path(PathBuf::from("test.rs"))
         .location(SourceLocation {
@@ -100,7 +100,7 @@ pub fn create_test_entity_with_file(
         .entity_id(format!("{}_{}", name, Uuid::new_v4()))
         .repository_id(repository_id.to_string())
         .name(name.to_string())
-        .qualified_name(format!("test::{name}"))
+        .qualified_name(QualifiedName::parse(&format!("test::{name}")).unwrap())
         .entity_type(entity_type)
         .file_path(PathBuf::from(file_path))
         .location(SourceLocation {

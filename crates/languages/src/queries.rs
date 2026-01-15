@@ -1,4 +1,4 @@
-//! Query definitions for entity extraction (V2 Architecture)
+//! Query definitions for entity extraction
 //!
 //! This module defines tree-sitter queries as Rust constants, providing
 //! type-safe query definitions with associated metadata.

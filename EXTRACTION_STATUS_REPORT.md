@@ -15,6 +15,73 @@ This document provides a comprehensive view of the spec-driven extraction system
 
 ## Changes Made This Session
 
+### Query Storage: Rust Raw String Literals
+
+**Problem Solved:** External `.scm` files required file I/O at runtime, complex parsing logic for annotations, and made it harder to co-locate queries with their handling code.
+
+**Solution Implemented:**
+
+Replaced `.scm` file parsing with Rust raw string literals embedded directly in the code:
+
+```rust
+const FUNCTION_QUERY: &str = r#"
+(function_item
+  name: (identifier) @name
+  parameters: (parameters) @params
+) @function
+"#;
+```
+
+**Benefits:**
+- Compile-time validation of query string syntax
+- No file I/O or parsing at runtime
+- Queries co-located with handler code
+- Simpler codebase with fewer moving parts
+
+**Files Changed:**
+- Removed `.scm` file loading infrastructure
+- Query strings now defined as constants in Rust modules
+
+---
+
+### Custom Predicate Evaluation
+
+**Problem Solved:** Tree-sitter doesn't automatically evaluate custom predicates like `#not-has-child?` and `#not-has-ancestor?`. This caused:
+- Functions in impl blocks being matched by free function handlers
+- Associated functions matching methods with `self` parameter
+
+**Solution Implemented:**
+
+Extended `should_skip_match()` in `crates/languages/src/spec_driven/engine.rs` to manually evaluate:
+
+1. **`#not-has-child? @params self_parameter`** - Checks if function has self parameter:
+```rust
+fn has_self_parameter(params_node: Node) -> bool {
+    let mut cursor = params_node.walk();
+    for child in params_node.children(&mut cursor) {
+        if child.kind() == "self_parameter" {
+            return true;
+        }
+    }
+    false
+}
+```
+
+2. **`#not-has-ancestor? @function impl_item`** - Checks if function is inside impl block:
+```rust
+if find_ancestor_of_kind(main_node, "impl_item").is_some() {
+    return true; // Skip
+}
+```
+
+**Files Changed:**
+- `crates/languages/src/spec_driven/engine.rs` - Added predicate evaluation
+- `crates/languages/specs/rust.yaml` - Added `#not-has-ancestor? impl_item` to `FUNCTION_FREE` query
+
+**Result:** `test_builder_pattern` now PASSES
+
+---
+
 ### QualifiedName Structured Type
 
 **Problem Solved:** Validation logic used `child_fqn.starts_with(parent_fqn)` for CONTAINS relationships, which failed for trait impls because `<crate::Type as crate::Trait>` doesn't start with `crate`.
@@ -139,16 +206,21 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 **Tests:** `test_builder_pattern`, `test_trait_vs_inherent_method`, `test_scattered_impl_blocks`
 
-**Problem:** `#not-has-child? @params self_parameter` predicate is not evaluated by tree-sitter.
+**Status: PARTIALLY FIXED**
 
-**Background:** (from TREE_SITTER_PREDICATE_ANALYSIS.md)
-- `#not-has-child?` is NOT a built-in tree-sitter predicate
-- Current workaround only handles `trait` field, NOT `self_parameter`
-- `self_parameter` is a child node type, not a field, so `!self_parameter` syntax doesn't work
+**Original Problem:** `#not-has-child? @params self_parameter` and `#not-has-ancestor?` predicates not evaluated by tree-sitter.
 
-**Result:** Methods with `self` may be incorrectly classified, or methods/functions may not be properly distinguished.
+**Fixes Implemented:**
+1. Added `has_self_parameter()` helper to check for self parameter in function parameters
+2. Extended `should_skip_match()` to evaluate `#not-has-child? @params self_parameter` predicate
+3. Added `#not-has-ancestor? impl_item` predicate evaluation for free functions
+4. Added predicate to `FUNCTION_FREE` query in YAML spec
 
-**Fix Required:** Implement structural AST check for `self_parameter` presence in handler code.
+**Result:** `test_builder_pattern` NOW PASSES
+
+**Remaining Issues:**
+- `test_trait_vs_inherent_method` - Inherent impl method not extracted when trait impl has same method name (conflict/deduplication issue)
+- `test_scattered_impl_blocks` - Qualified names use impl block module scope instead of type definition scope (qualified name template issue)
 
 ---
 
@@ -327,8 +399,8 @@ Create a query that matches positional fields in tuple struct patterns with nume
 |------|---------|
 | `crates/core/src/qualified_name.rs` | Structured qualified name type |
 | `crates/languages/src/spec_driven/engine.rs` | Query execution, `should_skip_match()` |
-| `crates/languages/src/specs/rust.yaml` | Rust extraction queries |
-| `crates/languages/src/specs/typescript.yaml` | TypeScript extraction queries |
+| `crates/languages/src/spec_driven/rust/` | Rust extraction queries (raw string constants) |
+| `crates/languages/src/spec_driven/typescript/` | TypeScript extraction queries (raw string constants) |
 | `crates/e2e-tests/tests/spec_validation/` | Spec validation fixtures and tests |
 
 ---

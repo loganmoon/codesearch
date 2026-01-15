@@ -368,68 +368,180 @@ fn to_pascal_case(s: &str) -> String {
 // .scm Query File Processing (V2 Architecture)
 // =============================================================================
 
-/// A query with its associated handler from a .scm file
-struct QueryWithHandler {
-    /// Handler name (e.g., "rust::free_function")
-    handler: String,
-    /// The tree-sitter query string
+/// Parsed handler definition from .scm annotations
+#[derive(Debug, Default)]
+struct ScmHandlerDef {
+    /// Handler name (e.g., "rust::free_function") - REQUIRED
+    handler: Option<String>,
+    /// Entity type (e.g., "Function", "Method") - REQUIRED
+    entity_type: Option<String>,
+    /// Primary capture name from the query - REQUIRED
+    capture: Option<String>,
+    /// Optional description
+    description: Option<String>,
+    /// The tree-sitter query string - REQUIRED
     query: String,
+}
+
+impl ScmHandlerDef {
+    /// Validate that all required fields are present
+    fn validate(&self, file: &Path, line_num: usize) -> Result<(), String> {
+        if self.handler.is_none() {
+            return Err(format!(
+                "{}:{}: missing @handler annotation",
+                file.display(),
+                line_num
+            ));
+        }
+        if self.entity_type.is_none() {
+            return Err(format!(
+                "{}:{}: missing @entity_type annotation for handler '{}'",
+                file.display(),
+                line_num,
+                self.handler.as_ref().unwrap()
+            ));
+        }
+        if self.capture.is_none() {
+            return Err(format!(
+                "{}:{}: missing @capture annotation for handler '{}'",
+                file.display(),
+                line_num,
+                self.handler.as_ref().unwrap()
+            ));
+        }
+        if self.query.trim().is_empty() {
+            return Err(format!(
+                "{}:{}: empty query for handler '{}'",
+                file.display(),
+                line_num,
+                self.handler.as_ref().unwrap()
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Parser state for .scm files
+struct ScmParser {
+    handlers: Vec<ScmHandlerDef>,
+    current: ScmHandlerDef,
+    current_start_line: usize,
+    in_query: bool,
+}
+
+impl ScmParser {
+    fn new() -> Self {
+        Self {
+            handlers: Vec::new(),
+            current: ScmHandlerDef::default(),
+            current_start_line: 0,
+            in_query: false,
+        }
+    }
+
+    /// Emit the current handler if it has content
+    fn emit_current(&mut self, file: &Path, line_num: usize) -> Result<(), String> {
+        if self.current.handler.is_some() || !self.current.query.trim().is_empty() {
+            self.current.validate(file, self.current_start_line)?;
+            self.handlers.push(std::mem::take(&mut self.current));
+        }
+        self.in_query = false;
+        self.current_start_line = line_num;
+        Ok(())
+    }
+
+    /// Parse an annotation line (starts with "; @")
+    fn parse_annotation(&mut self, line: &str, file: &Path, line_num: usize) -> Result<(), String> {
+        let content = line.trim().strip_prefix("; @").unwrap();
+
+        // Split into annotation name and value
+        let (name, value) = if let Some(space_pos) = content.find(' ') {
+            let (n, v) = content.split_at(space_pos);
+            (n, v.trim())
+        } else {
+            (content, "")
+        };
+
+        match name {
+            "handler" => {
+                // New handler starts - emit previous if any
+                self.emit_current(file, line_num)?;
+                self.current.handler = Some(value.to_string());
+            }
+            "entity_type" => {
+                self.current.entity_type = Some(value.to_string());
+            }
+            "capture" => {
+                self.current.capture = Some(value.to_string());
+            }
+            "description" => {
+                self.current.description = Some(value.to_string());
+            }
+            unknown => {
+                return Err(format!(
+                    "{}:{}: unknown annotation '@{}'",
+                    file.display(),
+                    line_num,
+                    unknown
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse a single line
+    fn parse_line(&mut self, line: &str, file: &Path, line_num: usize) -> Result<(), String> {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("; @") {
+            // Annotation line
+            self.parse_annotation(line, file, line_num)?;
+        } else if trimmed.starts_with(';') || trimmed.is_empty() {
+            // Comment or blank line - ignore (but don't break query accumulation)
+        } else {
+            // Query content
+            self.in_query = true;
+            self.current.query.push_str(line);
+            self.current.query.push('\n');
+        }
+        Ok(())
+    }
+
+    /// Finalize parsing and return handlers
+    fn finalize(mut self, file: &Path, line_num: usize) -> Result<Vec<ScmHandlerDef>, String> {
+        self.emit_current(file, line_num)?;
+        Ok(self.handlers)
+    }
 }
 
 /// Parse a .scm file extracting queries and their handler annotations
 ///
-/// The expected format is:
+/// Expected format:
 /// ```scheme
 /// ; @handler rust::free_function
-/// (function_item
+/// ; @entity_type Function
+/// ; @capture func
+/// ; @description Free functions at module level
+/// ((function_item
 ///   name: (identifier) @name
 /// ) @func
-/// (#not-has-ancestor? @func impl_item)
+/// (#not-has-ancestor? @func impl_item))
 /// ```
-fn parse_scm_file(path: &Path) -> Result<Vec<QueryWithHandler>, Box<dyn std::error::Error>> {
+fn parse_scm_file(path: &Path) -> Result<Vec<ScmHandlerDef>, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(path)?;
-    let mut queries = Vec::new();
-    let mut current_handler: Option<String> = None;
-    let mut current_query = String::new();
+    let mut parser = ScmParser::new();
 
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.starts_with("; @handler ") {
-            // Emit previous query if exists
-            if !current_query.trim().is_empty() {
-                if let Some(handler) = current_handler.take() {
-                    queries.push(QueryWithHandler {
-                        handler,
-                        query: std::mem::take(&mut current_query),
-                    });
-                }
-            }
-            current_handler = Some(
-                trimmed
-                    .strip_prefix("; @handler ")
-                    .unwrap()
-                    .trim()
-                    .to_string(),
-            );
-        } else if !trimmed.is_empty() && !trimmed.starts_with(';') {
-            // Non-empty, non-comment line - part of query
-            current_query.push_str(line);
-            current_query.push('\n');
-        }
+    for (line_num, line) in content.lines().enumerate() {
+        parser
+            .parse_line(line, path, line_num + 1)
+            .map_err(Box::<dyn std::error::Error>::from)?;
     }
 
-    // Emit final query
-    if !current_query.trim().is_empty() {
-        if let Some(handler) = current_handler {
-            queries.push(QueryWithHandler {
-                handler,
-                query: current_query,
-            });
-        }
-    }
+    let handlers = parser
+        .finalize(path, content.lines().count())
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
-    Ok(queries)
+    Ok(handlers)
 }
 
 /// Process all .scm files in a language directory
@@ -438,7 +550,7 @@ fn process_scm_queries(
     lang_name: &str,
     out_dir: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut all_queries = Vec::new();
+    let mut all_handlers: Vec<ScmHandlerDef> = Vec::new();
 
     // Find all .scm files in the language directory
     for entry in fs::read_dir(lang_dir)? {
@@ -447,12 +559,12 @@ fn process_scm_queries(
 
         if path.extension().is_some_and(|ext| ext == "scm") {
             println!("cargo:rerun-if-changed={}", path.display());
-            let queries = parse_scm_file(&path)?;
-            all_queries.extend(queries);
+            let handlers = parse_scm_file(&path)?;
+            all_handlers.extend(handlers);
         }
     }
 
-    if all_queries.is_empty() {
+    if all_handlers.is_empty() {
         return Ok(());
     }
 
@@ -471,11 +583,16 @@ fn process_scm_queries(
     )?;
     writeln!(output, "pub mod scm_queries {{")?;
 
-    for q in &all_queries {
-        let const_name = handler_to_const_name(&q.handler);
-        writeln!(output, "    /// Query for handler: {}", q.handler)?;
+    for h in &all_handlers {
+        let handler_name = h.handler.as_ref().unwrap();
+        let const_name = handler_to_const_name(handler_name);
+        if let Some(ref desc) = h.description {
+            writeln!(output, "    /// {desc}")?;
+        } else {
+            writeln!(output, "    /// Query for handler: {handler_name}")?;
+        }
         writeln!(output, "    pub const {const_name}: &str = r#\"")?;
-        writeln!(output, "{}", q.query.trim())?;
+        writeln!(output, "{}", h.query.trim())?;
         writeln!(output, "\"#;")?;
         writeln!(output)?;
     }
@@ -483,27 +600,39 @@ fn process_scm_queries(
     writeln!(output, "}}")?;
     writeln!(output)?;
 
-    // Generate handler dispatch table
-    writeln!(output, "/// Handler dispatch information for {lang_name}")?;
+    // Generate handler metadata module
+    writeln!(output, "/// Handler metadata for {lang_name}")?;
     writeln!(output, "pub mod scm_handlers {{")?;
     writeln!(output, "    use super::scm_queries;")?;
     writeln!(output)?;
-    writeln!(output, "    /// Query-handler mapping entry")?;
-    writeln!(output, "    pub struct QueryHandlerEntry {{")?;
+    writeln!(output, "    /// Complete handler definition from .scm file")?;
+    writeln!(output, "    #[derive(Debug, Clone, Copy)]")?;
+    writeln!(output, "    pub struct ScmHandler {{")?;
+    writeln!(
+        output,
+        "        /// Handler name (e.g., \"rust::free_function\")"
+    )?;
     writeln!(output, "        pub handler_name: &'static str,")?;
+    writeln!(output, "        /// Entity type (e.g., \"Function\")")?;
+    writeln!(output, "        pub entity_type: &'static str,")?;
+    writeln!(output, "        /// Primary capture name")?;
+    writeln!(output, "        pub capture: &'static str,")?;
+    writeln!(output, "        /// The tree-sitter query")?;
     writeln!(output, "        pub query: &'static str,")?;
     writeln!(output, "    }}")?;
     writeln!(output)?;
-    writeln!(output, "    /// All query-handler mappings for {lang_name}")?;
-    writeln!(
-        output,
-        "    pub const ALL_ENTRIES: &[QueryHandlerEntry] = &["
-    )?;
+    writeln!(output, "    /// All handler definitions for {lang_name}")?;
+    writeln!(output, "    pub const ALL_HANDLERS: &[ScmHandler] = &[")?;
 
-    for q in &all_queries {
-        let const_name = handler_to_const_name(&q.handler);
-        writeln!(output, "        QueryHandlerEntry {{")?;
-        writeln!(output, "            handler_name: \"{}\",", q.handler)?;
+    for h in &all_handlers {
+        let handler_name = h.handler.as_ref().unwrap();
+        let entity_type = h.entity_type.as_ref().unwrap();
+        let capture = h.capture.as_ref().unwrap();
+        let const_name = handler_to_const_name(handler_name);
+        writeln!(output, "        ScmHandler {{")?;
+        writeln!(output, "            handler_name: \"{handler_name}\",")?;
+        writeln!(output, "            entity_type: \"{entity_type}\",")?;
+        writeln!(output, "            capture: \"{capture}\",")?;
         writeln!(output, "            query: scm_queries::{const_name},")?;
         writeln!(output, "        }},")?;
     }

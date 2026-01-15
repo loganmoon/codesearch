@@ -17,6 +17,7 @@ pub mod extract_context;
 pub mod handler_registry;
 pub mod predicates;
 pub mod qualified_name;
+pub mod queries;
 pub mod spec_driven;
 
 /// Trait for extracting code entities from source files

@@ -89,15 +89,17 @@ impl StandardPredicates {
 
     /// Evaluate `#has-child?` or `#not-has-child?` predicate
     ///
-    /// Syntax: `(#not-has-child? @capture field_name)`
-    /// Checks if the captured node has a child with the specified field name.
+    /// Syntax: `(#not-has-child? @capture name)`
+    /// Checks if the captured node has:
+    /// 1. A child field with the specified name (e.g., "trait" on impl_item)
+    /// 2. OR a direct child node of the specified kind (e.g., "self_parameter" in parameters)
     fn eval_has_child<'a>(
         &self,
         predicate: &QueryPredicate,
         match_: &QueryMatch<'a, 'a>,
         negate: bool,
     ) -> Result<bool> {
-        // Expect exactly 2 args: @capture and field_name
+        // Expect exactly 2 args: @capture and name
         if predicate.args.len() != 2 {
             return Err(Error::entity_extraction(format!(
                 "#{}has-child? expects 2 arguments, got {}",
@@ -107,15 +109,31 @@ impl StandardPredicates {
         }
 
         let capture_index = self.resolve_capture_index(&predicate.args[0])?;
-        let field_name = self.extract_string_arg(&predicate.args[1])?;
+        let child_name = self.extract_string_arg(&predicate.args[1])?;
 
         let Some(node) = self.find_capture_node(match_, capture_index) else {
             // If capture not found, not-has-child passes (nothing to check)
             return Ok(negate);
         };
 
-        let has_child = node.child_by_field_name(field_name).is_some();
+        // First try as a field name (e.g., "trait" on impl_item)
+        let has_child = if node.child_by_field_name(child_name).is_some() {
+            true
+        } else {
+            // Fall back to checking for a child with that kind
+            self.find_child_of_kind(node, child_name).is_some()
+        };
+
         Ok(if negate { !has_child } else { has_child })
+    }
+
+    /// Find a direct child node of a specific kind
+    fn find_child_of_kind<'a>(&self, node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+        let mut cursor = node.walk();
+        let result = node
+            .children(&mut cursor)
+            .find(|child| child.kind() == kind);
+        result
     }
 
     /// Evaluate `#has-ancestor?` or `#not-has-ancestor?` predicate

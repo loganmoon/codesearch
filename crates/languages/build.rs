@@ -83,11 +83,13 @@ struct HandlerDef {
 fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let specs_dir = Path::new("specs");
+    let queries_dir = Path::new("queries");
 
     // Track which spec files we depend on
     println!("cargo:rerun-if-changed=specs/");
+    println!("cargo:rerun-if-changed=queries/");
 
-    // Process each language spec
+    // Process each language spec (YAML-based, existing system)
     for entry in fs::read_dir(specs_dir).expect("Failed to read specs directory") {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
@@ -103,6 +105,28 @@ fn main() {
 
             if let Err(e) = process_spec(&path, lang_name, &out_dir) {
                 panic!("Failed to process {}: {}", path.display(), e);
+            }
+        }
+    }
+
+    // Process .scm query files (new system for V2 architecture)
+    if queries_dir.exists() {
+        for entry in fs::read_dir(queries_dir).expect("Failed to read queries directory") {
+            let entry = entry.expect("Failed to read directory entry");
+            let path = entry.path();
+
+            if path.is_dir() {
+                let lang_name = path
+                    .file_name()
+                    .expect("No file name")
+                    .to_str()
+                    .expect("Invalid UTF-8 in filename");
+
+                println!("cargo:rerun-if-changed={}", path.display());
+
+                if let Err(e) = process_scm_queries(&path, lang_name, &out_dir) {
+                    panic!("Failed to process scm queries in {}: {}", path.display(), e);
+                }
             }
         }
     }
@@ -338,4 +362,159 @@ fn to_pascal_case(s: &str) -> String {
             }
         })
         .collect()
+}
+
+// =============================================================================
+// .scm Query File Processing (V2 Architecture)
+// =============================================================================
+
+/// A query with its associated handler from a .scm file
+struct QueryWithHandler {
+    /// Handler name (e.g., "rust::free_function")
+    handler: String,
+    /// The tree-sitter query string
+    query: String,
+}
+
+/// Parse a .scm file extracting queries and their handler annotations
+///
+/// The expected format is:
+/// ```scheme
+/// ; @handler rust::free_function
+/// (function_item
+///   name: (identifier) @name
+/// ) @func
+/// (#not-has-ancestor? @func impl_item)
+/// ```
+fn parse_scm_file(path: &Path) -> Result<Vec<QueryWithHandler>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(path)?;
+    let mut queries = Vec::new();
+    let mut current_handler: Option<String> = None;
+    let mut current_query = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("; @handler ") {
+            // Emit previous query if exists
+            if !current_query.trim().is_empty() {
+                if let Some(handler) = current_handler.take() {
+                    queries.push(QueryWithHandler {
+                        handler,
+                        query: std::mem::take(&mut current_query),
+                    });
+                }
+            }
+            current_handler = Some(
+                trimmed
+                    .strip_prefix("; @handler ")
+                    .unwrap()
+                    .trim()
+                    .to_string(),
+            );
+        } else if !trimmed.is_empty() && !trimmed.starts_with(';') {
+            // Non-empty, non-comment line - part of query
+            current_query.push_str(line);
+            current_query.push('\n');
+        }
+    }
+
+    // Emit final query
+    if !current_query.trim().is_empty() {
+        if let Some(handler) = current_handler {
+            queries.push(QueryWithHandler {
+                handler,
+                query: current_query,
+            });
+        }
+    }
+
+    Ok(queries)
+}
+
+/// Process all .scm files in a language directory
+fn process_scm_queries(
+    lang_dir: &Path,
+    lang_name: &str,
+    out_dir: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut all_queries = Vec::new();
+
+    // Find all .scm files in the language directory
+    for entry in fs::read_dir(lang_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().is_some_and(|ext| ext == "scm") {
+            println!("cargo:rerun-if-changed={}", path.display());
+            let queries = parse_scm_file(&path)?;
+            all_queries.extend(queries);
+        }
+    }
+
+    if all_queries.is_empty() {
+        return Ok(());
+    }
+
+    // Generate output file
+    let output_path = Path::new(out_dir).join(format!("{lang_name}_scm_queries.rs"));
+    let mut output = fs::File::create(&output_path)?;
+
+    writeln!(output, "// Auto-generated from {lang_name}/*.scm files")?;
+    writeln!(output, "// DO NOT EDIT - changes will be overwritten")?;
+    writeln!(output)?;
+
+    // Generate query constants module
+    writeln!(
+        output,
+        "/// Tree-sitter queries parsed from .scm files for {lang_name}"
+    )?;
+    writeln!(output, "pub mod scm_queries {{")?;
+
+    for q in &all_queries {
+        let const_name = handler_to_const_name(&q.handler);
+        writeln!(output, "    /// Query for handler: {}", q.handler)?;
+        writeln!(output, "    pub const {const_name}: &str = r#\"")?;
+        writeln!(output, "{}", q.query.trim())?;
+        writeln!(output, "\"#;")?;
+        writeln!(output)?;
+    }
+
+    writeln!(output, "}}")?;
+    writeln!(output)?;
+
+    // Generate handler dispatch table
+    writeln!(output, "/// Handler dispatch information for {lang_name}")?;
+    writeln!(output, "pub mod scm_handlers {{")?;
+    writeln!(output, "    use super::scm_queries;")?;
+    writeln!(output)?;
+    writeln!(output, "    /// Query-handler mapping entry")?;
+    writeln!(output, "    pub struct QueryHandlerEntry {{")?;
+    writeln!(output, "        pub handler_name: &'static str,")?;
+    writeln!(output, "        pub query: &'static str,")?;
+    writeln!(output, "    }}")?;
+    writeln!(output)?;
+    writeln!(output, "    /// All query-handler mappings for {lang_name}")?;
+    writeln!(
+        output,
+        "    pub const ALL_ENTRIES: &[QueryHandlerEntry] = &["
+    )?;
+
+    for q in &all_queries {
+        let const_name = handler_to_const_name(&q.handler);
+        writeln!(output, "        QueryHandlerEntry {{")?;
+        writeln!(output, "            handler_name: \"{}\",", q.handler)?;
+        writeln!(output, "            query: scm_queries::{const_name},")?;
+        writeln!(output, "        }},")?;
+    }
+
+    writeln!(output, "    ];")?;
+    writeln!(output, "}}")?;
+
+    Ok(())
+}
+
+/// Convert a handler name to a const name (e.g., "rust::free_function" -> "RUST_FREE_FUNCTION")
+fn handler_to_const_name(handler: &str) -> String {
+    handler.replace("::", "_").to_uppercase()
 }

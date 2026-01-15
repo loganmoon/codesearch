@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 codesearch-core = { path = "../core" }
+codesearch-languages-macros = { path = "../languages-macros" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -19,15 +19,13 @@ pub struct Relationship {
 /// Build relationship JSON for outbox payload
 pub fn build_contains_relationship_json(
     entity: &CodeEntity,
-    name_to_id: &HashMap<&str, &str>,
+    name_to_id: &HashMap<String, String>,
 ) -> Vec<serde_json::Value> {
     let mut relationships = Vec::new();
 
     if let Some(parent_qname) = &entity.parent_scope {
         // Try to resolve parent using the provided name_to_id map (O(1) lookup)
-        let parent_id = name_to_id
-            .get(parent_qname.as_str())
-            .map(|&id| id.to_string());
+        let parent_id = name_to_id.get(parent_qname).cloned();
 
         if let Some(parent_id) = parent_id {
             // Parent exists in batch, create resolved relationship
@@ -263,7 +261,7 @@ mod tests {
     use super::*;
     use codesearch_core::{
         entities::{CodeEntityBuilder, EntityMetadata, SourceLocation},
-        Visibility,
+        QualifiedName, Visibility,
     };
     use std::path::PathBuf;
 
@@ -274,12 +272,13 @@ mod tests {
         entity_type: EntityType,
         parent_scope: Option<String>,
     ) -> CodeEntity {
+        let qn = QualifiedName::parse(qualified_name).expect("Invalid qualified name in test");
         let mut builder = CodeEntityBuilder::default();
         builder
             .entity_id(id.to_string())
             .repository_id("test_repo".to_string())
             .name(name.to_string())
-            .qualified_name(qualified_name.to_string())
+            .qualified_name(qn)
             .entity_type(entity_type)
             .language(Language::Rust)
             .file_path(PathBuf::from("test.rs"))
@@ -313,9 +312,9 @@ mod tests {
 
         // Build name_to_id map
         let entities = [parent.clone(), child.clone()];
-        let name_to_id: HashMap<&str, &str> = entities
+        let name_to_id: HashMap<String, String> = entities
             .iter()
-            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .map(|e| (e.qualified_name.to_string(), e.entity_id.clone()))
             .collect();
 
         let relationships = build_contains_relationship_json(&child, &name_to_id);
@@ -339,9 +338,9 @@ mod tests {
 
         // Build name_to_id map (parent not in map, so relationship will be unresolved)
         let entities = [child.clone()];
-        let name_to_id: HashMap<&str, &str> = entities
+        let name_to_id: HashMap<String, String> = entities
             .iter()
-            .map(|e| (e.qualified_name.as_str(), e.entity_id.as_str()))
+            .map(|e| (e.qualified_name.to_string(), e.entity_id.clone()))
             .collect();
 
         let relationships = build_contains_relationship_json(&child, &name_to_id);
@@ -364,7 +363,7 @@ mod tests {
             .entity_id("impl_id".to_string())
             .repository_id("test_repo".to_string())
             .name("impl MyTrait for MyStruct".to_string())
-            .qualified_name("impl_block".to_string())
+            .qualified_name(QualifiedName::parse("impl_block").expect("Invalid qn"))
             .entity_type(EntityType::Impl)
             .language(Language::Rust)
             .file_path(PathBuf::from("test.rs"))
@@ -424,7 +423,7 @@ mod tests {
             .entity_id("module_id".to_string())
             .repository_id("test_repo".to_string())
             .name("my_module".to_string())
-            .qualified_name("crate::my_module".to_string())
+            .qualified_name(QualifiedName::parse("crate::my_module").expect("Invalid qn"))
             .entity_type(EntityType::Module)
             .language(Language::Rust)
             .file_path(PathBuf::from("src/my_module.rs"))
@@ -477,7 +476,7 @@ mod tests {
             .entity_id("func_id".to_string())
             .repository_id("test_repo".to_string())
             .name("my_function".to_string())
-            .qualified_name("crate::my_function".to_string())
+            .qualified_name(QualifiedName::parse("crate::my_function").expect("Invalid qn"))
             .entity_type(EntityType::Function)
             .language(Language::Rust)
             .file_path(PathBuf::from("src/lib.rs"))

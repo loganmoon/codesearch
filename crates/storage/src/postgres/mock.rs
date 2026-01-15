@@ -930,14 +930,15 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut result = std::collections::HashMap::new();
 
         for ((repo_id, _entity_id), metadata) in &data.entities {
+            let qn_string = metadata.entity.qualified_name.to_string();
             if *repo_id == repository_id
                 && metadata.deleted_at.is_none()
-                && qualified_names.contains(&metadata.entity.qualified_name)
+                && qualified_names.contains(&qn_string)
             {
                 // For the mock, we'll return a dummy embedding if we find the entity
                 // In real usage, this would need to join with embedding_id
                 let dummy_embedding = vec![0.1; 768]; // BGE-style embedding dimension
-                result.insert(metadata.entity.qualified_name.clone(), dummy_embedding);
+                result.insert(qn_string, dummy_embedding);
             }
         }
 
@@ -957,14 +958,12 @@ impl PostgresClientTrait for MockPostgresClient {
         let mut result = std::collections::HashMap::new();
 
         for ((repo_id, _entity_id), metadata) in &data.entities {
+            let qn_string = metadata.entity.qualified_name.to_string();
             if *repo_id == repository_id
                 && metadata.deleted_at.is_none()
-                && qualified_names.contains(&metadata.entity.qualified_name)
+                && qualified_names.contains(&qn_string)
             {
-                result.insert(
-                    metadata.entity.qualified_name.clone(),
-                    metadata.entity.clone(),
-                );
+                result.insert(qn_string, metadata.entity.clone());
             }
         }
 
@@ -1048,6 +1047,7 @@ impl MockPostgresClient {
 mod tests {
     use super::*;
     use codesearch_core::entities::{EntityType, Language, SourceLocation, Visibility};
+    use codesearch_core::QualifiedName;
     use std::path::PathBuf;
 
     fn create_test_entity(name: &str, file_path: &str) -> CodeEntity {
@@ -1057,7 +1057,7 @@ mod tests {
             entity_id: format!("test_{name}"),
             repository_id: "test_repo".to_string(),
             name: name.to_string(),
-            qualified_name: name.to_string(),
+            qualified_name: QualifiedName::parse(name).expect("Invalid qualified name"),
             path_entity_identifier: None,
             entity_type: EntityType::Function,
             language: Language::Rust,

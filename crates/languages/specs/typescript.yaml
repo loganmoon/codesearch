@@ -1472,10 +1472,26 @@ extraction_hints:
       description: "Arrow functions assigned to variables"
       capture: "function"
       query: |
+        ; Non-generic arrow functions in const/let declarations
         (lexical_declaration
           (variable_declarator
             name: (identifier) @name
             value: (arrow_function
+              parameters: [
+                (formal_parameters) @params
+                (identifier) @params
+              ]?
+              body: [
+                (statement_block)
+                (_)
+              ] @body))) @function
+
+        ; Generic arrow functions in const/let declarations (TypeScript)
+        (lexical_declaration
+          (variable_declarator
+            name: (identifier) @name
+            value: (arrow_function
+              type_parameters: (type_parameters)
               parameters: [
                 (formal_parameters) @params
                 (identifier) @params
@@ -1498,11 +1514,42 @@ extraction_hints:
                 (_)
               ] @body))) @function
 
+        ; Generic arrow functions in var declarations (TypeScript)
+        (variable_declaration
+          (variable_declarator
+            name: (identifier) @name
+            value: (arrow_function
+              type_parameters: (type_parameters)
+              parameters: [
+                (formal_parameters) @params
+                (identifier) @params
+              ]?
+              body: [
+                (statement_block)
+                (_)
+              ] @body))) @function
+
         (export_statement
           declaration: (lexical_declaration
             (variable_declarator
               name: (identifier) @name
               value: (arrow_function
+                parameters: [
+                  (formal_parameters) @params
+                  (identifier) @params
+                ]?
+                body: [
+                  (statement_block)
+                  (_)
+                ] @body)))) @function
+
+        ; Exported generic arrow functions (TypeScript)
+        (export_statement
+          declaration: (lexical_declaration
+            (variable_declarator
+              name: (identifier) @name
+              value: (arrow_function
+                type_parameters: (type_parameters)
                 parameters: [
                   (formal_parameters) @params
                   (identifier) @params
@@ -1533,13 +1580,20 @@ extraction_hints:
       description: "Const declarations (excluding functions)"
       capture: "const"
       query: |
+        ; Excludes function expressions and arrow functions:
+        ; - function/async function (function expressions)
+        ; - ( (parenthesized arrow function params)
+        ; - < (generic arrow function type params)
+        ; - async\s*< (async generic arrow functions)
+        ; - word => (single-param arrow functions)
+        ; NOTE: Some edge cases may still slip through - see REMAINING_ISSUES.md
         (
           (lexical_declaration
             kind: "const"
             (variable_declarator
               name: (identifier) @name
               value: (_) @value)) @const
-          (#not-match? @value "^(function|async function|\\(|<|\\w+\\s*=>)")
+          (#not-match? @value "^(function|async function|async\\s*<|\\(|<|\\w+\\s*=>)")
         )
 
         (
@@ -1549,7 +1603,7 @@ extraction_hints:
               (variable_declarator
                 name: (identifier) @name
                 value: (_) @value))) @const
-          (#not-match? @value "^(function|async function|\\(|<|\\w+\\s*=>)")
+          (#not-match? @value "^(function|async function|async\\s*<|\\(|<|\\w+\\s*=>)")
         )
 
     LET:

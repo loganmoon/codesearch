@@ -779,6 +779,57 @@ fn extract_bounds_recursive(
 }
 
 // =============================================================================
+// Impl block relationship extraction (Rust)
+// =============================================================================
+
+/// Extract IMPLEMENTS relationship from a Rust trait impl block.
+///
+/// For `impl Trait for Type`, extracts a reference to the Trait.
+/// Note: The implementing Type is not extracted here as a relationship;
+/// the impl block's qualified name already encodes this via the type name.
+pub fn extract_impl_trait_reference(
+    node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Vec<SourceReference> {
+    let mut refs = Vec::new();
+
+    // Find the trait field in impl_item
+    match node.child_by_field_name("trait") {
+        Some(trait_node) => {
+            let type_text = node_text(trait_node, ctx.source);
+            if type_text.is_empty() {
+                tracing::trace!(
+                    node_kind = node.kind(),
+                    "Trait node found but text is empty"
+                );
+            } else {
+                let simple_name = extract_simple_name(type_text);
+                let resolution_ctx = build_resolution_context(ctx, parent_scope);
+                let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+                if let Some(source_ref) = build_source_reference(
+                    resolved.target,
+                    resolved.simple_name,
+                    resolved.is_external,
+                    trait_node,
+                    ReferenceType::Implements,
+                ) {
+                    refs.push(source_ref);
+                }
+            }
+        }
+        None => {
+            tracing::trace!(
+                node_kind = node.kind(),
+                "extract_impl_trait_reference called on node without trait field"
+            );
+        }
+    }
+
+    refs
+}
+
+// =============================================================================
 // Interface relationship extraction (TypeScript)
 // =============================================================================
 
@@ -912,6 +963,52 @@ fn extract_ts_imports(
     extract_js_ts_imports_with_query(node, ctx, parent_scope, query)
 }
 
+/// Check if the file is a folder module (index.ts/index.js in a subdirectory)
+///
+/// A folder module is an index file that represents its containing directory,
+/// like `models/index.ts` representing the `models` module. Root-level index
+/// files (e.g., `src/index.ts` at the source root) are NOT folder modules.
+///
+/// This matters for relative import resolution: folder modules resolve `./foo`
+/// relative to the folder they represent, not their parent directory.
+fn is_folder_module(ctx: &SpecDrivenContext) -> bool {
+    // Must be named "index"
+    let is_index = ctx
+        .file_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|name| name == "index");
+
+    if !is_index {
+        return false;
+    }
+
+    // Must have a parent directory relative to source root
+    // (i.e., not be at the root level)
+    let Some(source_root) = ctx.source_root else {
+        tracing::debug!(
+            file_path = ?ctx.file_path,
+            "Cannot determine folder module status: no source_root configured for index file"
+        );
+        return false;
+    };
+
+    match ctx.file_path.strip_prefix(source_root) {
+        Ok(rel) => rel
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty()),
+        Err(e) => {
+            tracing::debug!(
+                file_path = ?ctx.file_path,
+                source_root = ?source_root,
+                error = %e,
+                "Index file path not under source root - folder module detection failed"
+            );
+            false
+        }
+    }
+}
+
 /// Common implementation for JS/TS import extraction
 fn extract_js_ts_imports_with_query(
     node: Node,
@@ -922,6 +1019,7 @@ fn extract_js_ts_imports_with_query(
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
+    let folder_module = is_folder_module(ctx);
 
     while let Some(query_match) = matches.next() {
         for capture in query_match.captures {
@@ -944,7 +1042,8 @@ fn extract_js_ts_imports_with_query(
 
             for (local_name, original_name, spec_node) in specifiers {
                 // Resolve the import path
-                let resolved_path = resolve_js_import_path(source_path, parent_scope);
+                let resolved_path =
+                    resolve_js_import_path(source_path, parent_scope, folder_module);
 
                 // Build target qualified name
                 let target = if original_name == "*" {
@@ -1046,13 +1145,47 @@ fn extract_single_js_specifier(spec: Node, source: &str) -> Option<(String, Stri
 }
 
 /// Resolve JS/TS import path to absolute module path
-fn resolve_js_import_path(source_path: &str, parent_scope: Option<&str>) -> String {
+///
+/// The `is_folder_module` flag indicates whether the importing module is a folder
+/// entry point (index.ts/index.js). For folder modules, relative imports like `./foo`
+/// resolve differently because the module path already represents the folder.
+fn resolve_js_import_path(
+    source_path: &str,
+    parent_scope: Option<&str>,
+    is_folder_module: bool,
+) -> String {
     // Handle relative imports
     if source_path.starts_with('.') {
-        if let Some(scope) = parent_scope {
-            // Use the same resolution logic as import_map
-            return crate::common::import_map::resolve_relative_import(scope, source_path)
-                .unwrap_or_else(|| format!("external.{source_path}"));
+        match parent_scope {
+            Some(scope) => {
+                // Use folder-aware resolution for index.ts/index.js files
+                let resolved = if is_folder_module {
+                    crate::common::import_map::resolve_relative_import_for_folder_module(
+                        scope,
+                        source_path,
+                    )
+                } else {
+                    crate::common::import_map::resolve_relative_import(scope, source_path)
+                };
+                match resolved {
+                    Some(path) => return path,
+                    None => {
+                        tracing::debug!(
+                            source_path = source_path,
+                            parent_scope = scope,
+                            is_folder_module = is_folder_module,
+                            "Relative import resolution failed, treating as external"
+                        );
+                        return format!("external.{source_path}");
+                    }
+                }
+            }
+            None => {
+                tracing::debug!(
+                    source_path = source_path,
+                    "Relative import path has no parent_scope context, treating as external"
+                );
+            }
         }
     }
 
@@ -1110,7 +1243,8 @@ fn extract_js_ts_reexports_with_query(
             };
 
             // Resolve the source module path
-            let resolved_path = resolve_js_import_path(source_path, parent_scope);
+            let resolved_path =
+                resolve_js_import_path(source_path, parent_scope, is_folder_module(ctx));
 
             // Check if it's a star re-export or named re-export
             let specifiers = extract_js_export_specifiers(export_stmt, ctx.source);
@@ -1479,6 +1613,13 @@ pub fn extract_relationships(
             EntityRelationshipData {
                 imports,
                 reexports,
+                ..Default::default()
+            }
+        }
+        RelationshipExtractor::ExtractImplRelationships => {
+            let implements = extract_impl_trait_reference(node, ctx, parent_scope);
+            EntityRelationshipData {
+                implements,
                 ..Default::default()
             }
         }

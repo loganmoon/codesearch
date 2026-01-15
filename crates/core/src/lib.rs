@@ -19,6 +19,7 @@ pub mod entities;
 pub mod entity_id;
 pub mod error;
 pub mod project_manifest;
+pub mod qualified_name;
 pub mod resolution;
 pub mod search_api;
 pub mod search_models;
@@ -38,6 +39,7 @@ pub use error::{Error, Result, ResultExt};
 pub use project_manifest::{
     detect_manifest, PackageInfo, PackageMap, ProjectManifest, ProjectType,
 };
+pub use qualified_name::{PathSeparator, QualifiedName};
 pub use resolution::{definitions as relationship_definitions, LookupStrategy, RelationshipDef};
 pub use search_api::SearchApi;
 pub use search_models::{

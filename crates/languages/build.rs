@@ -87,7 +87,7 @@ fn main() {
     // Track which spec files we depend on
     println!("cargo:rerun-if-changed=specs/");
 
-    // Process each language spec
+    // Process each language spec (YAML-based, existing system)
     for entry in fs::read_dir(specs_dir).expect("Failed to read specs directory") {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();

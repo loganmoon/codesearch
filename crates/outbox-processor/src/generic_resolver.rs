@@ -254,7 +254,7 @@ impl GenericResolver {
 
         for entity in target_entities {
             // Always build qname map
-            qname_map.insert(entity.qualified_name.clone(), entity.entity_id.clone());
+            qname_map.insert(entity.qualified_name.to_string(), entity.entity_id.clone());
 
             // Build path_id map if PathEntityIdentifier strategy is used
             if self
@@ -517,6 +517,7 @@ mod tests {
         CodeEntityBuilder, EntityMetadata, EntityRelationshipData, EntityType, Language,
         SourceLocation, SourceReference,
     };
+    use codesearch_core::QualifiedName;
     use std::path::PathBuf;
 
     fn make_test_entity(
@@ -529,7 +530,7 @@ mod tests {
             .entity_id(format!("id_{}", name))
             .repository_id("repo_1".to_string())
             .name(name.to_string())
-            .qualified_name(qualified_name.to_string())
+            .qualified_name(QualifiedName::parse(qualified_name).expect("Invalid qn"))
             .entity_type(entity_type)
             .file_path(PathBuf::from("/test.rs"))
             .location(SourceLocation {

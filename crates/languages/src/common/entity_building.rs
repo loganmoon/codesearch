@@ -11,6 +11,7 @@ use codesearch_core::entities::{
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
+use codesearch_core::qualified_name::QualifiedName;
 use codesearch_core::CodeEntity;
 use std::path::Path;
 use tree_sitter::{Node, Query, QueryMatch};
@@ -82,11 +83,13 @@ pub struct EntityDetails {
 /// * `name_capture` - Name of the capture containing the entity name
 /// * `main_node` - The main AST node for this entity
 /// * `language` - Language identifier for qualified name building (e.g., "rust", "python")
+/// * `entity_type` - The type of entity being extracted (used for unique ID generation)
 pub fn extract_common_components(
     ctx: &ExtractionContext,
     name_capture: &str,
     main_node: Node,
     language: &str,
+    entity_type: EntityType,
 ) -> Result<CommonEntityComponents> {
     // Extract name from capture, defaulting to empty string if not found
     let name = find_capture_node(ctx.query_match, ctx.query, name_capture)
@@ -141,12 +144,18 @@ pub fn extract_common_components(
         separator,
     );
 
-    // Generate entity_id from repository + file_path + qualified name
+    // Generate entity_id from repository + file_path + qualified name + entity_type
     let file_path_str = ctx
         .file_path
         .to_str()
         .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
+    let entity_type_str = entity_type.to_string();
+    let entity_id = generate_entity_id(
+        ctx.repository_id,
+        file_path_str,
+        &qualified_name,
+        &entity_type_str,
+    );
 
     // Get location
     let location = SourceLocation::from_tree_sitter_node(main_node);
@@ -177,8 +186,9 @@ pub fn extract_common_components_with_name(
     name: &str,
     main_node: Node,
     language: &str,
+    entity_type: EntityType,
 ) -> Result<CommonEntityComponents> {
-    extract_common_components_with_scope_skip(ctx, name, main_node, language, &[])
+    extract_common_components_with_scope_skip(ctx, name, main_node, language, &[], entity_type)
 }
 
 /// Extract common entity components with scope filtering
@@ -194,12 +204,14 @@ pub fn extract_common_components_with_name(
 /// * `main_node` - The main AST node for this entity
 /// * `language` - Language identifier
 /// * `skip_scope_kinds` - AST node kinds to skip during scope traversal (e.g., `&["method_definition"]`)
+/// * `entity_type` - The type of entity being extracted (used for unique ID generation)
 pub fn extract_common_components_with_scope_skip(
     ctx: &ExtractionContext,
     name: &str,
     main_node: Node,
     language: &str,
     skip_scope_kinds: &[&str],
+    entity_type: EntityType,
 ) -> Result<CommonEntityComponents> {
     if name.is_empty() {
         return Err(Error::entity_extraction("Empty name provided"));
@@ -249,12 +261,18 @@ pub fn extract_common_components_with_scope_skip(
         separator,
     );
 
-    // Generate entity_id from repository + file_path + qualified name
+    // Generate entity_id from repository + file_path + qualified name + entity_type
     let file_path_str = ctx
         .file_path
         .to_str()
         .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
-    let entity_id = generate_entity_id(ctx.repository_id, file_path_str, &qualified_name);
+    let entity_type_str = entity_type.to_string();
+    let entity_id = generate_entity_id(
+        ctx.repository_id,
+        file_path_str,
+        &qualified_name,
+        &entity_type_str,
+    );
 
     // Get location
     let location = SourceLocation::from_tree_sitter_node(main_node);
@@ -331,11 +349,22 @@ pub fn build_entity(
     components: CommonEntityComponents,
     details: EntityDetails,
 ) -> Result<CodeEntity> {
+    // Parse the qualified name string into a structured QualifiedName
+    let qualified_name = QualifiedName::parse(&components.qualified_name)?;
+
+    // For TraitImpl variants, set the scope from parent_scope if available
+    let qualified_name = if let Some(ref parent) = components.parent_scope {
+        let scope: Vec<String> = parent.split("::").map(String::from).collect();
+        qualified_name.with_scope(scope)
+    } else {
+        qualified_name
+    };
+
     CodeEntityBuilder::default()
         .entity_id(components.entity_id)
         .repository_id(components.repository_id)
         .name(components.name)
-        .qualified_name(components.qualified_name)
+        .qualified_name(qualified_name)
         .path_entity_identifier(components.path_entity_identifier)
         .parent_scope(components.parent_scope)
         .entity_type(details.entity_type)

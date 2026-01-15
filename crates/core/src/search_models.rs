@@ -86,7 +86,7 @@ impl TryFrom<CodeEntity> for EntityResult {
         Ok(Self {
             entity_id: entity.entity_id.clone(),
             repository_id,
-            qualified_name: entity.qualified_name.clone(),
+            qualified_name: entity.qualified_name.to_string(),
             name: entity.name.clone(),
             entity_type: entity.entity_type,
             language: entity.language,

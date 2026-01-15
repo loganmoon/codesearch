@@ -4,7 +4,7 @@ use codesearch_core::config::RerankingConfig;
 use codesearch_core::entities::{
     EntityMetadata, EntityType, FunctionSignature, Language, SourceLocation, Visibility,
 };
-use codesearch_core::CodeEntity;
+use codesearch_core::{CodeEntity, QualifiedName};
 use codesearch_indexer::entity_processor::extract_embedding_content;
 use codesearch_reranking::create_reranker_provider;
 use std::path::PathBuf;
@@ -134,7 +134,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         entity_id: "test_id".to_string(),
         entity_type: EntityType::Function,
         name: "calculate_sum".to_string(),
-        qualified_name: "math::calculate_sum".to_string(),
+        qualified_name: QualifiedName::parse("math::calculate_sum").unwrap(),
         path_entity_identifier: None,
         file_path: PathBuf::from("/test/path.rs"),
         location: SourceLocation {
@@ -191,7 +191,7 @@ fn test_content_consistency_between_indexing_and_reranking() {
         entity_id: "minimal_id".to_string(),
         entity_type: EntityType::Struct,
         name: "Point".to_string(),
-        qualified_name: "Point".to_string(),
+        qualified_name: QualifiedName::parse("Point").unwrap(),
         path_entity_identifier: None,
         file_path: PathBuf::from("/test/minimal.rs"),
         location: SourceLocation {

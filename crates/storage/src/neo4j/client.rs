@@ -272,7 +272,7 @@ impl Neo4jClient {
         let query = Query::new(query_str)
             .param("id", entity.entity_id.clone())
             .param("repository_id", entity.repository_id.to_string())
-            .param("qualified_name", entity.qualified_name.clone())
+            .param("qualified_name", entity.qualified_name.to_string())
             .param(
                 "path_entity_identifier",
                 entity.path_entity_identifier.clone().unwrap_or_default(),
@@ -344,7 +344,7 @@ impl Neo4jClient {
                         );
                         map.insert(
                             "qualified_name".to_string(),
-                            e.qualified_name.clone().into(),
+                            e.qualified_name.to_string().into(),
                         );
                         map.insert(
                             "path_entity_identifier".to_string(),

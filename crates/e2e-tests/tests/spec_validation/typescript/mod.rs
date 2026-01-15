@@ -5,6 +5,7 @@
 pub mod fixtures;
 
 use anyhow::Result;
+use codesearch_core::QualifiedName;
 use codesearch_e2e_tests::common::spec_validation::run_spec_validation;
 use fixtures::*;
 
@@ -458,10 +459,15 @@ fn test_contains_relationships_have_matching_entities() {
                     fixture.name, rel.to
                 );
 
-                // For TypeScript, check that the child starts with parent (dot-separated)
+                // Use structured QualifiedName for proper containment checking
+                let parent_qn = QualifiedName::parse(rel.from)
+                    .expect(&format!("Failed to parse parent qualified name: {}", rel.from));
+                let child_qn = QualifiedName::parse(rel.to)
+                    .expect(&format!("Failed to parse child qualified name: {}", rel.to));
+
                 assert!(
-                    rel.to.starts_with(rel.from),
-                    "Fixture '{}': CONTAINS child '{}' should be prefixed by parent '{}'",
+                    child_qn.is_child_of(&parent_qn),
+                    "Fixture '{}': CONTAINS child '{}' should be contained by parent '{}'",
                     fixture.name,
                     rel.to,
                     rel.from

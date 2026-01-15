@@ -70,7 +70,7 @@ pub fn use_ufcs(data: &Data) -> i32 {
         },
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::<test_crate::Data as test_crate::Processor>",
+            qualified_name: "<test_crate::Data as test_crate::Processor>",
             visibility: None,
         },
         ExpectedEntity {
@@ -98,11 +98,11 @@ pub fn use_ufcs(data: &Data) -> i32 {
         ExpectedRelationship {
             kind: RelationshipKind::Contains,
             from: "test_crate",
-            to: "test_crate::<test_crate::Data as test_crate::Processor>",
+            to: "<test_crate::Data as test_crate::Processor>",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<test_crate::Data as test_crate::Processor>",
+            from: "<test_crate::Data as test_crate::Processor>",
             to: "test_crate::Processor",
         },
         // UFCS call: <Data as Processor>::process(data) resolves to the trait impl method
@@ -255,13 +255,13 @@ impl Debug for MyType {
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
             qualified_name:
-                "test_crate::<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
+                "<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
             visibility: None,
         },
         // Concrete impl for MyType
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name: "test_crate::<test_crate::MyType as test_crate::Debug>",
+            qualified_name: "<test_crate::MyType as test_crate::Debug>",
             visibility: None,
         },
     ],
@@ -284,13 +284,13 @@ impl Debug for MyType {
         // Blanket impl implements Printable
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
+            from: "<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
             to: "test_crate::Printable",
         },
         // MyType impl block implements Debug
         ExpectedRelationship {
             kind: RelationshipKind::Implements,
-            from: "test_crate::<test_crate::MyType as test_crate::Debug>",
+            from: "<test_crate::MyType as test_crate::Debug>",
             to: "test_crate::Debug",
         },
     ],

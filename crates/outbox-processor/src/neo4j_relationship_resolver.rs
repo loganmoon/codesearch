@@ -68,7 +68,7 @@ impl EntityCache {
 
         let qname_to_id: HashMap<String, String> = entities
             .iter()
-            .map(|e| (e.qualified_name.clone(), e.entity_id.clone()))
+            .map(|e| (e.qualified_name.to_string(), e.entity_id.clone()))
             .collect();
 
         Ok(Self {

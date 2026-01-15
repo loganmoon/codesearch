@@ -819,6 +819,7 @@ extraction_hints:
           parameters: (parameters) @params
           return_type: (_)? @return_type
           body: (block) @body) @function
+        (#not-has-ancestor? @function impl_item)
 
     # --- Impl block queries ---
 

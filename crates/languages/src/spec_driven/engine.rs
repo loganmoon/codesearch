@@ -571,10 +571,11 @@ fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) ->
 
 /// Determine if a query match should be skipped based on implicit predicates.
 ///
-/// Handles two cases:
-/// 1. `#not-has-child?` predicates that tree-sitter doesn't automatically evaluate
-///    (e.g., inherent impl handlers should skip trait impls)
-/// 2. Queries expecting specific captures (like `trait_name`) that weren't matched
+/// Handles four cases:
+/// 1. `#not-has-child? @impl trait` - inherent impl handlers should skip trait impls
+/// 2. `#not-has-child? @params self_parameter` - associated function handlers should skip methods
+/// 3. `#not-has-ancestor? @function impl_item` - free functions should skip functions in impl blocks
+/// 4. Queries expecting specific captures (like `trait_name`) that weren't matched
 fn should_skip_match(
     config: &HandlerConfig,
     main_node: Node,
@@ -593,6 +594,39 @@ fn should_skip_match(
                 return true;
             }
         }
+    }
+
+    // For Rust: handle #not-has-child? @params self_parameter predicates.
+    // Queries expect functions WITHOUT self parameter. Tree-sitter doesn't
+    // evaluate this predicate automatically, so we check manually.
+    // Note: We check for the specific predicate pattern to avoid false matches on queries
+    // that merely contain "self_parameter" as a capture (like METHOD_IN_INHERENT_IMPL).
+    if config.query.contains("#not-has-child?")
+        && config.query.contains("self_parameter")
+        && config.query.contains("@params")
+    {
+        let func_node = if main_node.kind() == "function_item" {
+            Some(main_node)
+        } else {
+            find_ancestor_of_kind(main_node, "function_item")
+        };
+
+        if let Some(func) = func_node {
+            if let Some(params_node) = func.child_by_field_name("parameters") {
+                if has_self_parameter(params_node) {
+                    return true; // Skip: function has self_parameter but query expects none
+                }
+            }
+        }
+    }
+
+    // For Rust: handle #not-has-ancestor? predicates.
+    // Free function handlers should skip functions inside impl blocks.
+    if config.query.contains("#not-has-ancestor?")
+        && config.query.contains("impl_item")
+        && find_ancestor_of_kind(main_node, "impl_item").is_some()
+    {
+        return true; // Skip: function is inside impl_item but query expects it not to be
     }
 
     // For handlers that expect a trait_name but didn't capture one
@@ -614,6 +648,17 @@ fn find_ancestor_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
         current = parent;
     }
     None
+}
+
+/// Check if a parameters node contains a self_parameter child
+fn has_self_parameter(params_node: Node) -> bool {
+    let mut cursor = params_node.walk();
+    for child in params_node.children(&mut cursor) {
+        if child.kind() == "self_parameter" {
+            return true;
+        }
+    }
+    false
 }
 
 /// Compute the positional index of a node among its same-kind siblings

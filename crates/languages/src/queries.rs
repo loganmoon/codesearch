@@ -29,6 +29,7 @@ pub mod rust {
         capture: "func",
         query: r#"
             ((function_item
+              (visibility_modifier)? @visibility
               name: (identifier) @name
             ) @func
             (#not-has-ancestor? @func impl_item))
@@ -73,6 +74,7 @@ pub mod rust {
               type: (type_identifier) @impl_type
               body: (declaration_list
                 (function_item
+                  (visibility_modifier)? @visibility
                   name: (identifier) @name
                   parameters: (parameters
                     . (self_parameter) @self_param
@@ -110,6 +112,7 @@ pub mod rust {
         capture: "struct",
         query: r#"
             (struct_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @struct
         "#,
@@ -122,6 +125,7 @@ pub mod rust {
         capture: "enum",
         query: r#"
             (enum_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @enum
         "#,
@@ -134,6 +138,7 @@ pub mod rust {
         capture: "trait",
         query: r#"
             (trait_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @trait
         "#,
@@ -149,6 +154,7 @@ pub mod rust {
               type: [(type_identifier) (generic_type type: (type_identifier))] @impl_type
               body: (declaration_list
                 (function_item
+                  (visibility_modifier)? @visibility
                   name: (identifier) @name
                   parameters: (parameters) @params
                 ) @function
@@ -166,6 +172,7 @@ pub mod rust {
         capture: "module",
         query: r#"
             (mod_item
+              (visibility_modifier)? @visibility
               name: (identifier) @name
             ) @module
         "#,
@@ -181,6 +188,7 @@ pub mod rust {
               name: (type_identifier) @struct_name
               body: (field_declaration_list
                 (field_declaration
+                  (visibility_modifier)? @visibility
                   name: (field_identifier) @name
                   type: (_) @field_type
                 ) @field
@@ -213,6 +221,7 @@ pub mod rust {
         capture: "const",
         query: r#"
             (const_item
+              (visibility_modifier)? @visibility
               name: (identifier) @name
               type: (_) @const_type
             ) @const
@@ -226,6 +235,7 @@ pub mod rust {
         capture: "static",
         query: r#"
             (static_item
+              (visibility_modifier)? @visibility
               name: (identifier) @name
               type: (_) @static_type
             ) @static
@@ -239,6 +249,7 @@ pub mod rust {
         capture: "type_alias",
         query: r#"
             (type_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
               type: (_) @aliased_type
             ) @type_alias
@@ -252,6 +263,7 @@ pub mod rust {
         capture: "union",
         query: r#"
             (union_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @union
         "#,

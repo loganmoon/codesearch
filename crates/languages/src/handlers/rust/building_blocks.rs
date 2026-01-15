@@ -6,7 +6,9 @@
 //! - Visibility extraction
 //! - Entity construction utilities
 
-use crate::common::entity_building::{build_entity, CommonEntityComponents, EntityDetails};
+use crate::common::entity_building::{
+    build_entity, compose_qualified_name, CommonEntityComponents, EntityDetails,
+};
 use crate::common::module_utils::derive_path_entity_identifier;
 use crate::extract_context::ExtractContext;
 use crate::qualified_name::{build_qualified_name_from_ast, derive_module_path_for_language};
@@ -48,16 +50,23 @@ pub(crate) fn build_components_from_context(
         module_prefix.as_deref(),
         &ast_scope,
         name,
+        RUST_SEPARATOR,
     );
 
     // Calculate parent_scope (everything except the final name)
-    let parent_scope =
-        compose_qualified_name(ctx.package_name(), module_prefix.as_deref(), &ast_scope, "");
+    let parent_scope = compose_qualified_name(
+        ctx.package_name(),
+        module_prefix.as_deref(),
+        &ast_scope,
+        "",
+        RUST_SEPARATOR,
+    );
 
     // Generate path_entity_identifier for import resolution
     let path_module =
         derive_path_entity_identifier(ctx.file_path(), ctx.repo_root(), RUST_SEPARATOR);
-    let path_entity_identifier = compose_qualified_name(None, Some(&path_module), &ast_scope, name);
+    let path_entity_identifier =
+        compose_qualified_name(None, Some(&path_module), &ast_scope, name, RUST_SEPARATOR);
 
     // Generate entity ID
     let file_path_str = ctx
@@ -104,7 +113,8 @@ pub(crate) fn build_components_with_custom_qn(
     let ast_scope = scope_result.parent_scope;
     let path_module =
         derive_path_entity_identifier(ctx.file_path(), ctx.repo_root(), RUST_SEPARATOR);
-    let path_entity_identifier = compose_qualified_name(None, Some(&path_module), &ast_scope, name);
+    let path_entity_identifier =
+        compose_qualified_name(None, Some(&path_module), &ast_scope, name, RUST_SEPARATOR);
 
     let file_path_str = ctx
         .file_path()
@@ -206,6 +216,7 @@ pub(crate) fn build_function_qn(ctx: &ExtractContext, name: &str) -> String {
         module_prefix.as_deref(),
         &scope_result.parent_scope,
         name,
+        RUST_SEPARATOR,
     )
 }
 
@@ -227,6 +238,7 @@ pub(crate) fn build_inherent_method_qn(
         module_prefix.as_deref(),
         impl_type,
         name,
+        RUST_SEPARATOR,
     )
 }
 
@@ -240,7 +252,13 @@ pub(crate) fn build_trait_impl_method_qn(
     let module_prefix = ctx
         .source_root()
         .and_then(|root| derive_module_path_for_language(ctx.file_path(), root, "rust"));
-    let base = compose_qualified_name(ctx.package_name(), module_prefix.as_deref(), "", "");
+    let base = compose_qualified_name(
+        ctx.package_name(),
+        module_prefix.as_deref(),
+        "",
+        "",
+        RUST_SEPARATOR,
+    );
     let qualified_trait = resolve_type_name(ctx, trait_name);
     let qualified_type = resolve_type_name(ctx, impl_type);
     if base.is_empty() {
@@ -255,7 +273,13 @@ pub(crate) fn build_inherent_impl_qn(ctx: &ExtractContext, impl_type: &str) -> S
     let module_prefix = ctx
         .source_root()
         .and_then(|root| derive_module_path_for_language(ctx.file_path(), root, "rust"));
-    let base = compose_qualified_name(ctx.package_name(), module_prefix.as_deref(), "", "");
+    let base = compose_qualified_name(
+        ctx.package_name(),
+        module_prefix.as_deref(),
+        "",
+        "",
+        RUST_SEPARATOR,
+    );
     if base.is_empty() {
         format!("impl {impl_type}")
     } else {
@@ -272,7 +296,13 @@ pub(crate) fn build_trait_impl_qn(
     let module_prefix = ctx
         .source_root()
         .and_then(|root| derive_module_path_for_language(ctx.file_path(), root, "rust"));
-    let base = compose_qualified_name(ctx.package_name(), module_prefix.as_deref(), "", "");
+    let base = compose_qualified_name(
+        ctx.package_name(),
+        module_prefix.as_deref(),
+        "",
+        "",
+        RUST_SEPARATOR,
+    );
     let qualified_trait = resolve_type_name(ctx, trait_name);
     let qualified_type = resolve_type_name(ctx, impl_type);
     if base.is_empty() {
@@ -318,31 +348,26 @@ pub(crate) fn extract_trait_metadata(ctx: &ExtractContext) -> EntityMetadata {
 
 // === Visibility Extraction ===
 
-/// Extract visibility from a Rust AST node
+/// Extract visibility from the @visibility capture
+///
+/// Uses the tree-sitter query capture for visibility_modifier.
+/// If no capture exists, defaults to Private.
 pub(crate) fn extract_visibility(ctx: &ExtractContext) -> Option<Visibility> {
-    extract_visibility_from_node(ctx.node(), ctx.source())
+    ctx.capture_text_opt("visibility")
+        .map(visibility_from_text)
+        .or(Some(Visibility::Private))
 }
 
-/// Extract visibility from a node and source
-pub(crate) fn extract_visibility_from_node(node: Node, source: &str) -> Option<Visibility> {
-    // Look for visibility_modifier child
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if child.kind() == "visibility_modifier" {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                return match text.trim() {
-                    "pub" => Some(Visibility::Public),
-                    // pub(crate) and pub(super) map to Internal (restricted visibility)
-                    s if s.starts_with("pub(crate)") => Some(Visibility::Internal),
-                    s if s.starts_with("pub(super)") => Some(Visibility::Internal),
-                    s if s.starts_with("pub(in") => Some(Visibility::Internal),
-                    _ => Some(Visibility::Private),
-                };
-            }
-        }
+/// Convert visibility modifier text to Visibility enum
+fn visibility_from_text(text: &str) -> Visibility {
+    match text.trim() {
+        "pub" => Visibility::Public,
+        s if s.starts_with("pub(crate)") => Visibility::Internal,
+        s if s.starts_with("pub(super)") => Visibility::Internal,
+        s if s.starts_with("pub(in") => Visibility::Internal,
+        s if s.starts_with("pub(self)") => Visibility::Private,
+        _ => Visibility::Private,
     }
-    // Default to private if no visibility modifier
-    Some(Visibility::Private)
 }
 
 /// Extract visibility for macro definitions
@@ -432,98 +457,33 @@ pub(crate) fn extract_doc_from_node(node: Node, source: &str) -> Option<String> 
     }
 }
 
-// === Helper Functions ===
-
-/// Compose a fully qualified name from components
-fn compose_qualified_name(
-    package: Option<&str>,
-    module: Option<&str>,
-    scope: &str,
-    name: &str,
-) -> String {
-    let mut parts: Vec<&str> = Vec::with_capacity(4);
-
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
-            parts.push(pkg);
-        }
-    }
-
-    if let Some(mod_path) = module {
-        if !mod_path.is_empty() {
-            parts.push(mod_path);
-        }
-    }
-
-    if !scope.is_empty() {
-        parts.push(scope);
-    }
-
-    if !name.is_empty() {
-        parts.push(name);
-    }
-
-    parts.join(RUST_SEPARATOR)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_compose_qualified_name() {
-        assert_eq!(
-            compose_qualified_name(Some("my_crate"), Some("module"), "MyStruct", "method"),
-            "my_crate::module::MyStruct::method"
-        );
+    fn test_visibility_from_text_public() {
+        assert_eq!(visibility_from_text("pub"), Visibility::Public);
+    }
 
-        assert_eq!(
-            compose_qualified_name(Some("my_crate"), None, "", "function"),
-            "my_crate::function"
-        );
+    #[test]
+    fn test_visibility_from_text_private() {
+        // No visibility modifier text results in Private
+        assert_eq!(visibility_from_text(""), Visibility::Private);
+    }
 
+    #[test]
+    fn test_visibility_from_text_internal() {
+        assert_eq!(visibility_from_text("pub(crate)"), Visibility::Internal);
+        assert_eq!(visibility_from_text("pub(super)"), Visibility::Internal);
         assert_eq!(
-            compose_qualified_name(None, None, "MyStruct", "field"),
-            "MyStruct::field"
+            visibility_from_text("pub(in crate::module)"),
+            Visibility::Internal
         );
     }
 
     #[test]
-    fn test_extract_visibility_public() {
-        let source = "pub fn test() {}";
-        let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&language).unwrap();
-        let tree = parser.parse(source, None).unwrap();
-
-        let func_node = tree.root_node().child(0).unwrap();
-        let visibility = extract_visibility_from_node(func_node, source);
-        assert_eq!(visibility, Some(Visibility::Public));
-    }
-
-    #[test]
-    fn test_extract_visibility_private() {
-        let source = "fn test() {}";
-        let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&language).unwrap();
-        let tree = parser.parse(source, None).unwrap();
-
-        let func_node = tree.root_node().child(0).unwrap();
-        let visibility = extract_visibility_from_node(func_node, source);
-        assert_eq!(visibility, Some(Visibility::Private));
-    }
-
-    #[test]
-    fn test_extract_visibility_crate() {
-        let source = "pub(crate) fn test() {}";
-        let language: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
-        let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&language).unwrap();
-        let tree = parser.parse(source, None).unwrap();
-
-        let func_node = tree.root_node().child(0).unwrap();
-        let visibility = extract_visibility_from_node(func_node, source);
-        assert_eq!(visibility, Some(Visibility::Internal));
+    fn test_visibility_from_text_pub_self() {
+        assert_eq!(visibility_from_text("pub(self)"), Visibility::Private);
     }
 }

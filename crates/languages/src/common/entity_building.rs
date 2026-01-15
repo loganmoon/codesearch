@@ -304,7 +304,7 @@ pub fn extract_common_components_with_scope_skip(
 /// * `scope` - AST-derived scope from parent traversal (e.g., "MyStruct")
 /// * `name` - The entity name (e.g., "my_method")
 /// * `separator` - Language-specific separator (e.g., "::" for Rust, "." for Python)
-fn compose_qualified_name(
+pub(crate) fn compose_qualified_name(
     package: Option<&str>,
     module: Option<&str>,
     scope: &str,

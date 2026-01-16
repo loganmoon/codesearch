@@ -406,7 +406,10 @@ pub(crate) fn extract_documentation(ctx: &ExtractContext) -> Option<String> {
     extract_doc_from_node(ctx.node(), ctx.source())
 }
 
-/// Extract documentation from a node
+/// Extract documentation from a node by walking preceding siblings
+///
+/// Uses tree-sitter's `doc` field on comment nodes to identify doc comments,
+/// avoiding brittle string prefix matching.
 pub(crate) fn extract_doc_from_node(node: Node, source: &str) -> Option<String> {
     let mut docs = Vec::new();
     let mut current = node;
@@ -417,28 +420,11 @@ pub(crate) fn extract_doc_from_node(node: Node, source: &str) -> Option<String> 
         let kind = prev.kind();
 
         match kind {
-            "line_comment" => {
-                if let Ok(text) = prev.utf8_text(source.as_bytes()) {
-                    // Check for doc comments (/// or //!)
-                    if text.starts_with("///") || text.starts_with("//!") {
-                        let content = text
-                            .trim_start_matches("///")
-                            .trim_start_matches("//!")
-                            .trim();
-                        docs.push(content.to_string());
-                    }
-                }
-            }
-            "block_comment" => {
-                if let Ok(text) = prev.utf8_text(source.as_bytes()) {
-                    // Check for doc comments (/** ... */ or /*! ... */)
-                    if text.starts_with("/**") || text.starts_with("/*!") {
-                        let content = text
-                            .trim_start_matches("/**")
-                            .trim_start_matches("/*!")
-                            .trim_end_matches("*/")
-                            .trim();
-                        docs.push(content.to_string());
+            "line_comment" | "block_comment" => {
+                // Use tree-sitter's doc field to identify doc comments
+                if let Some(doc_node) = prev.child_by_field_name("doc") {
+                    if let Ok(content) = doc_node.utf8_text(source.as_bytes()) {
+                        docs.push(content.trim().to_string());
                     }
                 }
             }

@@ -547,8 +547,11 @@ const RUST_TYPE_QUERY: &str = r#"
 ]
 "#;
 
-/// Rust primitive types to filter out from type references
-const RUST_PRIMITIVES: &[&str] = &[
+/// Common Rust types to filter out from type references.
+///
+/// Includes both language primitives (i32, bool, etc.) and standard library types
+/// (String, Option, Result, Vec, Box) that are ubiquitous enough to be noise.
+const RUST_FILTERED_TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
     "f64", "bool", "char", "str", "String", "Self", "()", "Option", "Result", "Vec", "Box",
 ];
@@ -758,7 +761,7 @@ pub(crate) fn extract_type_relationships(
             }
 
             // Filter primitive types
-            if RUST_PRIMITIVES.contains(&type_text) {
+            if RUST_FILTERED_TYPES.contains(&type_text) {
                 continue;
             }
 
@@ -854,6 +857,31 @@ pub(crate) fn extract_trait_bounds_relationships(
     }
 }
 
+/// Process a type bound node (type_identifier or scoped_type_identifier) and add to refs.
+fn process_bound_type(
+    node: Node,
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+    refs: &mut Vec<SourceReference>,
+) {
+    let type_text = node_text(node, ctx.source());
+    if type_text.is_empty() || RUST_FILTERED_TYPES.contains(&type_text) {
+        return;
+    }
+    let simple_name = extract_simple_name(type_text);
+    let resolution_ctx = build_resolution_context(ctx, parent_scope);
+    let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+    if let Some(source_ref) = build_source_reference(
+        resolved.target,
+        resolved.simple_name,
+        resolved.is_external,
+        node,
+        ReferenceType::Extends,
+    ) {
+        refs.push(source_ref);
+    }
+}
+
 fn extract_bounds_recursive(
     node: Node,
     ctx: &ExtractContext,
@@ -863,39 +891,8 @@ fn extract_bounds_recursive(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "type_identifier" => {
-                let type_text = node_text(child, ctx.source());
-                if !type_text.is_empty() && !RUST_PRIMITIVES.contains(&type_text) {
-                    let simple_name = extract_simple_name(type_text);
-                    let resolution_ctx = build_resolution_context(ctx, parent_scope);
-                    let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
-                    if let Some(source_ref) = build_source_reference(
-                        resolved.target,
-                        resolved.simple_name,
-                        resolved.is_external,
-                        child,
-                        ReferenceType::Extends,
-                    ) {
-                        refs.push(source_ref);
-                    }
-                }
-            }
-            "scoped_type_identifier" => {
-                let type_text = node_text(child, ctx.source());
-                if !type_text.is_empty() {
-                    let simple_name = extract_simple_name(type_text);
-                    let resolution_ctx = build_resolution_context(ctx, parent_scope);
-                    let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
-                    if let Some(source_ref) = build_source_reference(
-                        resolved.target,
-                        resolved.simple_name,
-                        resolved.is_external,
-                        child,
-                        ReferenceType::Extends,
-                    ) {
-                        refs.push(source_ref);
-                    }
-                }
+            "type_identifier" | "scoped_type_identifier" => {
+                process_bound_type(child, ctx, parent_scope, refs);
             }
             _ => {
                 // Recurse into children

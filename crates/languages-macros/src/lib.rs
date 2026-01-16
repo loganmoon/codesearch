@@ -18,6 +18,8 @@
 //! fn free_function() {}
 //! ```
 //!
+//! Note: `#[entity_handler]` must be the outermost attribute.
+//!
 //! The macro detects empty function bodies and generates the full implementation.
 
 use proc_macro::TokenStream;
@@ -402,11 +404,14 @@ fn generate_declarative_handler(
     let handler_name = format!("{language}::{fn_name}");
     let wrapper_name = Ident::new(&format!("__{fn_name}_wrapper"), fn_name.span());
 
-    // The name capture is required for declarative handlers
-    let name_capture = decl_attrs
-        .name_capture
-        .as_ref()
-        .expect("name_capture required");
+    // The name capture is required for declarative handlers.
+    // This is guaranteed by is_declarative_handler() which checks name_capture.is_some().
+    let name_capture = decl_attrs.name_capture.as_ref().unwrap_or_else(|| {
+        unreachable!(
+            "declarative handler requires #[name(capture = \"...\")] attribute; \
+             this is enforced by is_declarative_handler()"
+        )
+    });
 
     // Generate metadata extraction
     let metadata_code = match &decl_attrs.metadata {
@@ -426,43 +431,53 @@ fn generate_declarative_handler(
         _ => quote! { None },
     };
 
-    // Generate relationships extraction
-    let relationships_code = match &decl_attrs.relationships {
-        Some(ExtractorRef::Function(f)) => quote! { #f(__ctx, None) },
-        _ => quote! { EntityRelationshipData::default() },
-    };
-
     // Generate entity building based on qualified_name strategy
+    // For Custom qualified_name, we compute parent_scope first and pass it to relationships
     let entity_building = match &decl_attrs.qualified_name {
         Some(QualifiedNameStrategy::Custom(custom_fn)) => {
+            // For custom qualified names, compute parent_scope and use it for relationships
+            let relationships_code = match &decl_attrs.relationships {
+                Some(ExtractorRef::Function(f)) => quote! { #f(__ctx, Some(__parent_scope)) },
+                _ => quote! { EntityRelationshipData::default() },
+            };
             quote! {
-                let __qn = #custom_fn(__ctx, __name);
-                let __parent_scope = crate::handlers::rust::building_blocks::derive_parent_scope(&__qn);
-                crate::handlers::rust::building_blocks::build_entity_with_custom_qn(
-                    __ctx,
-                    __name,
-                    __qn,
-                    __parent_scope,
-                    EntityType::#entity_type,
-                    __metadata,
-                    __relationships,
-                    __visibility,
-                    __documentation,
-                )?
+                {
+                    let __qn = #custom_fn(__ctx, __name);
+                    let __parent_scope = crate::handlers::rust::building_blocks::derive_parent_scope(&__qn);
+                    let __relationships = #relationships_code;
+                    crate::handlers::rust::building_blocks::build_entity_with_custom_qn(
+                        __ctx,
+                        __name,
+                        __qn,
+                        __parent_scope,
+                        EntityType::#entity_type,
+                        __metadata,
+                        __relationships,
+                        __visibility,
+                        __documentation,
+                    )?
+                }
             }
         }
         _ => {
-            // Standard: use build_standard_entity
+            // Standard: use build_standard_entity, no parent_scope available
+            let relationships_code = match &decl_attrs.relationships {
+                Some(ExtractorRef::Function(f)) => quote! { #f(__ctx, None) },
+                _ => quote! { EntityRelationshipData::default() },
+            };
             quote! {
-                crate::handlers::rust::building_blocks::build_standard_entity(
-                    __ctx,
-                    __name,
-                    EntityType::#entity_type,
-                    __metadata,
-                    __relationships,
-                    __visibility,
-                    __documentation,
-                )?
+                {
+                    let __relationships = #relationships_code;
+                    crate::handlers::rust::building_blocks::build_standard_entity(
+                        __ctx,
+                        __name,
+                        EntityType::#entity_type,
+                        __metadata,
+                        __relationships,
+                        __visibility,
+                        __documentation,
+                    )?
+                }
             }
         }
     };
@@ -476,7 +491,6 @@ fn generate_declarative_handler(
             let __metadata = #metadata_code;
             let __visibility = #visibility_code;
             let __documentation = #documentation_code;
-            let __relationships = #relationships_code;
 
             let __entity = #entity_building;
 

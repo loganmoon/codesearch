@@ -320,12 +320,65 @@ fn resolve_type_name(ctx: &ExtractContext, type_name: &str) -> String {
         .unwrap_or_else(|| type_name.to_string())
 }
 
+// === Scope Derivation ===
+
+/// Derive parent scope from a qualified name by stripping the last `::` component
+///
+/// Generic utility for methods, functions, etc. that need to find their containing scope.
+pub(crate) fn derive_parent_scope(qualified_name: &str) -> Option<String> {
+    if let Some(pos) = qualified_name.rfind("::") {
+        let parent = &qualified_name[..pos];
+        if parent.is_empty() {
+            None
+        } else {
+            Some(parent.to_string())
+        }
+    } else {
+        None
+    }
+}
+
+/// Derive module scope from an impl block qualified name
+///
+/// For impl blocks, we want the containing module, not the impl block itself.
+/// The qualified name format is: "module::path::impl Type" or "module::path::<Type as Trait>"
+pub(crate) fn derive_impl_module_scope(qualified_name: &str) -> Option<String> {
+    // Find where the impl signature starts
+    if let Some(impl_pos) = qualified_name.rfind("::impl ") {
+        let parent = &qualified_name[..impl_pos];
+        if parent.is_empty() {
+            None
+        } else {
+            Some(parent.to_string())
+        }
+    } else if let Some(angle_pos) = qualified_name.rfind("::<") {
+        let parent = &qualified_name[..angle_pos];
+        if parent.is_empty() {
+            None
+        } else {
+            Some(parent.to_string())
+        }
+    } else {
+        None
+    }
+}
+
 // === Metadata Extraction ===
 
 /// Extract function/method metadata from a function_item node
 pub(crate) fn extract_function_metadata(ctx: &ExtractContext) -> EntityMetadata {
+    // Check for async keyword by iterating children
+    // (async is not a named field in tree-sitter-rust, it's a direct child node)
+    let mut is_async = false;
+    let mut cursor = ctx.node().walk();
+    for child in ctx.node().children(&mut cursor) {
+        if child.kind() == "async" {
+            is_async = true;
+            break;
+        }
+    }
     EntityMetadata {
-        is_async: ctx.has_child_field("async"),
+        is_async,
         ..Default::default()
     }
 }

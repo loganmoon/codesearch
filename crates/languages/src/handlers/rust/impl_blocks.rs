@@ -6,7 +6,8 @@ use crate::entity_handler;
 use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
-    build_entity_with_custom_qn, build_inherent_impl_qn, build_trait_impl_qn, extract_documentation,
+    build_entity_with_custom_qn, build_inherent_impl_qn, build_trait_impl_qn,
+    derive_impl_module_scope, extract_documentation,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
@@ -25,7 +26,7 @@ fn inherent_impl(#[capture] impl_type: &str, ctx: &ExtractContext) -> Result<Opt
     let qualified_name = build_inherent_impl_qn(ctx, impl_type);
 
     // For impl blocks, parent_scope is the module
-    let parent_scope = derive_module_scope(&qualified_name);
+    let parent_scope = derive_impl_module_scope(&qualified_name);
 
     // Use "impl Type" as the name
     let name = format!("impl {impl_type}");
@@ -62,7 +63,7 @@ fn trait_impl(
     let qualified_name = build_trait_impl_qn(ctx, impl_type, trait_name);
 
     // For impl blocks, parent_scope is the module
-    let parent_scope = derive_module_scope(&qualified_name);
+    let parent_scope = derive_impl_module_scope(&qualified_name);
 
     // Use "<Type as Trait>" as the name
     let name = format!("<{impl_type} as {trait_name}>");
@@ -82,50 +83,25 @@ fn trait_impl(
     Ok(Some(entity))
 }
 
-/// Derive module scope from a qualified name
-///
-/// For impl blocks, we want the containing module, not the impl block itself.
-/// The qualified name format is: "module::path::impl Type" or "module::path::<Type as Trait>"
-fn derive_module_scope(qualified_name: &str) -> Option<String> {
-    // Find where the impl signature starts
-    if let Some(impl_pos) = qualified_name.rfind("::impl ") {
-        let parent = &qualified_name[..impl_pos];
-        if parent.is_empty() {
-            None
-        } else {
-            Some(parent.to_string())
-        }
-    } else if let Some(angle_pos) = qualified_name.rfind("::<") {
-        let parent = &qualified_name[..angle_pos];
-        if parent.is_empty() {
-            None
-        } else {
-            Some(parent.to_string())
-        }
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_derive_module_scope_inherent() {
+    fn test_derive_impl_module_scope_inherent() {
         assert_eq!(
-            derive_module_scope("my_crate::module::impl MyStruct"),
+            derive_impl_module_scope("my_crate::module::impl MyStruct"),
             Some("my_crate::module".to_string())
         );
-        assert_eq!(derive_module_scope("impl MyStruct"), None);
+        assert_eq!(derive_impl_module_scope("impl MyStruct"), None);
     }
 
     #[test]
-    fn test_derive_module_scope_trait_impl() {
+    fn test_derive_impl_module_scope_trait_impl() {
         assert_eq!(
-            derive_module_scope("my_crate::module::<MyStruct as MyTrait>"),
+            derive_impl_module_scope("my_crate::module::<MyStruct as MyTrait>"),
             Some("my_crate::module".to_string())
         );
-        assert_eq!(derive_module_scope("<MyStruct as MyTrait>"), None);
+        assert_eq!(derive_impl_module_scope("<MyStruct as MyTrait>"), None);
     }
 }

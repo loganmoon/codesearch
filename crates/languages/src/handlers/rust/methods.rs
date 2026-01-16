@@ -7,7 +7,7 @@ use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
     build_entity_with_custom_qn, build_inherent_method_qn, build_trait_impl_method_qn,
-    extract_documentation, extract_function_metadata, extract_visibility,
+    derive_parent_scope, extract_documentation, extract_function_metadata, extract_visibility,
 };
 use codesearch_core::entities::{EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
@@ -92,7 +92,7 @@ fn method_in_trait_def(
     let qualified_name = if base.is_empty() {
         format!("{trait_name}::{name}")
     } else {
-        format!("{base}{trait_name}::{name}")
+        format!("{base}::{trait_name}::{name}")
     };
     let parent_scope = derive_parent_scope(&qualified_name);
 
@@ -109,19 +109,4 @@ fn method_in_trait_def(
     )?;
 
     Ok(Some(entity))
-}
-
-/// Derive parent scope from a qualified name
-fn derive_parent_scope(qualified_name: &str) -> Option<String> {
-    // Find the last :: separator
-    if let Some(pos) = qualified_name.rfind("::") {
-        let parent = &qualified_name[..pos];
-        if parent.is_empty() {
-            None
-        } else {
-            Some(parent.to_string())
-        }
-    } else {
-        None
-    }
 }

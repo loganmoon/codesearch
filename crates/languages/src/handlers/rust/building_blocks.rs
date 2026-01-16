@@ -379,16 +379,17 @@ pub(crate) fn extract_macro_visibility(ctx: &ExtractContext) -> Option<Visibilit
 }
 
 /// Extract visibility from a macro definition node
+///
+/// Uses tree-sitter node structure to find the attribute identifier,
+/// avoiding brittle string matching.
 pub(crate) fn extract_macro_visibility_from_node(node: Node, source: &str) -> Option<Visibility> {
     // Check preceding siblings for macro_export attribute
     let mut current = node;
     while let Some(prev) = current.prev_sibling() {
         current = prev;
         if prev.kind() == "attribute_item" {
-            if let Ok(text) = prev.utf8_text(source.as_bytes()) {
-                if text.contains("macro_export") {
-                    return Some(Visibility::Public);
-                }
+            if is_macro_export_attribute(prev, source) {
+                return Some(Visibility::Public);
             }
         } else if prev.kind() != "line_comment" && prev.kind() != "block_comment" {
             // Stop if we hit a non-attribute, non-comment node
@@ -397,6 +398,26 @@ pub(crate) fn extract_macro_visibility_from_node(node: Node, source: &str) -> Op
     }
     // Default to private for macros without #[macro_export]
     Some(Visibility::Private)
+}
+
+/// Check if an attribute_item is `#[macro_export]`
+fn is_macro_export_attribute(attr_item: Node, source: &str) -> bool {
+    // Find the attribute child
+    let mut cursor = attr_item.walk();
+    for child in attr_item.named_children(&mut cursor) {
+        if child.kind() == "attribute" {
+            // Find the identifier child of the attribute
+            let mut attr_cursor = child.walk();
+            for attr_child in child.named_children(&mut attr_cursor) {
+                if attr_child.kind() == "identifier" {
+                    if let Ok(text) = attr_child.utf8_text(source.as_bytes()) {
+                        return text == "macro_export";
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 // === Documentation Extraction ===

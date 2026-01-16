@@ -1,39 +1,30 @@
 //! Function handlers for Rust
 //!
 //! Handles extraction of free functions, associated functions, and constants/statics.
+//!
+//! Most handlers use declarative form with `#[entity_handler]` attributes.
 
 use crate::entity_handler;
 use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
-    build_entity_with_custom_qn, build_inherent_method_qn, build_standard_entity,
-    extract_documentation, extract_function_metadata, extract_function_relationships,
-    extract_macro_visibility, extract_visibility,
+    build_entity_with_custom_qn, build_inherent_method_qn, extract_documentation,
+    extract_function_metadata, extract_function_relationships, extract_macro_visibility,
+    extract_visibility,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 
-/// Handler for free functions (not inside impl blocks)
+/// Handler for free functions (not inside impl blocks) - declarative form
 #[entity_handler(entity_type = Function, capture = "func", language = "rust")]
-fn free_function(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = extract_function_metadata(ctx);
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
-    let relationships = extract_function_relationships(ctx, None);
-
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Function,
-        metadata,
-        relationships,
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(extract_function_metadata)]
+#[relationships(extract_function_relationships)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn free_function() {}
 
 /// Handler for associated functions in inherent impl (no self parameter)
 #[entity_handler(entity_type = Function, capture = "function", language = "rust")]
@@ -75,83 +66,43 @@ fn associated_function_in_inherent_impl(
     Ok(Some(entity))
 }
 
-/// Handler for constants
+/// Handler for constants (declarative form)
 #[entity_handler(entity_type = Constant, capture = "const", language = "rust")]
-fn constant(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn constant() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Constant,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for statics
+/// Handler for statics (declarative form)
 #[entity_handler(entity_type = Static, capture = "static", language = "rust")]
-fn static_item(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn static_item() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Static,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for module declarations
+/// Handler for module declarations (declarative form)
 #[entity_handler(entity_type = Module, capture = "module", language = "rust")]
-fn module_declaration(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn module_declaration() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Module,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for macro definitions
+/// Handler for macro definitions (declarative form)
+/// Macros use #[macro_export] attribute instead of visibility modifiers
 #[entity_handler(entity_type = Macro, capture = "macro", language = "rust")]
-fn macro_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    // Macros use #[macro_export] attribute instead of visibility modifiers
-    let visibility = extract_macro_visibility(ctx);
-    let documentation = extract_documentation(ctx);
-
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Macro,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_macro_visibility)]
+#[documentation(extract_documentation)]
+fn macro_definition() {}

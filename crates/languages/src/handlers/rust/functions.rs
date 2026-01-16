@@ -7,7 +7,8 @@ use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
     build_entity_with_custom_qn, build_inherent_method_qn, build_standard_entity,
-    extract_documentation, extract_function_metadata, extract_macro_visibility, extract_visibility,
+    extract_documentation, extract_function_metadata, extract_function_relationships,
+    extract_macro_visibility, extract_visibility,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
@@ -19,13 +20,14 @@ fn free_function(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<C
     let metadata = extract_function_metadata(ctx);
     let visibility = extract_visibility(ctx);
     let documentation = extract_documentation(ctx);
+    let relationships = extract_function_relationships(ctx, None);
 
     let entity = build_standard_entity(
         ctx,
         name,
         EntityType::Function,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;
@@ -56,6 +58,8 @@ fn associated_function_in_inherent_impl(
         }
     };
 
+    let relationships = extract_function_relationships(ctx, parent_scope.as_deref());
+
     let entity = build_entity_with_custom_qn(
         ctx,
         name,
@@ -63,7 +67,7 @@ fn associated_function_in_inherent_impl(
         parent_scope,
         EntityType::Function,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;

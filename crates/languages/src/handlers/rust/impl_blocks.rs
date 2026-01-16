@@ -7,7 +7,7 @@ use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
     build_entity_with_custom_qn, build_inherent_impl_qn, build_trait_impl_qn,
-    derive_impl_module_scope, extract_documentation,
+    derive_impl_module_scope, extract_documentation, extract_impl_relationships,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
@@ -65,6 +65,9 @@ fn trait_impl(
     // For impl blocks, parent_scope is the module
     let parent_scope = derive_impl_module_scope(&qualified_name);
 
+    // Extract IMPLEMENTS relationship (reference to the implemented trait)
+    let relationships = extract_impl_relationships(ctx, parent_scope.as_deref());
+
     // Use "<Type as Trait>" as the name
     let name = format!("<{impl_type} as {trait_name}>");
 
@@ -75,7 +78,7 @@ fn trait_impl(
         parent_scope,
         EntityType::Impl,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;

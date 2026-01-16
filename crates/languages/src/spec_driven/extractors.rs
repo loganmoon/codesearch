@@ -4,6 +4,7 @@
 //! and generated handler configurations.
 
 use super::engine::{extract_with_config, SpecDrivenContext};
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::import_map::parse_file_imports;
 use crate::common::js_ts_shared::{
     module_path as js_module_path, SCOPE_PATTERNS, TS_SCOPE_PATTERNS,
@@ -228,6 +229,8 @@ impl Extractor for SpecDrivenRustExtractor {
         // Build import map for reference resolution
         let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
 
+        let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
+
         let ctx = HandlerContext {
             source,
             file_path,
@@ -238,6 +241,8 @@ impl Extractor for SpecDrivenRustExtractor {
             language: Language::Rust,
             language_str: "rust",
             import_map: &import_map,
+            path_config: &CRATE_BASED_PATH_CONFIG,
+            edge_case_handlers: Some(&edge_case_registry),
         };
 
         extract_with_handlers(&ctx, tree.root_node())

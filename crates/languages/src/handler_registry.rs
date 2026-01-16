@@ -142,6 +142,7 @@ mod tests {
             .language_str("rust")
             .repository_id("test-repo")
             .repo_root(Path::new("/test"))
+            .path_config(&crate::common::path_config::RUST_PATH_CONFIG)
             .build()
             .unwrap();
 
@@ -231,6 +232,7 @@ mod tests {
                 .language_str("rust")
                 .repository_id("test-repo")
                 .repo_root(Path::new("/test"))
+                .path_config(&crate::common::path_config::RUST_PATH_CONFIG)
                 .build()
                 .unwrap();
 

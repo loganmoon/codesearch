@@ -6,7 +6,8 @@ use crate::entity_handler;
 use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
-    build_standard_entity, extract_documentation, extract_struct_metadata, extract_trait_metadata,
+    build_standard_entity, extract_documentation, extract_struct_metadata,
+    extract_trait_bounds_relationships, extract_trait_metadata, extract_type_relationships,
     extract_visibility,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
@@ -19,13 +20,15 @@ fn struct_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Opti
     let metadata = extract_struct_metadata(ctx);
     let visibility = extract_visibility(ctx);
     let documentation = extract_documentation(ctx);
+    // Extract type references from generic bounds (not field types - those belong to field entities)
+    let relationships = extract_type_relationships(ctx, None);
 
     let entity = build_standard_entity(
         ctx,
         name,
         EntityType::Struct,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;
@@ -59,13 +62,15 @@ fn trait_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Optio
     let metadata = extract_trait_metadata(ctx);
     let visibility = extract_visibility(ctx);
     let documentation = extract_documentation(ctx);
+    // Extract supertrait bounds (trait Foo: Bar + Baz)
+    let relationships = extract_trait_bounds_relationships(ctx, None);
 
     let entity = build_standard_entity(
         ctx,
         name,
         EntityType::Trait,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;

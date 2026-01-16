@@ -248,29 +248,17 @@ pub(crate) fn build_inherent_method_qn(
 }
 
 /// Build qualified name for methods in trait impl: <Type as Trait>::method_name
+///
+/// The format is `<fully::qualified::Type as fully::qualified::Trait>::method_name`.
 pub(crate) fn build_trait_impl_method_qn(
     ctx: &ExtractContext,
     name: &str,
     impl_type: &str,
     trait_name: &str,
 ) -> String {
-    let module_prefix = ctx
-        .source_root()
-        .and_then(|root| derive_module_path_for_language(ctx.file_path(), root, "rust"));
-    let base = compose_qualified_name(
-        ctx.package_name(),
-        module_prefix.as_deref(),
-        "",
-        "",
-        RUST_SEPARATOR,
-    );
-    let qualified_trait = resolve_type_name(ctx, trait_name);
-    let qualified_type = resolve_type_name(ctx, impl_type);
-    if base.is_empty() {
-        format!("<{qualified_type} as {qualified_trait}>::{name}")
-    } else {
-        format!("{base}::<{qualified_type} as {qualified_trait}>::{name}")
-    }
+    let qualified_type = fully_qualify_type_name(ctx, impl_type);
+    let qualified_trait = fully_qualify_type_name(ctx, trait_name);
+    format!("<{qualified_type} as {qualified_trait}>::{name}")
 }
 
 /// Build qualified name for inherent impl block: impl Type
@@ -293,36 +281,39 @@ pub(crate) fn build_inherent_impl_qn(ctx: &ExtractContext, impl_type: &str) -> S
 }
 
 /// Build qualified name for trait impl block: <Type as Trait>
+///
+/// The format is `<fully::qualified::Type as fully::qualified::Trait>`.
 pub(crate) fn build_trait_impl_qn(
     ctx: &ExtractContext,
     impl_type: &str,
     trait_name: &str,
 ) -> String {
+    let qualified_type = fully_qualify_type_name(ctx, impl_type);
+    let qualified_trait = fully_qualify_type_name(ctx, trait_name);
+    format!("<{qualified_type} as {qualified_trait}>")
+}
+
+/// Fully qualify a type name using the reference resolution infrastructure.
+///
+/// This handles:
+/// - Import map lookups (for imported types)
+/// - Module-local fallback (prepending package::module for local types)
+/// - Already qualified types (returns as-is)
+fn fully_qualify_type_name(ctx: &ExtractContext, type_name: &str) -> String {
     let module_prefix = ctx
         .source_root()
         .and_then(|root| derive_module_path_for_language(ctx.file_path(), root, "rust"));
-    let base = compose_qualified_name(
-        ctx.package_name(),
-        module_prefix.as_deref(),
-        "",
-        "",
-        RUST_SEPARATOR,
-    );
-    let qualified_trait = resolve_type_name(ctx, trait_name);
-    let qualified_type = resolve_type_name(ctx, impl_type);
-    if base.is_empty() {
-        format!("<{qualified_type} as {qualified_trait}>")
-    } else {
-        format!("{base}::<{qualified_type} as {qualified_trait}>")
-    }
-}
 
-/// Resolve a type name to fully qualified if possible using import map
-fn resolve_type_name(ctx: &ExtractContext, type_name: &str) -> String {
-    ctx.import_map()
-        .resolve(type_name)
-        .map(String::from)
-        .unwrap_or_else(|| type_name.to_string())
+    let resolution_ctx = ResolutionContext {
+        import_map: ctx.import_map(),
+        parent_scope: None,
+        package_name: ctx.package_name(),
+        current_module: module_prefix.as_deref(),
+        path_config: ctx.path_config(),
+        edge_case_handlers: None, // Don't need edge cases for type name resolution
+    };
+
+    resolve_reference(type_name, type_name, &resolution_ctx).target
 }
 
 // === Scope Derivation ===

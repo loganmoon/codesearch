@@ -10,15 +10,20 @@ use crate::common::entity_building::{
     build_entity, compose_qualified_name, CommonEntityComponents, EntityDetails,
 };
 use crate::common::module_utils::derive_path_entity_identifier;
+use crate::common::reference_resolution::{resolve_reference, ResolutionContext};
 use crate::extract_context::ExtractContext;
 use crate::qualified_name::{build_qualified_name_from_ast, derive_module_path_for_language};
 use codesearch_core::entities::{
-    EntityMetadata, EntityRelationshipData, EntityType, SourceLocation, Visibility,
+    EntityMetadata, EntityRelationshipData, EntityType, ReferenceType, SourceLocation,
+    SourceReference, Visibility,
 };
 use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
-use tree_sitter::Node;
+use std::collections::HashSet;
+use std::sync::OnceLock;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Node, Query, QueryCursor};
 
 const RUST_SEPARATOR: &str = "::";
 
@@ -514,6 +519,386 @@ pub(crate) fn extract_doc_from_node(node: Node, source: &str) -> Option<String> 
     } else {
         docs.reverse();
         Some(docs.join("\n"))
+    }
+}
+
+// === Relationship Extraction ===
+
+/// Rust function call query
+const RUST_CALL_QUERY: &str = r#"
+[
+  (call_expression
+    function: (identifier) @callee)
+
+  (call_expression
+    function: (scoped_identifier) @callee)
+
+  (call_expression
+    function: (field_expression
+      field: (field_identifier) @method_callee))
+]
+"#;
+
+/// Rust type reference query
+const RUST_TYPE_QUERY: &str = r#"
+[
+  (type_identifier) @type_ref
+  (scoped_type_identifier) @scoped_type_ref
+]
+"#;
+
+/// Common Rust types to filter out from type references.
+///
+/// Includes both language primitives (i32, bool, etc.) and standard library types
+/// (String, Option, Result, Vec, Box) that are ubiquitous enough to be noise.
+const RUST_FILTERED_TYPES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
+    "f64", "bool", "char", "str", "String", "Self", "()", "Option", "Result", "Vec", "Box",
+];
+
+/// Node kinds that represent child entities - type references inside these should
+/// be attributed to the child entity, not the parent container.
+const RUST_CHILD_ENTITY_KINDS: &[&str] = &[
+    "field_declaration", // struct fields
+    "enum_variant",      // enum variants
+    "function_item",     // methods in impl blocks
+    "const_item",        // associated consts
+    "type_item",         // associated types
+];
+
+fn get_rust_call_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_rust::LANGUAGE.into();
+            match Query::new(&language, RUST_CALL_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "RUST_CALL_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - call extraction disabled"
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+fn get_rust_type_query() -> Option<&'static Query> {
+    static QUERY: OnceLock<Option<Query>> = OnceLock::new();
+    QUERY
+        .get_or_init(|| {
+            let language = tree_sitter_rust::LANGUAGE.into();
+            match Query::new(&language, RUST_TYPE_QUERY) {
+                Ok(q) => Some(q),
+                Err(e) => {
+                    tracing::error!(
+                        query = "RUST_TYPE_QUERY",
+                        error = %e,
+                        "Failed to compile tree-sitter query - type extraction disabled"
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+/// Extract the text content of a node
+fn node_text<'a>(node: Node, source: &'a str) -> &'a str {
+    match node.utf8_text(source.as_bytes()) {
+        Ok(text) => text,
+        Err(e) => {
+            tracing::warn!(
+                node_kind = node.kind(),
+                start_byte = node.start_byte(),
+                end_byte = node.end_byte(),
+                error = %e,
+                "Failed to extract node text as UTF-8, treating as empty"
+            );
+            ""
+        }
+    }
+}
+
+/// Extract simple name from a potentially qualified name
+fn extract_simple_name(name: &str) -> &str {
+    name.rsplit("::").next().unwrap_or(name)
+}
+
+/// Build a ResolutionContext from ExtractContext
+fn build_resolution_context<'a>(
+    ctx: &'a ExtractContext<'a>,
+    parent_scope: Option<&'a str>,
+) -> ResolutionContext<'a> {
+    ResolutionContext {
+        import_map: ctx.import_map(),
+        parent_scope,
+        package_name: ctx.package_name(),
+        current_module: parent_scope,
+        path_config: ctx.path_config(),
+        edge_case_handlers: ctx.edge_case_handlers(),
+    }
+}
+
+/// Build a SourceReference from a resolved reference
+fn build_source_reference(
+    target: String,
+    simple_name: String,
+    is_external: bool,
+    node: Node,
+    ref_type: ReferenceType,
+) -> Option<SourceReference> {
+    SourceReference::builder()
+        .target(target)
+        .simple_name(simple_name)
+        .is_external(is_external)
+        .location(SourceLocation::from_tree_sitter_node(node))
+        .ref_type(ref_type)
+        .build()
+        .ok()
+}
+
+/// Check if a type node is inside a child entity declaration (relative to the parent).
+fn is_inside_child_entity(type_node: Node, parent_node: Node, child_kinds: &[&str]) -> bool {
+    let mut current = type_node;
+    while let Some(ancestor) = current.parent() {
+        // Stop if we've reached the parent node
+        if ancestor.id() == parent_node.id() {
+            return false;
+        }
+        // Check if this ancestor is a child entity kind
+        if child_kinds.contains(&ancestor.kind()) {
+            return true;
+        }
+        current = ancestor;
+    }
+    false
+}
+
+/// Extract function call relationships from a function or method body
+///
+/// Returns an EntityRelationshipData with the `calls` field populated.
+pub(crate) fn extract_function_relationships(
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+) -> EntityRelationshipData {
+    let Some(query) = get_rust_call_query() else {
+        return EntityRelationshipData::default();
+    };
+
+    let mut calls = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cursor = QueryCursor::new();
+
+    let mut matches = cursor.matches(query, ctx.node(), ctx.source().as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let callee_node = capture.node;
+            let callee_text = node_text(callee_node, ctx.source());
+
+            if callee_text.is_empty() {
+                continue;
+            }
+
+            // Skip if we've already processed this call at this location
+            let key = (callee_text.to_string(), callee_node.start_byte());
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.insert(key);
+
+            // Resolve the reference
+            let simple_name = extract_simple_name(callee_text);
+            let resolution_ctx = build_resolution_context(ctx, parent_scope);
+            let resolved = resolve_reference(callee_text, simple_name, &resolution_ctx);
+
+            if let Some(source_ref) = build_source_reference(
+                resolved.target,
+                resolved.simple_name,
+                resolved.is_external,
+                callee_node,
+                ReferenceType::Call,
+            ) {
+                calls.push(source_ref);
+            }
+        }
+    }
+
+    EntityRelationshipData {
+        calls,
+        ..Default::default()
+    }
+}
+
+/// Extract type reference relationships from a type definition (struct, enum, etc.)
+///
+/// Returns an EntityRelationshipData with the `uses_types` field populated.
+pub(crate) fn extract_type_relationships(
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+) -> EntityRelationshipData {
+    let Some(query) = get_rust_type_query() else {
+        return EntityRelationshipData::default();
+    };
+
+    let mut type_refs = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cursor = QueryCursor::new();
+
+    let mut matches = cursor.matches(query, ctx.node(), ctx.source().as_bytes());
+
+    while let Some(query_match) = matches.next() {
+        for capture in query_match.captures {
+            let type_node = capture.node;
+            let type_text = node_text(type_node, ctx.source());
+
+            if type_text.is_empty() {
+                continue;
+            }
+
+            // Filter primitive types
+            if RUST_FILTERED_TYPES.contains(&type_text) {
+                continue;
+            }
+
+            // Skip type references inside child entity declarations
+            if is_inside_child_entity(type_node, ctx.node(), RUST_CHILD_ENTITY_KINDS) {
+                continue;
+            }
+
+            // Skip duplicates
+            let key = (type_text.to_string(), type_node.start_byte());
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.insert(key);
+
+            // Resolve the reference
+            let simple_name = extract_simple_name(type_text);
+            let resolution_ctx = build_resolution_context(ctx, parent_scope);
+            let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+
+            if let Some(source_ref) = build_source_reference(
+                resolved.target,
+                resolved.simple_name,
+                resolved.is_external,
+                type_node,
+                ReferenceType::TypeUsage,
+            ) {
+                type_refs.push(source_ref);
+            }
+        }
+    }
+
+    EntityRelationshipData {
+        uses_types: type_refs,
+        ..Default::default()
+    }
+}
+
+/// Extract IMPLEMENTS relationship from a Rust trait impl block.
+///
+/// For `impl Trait for Type`, extracts a reference to the Trait.
+pub(crate) fn extract_impl_relationships(
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+) -> EntityRelationshipData {
+    let mut implements = Vec::new();
+
+    // Find the trait field in impl_item
+    if let Some(trait_node) = ctx.node().child_by_field_name("trait") {
+        let type_text = node_text(trait_node, ctx.source());
+        if !type_text.is_empty() {
+            let simple_name = extract_simple_name(type_text);
+            let resolution_ctx = build_resolution_context(ctx, parent_scope);
+            let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+            if let Some(source_ref) = build_source_reference(
+                resolved.target,
+                resolved.simple_name,
+                resolved.is_external,
+                trait_node,
+                ReferenceType::Implements,
+            ) {
+                implements.push(source_ref);
+            }
+        }
+    }
+
+    EntityRelationshipData {
+        implements,
+        ..Default::default()
+    }
+}
+
+/// Extract trait bound (supertrait) relationships from a trait definition
+///
+/// For `trait Foo: Bar + Baz`, extracts references to Bar and Baz.
+pub(crate) fn extract_trait_bounds_relationships(
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+) -> EntityRelationshipData {
+    let mut extends = Vec::new();
+
+    // Find trait_bounds child
+    let mut cursor = ctx.node().walk();
+    for child in ctx.node().children(&mut cursor) {
+        if child.kind() == "trait_bounds" {
+            extract_bounds_recursive(child, ctx, parent_scope, &mut extends);
+        }
+    }
+
+    EntityRelationshipData {
+        extended_types: extends,
+        ..Default::default()
+    }
+}
+
+/// Process a type bound node (type_identifier or scoped_type_identifier) and add to refs.
+fn process_bound_type(
+    node: Node,
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+    refs: &mut Vec<SourceReference>,
+) {
+    let type_text = node_text(node, ctx.source());
+    if type_text.is_empty() || RUST_FILTERED_TYPES.contains(&type_text) {
+        return;
+    }
+    let simple_name = extract_simple_name(type_text);
+    let resolution_ctx = build_resolution_context(ctx, parent_scope);
+    let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+    if let Some(source_ref) = build_source_reference(
+        resolved.target,
+        resolved.simple_name,
+        resolved.is_external,
+        node,
+        ReferenceType::Extends,
+    ) {
+        refs.push(source_ref);
+    }
+}
+
+fn extract_bounds_recursive(
+    node: Node,
+    ctx: &ExtractContext,
+    parent_scope: Option<&str>,
+    refs: &mut Vec<SourceReference>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "type_identifier" | "scoped_type_identifier" => {
+                process_bound_type(child, ctx, parent_scope, refs);
+            }
+            _ => {
+                // Recurse into children
+                extract_bounds_recursive(child, ctx, parent_scope, refs);
+            }
+        }
     }
 }
 

@@ -99,6 +99,17 @@ pub struct EdgeCaseRegistry {
     handlers: Vec<&'static dyn EdgeCaseHandler>,
 }
 
+impl std::fmt::Debug for EdgeCaseRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EdgeCaseRegistry")
+            .field(
+                "handlers",
+                &self.handlers.iter().map(|h| h.name()).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
 impl EdgeCaseRegistry {
     /// Create a new empty registry
     #[cfg(test)]

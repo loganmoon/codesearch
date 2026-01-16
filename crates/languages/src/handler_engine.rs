@@ -4,7 +4,9 @@
 //! handlers with proper predicate evaluation, replacing the old HandlerConfig-based
 //! dispatch with string matching hacks.
 
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::import_map::ImportMap;
+use crate::common::path_config::PathConfig;
 use crate::extract_context::{CaptureData, ExtractContext};
 use crate::handler_registry::find_handler;
 use crate::predicates::{PredicateEvaluator, StandardPredicates};
@@ -38,6 +40,8 @@ pub(crate) struct HandlerContext<'a> {
     pub(crate) language: Language,
     pub(crate) language_str: &'a str,
     pub(crate) import_map: &'a ImportMap,
+    pub(crate) path_config: &'static PathConfig,
+    pub(crate) edge_case_handlers: Option<&'a EdgeCaseRegistry>,
 }
 
 /// Get or compile queries for a language
@@ -193,6 +197,8 @@ fn build_extract_context<'a>(
         .package_name(ctx.package_name)
         .source_root(ctx.source_root)
         .repo_root(ctx.repo_root)
+        .path_config(ctx.path_config)
+        .edge_case_handlers(ctx.edge_case_handlers)
         .build()
 }
 
@@ -345,6 +351,8 @@ pub struct Wrapper {
             language: Language::Rust,
             language_str: "rust",
             import_map: &import_map,
+            path_config: &crate::common::path_config::RUST_PATH_CONFIG,
+            edge_case_handlers: None,
         };
 
         let entities = extract_with_handlers(&handler_ctx, tree.root_node()).unwrap();

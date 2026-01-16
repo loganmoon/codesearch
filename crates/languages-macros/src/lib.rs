@@ -2,6 +2,25 @@
 //!
 //! This crate provides the `#[entity_handler]` attribute macro for registering
 //! entity extraction handlers with automatic capture injection.
+//!
+//! # Declarative Handlers
+//!
+//! For simple handlers that follow standard patterns, you can use declarative attributes:
+//!
+//! ```ignore
+//! #[entity_handler(entity_type = Function, capture = "func", language = "rust")]
+//! #[name(capture = "name")]
+//! #[qualified_name(standard)]
+//! #[metadata(extract_function_metadata)]
+//! #[relationships(extract_function_relationships)]
+//! #[visibility(extract_visibility)]
+//! #[documentation(extract_documentation)]
+//! fn free_function() {}
+//! ```
+//!
+//! Note: `#[entity_handler]` must be the outermost attribute.
+//!
+//! The macro detects empty function bodies and generates the full implementation.
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
@@ -109,6 +128,138 @@ struct CaptureParam {
     param_name: Ident,
     is_optional: bool,
     is_node: bool,
+}
+
+// === Declarative Handler Attributes ===
+
+/// Parsed declarative attributes for generating handler code
+#[derive(Default)]
+struct DeclarativeAttrs {
+    /// #[name(capture = "...")] - capture name for entity name
+    name_capture: Option<String>,
+    /// #[qualified_name(standard)] or #[qualified_name(fn_name)]
+    qualified_name: Option<QualifiedNameStrategy>,
+    /// #[metadata(fn_name)] or #[metadata(default)]
+    metadata: Option<ExtractorRef>,
+    /// #[relationships(fn_name)] or #[relationships(none)]
+    relationships: Option<ExtractorRef>,
+    /// #[visibility(fn_name)] or #[visibility(none)]
+    visibility: Option<ExtractorRef>,
+    /// #[documentation(fn_name)] or #[documentation(none)]
+    documentation: Option<ExtractorRef>,
+}
+
+/// Strategy for building qualified names
+#[derive(Clone)]
+enum QualifiedNameStrategy {
+    /// Use build_standard_entity (default)
+    Standard,
+    /// Use a custom function
+    Custom(Ident),
+}
+
+/// Reference to an extractor function or special value
+#[derive(Clone)]
+enum ExtractorRef {
+    /// Use default/none value
+    None,
+    /// Call the specified function
+    Function(Ident),
+}
+
+/// Parse declarative attributes from function attributes
+fn parse_declarative_attrs(attrs: &[Attribute]) -> syn::Result<DeclarativeAttrs> {
+    let mut result = DeclarativeAttrs::default();
+
+    for attr in attrs {
+        let path = attr.path();
+        if path.is_ident("name") {
+            result.name_capture = Some(parse_name_attr(attr)?);
+        } else if path.is_ident("qualified_name") {
+            result.qualified_name = Some(parse_qualified_name_attr(attr)?);
+        } else if path.is_ident("metadata") {
+            result.metadata = Some(parse_extractor_attr(attr)?);
+        } else if path.is_ident("relationships") {
+            result.relationships = Some(parse_extractor_attr(attr)?);
+        } else if path.is_ident("visibility") {
+            result.visibility = Some(parse_extractor_attr(attr)?);
+        } else if path.is_ident("documentation") {
+            result.documentation = Some(parse_extractor_attr(attr)?);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Parse #[name(capture = "...")] attribute
+fn parse_name_attr(attr: &Attribute) -> syn::Result<String> {
+    let Meta::List(list) = &attr.meta else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "expected #[name(capture = \"...\")]",
+        ));
+    };
+
+    let nested: Meta = syn::parse2(list.tokens.clone())?;
+    if let Meta::NameValue(nv) = nested {
+        if nv.path.is_ident("capture") {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: Lit::Str(s), ..
+            }) = &nv.value
+            {
+                return Ok(s.value());
+            }
+        }
+    }
+
+    Err(syn::Error::new_spanned(
+        attr,
+        "expected #[name(capture = \"...\")]",
+    ))
+}
+
+/// Parse #[qualified_name(standard)] or #[qualified_name(fn_name)] attribute
+fn parse_qualified_name_attr(attr: &Attribute) -> syn::Result<QualifiedNameStrategy> {
+    let Meta::List(list) = &attr.meta else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "expected #[qualified_name(standard)] or #[qualified_name(fn_name)]",
+        ));
+    };
+
+    let ident: Ident = syn::parse2(list.tokens.clone())?;
+    if ident == "standard" {
+        Ok(QualifiedNameStrategy::Standard)
+    } else {
+        Ok(QualifiedNameStrategy::Custom(ident))
+    }
+}
+
+/// Parse #[attr(fn_name)], #[attr(none)], or #[attr(default)] attribute
+fn parse_extractor_attr(attr: &Attribute) -> syn::Result<ExtractorRef> {
+    let Meta::List(list) = &attr.meta else {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "expected #[attr(fn_name)] or #[attr(none)]",
+        ));
+    };
+
+    let ident: Ident = syn::parse2(list.tokens.clone())?;
+    if ident == "none" || ident == "default" {
+        Ok(ExtractorRef::None)
+    } else {
+        Ok(ExtractorRef::Function(ident))
+    }
+}
+
+/// Check if a function has an empty body (just `{}`)
+fn has_empty_body(func: &ItemFn) -> bool {
+    func.block.stmts.is_empty()
+}
+
+/// Check if the function is a declarative handler (empty body + #[name(...)] attr)
+fn is_declarative_handler(func: &ItemFn, decl_attrs: &DeclarativeAttrs) -> bool {
+    has_empty_body(func) && decl_attrs.name_capture.is_some()
 }
 
 /// Parse #[capture] or #[capture(name = "...")] attribute
@@ -240,6 +391,125 @@ fn generate_capture_extraction(captures: &[CaptureParam]) -> proc_macro2::TokenS
     }
 }
 
+/// Generate code for a declarative handler
+fn generate_declarative_handler(
+    args: &EntityHandlerArgs,
+    fn_name: &Ident,
+    fn_vis: &syn::Visibility,
+    decl_attrs: &DeclarativeAttrs,
+) -> proc_macro2::TokenStream {
+    let entity_type = &args.entity_type;
+    let capture = &args.capture;
+    let language = args.language.as_deref().unwrap_or("rust");
+    let handler_name = format!("{language}::{fn_name}");
+    let wrapper_name = Ident::new(&format!("__{fn_name}_wrapper"), fn_name.span());
+
+    // The name capture is required for declarative handlers.
+    // This is guaranteed by is_declarative_handler() which checks name_capture.is_some().
+    let name_capture = decl_attrs.name_capture.as_ref().unwrap_or_else(|| {
+        unreachable!(
+            "declarative handler requires #[name(capture = \"...\")] attribute; \
+             this is enforced by is_declarative_handler()"
+        )
+    });
+
+    // Generate metadata extraction
+    let metadata_code = match &decl_attrs.metadata {
+        Some(ExtractorRef::Function(f)) => quote! { #f(__ctx) },
+        _ => quote! { EntityMetadata::default() },
+    };
+
+    // Generate visibility extraction
+    let visibility_code = match &decl_attrs.visibility {
+        Some(ExtractorRef::Function(f)) => quote! { #f(__ctx) },
+        _ => quote! { None },
+    };
+
+    // Generate documentation extraction
+    let documentation_code = match &decl_attrs.documentation {
+        Some(ExtractorRef::Function(f)) => quote! { #f(__ctx) },
+        _ => quote! { None },
+    };
+
+    // Generate entity building based on qualified_name strategy
+    // For Custom qualified_name, we compute parent_scope first and pass it to relationships
+    let entity_building = match &decl_attrs.qualified_name {
+        Some(QualifiedNameStrategy::Custom(custom_fn)) => {
+            // For custom qualified names, compute parent_scope and use it for relationships
+            let relationships_code = match &decl_attrs.relationships {
+                Some(ExtractorRef::Function(f)) => quote! { #f(__ctx, Some(__parent_scope)) },
+                _ => quote! { EntityRelationshipData::default() },
+            };
+            quote! {
+                {
+                    let __qn = #custom_fn(__ctx, __name);
+                    let __parent_scope = crate::handlers::rust::building_blocks::derive_parent_scope(&__qn);
+                    let __relationships = #relationships_code;
+                    crate::handlers::rust::building_blocks::build_entity_with_custom_qn(
+                        __ctx,
+                        __name,
+                        __qn,
+                        __parent_scope,
+                        EntityType::#entity_type,
+                        __metadata,
+                        __relationships,
+                        __visibility,
+                        __documentation,
+                    )?
+                }
+            }
+        }
+        _ => {
+            // Standard: use build_standard_entity, no parent_scope available
+            let relationships_code = match &decl_attrs.relationships {
+                Some(ExtractorRef::Function(f)) => quote! { #f(__ctx, None) },
+                _ => quote! { EntityRelationshipData::default() },
+            };
+            quote! {
+                {
+                    let __relationships = #relationships_code;
+                    crate::handlers::rust::building_blocks::build_standard_entity(
+                        __ctx,
+                        __name,
+                        EntityType::#entity_type,
+                        __metadata,
+                        __relationships,
+                        __visibility,
+                        __documentation,
+                    )?
+                }
+            }
+        }
+    };
+
+    quote! {
+        // Wrapper function for the registry (declarative handler)
+        #fn_vis fn #wrapper_name<'a>(
+            __ctx: &ExtractContext<'a>
+        ) -> Result<Option<CodeEntity>> {
+            let __name = __ctx.capture_text(#name_capture)?;
+            let __metadata = #metadata_code;
+            let __visibility = #visibility_code;
+            let __documentation = #documentation_code;
+
+            let __entity = #entity_building;
+
+            Ok(Some(__entity))
+        }
+
+        // Register with inventory
+        inventory::submit! {
+            HandlerRegistration {
+                name: #handler_name,
+                language: #language,
+                entity_type: EntityType::#entity_type,
+                primary_capture: #capture,
+                handler: #wrapper_name,
+            }
+        }
+    }
+}
+
 /// Entity handler attribute macro
 ///
 /// This macro registers an entity extraction handler with the handler registry.
@@ -262,6 +532,21 @@ fn generate_capture_extraction(captures: &[CaptureParam]) -> proc_macro2::TokenS
 /// ) -> Result<Option<CodeEntity>> {
 ///     // Handler implementation
 /// }
+/// ```
+///
+/// # Declarative Handlers
+///
+/// For simple handlers, use declarative attributes with an empty body:
+///
+/// ```ignore
+/// #[entity_handler(entity_type = Function, capture = "func", language = "rust")]
+/// #[name(capture = "name")]
+/// #[qualified_name(standard)]
+/// #[metadata(extract_function_metadata)]
+/// #[relationships(extract_function_relationships)]
+/// #[visibility(extract_visibility)]
+/// #[documentation(extract_documentation)]
+/// fn free_function() {}
 /// ```
 ///
 /// The macro generates:
@@ -288,7 +573,20 @@ fn expand_entity_handler(
     let capture = &args.capture;
     let language = args.language.as_deref().unwrap_or("rust");
 
-    // Extract capture parameters
+    // Parse declarative attributes
+    let decl_attrs = parse_declarative_attrs(&input_fn.attrs)?;
+
+    // Check if this is a declarative handler (empty body + #[name(...)])
+    if is_declarative_handler(&input_fn, &decl_attrs) {
+        return Ok(generate_declarative_handler(
+            &args,
+            fn_name,
+            fn_vis,
+            &decl_attrs,
+        ));
+    }
+
+    // Non-declarative: extract capture parameters
     let captures = extract_capture_params(&input_fn)?;
 
     // Generate capture extraction code

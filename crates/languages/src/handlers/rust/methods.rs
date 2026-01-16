@@ -7,9 +7,10 @@ use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
     build_entity_with_custom_qn, build_inherent_method_qn, build_trait_impl_method_qn,
-    derive_parent_scope, extract_documentation, extract_function_metadata, extract_visibility,
+    derive_parent_scope, extract_documentation, extract_function_metadata,
+    extract_function_relationships, extract_visibility,
 };
-use codesearch_core::entities::{EntityRelationshipData, EntityType};
+use codesearch_core::entities::EntityType;
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 
@@ -27,6 +28,7 @@ fn method_in_inherent_impl(
     // Build qualified name: <Type>::method_name
     let qualified_name = build_inherent_method_qn(ctx, name, impl_type);
     let parent_scope = derive_parent_scope(&qualified_name);
+    let relationships = extract_function_relationships(ctx, parent_scope.as_deref());
 
     let entity = build_entity_with_custom_qn(
         ctx,
@@ -35,7 +37,7 @@ fn method_in_inherent_impl(
         parent_scope,
         EntityType::Method,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;
@@ -58,6 +60,7 @@ fn method_in_trait_impl(
     // Build qualified name: <Type as Trait>::method_name
     let qualified_name = build_trait_impl_method_qn(ctx, name, impl_type, trait_name);
     let parent_scope = derive_parent_scope(&qualified_name);
+    let relationships = extract_function_relationships(ctx, parent_scope.as_deref());
 
     let entity = build_entity_with_custom_qn(
         ctx,
@@ -66,7 +69,7 @@ fn method_in_trait_impl(
         parent_scope,
         EntityType::Method,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;
@@ -96,6 +99,9 @@ fn method_in_trait_def(
     };
     let parent_scope = derive_parent_scope(&qualified_name);
 
+    // Extract function calls if method has default implementation
+    let relationships = extract_function_relationships(ctx, parent_scope.as_deref());
+
     let entity = build_entity_with_custom_qn(
         ctx,
         name,
@@ -103,7 +109,7 @@ fn method_in_trait_def(
         parent_scope,
         EntityType::Method,
         metadata,
-        EntityRelationshipData::default(),
+        relationships,
         visibility,
         documentation,
     )?;

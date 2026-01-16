@@ -1,151 +1,89 @@
 //! Type definition handlers for Rust
 //!
 //! Handles extraction of structs, enums, traits, and unions.
+//!
+//! Most handlers use declarative form with `#[entity_handler]` attributes.
 
 use crate::entity_handler;
 use crate::extract_context::ExtractContext;
 use crate::handler_registry::HandlerRegistration;
 use crate::handlers::rust::building_blocks::{
-    build_standard_entity, extract_documentation, extract_struct_metadata, extract_trait_metadata,
-    extract_visibility,
+    extract_documentation, extract_struct_metadata, extract_trait_bounds_relationships,
+    extract_trait_metadata, extract_type_relationships, extract_visibility,
 };
 use codesearch_core::entities::{EntityMetadata, EntityRelationshipData, EntityType};
 use codesearch_core::error::Result;
 use codesearch_core::CodeEntity;
 
-/// Handler for struct definitions
+/// Handler for struct definitions (declarative form)
+/// Extracts type references from generic bounds (not field types - those belong to field entities)
 #[entity_handler(entity_type = Struct, capture = "struct", language = "rust")]
-fn struct_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = extract_struct_metadata(ctx);
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(extract_struct_metadata)]
+#[relationships(extract_type_relationships)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn struct_definition() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Struct,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for enum definitions
+/// Handler for enum definitions (declarative form)
 #[entity_handler(entity_type = Enum, capture = "enum", language = "rust")]
-fn enum_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn enum_definition() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Enum,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for trait definitions
+/// Handler for trait definitions (declarative form)
+/// Extracts supertrait bounds (trait Foo: Bar + Baz)
 #[entity_handler(entity_type = Trait, capture = "trait", language = "rust")]
-fn trait_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = extract_trait_metadata(ctx);
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(extract_trait_metadata)]
+#[relationships(extract_trait_bounds_relationships)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn trait_definition() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Trait,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for union definitions
+/// Handler for union definitions (declarative form)
 #[entity_handler(entity_type = Union, capture = "union", language = "rust")]
-fn union_definition(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn union_definition() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Union,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for struct fields
+/// Handler for struct fields (declarative form)
 #[entity_handler(entity_type = Property, capture = "field", language = "rust")]
-fn struct_field(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(none)]
+fn struct_field() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::Property,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        None,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for enum variants
+/// Handler for enum variants (declarative form)
+/// Enum variants inherit visibility from enum
 #[entity_handler(entity_type = EnumVariant, capture = "variant", language = "rust")]
-fn enum_variant(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(none)]
+#[documentation(none)]
+fn enum_variant() {}
 
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::EnumVariant,
-        metadata,
-        EntityRelationshipData::default(),
-        None, // Enum variants inherit visibility from enum
-        None,
-    )?;
-
-    Ok(Some(entity))
-}
-
-/// Handler for type aliases
+/// Handler for type aliases (declarative form)
 #[entity_handler(entity_type = TypeAlias, capture = "type_alias", language = "rust")]
-fn type_alias(#[capture] name: &str, ctx: &ExtractContext) -> Result<Option<CodeEntity>> {
-    let metadata = EntityMetadata::default();
-    let visibility = extract_visibility(ctx);
-    let documentation = extract_documentation(ctx);
-
-    let entity = build_standard_entity(
-        ctx,
-        name,
-        EntityType::TypeAlias,
-        metadata,
-        EntityRelationshipData::default(),
-        visibility,
-        documentation,
-    )?;
-
-    Ok(Some(entity))
-}
+#[name(capture = "name")]
+#[qualified_name(standard)]
+#[metadata(default)]
+#[relationships(none)]
+#[visibility(extract_visibility)]
+#[documentation(extract_documentation)]
+fn type_alias() {}

@@ -3,7 +3,9 @@
 //! This module provides the `ExtractContext` type which encapsulates all the data
 //! needed by entity handlers to extract code entities from AST matches.
 
+use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::import_map::ImportMap;
+use crate::common::path_config::PathConfig;
 use codesearch_core::entities::Language;
 use codesearch_core::error::{Error, Result};
 use std::collections::HashMap;
@@ -33,6 +35,8 @@ pub struct ExtractContextBuilder<'a> {
     package_name: Option<&'a str>,
     source_root: Option<&'a Path>,
     repo_root: Option<&'a Path>,
+    path_config: Option<&'static PathConfig>,
+    edge_case_handlers: Option<&'a EdgeCaseRegistry>,
 }
 
 impl<'a> Default for ExtractContextBuilder<'a> {
@@ -57,6 +61,8 @@ impl<'a> ExtractContextBuilder<'a> {
             package_name: None,
             source_root: None,
             repo_root: None,
+            path_config: None,
+            edge_case_handlers: None,
         }
     }
 
@@ -138,6 +144,18 @@ impl<'a> ExtractContextBuilder<'a> {
         self
     }
 
+    /// Set the path configuration
+    pub fn path_config(mut self, path_config: &'static PathConfig) -> Self {
+        self.path_config = Some(path_config);
+        self
+    }
+
+    /// Set the edge case handlers
+    pub fn edge_case_handlers(mut self, edge_case_handlers: Option<&'a EdgeCaseRegistry>) -> Self {
+        self.edge_case_handlers = edge_case_handlers;
+        self
+    }
+
     /// Build the ExtractContext
     ///
     /// Returns an error if required fields are missing.
@@ -171,6 +189,10 @@ impl<'a> ExtractContextBuilder<'a> {
             repo_root: self
                 .repo_root
                 .ok_or_else(|| Error::entity_extraction("ExtractContext: repo_root is required"))?,
+            path_config: self.path_config.ok_or_else(|| {
+                Error::entity_extraction("ExtractContext: path_config is required")
+            })?,
+            edge_case_handlers: self.edge_case_handlers,
         })
     }
 }
@@ -205,6 +227,10 @@ pub struct ExtractContext<'a> {
     source_root: Option<&'a Path>,
     /// Repository root for repo-relative paths
     repo_root: &'a Path,
+    /// Language-specific path configuration for resolution
+    path_config: &'static PathConfig,
+    /// Optional edge case handlers for language-specific patterns
+    edge_case_handlers: Option<&'a EdgeCaseRegistry>,
 }
 
 impl<'a> ExtractContext<'a> {
@@ -376,11 +402,22 @@ impl<'a> ExtractContext<'a> {
     pub fn import_map(&self) -> &'a ImportMap {
         self.import_map
     }
+
+    /// Get the path configuration for reference resolution
+    pub fn path_config(&self) -> &'static PathConfig {
+        self.path_config
+    }
+
+    /// Get the edge case handlers (if available)
+    pub fn edge_case_handlers(&self) -> Option<&'a EdgeCaseRegistry> {
+        self.edge_case_handlers
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::path_config::RUST_PATH_CONFIG;
 
     #[test]
     fn test_capture_access() {
@@ -412,6 +449,7 @@ mod tests {
             .language_str("rust")
             .repository_id("test-repo")
             .repo_root(Path::new("/test"))
+            .path_config(&RUST_PATH_CONFIG)
             .build()
             .unwrap();
 
@@ -459,6 +497,7 @@ mod tests {
             .language_str("rust")
             .repository_id("test-repo")
             .repo_root(Path::new("/test"))
+            .path_config(&RUST_PATH_CONFIG)
             .build()
             .unwrap();
 
@@ -504,6 +543,7 @@ mod tests {
             .language_str("rust")
             .repository_id("test-repo")
             .repo_root(Path::new("/test"))
+            .path_config(&RUST_PATH_CONFIG)
             .scope_stack(scope)
             .build()
             .unwrap();

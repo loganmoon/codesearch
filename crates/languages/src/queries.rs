@@ -29,6 +29,7 @@ pub mod rust {
         capture: "func",
         query: r#"
             ((function_item
+              (visibility_modifier)? @visibility
               name: (identifier) @name
             ) @func
             (#not-has-ancestor? @func impl_item))
@@ -73,6 +74,7 @@ pub mod rust {
               type: (type_identifier) @impl_type
               body: (declaration_list
                 (function_item
+                  (visibility_modifier)? @visibility
                   name: (identifier) @name
                   parameters: (parameters
                     . (self_parameter) @self_param
@@ -110,6 +112,7 @@ pub mod rust {
         capture: "struct",
         query: r#"
             (struct_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @struct
         "#,
@@ -122,6 +125,7 @@ pub mod rust {
         capture: "enum",
         query: r#"
             (enum_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @enum
         "#,
@@ -134,8 +138,163 @@ pub mod rust {
         capture: "trait",
         query: r#"
             (trait_item
+              (visibility_modifier)? @visibility
               name: (type_identifier) @name
             ) @trait
+        "#,
+    };
+
+    /// Associated functions in inherent impl (no self parameter)
+    pub const ASSOCIATED_FUNCTION_IN_INHERENT_IMPL: QueryDef = QueryDef {
+        handler: "rust::associated_function_in_inherent_impl",
+        entity_type: EntityType::Function,
+        capture: "function",
+        query: r#"
+            ((impl_item
+              type: [(type_identifier) (generic_type type: (type_identifier))] @impl_type
+              body: (declaration_list
+                (function_item
+                  (visibility_modifier)? @visibility
+                  name: (identifier) @name
+                  parameters: (parameters) @params
+                ) @function
+              )
+            ) @impl
+            (#not-has-child? @impl trait)
+            (#not-has-child? @params self_parameter))
+        "#,
+    };
+
+    /// Module declarations
+    pub const MODULE: QueryDef = QueryDef {
+        handler: "rust::module_declaration",
+        entity_type: EntityType::Module,
+        capture: "module",
+        query: r#"
+            (mod_item
+              (visibility_modifier)? @visibility
+              name: (identifier) @name
+            ) @module
+        "#,
+    };
+
+    /// Struct fields (named fields in struct body)
+    pub const STRUCT_FIELD: QueryDef = QueryDef {
+        handler: "rust::struct_field",
+        entity_type: EntityType::Property,
+        capture: "field",
+        query: r#"
+            (struct_item
+              name: (type_identifier) @struct_name
+              body: (field_declaration_list
+                (field_declaration
+                  (visibility_modifier)? @visibility
+                  name: (field_identifier) @name
+                  type: (_) @field_type
+                ) @field
+              )
+            )
+        "#,
+    };
+
+    /// Enum variants
+    pub const ENUM_VARIANT: QueryDef = QueryDef {
+        handler: "rust::enum_variant",
+        entity_type: EntityType::EnumVariant,
+        capture: "variant",
+        query: r#"
+            (enum_item
+              name: (type_identifier) @enum_name
+              body: (enum_variant_list
+                (enum_variant
+                  name: (identifier) @name
+                ) @variant
+              )
+            )
+        "#,
+    };
+
+    /// Constants at module level
+    pub const CONSTANT: QueryDef = QueryDef {
+        handler: "rust::constant",
+        entity_type: EntityType::Constant,
+        capture: "const",
+        query: r#"
+            (const_item
+              (visibility_modifier)? @visibility
+              name: (identifier) @name
+              type: (_) @const_type
+            ) @const
+        "#,
+    };
+
+    /// Statics at module level
+    pub const STATIC: QueryDef = QueryDef {
+        handler: "rust::static_item",
+        entity_type: EntityType::Static,
+        capture: "static",
+        query: r#"
+            (static_item
+              (visibility_modifier)? @visibility
+              name: (identifier) @name
+              type: (_) @static_type
+            ) @static
+        "#,
+    };
+
+    /// Type aliases
+    pub const TYPE_ALIAS: QueryDef = QueryDef {
+        handler: "rust::type_alias",
+        entity_type: EntityType::TypeAlias,
+        capture: "type_alias",
+        query: r#"
+            (type_item
+              (visibility_modifier)? @visibility
+              name: (type_identifier) @name
+              type: (_) @aliased_type
+            ) @type_alias
+        "#,
+    };
+
+    /// Union definitions
+    pub const UNION: QueryDef = QueryDef {
+        handler: "rust::union_definition",
+        entity_type: EntityType::Union,
+        capture: "union",
+        query: r#"
+            (union_item
+              (visibility_modifier)? @visibility
+              name: (type_identifier) @name
+            ) @union
+        "#,
+    };
+
+    /// Macro definitions (macro_rules!)
+    pub const MACRO_DEFINITION: QueryDef = QueryDef {
+        handler: "rust::macro_definition",
+        entity_type: EntityType::Macro,
+        capture: "macro",
+        query: r#"
+            (macro_definition
+              name: (identifier) @name
+            ) @macro
+        "#,
+    };
+
+    /// Method signatures in trait definitions
+    pub const METHOD_IN_TRAIT_DEF: QueryDef = QueryDef {
+        handler: "rust::method_in_trait_def",
+        entity_type: EntityType::Method,
+        capture: "method",
+        query: r#"
+            (trait_item
+              name: (type_identifier) @trait_name
+              body: (declaration_list
+                (function_signature_item
+                  name: (identifier) @name
+                ) @method
+              )
+            )
         "#,
     };
 
@@ -146,9 +305,19 @@ pub mod rust {
         &TRAIT_IMPL,
         &METHOD_IN_INHERENT_IMPL,
         &METHOD_IN_TRAIT_IMPL,
+        &ASSOCIATED_FUNCTION_IN_INHERENT_IMPL,
         &STRUCT,
         &ENUM,
         &TRAIT,
+        &MODULE,
+        &STRUCT_FIELD,
+        &ENUM_VARIANT,
+        &CONSTANT,
+        &STATIC,
+        &TYPE_ALIAS,
+        &UNION,
+        &MACRO_DEFINITION,
+        &METHOD_IN_TRAIT_DEF,
     ];
 }
 
@@ -166,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_all_queries_list() {
-        assert_eq!(rust::ALL.len(), 8);
+        assert_eq!(rust::ALL.len(), 18);
         for query in rust::ALL {
             assert!(!query.handler.is_empty());
             assert!(!query.capture.is_empty());

@@ -20,6 +20,10 @@ pub mod qualified_name;
 pub mod queries;
 pub mod spec_driven;
 
+// Internal modules (used by extractors)
+pub(crate) mod handler_engine;
+pub(crate) mod handlers;
+
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {
     /// Extract entities from source code

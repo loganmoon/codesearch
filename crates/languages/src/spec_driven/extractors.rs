@@ -4,8 +4,6 @@
 //! and generated handler configurations.
 
 use super::engine::{extract_with_config, SpecDrivenContext};
-use super::HandlerConfig;
-use crate::common::edge_case_handlers::EdgeCaseRegistry;
 use crate::common::import_map::parse_file_imports;
 use crate::common::js_ts_shared::{
     module_path as js_module_path, SCOPE_PATTERNS, TS_SCOPE_PATTERNS,
@@ -212,14 +210,12 @@ impl SpecDrivenRustExtractor {
             repo_root,
         })
     }
+}
 
-    /// Extract entities using the given handler configs
-    fn extract_with_configs(
-        &self,
-        source: &str,
-        file_path: &Path,
-        configs: &[&HandlerConfig],
-    ) -> Result<Vec<CodeEntity>> {
+impl Extractor for SpecDrivenRustExtractor {
+    fn extract(&self, source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
+        use crate::handler_engine::{extract_with_handlers, HandlerContext};
+
         let mut parser = Parser::new();
         parser
             .set_language(&tree_sitter_rust::LANGUAGE.into())
@@ -232,10 +228,7 @@ impl SpecDrivenRustExtractor {
         // Build import map for reference resolution
         let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
 
-        // Create edge case registry for Rust-specific patterns
-        let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
-
-        let ctx = SpecDrivenContext {
+        let ctx = HandlerContext {
             source,
             file_path,
             repository_id: &self.repository_id,
@@ -245,25 +238,9 @@ impl SpecDrivenRustExtractor {
             language: Language::Rust,
             language_str: "rust",
             import_map: &import_map,
-            path_config: &CRATE_BASED_PATH_CONFIG,
-            edge_case_handlers: Some(&edge_case_registry),
         };
 
-        let mut all_entities = Vec::new();
-
-        for config in configs {
-            let entities = extract_with_config(config, &ctx, tree.root_node())?;
-            all_entities.extend(entities);
-        }
-
-        Ok(all_entities)
-    }
-}
-
-impl Extractor for SpecDrivenRustExtractor {
-    fn extract(&self, source: &str, file_path: &Path) -> Result<Vec<CodeEntity>> {
-        use super::rust::handler_configs::ALL_HANDLERS;
-        self.extract_with_configs(source, file_path, ALL_HANDLERS)
+        extract_with_handlers(&ctx, tree.root_node())
     }
 }
 

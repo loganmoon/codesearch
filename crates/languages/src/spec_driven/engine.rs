@@ -189,7 +189,9 @@ pub fn extract_with_config(
                 documentation: extract_documentation(main_node, ctx.source),
                 content: node_to_text(main_node, ctx.source).ok(),
                 metadata,
-                signature: None, // TODO: Extract function signature if applicable
+                // Known limitation: signature extraction not yet implemented.
+                // Function signatures are available via `content` field for now.
+                signature: None,
                 relationships,
             },
         )?;
@@ -1138,7 +1140,8 @@ fn extract_function_metadata(node: Node, _source: &str) -> EntityMetadata {
             }
             "type_parameters" => {
                 metadata.is_generic = true;
-                // TODO: Extract generic params
+                // Known limitation: generic parameter details not extracted.
+                // We track is_generic=true but don't parse individual params yet.
             }
             _ => {}
         }
@@ -1206,7 +1209,8 @@ fn extract_struct_metadata(node: Node, _source: &str) -> EntityMetadata {
         match child.kind() {
             "type_parameters" => {
                 metadata.is_generic = true;
-                // TODO: Extract generic params
+                // Known limitation: generic parameter details not extracted.
+                // We track is_generic=true but don't parse individual params yet.
             }
             "ordered_field_declaration_list" => {
                 metadata
@@ -1245,7 +1249,8 @@ fn extract_enum_metadata(node: Node, _source: &str) -> EntityMetadata {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameters" {
             metadata.is_generic = true;
-            // TODO: Extract generic params
+            // Known limitation: generic parameter details not extracted.
+            // We track is_generic=true but don't parse individual params yet.
         }
     }
 
@@ -1259,7 +1264,8 @@ fn extract_trait_metadata(node: Node, _source: &str) -> EntityMetadata {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameters" {
             metadata.is_generic = true;
-            // TODO: Extract generic params
+            // Known limitation: generic parameter details not extracted.
+            // We track is_generic=true but don't parse individual params yet.
         }
     }
 

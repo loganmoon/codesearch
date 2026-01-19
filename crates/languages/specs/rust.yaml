@@ -1011,9 +1011,12 @@ extraction_hints:
             name: (field_identifier) @name
             type: (_) @field_type) @field)
 
-    # Note: Tuple struct fields are positional and don't have field_declaration nodes
-    # They would need special handling with PositionalIndex name strategy
-    # For now, we skip individual tuple field extraction
+    TUPLE_STRUCT_FIELD:
+      description: "Tuple struct fields (positional)"
+      capture: "field_type"
+      query: |
+        (ordered_field_declaration_list
+          type: (_) @field_type)
 
     ENUM:
       description: "Enum definitions"
@@ -1391,8 +1394,12 @@ extraction_hints:
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
 
-    # TupleStructField handler removed - tuple fields need special handling
-    # since ordered_field_declaration_list doesn't contain field_declaration nodes
+    TupleStructField:
+      entity_rule: E-PROPERTY
+      query: TUPLE_STRUCT_FIELD
+      capture: "field_type"
+      name_strategy: positional_index
+      qualified_name_template: "{scope}::{name}"
 
     Enum:
       entity_rule: E-ENUM

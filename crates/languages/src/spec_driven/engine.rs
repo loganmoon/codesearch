@@ -1049,22 +1049,42 @@ fn extract_rust_visibility(node: Node, source: &str) -> Option<Visibility> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "visibility_modifier" {
-            if let Ok(text) = node_to_text(child, source) {
-                let trimmed = text.trim();
-                if trimmed == "pub" {
-                    return Some(Visibility::Public);
-                } else if trimmed.starts_with("pub(crate)")
-                    || trimmed.starts_with("pub(super)")
-                    || trimmed.starts_with("pub(in")
-                {
-                    // pub(crate), pub(super), and pub(in path) are internal visibility
-                    // They're accessible beyond the immediate scope but not publicly
-                    return Some(Visibility::Internal);
-                } else if trimmed.starts_with("pub(self)") {
-                    // pub(self) is effectively private to the current module
-                    return Some(Visibility::Private);
+            return parse_visibility_modifier(child, source);
+        }
+    }
+
+    // For tuple struct fields: the visibility modifier is a preceding sibling
+    // within the ordered_field_declaration_list, not a child of the type node
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "ordered_field_declaration_list" {
+            // Look for a visibility_modifier that immediately precedes this type node
+            if let Some(prev) = node.prev_sibling() {
+                if prev.kind() == "visibility_modifier" {
+                    return parse_visibility_modifier(prev, source);
                 }
             }
+        }
+    }
+
+    None
+}
+
+/// Parse a visibility_modifier node into a Visibility value
+fn parse_visibility_modifier(node: Node, source: &str) -> Option<Visibility> {
+    if let Ok(text) = node_to_text(node, source) {
+        let trimmed = text.trim();
+        if trimmed == "pub" {
+            return Some(Visibility::Public);
+        } else if trimmed.starts_with("pub(crate)")
+            || trimmed.starts_with("pub(super)")
+            || trimmed.starts_with("pub(in")
+        {
+            // pub(crate), pub(super), and pub(in path) are internal visibility
+            // They're accessible beyond the immediate scope but not publicly
+            return Some(Visibility::Internal);
+        } else if trimmed.starts_with("pub(self)") {
+            // pub(self) is effectively private to the current module
+            return Some(Visibility::Private);
         }
     }
     None

@@ -90,6 +90,11 @@ pub fn extract_with_config(
     while let Some(query_match) = matches.next() {
         // Find the primary capture node
         let Some(main_node) = find_capture_node(query_match, &query, config.capture) else {
+            tracing::trace!(
+                capture = config.capture,
+                entity_rule = config.entity_rule,
+                "Skipping match: capture node not found"
+            );
             continue;
         };
 
@@ -100,6 +105,11 @@ pub fn extract_with_config(
         // The #not-has-child? predicate isn't automatically evaluated by tree-sitter,
         // so we filter manually: inherent impl handlers should skip trait impls.
         if should_skip_match(config, main_node, &captures) {
+            tracing::trace!(
+                entity_rule = config.entity_rule,
+                node_kind = main_node.kind(),
+                "Skipping match: failed implicit predicate check"
+            );
             continue;
         }
 

@@ -409,7 +409,13 @@ pub fn extract_function_calls(
         "rust" => get_rust_call_query(),
         "javascript" => get_js_call_query(),
         "typescript" | "tsx" => get_ts_call_query(),
-        _ => return Vec::new(),
+        _ => {
+            tracing::trace!(
+                language = ctx.language_str,
+                "Function call extraction not supported for language"
+            );
+            return Vec::new();
+        }
     };
 
     let Some(query) = query else {

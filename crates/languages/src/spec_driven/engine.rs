@@ -128,16 +128,24 @@ pub fn extract_with_config(
             components.qualified_name.clone()
         };
 
-        // Derive parent_scope for entities with custom qualified_name templates.
-        // For trait impl methods (e.g., `<Type as Trait>::method`), derive parent from
-        // the qualified name by removing the final `::name` component.
-        // For entities where derivation fails (e.g., impl blocks where qualified_name has
-        // no clear parent component), fall back to the original AST-derived parent_scope.
+        // Derive parent_scope using one of three mechanisms:
+        // 1. If parent_scope_template is provided, use it (for extern items where containment
+        //    differs from qualified name structure)
+        // 2. If qualified_name_template is provided, derive from qualified name structure
+        // 3. Otherwise, use AST-derived parent_scope
         //
         // Note: We use `name` (the simple entity name from name_strategy, e.g., "handle"),
         // not `components.name` which for template strategies may contain the unexpanded
         // template (e.g., "<{impl_type_name} as {trait_name}>").
-        let parent_scope = if config.qualified_name_template.is_some() {
+        let parent_scope = if let Some(template) = config.parent_scope_template {
+            // Use explicit parent_scope template (for extern items, etc.)
+            let expanded = expand_qualified_name_template(template, &captures, &components);
+            if expanded.is_empty() {
+                None
+            } else {
+                Some(expanded)
+            }
+        } else if config.qualified_name_template.is_some() {
             // Try to derive parent from the qualified name structure using the simple name
             derive_parent_from_qualified_name(&qualified_name, &name)
                 // Fall back to original parent_scope if derivation returns None

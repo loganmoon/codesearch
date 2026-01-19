@@ -75,6 +75,14 @@ pub struct HandlerConfig {
 
     /// Override visibility (e.g., Public for trait impl members)
     pub visibility_override: Option<Visibility>,
+
+    /// Optional template for overriding parent_scope derivation.
+    /// Uses placeholders like {scope}, {abi}, etc.
+    /// When set, this template determines the containment relationship parent,
+    /// independent of the qualified_name_template.
+    /// Useful for extern items where the parent should be the extern block but
+    /// the qualified name shouldn't include the extern block path.
+    pub parent_scope_template: Option<&'static str>,
 }
 
 /// Strategy for deriving entity names from query captures

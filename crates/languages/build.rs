@@ -69,6 +69,8 @@ struct HandlerDef {
     #[serde(default)]
     qualified_name_template: Option<String>,
     #[serde(default)]
+    parent_scope_template: Option<String>,
+    #[serde(default)]
     metadata: Option<String>,
     #[serde(default)]
     relationships: Option<String>,
@@ -257,6 +259,16 @@ fn generate_handler_configs(
             writeln!(output, "        visibility_override: {vis_str},")?;
         } else {
             writeln!(output, "        visibility_override: None,")?;
+        }
+
+        if let Some(ref template) = handler.parent_scope_template {
+            writeln!(
+                output,
+                "        parent_scope_template: Some(r#\"{}\"#),",
+                template
+            )?;
+        } else {
+            writeln!(output, "        parent_scope_template: None,")?;
         }
 
         writeln!(output, "    }};")?;

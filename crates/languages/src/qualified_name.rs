@@ -10,6 +10,10 @@ pub struct ScopePattern {
     pub field_name: &'static str,
 }
 
+/// Function type for custom scope name extraction.
+/// Takes (node, source) and returns Option<scope_name>.
+pub type CustomScopeExtractor = fn(Node, &str) -> Option<String>;
+
 /// Function type for deriving module path from file path
 pub type ModulePathFn = fn(&Path, &Path) -> Option<String>;
 
@@ -32,6 +36,10 @@ pub struct ScopeConfiguration {
     /// Optional edge case handlers for language-specific resolution quirks
     pub edge_case_handlers:
         Option<&'static [&'static dyn crate::common::edge_case_handlers::EdgeCaseHandler]>,
+    /// Optional custom scope extractor for nodes not covered by patterns.
+    /// Called for each parent node during scope traversal; returns Some(name) if
+    /// the node contributes to the scope, None otherwise.
+    pub custom_scope_extractor: Option<CustomScopeExtractor>,
 }
 
 inventory::collect!(ScopeConfiguration);
@@ -81,8 +89,8 @@ pub fn build_qualified_name_with_skip(
     // Find configuration for this language via inventory lookup
     let config = inventory::iter::<ScopeConfiguration>().find(|config| config.language == language);
 
-    let (patterns, separator) = match config {
-        Some(cfg) => (cfg.patterns, cfg.separator),
+    let (patterns, separator, custom_extractor) = match config {
+        Some(cfg) => (cfg.patterns, cfg.separator, cfg.custom_scope_extractor),
         None => {
             tracing::warn!(
                 "No ScopeConfiguration registered for language '{language}'. \
@@ -95,6 +103,7 @@ pub fn build_qualified_name_with_skip(
                     "rust" => "::",
                     _ => ".",
                 },
+                None,
             )
         }
     };
@@ -103,7 +112,10 @@ pub fn build_qualified_name_with_skip(
     while let Some(parent) = current.parent() {
         // Skip nodes whose kind is in the skip list
         if !skip_kinds.contains(&parent.kind()) {
-            let scope_name = extract_scope_name_generic(parent, source, patterns);
+            // First try pattern-based extraction
+            let scope_name = extract_scope_name_generic(parent, source, patterns)
+                // Then try custom extractor if patterns didn't match
+                .or_else(|| custom_extractor.and_then(|f| f(parent, source)));
 
             if let Some(name) = scope_name {
                 scope_parts.push(name);

@@ -345,10 +345,12 @@ pub fn resolve_reference(
     // Check if current_module already has the package prefix to avoid duplication.
     // This happens when current_module is derived from a fully qualified name
     // (e.g., "test_crate::use_ufcs" instead of just "use_ufcs").
+    // Use segment-based comparison to avoid brittle string manipulation.
     let module_has_package_prefix = match (ctx.package_name, ctx.current_module) {
         (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
-            module.starts_with(pkg)
-                && (module.len() == pkg.len() || module[pkg.len()..].starts_with(config.separator))
+            let pkg_segments: Vec<&str> = pkg.split(config.separator).collect();
+            let module_segments: Vec<&str> = module.split(config.separator).collect();
+            module_segments.starts_with(&pkg_segments)
         }
         _ => false,
     };

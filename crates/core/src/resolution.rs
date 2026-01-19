@@ -108,6 +108,9 @@ pub mod definitions {
     pub const MODULE_TYPES: &[EntityType] = &[EntityType::Module];
 
     /// CALLS relationship: Function/Method calls other Function/Method
+    ///
+    /// Uses SimpleName as a fallback for method chain resolution where type
+    /// information is not available (e.g., `.name()` in `Builder::new().name()`).
     pub const CALLS: RelationshipDef = RelationshipDef::new(
         "calls",
         CALLABLE_TYPES,
@@ -117,6 +120,7 @@ pub mod definitions {
             LookupStrategy::QualifiedName,
             LookupStrategy::CallAliases,
             LookupStrategy::UniqueSimpleName,
+            LookupStrategy::SimpleName,
         ],
     );
 

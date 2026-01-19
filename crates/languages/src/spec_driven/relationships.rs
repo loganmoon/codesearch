@@ -376,14 +376,26 @@ fn build_source_reference(
     node: Node,
     ref_type: ReferenceType,
 ) -> Option<SourceReference> {
-    SourceReference::builder()
-        .target(target)
-        .simple_name(simple_name)
+    match SourceReference::builder()
+        .target(target.clone())
+        .simple_name(simple_name.clone())
         .is_external(is_external)
         .location(SourceLocation::from_tree_sitter_node(node))
         .ref_type(ref_type)
         .build()
-        .ok()
+    {
+        Ok(source_ref) => Some(source_ref),
+        Err(e) => {
+            tracing::debug!(
+                target = target,
+                simple_name = simple_name,
+                ref_type = ?ref_type,
+                error = %e,
+                "Failed to build SourceReference"
+            );
+            None
+        }
+    }
 }
 
 /// Extract simple name from a potentially qualified name
@@ -409,7 +421,13 @@ pub fn extract_function_calls(
         "rust" => get_rust_call_query(),
         "javascript" => get_js_call_query(),
         "typescript" | "tsx" => get_ts_call_query(),
-        _ => return Vec::new(),
+        _ => {
+            tracing::trace!(
+                language = ctx.language_str,
+                "Function call extraction not supported for language"
+            );
+            return Vec::new();
+        }
     };
 
     let Some(query) = query else {

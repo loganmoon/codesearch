@@ -36,14 +36,16 @@ pub mod relationships;
 use codesearch_core::entities::Visibility;
 
 // Generated code from YAML specs
-// Note: Rust extraction now uses handler-based system (handlers/rust/),
-// so no rust_generated.rs is needed here
 pub mod javascript {
     include!(concat!(env!("OUT_DIR"), "/javascript_generated.rs"));
 }
 
 pub mod typescript {
     include!(concat!(env!("OUT_DIR"), "/typescript_generated.rs"));
+}
+
+pub mod rust {
+    include!(concat!(env!("OUT_DIR"), "/rust_generated.rs"));
 }
 
 /// Configuration for a spec-driven handler

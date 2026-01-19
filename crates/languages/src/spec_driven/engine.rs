@@ -21,9 +21,8 @@ use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
 /// Context for spec-driven extraction
 ///
-/// This context provides all the information needed for spec-driven extraction
-/// without requiring the query_match and query fields that are only used
-/// by the legacy handler-based extraction.
+/// This context provides all the information needed for spec-driven extraction,
+/// including file metadata, language configuration, and import resolution context.
 pub struct SpecDrivenContext<'a> {
     /// Source code being extracted
     pub source: &'a str,
@@ -90,6 +89,11 @@ pub fn extract_with_config(
     while let Some(query_match) = matches.next() {
         // Find the primary capture node
         let Some(main_node) = find_capture_node(query_match, &query, config.capture) else {
+            tracing::trace!(
+                capture = config.capture,
+                entity_rule = config.entity_rule,
+                "Skipping match: capture node not found"
+            );
             continue;
         };
 
@@ -100,6 +104,11 @@ pub fn extract_with_config(
         // The #not-has-child? predicate isn't automatically evaluated by tree-sitter,
         // so we filter manually: inherent impl handlers should skip trait impls.
         if should_skip_match(config, main_node, &captures) {
+            tracing::trace!(
+                entity_rule = config.entity_rule,
+                node_kind = main_node.kind(),
+                "Skipping match: failed implicit predicate check"
+            );
             continue;
         }
 
@@ -180,7 +189,9 @@ pub fn extract_with_config(
                 documentation: extract_documentation(main_node, ctx.source),
                 content: node_to_text(main_node, ctx.source).ok(),
                 metadata,
-                signature: None, // TODO: Extract function signature if applicable
+                // Known limitation: signature extraction not yet implemented.
+                // Function signatures are available via `content` field for now.
+                signature: None,
                 relationships,
             },
         )?;
@@ -848,6 +859,7 @@ fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Opt
         // Most Rust items (functions, structs, modules, etc.) are private by default
         let rust_item_kinds = [
             "function_item",
+            "function_signature_item", // For extern block function declarations
             "struct_item",
             "enum_item",
             "type_item",
@@ -874,14 +886,12 @@ fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Opt
 
 /// Extract JS/TS visibility based on export keyword and access modifiers
 fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
-    // Module (program) nodes are implicitly public (can be imported)
-    if node.kind() == "program" {
-        return Some(Visibility::Public);
-    }
-
-    // Check if this node IS an export_statement
-    if node.kind() == "export_statement" {
-        return Some(Visibility::Public);
+    // First pass: simple node kind matches for implicitly public nodes
+    match node.kind() {
+        // Module (program) nodes are implicitly public (can be imported)
+        // export_statement nodes are explicitly public
+        "program" | "export_statement" => return Some(Visibility::Public),
+        _ => {}
     }
 
     // Check if this node's parent is an export_statement
@@ -918,60 +928,56 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         }
     }
 
-    // Enum members inherit visibility from parent enum (always public within enum)
-    // The captured node can be either:
-    // - property_identifier directly in enum_body (simple enum members)
-    // - enum_assignment (enum members with explicit values)
-    if node.kind() == "enum_assignment" {
-        return Some(Visibility::Public);
-    }
-    if node.kind() == "property_identifier" {
-        if let Some(parent) = node.parent() {
-            if parent.kind() == "enum_body" || parent.kind() == "enum_assignment" {
-                return Some(Visibility::Public);
-            }
-        }
-    }
+    // Second pass: specific entity type visibility rules
+    match node.kind() {
+        // Enum members inherit visibility from parent enum (always public within enum)
+        "enum_assignment" => Some(Visibility::Public),
 
-    // Interface members are always public
-    if node.kind() == "property_signature"
-        || node.kind() == "method_signature"
-        || node.kind() == "call_signature"
-        || node.kind() == "construct_signature"
-        || node.kind() == "index_signature"
-    {
-        return Some(Visibility::Public);
-    }
-
-    // For class members, check for TypeScript accessibility modifiers
-    if node.kind() == "public_field_definition"
-        || node.kind() == "field_definition"
-        || node.kind() == "method_definition"
-    {
-        // Check for accessibility_modifier child (public/private/protected)
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "accessibility_modifier" {
-                // Get the text to determine which modifier
-                if let Some(first_child) = child.child(0) {
-                    return match first_child.kind() {
-                        "private" => Some(Visibility::Private),
-                        "protected" => Some(Visibility::Protected),
-                        "public" => Some(Visibility::Public),
-                        _ => None,
-                    };
+        // property_identifier in enum context is public
+        "property_identifier" => {
+            if let Some(parent) = node.parent() {
+                if matches!(parent.kind(), "enum_body" | "enum_assignment") {
+                    return Some(Visibility::Public);
                 }
             }
-            // Check for # private field syntax
-            if child.kind() == "private_property_identifier" {
-                return Some(Visibility::Private);
-            }
+            None
         }
-        // Default: public for class members without explicit modifier
-        return Some(Visibility::Public);
-    }
 
-    None
+        // Interface members are always public
+        "property_signature"
+        | "method_signature"
+        | "call_signature"
+        | "construct_signature"
+        | "index_signature" => Some(Visibility::Public),
+
+        // Class members: check for TypeScript accessibility modifiers
+        "public_field_definition" | "field_definition" | "method_definition" => {
+            // Check for accessibility_modifier child (public/private/protected)
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                match child.kind() {
+                    "accessibility_modifier" => {
+                        // Get the text to determine which modifier
+                        if let Some(first_child) = child.child(0) {
+                            return match first_child.kind() {
+                                "private" => Some(Visibility::Private),
+                                "protected" => Some(Visibility::Protected),
+                                "public" => Some(Visibility::Public),
+                                _ => None,
+                            };
+                        }
+                    }
+                    // Check for # private field syntax
+                    "private_property_identifier" => return Some(Visibility::Private),
+                    _ => {}
+                }
+            }
+            // Default: public for class members without explicit modifier
+            Some(Visibility::Public)
+        }
+
+        _ => None,
+    }
 }
 
 /// Check if a node is an ambient declaration (has 'declare' modifier)
@@ -1134,7 +1140,8 @@ fn extract_function_metadata(node: Node, _source: &str) -> EntityMetadata {
             }
             "type_parameters" => {
                 metadata.is_generic = true;
-                // TODO: Extract generic params
+                // Known limitation: generic parameter details not extracted.
+                // We track is_generic=true but don't parse individual params yet.
             }
             _ => {}
         }
@@ -1202,7 +1209,8 @@ fn extract_struct_metadata(node: Node, _source: &str) -> EntityMetadata {
         match child.kind() {
             "type_parameters" => {
                 metadata.is_generic = true;
-                // TODO: Extract generic params
+                // Known limitation: generic parameter details not extracted.
+                // We track is_generic=true but don't parse individual params yet.
             }
             "ordered_field_declaration_list" => {
                 metadata
@@ -1241,7 +1249,8 @@ fn extract_enum_metadata(node: Node, _source: &str) -> EntityMetadata {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameters" {
             metadata.is_generic = true;
-            // TODO: Extract generic params
+            // Known limitation: generic parameter details not extracted.
+            // We track is_generic=true but don't parse individual params yet.
         }
     }
 
@@ -1255,7 +1264,8 @@ fn extract_trait_metadata(node: Node, _source: &str) -> EntityMetadata {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameters" {
             metadata.is_generic = true;
-            // TODO: Extract generic params
+            // Known limitation: generic parameter details not extracted.
+            // We track is_generic=true but don't parse individual params yet.
         }
     }
 

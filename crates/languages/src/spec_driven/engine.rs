@@ -21,9 +21,8 @@ use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
 
 /// Context for spec-driven extraction
 ///
-/// This context provides all the information needed for spec-driven extraction
-/// without requiring the query_match and query fields that are only used
-/// by the legacy handler-based extraction.
+/// This context provides all the information needed for spec-driven extraction,
+/// including file metadata, language configuration, and import resolution context.
 pub struct SpecDrivenContext<'a> {
     /// Source code being extracted
     pub source: &'a str,

@@ -1438,6 +1438,7 @@ extraction_hints:
       capture: "type_alias"
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
+      relationships: extract_type_relationships
 
     AssociatedTypeInTraitImpl:
       entity_rule: E-TYPE-ALIAS-ASSOC
@@ -1569,7 +1570,10 @@ fixtures:
     tests: [E-EXTERN-BLOCK, E-EXTERN-FN, E-EXTERN-STATIC, R-CONTAINS-EXTERN-ITEM]
 
   type_aliases:
-    tests: [E-TYPE-ALIAS, M-TYPE-ALIAS-TARGET]
+    tests: [E-TYPE-ALIAS, M-TYPE-ALIAS-TARGET, R-USES-TYPE]
+
+  type_alias_chains:
+    tests: [E-TYPE-ALIAS, R-USES-TYPE]
 
   async_functions:
     tests: [M-FN-ASYNC]

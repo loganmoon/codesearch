@@ -857,6 +857,7 @@ extraction_hints:
           ]
           type: [
             (type_identifier) @impl_type_name
+            (primitive_type) @impl_type_name
             (generic_type
               type: (type_identifier) @impl_type_name
               type_arguments: (type_arguments) @impl_type_args)
@@ -939,6 +940,7 @@ extraction_hints:
           ]
           type: [
             (type_identifier) @impl_type_name
+            (primitive_type) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
             (scoped_type_identifier name: (type_identifier) @impl_type_name)
           ]

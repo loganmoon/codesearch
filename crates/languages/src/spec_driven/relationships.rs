@@ -412,6 +412,11 @@ fn extract_simple_name(name: &str) -> &str {
 // =============================================================================
 
 /// Extract function calls from a node (typically function/method body)
+///
+/// Method calls in chains (e.g., `foo.bar().baz()`) are captured as unresolved
+/// calls with just the method name, since we don't have type information to
+/// determine which type's method is being called. Post-processing can match
+/// these unresolved calls to their implementations.
 pub fn extract_function_calls(
     node: Node,
     ctx: &SpecDrivenContext,
@@ -456,15 +461,29 @@ pub fn extract_function_calls(
             }
             seen.insert(key);
 
-            // Resolve the reference
+            // Check if this is a method call (method_callee capture) vs direct function call (callee capture)
+            // Method calls like `.name()` in a chain can't be resolved without type information,
+            // so we keep them as unresolved calls with just the method name.
+            let capture_name = query.capture_names()[capture.index as usize];
+            let is_method_call = capture_name == "method_callee";
+
             let simple_name = extract_simple_name(callee_text);
-            let resolution_ctx = build_resolution_context(ctx, parent_scope);
-            let resolved = resolve_reference(callee_text, simple_name, &resolution_ctx);
+
+            let (target, is_external) = if is_method_call {
+                // For method calls, keep as unresolved - just the method name
+                // This allows post-processing to match against known methods
+                (simple_name.to_string(), false)
+            } else {
+                // For direct function calls, resolve normally
+                let resolution_ctx = build_resolution_context(ctx, parent_scope);
+                let resolved = resolve_reference(callee_text, simple_name, &resolution_ctx);
+                (resolved.target, resolved.is_external)
+            };
 
             if let Some(source_ref) = build_source_reference(
-                resolved.target,
-                resolved.simple_name,
-                resolved.is_external,
+                target,
+                simple_name.to_string(),
+                is_external,
                 callee_node,
                 ReferenceType::Call,
             ) {

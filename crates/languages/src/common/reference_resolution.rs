@@ -342,9 +342,22 @@ pub fn resolve_reference(
     // 6. Fallback to module-local (package::module::name)
     let mut parts = Vec::new();
 
-    if let Some(pkg) = ctx.package_name {
-        if !pkg.is_empty() {
-            parts.push(pkg.to_string());
+    // Check if current_module already has the package prefix to avoid duplication.
+    // This happens when current_module is derived from a fully qualified name
+    // (e.g., "test_crate::use_ufcs" instead of just "use_ufcs").
+    let module_has_package_prefix = match (ctx.package_name, ctx.current_module) {
+        (Some(pkg), Some(module)) if !pkg.is_empty() && !module.is_empty() => {
+            module.starts_with(pkg)
+                && (module.len() == pkg.len() || module[pkg.len()..].starts_with(config.separator))
+        }
+        _ => false,
+    };
+
+    if !module_has_package_prefix {
+        if let Some(pkg) = ctx.package_name {
+            if !pkg.is_empty() {
+                parts.push(pkg.to_string());
+            }
         }
     }
 
@@ -595,5 +608,39 @@ mod tests {
         assert!(!result
             .target
             .contains("test_crate::Data as test_crate::Processor"));
+    }
+
+    // ========================================================================
+    // Tests for module-local fallback with prefixed current_module
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_module_local_with_prefixed_current_module() {
+        let import_map = ImportMap::new("::");
+        let ctx = make_context(
+            &import_map,
+            None,
+            Some("test_crate"),
+            Some("test_crate::use_ufcs"),
+        );
+        let result = resolve_reference("Data", "Data", &ctx);
+        assert_eq!(result.target, "test_crate::use_ufcs::Data");
+        assert!(!result.is_external);
+    }
+
+    #[test]
+    fn test_resolve_module_local_partial_prefix_no_match() {
+        let import_map = ImportMap::new("::");
+        let ctx = make_context(&import_map, None, Some("test"), Some("testing::module"));
+        let result = resolve_reference("Type", "Type", &ctx);
+        assert_eq!(result.target, "test::testing::module::Type");
+    }
+
+    #[test]
+    fn test_resolve_module_local_module_equals_package() {
+        let import_map = ImportMap::new("::");
+        let ctx = make_context(&import_map, None, Some("test_crate"), Some("test_crate"));
+        let result = resolve_reference("Type", "Type", &ctx);
+        assert_eq!(result.target, "test_crate::Type");
     }
 }

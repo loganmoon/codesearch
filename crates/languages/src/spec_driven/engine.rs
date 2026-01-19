@@ -477,23 +477,27 @@ fn expand_qualified_name_template(
     //
     // Resolution order:
     // 1. If impl_type_path was captured (e.g., `mod::Type`), use path::type_name
-    // 2. If parent_scope already ends with the type name (method context), use scope as-is
-    // 3. Otherwise (impl block context), prepend the module-level scope
-    // 4. If no scope available, use the simple type name
+    // 2. If impl_type_name is a well-known std/primitive type, don't prefix
+    // 3. If parent_scope already ends with the type name (method context), use scope as-is
+    // 4. Otherwise (impl block context), prepend the module-level scope
+    // 5. If no scope available, use the simple type name
     if let Some(impl_type_name) = captures.get("impl_type_name") {
         let qualified_impl_type = if let Some(impl_type_path) = captures.get("impl_type_path") {
             // Case 1: Scoped type like `mod::Type`
             format!("{impl_type_path}::{impl_type_name}")
+        } else if crate::rust::edge_case_handlers::is_std_type(impl_type_name) {
+            // Case 2: Well-known std/primitive type - don't add scope prefix
+            impl_type_name.clone()
         } else if let Some(ref scope) = components.parent_scope {
             if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
-                // Case 2: Method context - scope already is the qualified type name
+                // Case 3: Method context - scope already is the qualified type name
                 scope.clone()
             } else {
-                // Case 3: Impl block context - prepend module scope
+                // Case 4: Impl block context - prepend module scope
                 format!("{scope}::{impl_type_name}")
             }
         } else {
-            // Case 4: No scope available
+            // Case 5: No scope available
             impl_type_name.clone()
         };
         result = result.replace("{impl_type_name}", &qualified_impl_type);

@@ -5,24 +5,13 @@
 use codesearch_core::{error::Result, CodeEntity};
 use std::path::Path;
 
-// Re-export the entity_handler macro for convenience
-pub use codesearch_languages_macros::entity_handler;
-
 // Public language-specific modules (for external use)
 pub mod rust;
 
 // Public modules
 pub mod common;
-pub mod extract_context;
-pub mod handler_registry;
-pub mod predicates;
 pub mod qualified_name;
-pub mod queries;
 pub mod spec_driven;
-
-// Internal modules (used by extractors)
-pub(crate) mod handler_engine;
-pub(crate) mod handlers;
 
 /// Trait for extracting code entities from source files
 pub trait Extractor: Send + Sync {

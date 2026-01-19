@@ -848,6 +848,7 @@ fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Opt
         // Most Rust items (functions, structs, modules, etc.) are private by default
         let rust_item_kinds = [
             "function_item",
+            "function_signature_item", // For extern block function declarations
             "struct_item",
             "enum_item",
             "type_item",

@@ -173,13 +173,21 @@ pub fn extract_with_config(
         // Extract relationships using the configured extractor.
         // For Property entities without explicit relationship extractors, we fall back
         // to ExtractTypeRelationships to capture type annotations as TypeUsage references.
-        let relationships = extract_relationships_with_fallback(
+        let mut relationships = extract_relationships_with_fallback(
             config.relationship_extractor,
             entity_type,
             main_node,
             ctx,
             Some(components.qualified_name.as_str()),
         );
+
+        // For Rust trait impl methods, generate call aliases for UFCS resolution.
+        // This allows `Type::method` to resolve to `<Type as Trait>::method`.
+        if ctx.language_str == "rust" && entity_type == EntityType::Method {
+            if let Some(alias) = generate_ufcs_call_alias(&components.qualified_name) {
+                relationships.call_aliases.push(alias);
+            }
+        }
 
         // Determine visibility
         let visibility = config
@@ -888,6 +896,32 @@ fn extract_relationships(
     };
 
     super::relationships::extract_relationships(extractor, node, ctx, parent_scope)
+}
+
+/// Generate a call alias for UFCS-formatted qualified names
+///
+/// For qualified names in UFCS format like `<crate::Type as crate::Trait>::method`,
+/// generates an alias like `crate::Type::method` to enable resolution when
+/// the caller uses the type-qualified form.
+///
+/// Returns `None` if the qualified name is not in UFCS format.
+fn generate_ufcs_call_alias(qualified_name: &str) -> Option<String> {
+    // Check if this is UFCS format: starts with '<' and contains '>::'
+    if !qualified_name.starts_with('<') {
+        return None;
+    }
+
+    // Parse UFCS format: <Type as Trait>::method
+    // Find the position of " as " to extract the type
+    let as_pos = qualified_name.find(" as ")?;
+    let type_name = &qualified_name[1..as_pos]; // Skip leading '<'
+
+    // Find the position of '>::' to extract the method name
+    let method_separator = qualified_name.find(">::")?;
+    let method_name = &qualified_name[method_separator + 3..]; // Skip '>::'
+
+    // Construct alias: Type::method
+    Some(format!("{type_name}::{method_name}"))
 }
 
 /// Extract relationships, with automatic fallback for Property entities.

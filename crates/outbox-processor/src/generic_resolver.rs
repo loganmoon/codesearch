@@ -49,8 +49,9 @@ struct TargetLookupMaps {
     call_alias: HashMap<String, String>,
     /// Simple name -> entity_id (only for unique names)
     unique_simple_name: HashMap<String, String>,
-    /// Simple name -> all entity_ids (for uniqueness check)
-    all_simple_names: HashMap<String, Vec<String>>,
+    /// Simple name -> (qualified_name, entity_id) pairs
+    /// The qualified_name is used to prefer trait methods over impl methods
+    all_simple_names: HashMap<String, Vec<(String, String)>>,
 }
 
 /// Trait for extracting relationship target references from entities
@@ -243,7 +244,7 @@ impl GenericResolver {
         let mut path_id_map = HashMap::new();
         let mut call_alias_map = HashMap::new();
         let mut simple_name_map = HashMap::new();
-        let mut simple_name_counts: HashMap<String, Vec<String>> = HashMap::new();
+        let mut simple_name_counts: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
         // Collect all target entities based on target_types
         let target_entities: Vec<&CodeEntity> = cache
@@ -279,6 +280,7 @@ impl GenericResolver {
             }
 
             // Track simple names for SimpleName/UniqueSimpleName strategies
+            // Store (qualified_name, entity_id) tuples to enable preferring trait methods
             if self
                 .def
                 .lookup_strategies
@@ -291,14 +293,14 @@ impl GenericResolver {
                 simple_name_counts
                     .entry(entity.name.clone())
                     .or_default()
-                    .push(entity.entity_id.clone());
+                    .push((entity.qualified_name.to_string(), entity.entity_id.clone()));
             }
         }
 
         // Build simple_name_map: only include entries with exactly one entity for UniqueSimpleName
-        for (name, ids) in &simple_name_counts {
-            if ids.len() == 1 {
-                simple_name_map.insert(name.clone(), ids[0].clone());
+        for (name, entries) in &simple_name_counts {
+            if entries.len() == 1 {
+                simple_name_map.insert(name.clone(), entries[0].1.clone());
             }
         }
 
@@ -349,17 +351,35 @@ impl GenericResolver {
                 }
                 LookupStrategy::SimpleName => {
                     // Use pre-computed simple_name from ExtractedRef
-                    if let Some(ids) = maps.all_simple_names.get(&ext_ref.simple_name) {
-                        if !ids.is_empty() {
-                            if ids.len() > 1 {
+                    // entries are (qualified_name, entity_id) tuples
+                    if let Some(entries) = maps.all_simple_names.get(&ext_ref.simple_name) {
+                        if !entries.is_empty() {
+                            if entries.len() > 1 {
+                                // When multiple entities share a simple name, prefer:
+                                // 1. Trait method definitions (non-UFCS format like "crate::Trait::method")
+                                // 2. Over impl methods (UFCS format like "<Type as Trait>::method")
+                                // This handles generic trait bound resolution where we want the
+                                // trait definition rather than a specific impl.
+                                for (qname, entity_id) in entries {
+                                    // Trait definitions don't start with '<' (which indicates UFCS/impl format)
+                                    if !qname.starts_with('<') {
+                                        trace!(
+                                            "  [SimpleName] preferring trait method {} over {} candidates",
+                                            qname,
+                                            entries.len()
+                                        );
+                                        return Some(entity_id.clone());
+                                    }
+                                }
+                                // Fall back to first match if no trait method found
                                 warn!(
                                     "  [SimpleName] ambiguous match for {}: {} candidates",
                                     target,
-                                    ids.len()
+                                    entries.len()
                                 );
                             }
-                            trace!("  [SimpleName] resolved {} -> {}", target, &ids[0]);
-                            return Some(ids[0].clone());
+                            trace!("  [SimpleName] resolved {} -> {}", target, &entries[0].0);
+                            return Some(entries[0].1.clone());
                         }
                     }
                 }

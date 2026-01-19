@@ -14,7 +14,7 @@
 #
 # Reference: https://doc.rust-lang.org/reference/
 #
-# Last validated against Rust Reference: 2025-12-31
+# Last validated against Rust Reference: 2025-01-19
 
 version: "1.0"
 language: rust

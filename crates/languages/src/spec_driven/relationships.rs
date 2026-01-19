@@ -399,7 +399,14 @@ fn build_source_reference(
 }
 
 /// Extract simple name from a potentially qualified name
+///
+/// Handles:
+/// - Qualified paths with `::` or `.` separators
+/// - Generic types by stripping `<...>` suffixes
 fn extract_simple_name(name: &str) -> &str {
+    // First strip generic parameters if present
+    let name = name.split('<').next().unwrap_or(name);
+
     // Handle both Rust (::) and JS (.) separators
     name.rsplit("::")
         .next()
@@ -841,9 +848,11 @@ pub fn extract_impl_trait_reference(
                     "Trait node found but text is empty"
                 );
             } else {
-                let simple_name = extract_simple_name(type_text);
+                // Strip generic parameters for resolution (e.g., Transformer<String, i32> -> Transformer)
+                let type_name = type_text.split('<').next().unwrap_or(type_text);
+                let simple_name = extract_simple_name(type_name);
                 let resolution_ctx = build_resolution_context(ctx, parent_scope);
-                let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+                let resolved = resolve_reference(type_name, simple_name, &resolution_ctx);
                 if let Some(source_ref) = build_source_reference(
                     resolved.target,
                     resolved.simple_name,

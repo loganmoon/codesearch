@@ -17,7 +17,7 @@ use codesearch_core::CodeEntity;
 use std::collections::HashMap;
 use std::path::Path;
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Node, Query, QueryCursor, QueryMatch};
+use tree_sitter::{Node, Query, QueryCursor, QueryMatch, QueryPredicateArg};
 
 /// Context for spec-driven extraction
 ///
@@ -100,14 +100,13 @@ pub fn extract_with_config(
         // Extract capture values for template expansion
         let captures = extract_capture_values(query_match, &query, ctx.source);
 
-        // Skip matches that don't satisfy implicit predicates.
-        // The #not-has-child? predicate isn't automatically evaluated by tree-sitter,
-        // so we filter manually: inherent impl handlers should skip trait impls.
-        if should_skip_match(config, main_node, &captures) {
+        // Evaluate custom predicates (e.g., #not-has-child?, #not-has-ancestor?)
+        // These are not evaluated automatically by tree-sitter
+        if !evaluate_custom_predicates(&query, query_match, config, &captures) {
             tracing::trace!(
                 entity_rule = config.entity_rule,
                 node_kind = main_node.kind(),
-                "Skipping match: failed implicit predicate check"
+                "Skipping match: custom predicate not satisfied"
             );
             continue;
         }
@@ -592,73 +591,164 @@ fn derive_parent_from_qualified_name(qualified_name: &str, entity_name: &str) ->
     None
 }
 
-/// Determine if a query match should be skipped based on implicit predicates.
+/// Evaluate custom predicates for a query match.
 ///
-/// Handles four cases:
-/// 1. `#not-has-child? @impl trait` - inherent impl handlers should skip trait impls
-/// 2. `#not-has-child? @params self_parameter` - associated function handlers should skip methods
-/// 3. `#not-has-ancestor? @function impl_item` - free functions should skip functions in impl blocks
-/// 4. Queries expecting specific captures (like `trait_name`) that weren't matched
-fn should_skip_match(
+/// Tree-sitter's built-in predicates (`#eq?`, `#match?`, etc.) are evaluated automatically,
+/// but custom predicates like `#not-has-child?` and `#not-has-ancestor?` need manual evaluation.
+///
+/// Supported custom predicates:
+/// - `#not-has-child? @capture field_name` - node must NOT have a child with the given field name
+/// - `#not-has-ancestor? @capture node_kind` - node must NOT have an ancestor of the given kind
+fn evaluate_custom_predicates(
+    query: &Query,
+    query_match: &QueryMatch,
     config: &HandlerConfig,
-    main_node: Node,
     captures: &HashMap<String, String>,
 ) -> bool {
-    // For Rust: inherent impl handlers should skip trait impls.
-    // The queries use (#not-has-child? @impl trait) but this isn't evaluated automatically.
-    // Instead, we check: if this is an inherent impl query but we captured a trait_name,
-    // it means this is actually a trait impl and should be skipped.
-    if config.query.contains("#not-has-child?") && config.query.contains("trait") {
-        // This query expects NO trait field on the impl_item.
-        // main_node might be a nested node (e.g., the method), so we need to find
-        // the impl_item ancestor and check if IT has a trait field.
-        if let Some(impl_node) = find_ancestor_of_kind(main_node, "impl_item") {
-            if impl_node.child_by_field_name("trait").is_some() {
-                return true;
-            }
-        }
-    }
+    let pattern_index = query_match.pattern_index;
+    let predicates = query.general_predicates(pattern_index);
 
-    // For Rust: handle #not-has-child? @params self_parameter predicates.
-    // Queries expect functions WITHOUT self parameter. Tree-sitter doesn't
-    // evaluate this predicate automatically, so we check manually.
-    // Note: We check for the specific predicate pattern to avoid false matches on queries
-    // that merely contain "self_parameter" as a capture (like METHOD_IN_INHERENT_IMPL).
-    if config.query.contains("#not-has-child?")
-        && config.query.contains("self_parameter")
-        && config.query.contains("@params")
-    {
-        let func_node = if main_node.kind() == "function_item" {
-            Some(main_node)
-        } else {
-            find_ancestor_of_kind(main_node, "function_item")
-        };
+    for predicate in predicates {
+        let operator = predicate.operator.as_ref();
 
-        if let Some(func) = func_node {
-            if let Some(params_node) = func.child_by_field_name("parameters") {
-                if has_self_parameter(params_node) {
-                    return true; // Skip: function has self_parameter but query expects none
+        match operator {
+            "not-has-child?" => {
+                if !evaluate_not_has_child(predicate.args.as_ref(), query, query_match) {
+                    return false;
                 }
             }
+            "not-has-ancestor?" => {
+                if !evaluate_not_has_ancestor(predicate.args.as_ref(), query, query_match) {
+                    return false;
+                }
+            }
+            // Ignore other predicates (they may be handled elsewhere or be informational)
+            _ => {}
         }
     }
 
-    // For Rust: handle #not-has-ancestor? predicates.
-    // Free function handlers should skip functions inside impl blocks.
-    if config.query.contains("#not-has-ancestor?")
-        && config.query.contains("impl_item")
-        && find_ancestor_of_kind(main_node, "impl_item").is_some()
-    {
-        return true; // Skip: function is inside impl_item but query expects it not to be
+    // Additional check: handlers that expect a trait_name capture but didn't get one
+    // This handles cases where the query has alternative patterns and only some match
+    if config.query.contains("trait:") && !captures.contains_key("trait_name") {
+        return false;
     }
 
-    // For handlers that expect a trait_name but didn't capture one
-    if config.query.contains("trait:") && !captures.contains_key("trait_name") {
-        // Trait impl query that didn't match the trait capture
+    true
+}
+
+/// Evaluate `#not-has-child? @capture child_spec` predicate.
+///
+/// The child_spec can be either:
+/// - A field name (e.g., "trait") - checks `node.child_by_field_name()`
+/// - A node kind (e.g., "self_parameter") - checks for any child of that kind
+///
+/// Returns true if the captured node does NOT have the specified child.
+fn evaluate_not_has_child(
+    args: &[QueryPredicateArg],
+    _query: &Query,
+    query_match: &QueryMatch,
+) -> bool {
+    // Expected: [Capture(index), String(child_spec)]
+    if args.len() != 2 {
+        tracing::warn!(
+            "not-has-child? predicate expects 2 arguments, got {}",
+            args.len()
+        );
+        return true; // Don't filter on malformed predicates
+    }
+
+    let capture_index = match &args[0] {
+        QueryPredicateArg::Capture(idx) => *idx,
+        _ => {
+            tracing::warn!("not-has-child? first argument must be a capture");
+            return true;
+        }
+    };
+
+    let child_spec = match &args[1] {
+        QueryPredicateArg::String(s) => s.as_ref(),
+        _ => {
+            tracing::warn!("not-has-child? second argument must be a string");
+            return true;
+        }
+    };
+
+    // Find the captured node
+    let Some(node) = query_match
+        .captures
+        .iter()
+        .find(|c| c.index == capture_index)
+        .map(|c| c.node)
+    else {
+        // Capture not found in this match - this can happen with alternative patterns
+        return true;
+    };
+
+    // First try as a field name (e.g., "trait" field on impl_item)
+    if node.child_by_field_name(child_spec).is_some() {
+        return false; // Has the child field, predicate NOT satisfied
+    }
+
+    // Then check for any child of the specified node kind (e.g., "self_parameter")
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == child_spec {
+            return false; // Has a child of the specified kind, predicate NOT satisfied
+        }
+    }
+
+    // Node does NOT have the specified child
+    true
+}
+
+/// Evaluate `#not-has-ancestor? @capture node_kind` predicate.
+///
+/// Returns true if the captured node does NOT have an ancestor of the specified kind.
+fn evaluate_not_has_ancestor(
+    args: &[QueryPredicateArg],
+    _query: &Query,
+    query_match: &QueryMatch,
+) -> bool {
+    // Expected: [Capture(index), String(node_kind)]
+    if args.len() != 2 {
+        tracing::warn!(
+            "not-has-ancestor? predicate expects 2 arguments, got {}",
+            args.len()
+        );
         return true;
     }
 
-    false
+    let capture_index = match &args[0] {
+        QueryPredicateArg::Capture(idx) => *idx,
+        _ => {
+            tracing::warn!("not-has-ancestor? first argument must be a capture");
+            return true;
+        }
+    };
+
+    let node_kind = match &args[1] {
+        QueryPredicateArg::String(s) => s.as_ref(),
+        _ => {
+            tracing::warn!("not-has-ancestor? second argument must be a string");
+            return true;
+        }
+    };
+
+    // Find the captured node
+    let Some(node) = query_match
+        .captures
+        .iter()
+        .find(|c| c.index == capture_index)
+        .map(|c| c.node)
+    else {
+        return true;
+    };
+
+    // Check if any ancestor has the specified kind
+    let has_ancestor = find_ancestor_of_kind(node, node_kind).is_some();
+
+    // Return true if the node does NOT have the ancestor (predicate satisfied)
+    !has_ancestor
 }
 
 /// Find an ancestor node of a specific kind
@@ -671,17 +761,6 @@ fn find_ancestor_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
         current = parent;
     }
     None
-}
-
-/// Check if a parameters node contains a self_parameter child
-fn has_self_parameter(params_node: Node) -> bool {
-    let mut cursor = params_node.walk();
-    for child in params_node.children(&mut cursor) {
-        if child.kind() == "self_parameter" {
-            return true;
-        }
-    }
-    false
 }
 
 /// Compute the positional index of a node among its same-kind siblings

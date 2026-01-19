@@ -104,11 +104,15 @@ impl EdgeCaseHandler for UfcsHandler {
 
         // Create resolution context for nested resolution
         // Note: edge_case_handlers is None to avoid infinite recursion
+        // Note: current_module is None because types/traits are defined at module level,
+        // not inside functions. When called from a function body, ctx.current_module
+        // would be the function's FQN (e.g., "test_crate::use_ufcs"), but type names
+        // should resolve to module-level scope (e.g., "test_crate::Data").
         let resolution_ctx = ResolutionContext {
             import_map: ctx.import_map,
             parent_scope: None, // Type/trait names, not methods
             package_name: ctx.package_name,
-            current_module: ctx.current_module,
+            current_module: None,
             path_config: ctx.path_config,
             edge_case_handlers: None,
         };

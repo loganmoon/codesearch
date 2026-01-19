@@ -1161,6 +1161,8 @@ extraction_hints:
       capture: "function"
       query: |
         (foreign_mod_item
+          (extern_modifier
+            (string_literal)? @abi)
           body: (declaration_list
             (function_signature_item
               name: (identifier) @name
@@ -1172,6 +1174,8 @@ extraction_hints:
       capture: "static"
       query: |
         (foreign_mod_item
+          (extern_modifier
+            (string_literal)? @abi)
           body: (declaration_list
             (static_item
               name: (identifier) @name
@@ -1491,6 +1495,7 @@ extraction_hints:
       capture: "function"
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
+      parent_scope_template: '{scope}::extern {abi}'
       # visibility_override removed - use actual visibility from source
 
     ExternStatic:
@@ -1499,6 +1504,7 @@ extraction_hints:
       capture: "static"
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
+      parent_scope_template: '{scope}::extern {abi}'
       # visibility_override removed - use actual visibility from source
 
     # --- Macro handlers ---

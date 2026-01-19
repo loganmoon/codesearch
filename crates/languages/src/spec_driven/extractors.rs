@@ -57,6 +57,7 @@ inventory::submit! {
         module_path_fn: Some(rust_module_path::derive_module_path),
         path_config: &CRATE_BASED_PATH_CONFIG,
         edge_case_handlers: Some(RUST_EDGE_CASE_HANDLERS),
+        custom_scope_extractor: None,
     }
 }
 
@@ -68,6 +69,7 @@ inventory::submit! {
         module_path_fn: Some(js_module_path::derive_module_path),
         path_config: &MODULE_BASED_PATH_CONFIG,
         edge_case_handlers: None,
+        custom_scope_extractor: None,
     }
 }
 
@@ -79,6 +81,7 @@ inventory::submit! {
         module_path_fn: Some(js_module_path::derive_module_path),
         path_config: &MODULE_BASED_PATH_CONFIG,
         edge_case_handlers: None,
+        custom_scope_extractor: None,
     }
 }
 
@@ -90,6 +93,7 @@ inventory::submit! {
         module_path_fn: Some(js_module_path::derive_module_path),
         path_config: &MODULE_BASED_PATH_CONFIG,
         edge_case_handlers: None,
+        custom_scope_extractor: None,
     }
 }
 

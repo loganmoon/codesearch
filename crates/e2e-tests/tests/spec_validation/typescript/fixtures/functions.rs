@@ -127,7 +127,7 @@ const result = (function initialize(): number {
         ExpectedEntity {
             kind: EntityKind::Function,
             qualified_name: "handlers.initialize",
-            visibility: Some(Visibility::Private),
+            visibility: None, // IIFEs are expressions, not declarations, so no visibility
         },
     ],
     relationships: &[],

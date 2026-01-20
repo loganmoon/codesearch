@@ -93,7 +93,8 @@ pub struct SearchFilters {
 pub struct EmbeddedEntity {
     pub entity: CodeEntity,
     pub dense_embedding: Vec<f32>,
-    pub sparse_embedding: Vec<(u32, f32)>,
+    /// Sparse embedding is optional - not all embedding models produce sparse vectors
+    pub sparse_embedding: Option<Vec<(u32, f32)>>,
     pub bm25_token_count: usize,
     pub qdrant_point_id: Uuid,
 }

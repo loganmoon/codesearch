@@ -254,8 +254,7 @@ impl Debug for MyType {
         // Blanket impl creates an impl block with generic parameter in name
         ExpectedEntity {
             kind: EntityKind::ImplBlock,
-            qualified_name:
-                "<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
+            qualified_name: "<test_crate::T as test_crate::Printable where T: test_crate::Debug>",
             visibility: None,
         },
         // Concrete impl for MyType

@@ -1254,8 +1254,11 @@ extraction_hints:
       description: "Index signatures in interfaces"
       capture: "index_signature"
       query: |
+        ;; Index signatures: [param: KeyType]: ValueType
+        ;; The key type is directly after the parameter name, before the type_annotation
         (interface_body
-          (index_signature) @index_signature)
+          (index_signature
+            [(predefined_type) (type_identifier)] @key_type) @index_signature)
 
     # --- Type alias queries ---
 
@@ -1576,6 +1579,15 @@ extraction_hints:
               body: (statement_block) @body)
           ] @value) @function
 
+        ;; IIFE: (function name() {})() - works for both typed and untyped
+        (call_expression
+          function: (parenthesized_expression
+            (function_expression
+              name: (identifier) @fn_name
+              parameters: (formal_parameters) @params
+              return_type: (type_annotation)?
+              body: (statement_block) @body) @value)) @function
+
     CONST:
       description: "Const declarations (excluding functions)"
       capture: "const"
@@ -1605,6 +1617,28 @@ extraction_hints:
                 value: (_) @value))) @const
           (#not-match? @value "^(function|async function|async\\s*<|\\(|<|\\w+\\s*=>)")
         )
+
+        ; Destructured object patterns: const { apiUrl, timeout } = CONFIG
+        (lexical_declaration
+          kind: "const"
+          (variable_declarator
+            name: (object_pattern
+              (shorthand_property_identifier_pattern) @name))) @const
+
+        ; Destructured object patterns with renaming: const { original: renamed } = obj
+        (lexical_declaration
+          kind: "const"
+          (variable_declarator
+            name: (object_pattern
+              (pair_pattern
+                value: (identifier) @name)))) @const
+
+        ; Destructured array patterns: const [first, second] = arr
+        (lexical_declaration
+          kind: "const"
+          (variable_declarator
+            name: (array_pattern
+              (identifier) @name))) @const
 
     LET:
       description: "Let declarations"
@@ -1737,7 +1771,7 @@ extraction_hints:
       query: TS_CLASS_EXPRESSION
       capture: "class"
       name_strategy: fallback
-      name_captures: ["name", "class_name"]
+      name_captures: ["class_name", "name"]
       relationships: extract_class_relationships
 
     MethodDefinition:
@@ -1808,8 +1842,8 @@ extraction_hints:
       entity_rule: E-INTERFACE-INDEX-SIG
       query: INDEX_SIGNATURE
       capture: "index_signature"
-      name_strategy: static
-      static_name: "[index]"
+      name_strategy: template
+      name_template: "[{key_type}]"
       visibility_override: Public
 
     # --- Type alias handlers ---

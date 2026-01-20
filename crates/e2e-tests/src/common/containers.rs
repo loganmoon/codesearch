@@ -1,8 +1,6 @@
 //! Container management for E2E tests
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -20,66 +18,6 @@ static SHARED_POSTGRES: OnceLock<TokioMutex<Weak<TestPostgres>>> = OnceLock::new
 
 /// Global shared Neo4j instance (drops when last Arc is dropped)
 static SHARED_NEO4J: OnceLock<TokioMutex<Weak<TestNeo4j>>> = OnceLock::new();
-
-/// Stores the result of building the outbox image (success or error message)
-/// Using OnceLock<Result> avoids poisoning that happens with Once + panic
-static BUILD_OUTBOX_IMAGE_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
-
-/// Build the outbox_processor Docker image if it doesn't exist
-///
-/// This is called automatically by TestOutboxProcessor::start()
-/// Uses OnceLock<Result> pattern to avoid poisoning on failure.
-fn ensure_outbox_image_built() -> Result<()> {
-    let result = BUILD_OUTBOX_IMAGE_RESULT.get_or_init(|| {
-        // Use env!() for compile-time resolution (runtime env var may not be set)
-        // CARGO_MANIFEST_DIR = crates/e2e-tests
-        // parent = crates/
-        // parent.parent = workspace root
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-
-        let workspace_root = manifest_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| "e2e-tests crate should be in crates/ directory".to_string())?;
-
-        let dockerfile_path = workspace_root.join("Dockerfile.outbox-processor");
-
-        // Verify Dockerfile exists before trying to build
-        if !dockerfile_path.exists() {
-            return Err(format!(
-                "Dockerfile.outbox-processor not found at: {}\nWorkspace root: {}\nManifest dir: {}",
-                dockerfile_path.display(),
-                workspace_root.display(),
-                manifest_dir.display()
-            ));
-        }
-
-        let output = Command::new("docker")
-            .args([
-                "build",
-                "-t",
-                "codesearch-outbox:test",
-                "-f",
-                "Dockerfile.outbox-processor",
-                ".",
-            ])
-            .current_dir(workspace_root)
-            .output()
-            .map_err(|e| format!("Failed to execute docker build: {e}"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Docker build failed: {stderr}"));
-        }
-
-        Ok(())
-    });
-
-    result
-        .as_ref()
-        .map(|_| ())
-        .map_err(|e| anyhow::anyhow!("{e}"))
-}
 
 /// Test Postgres container using testcontainers-rs
 pub struct TestPostgres {
@@ -247,6 +185,29 @@ pub async fn drop_test_collection(qdrant: &Arc<TestQdrant>, collection_name: &st
     Ok(())
 }
 
+/// Clean up test data from Neo4j by repository_id
+///
+/// Deletes all nodes with the given repository_id to clean up after a test
+/// while keeping the container running for other tests.
+pub async fn drop_test_neo4j_data(neo4j: &Arc<TestNeo4j>, repository_id: &str) -> Result<()> {
+    use neo4rs::{query, Graph};
+
+    let graph = Graph::new(neo4j.bolt_url(), "", "")
+        .await
+        .context("Failed to connect to Neo4j for cleanup")?;
+
+    // Delete all nodes with this repository_id and their relationships
+    graph
+        .run(
+            query("MATCH (n {repository_id: $repository_id}) DETACH DELETE n")
+                .param("repository_id", repository_id),
+        )
+        .await
+        .context("Failed to delete Neo4j nodes for repository")?;
+
+    Ok(())
+}
+
 /// Test Qdrant container using testcontainers-rs
 pub struct TestQdrant {
     container: ContainerAsync<GenericImage>,
@@ -257,7 +218,7 @@ pub struct TestQdrant {
 impl TestQdrant {
     /// Start a new Qdrant instance
     pub async fn start() -> Result<Self> {
-        let container = GenericImage::new("qdrant/qdrant", "latest-unprivileged")
+        let container = GenericImage::new("qdrant/qdrant", "v1.16.0-unprivileged")
             .with_exposed_port(ContainerPort::Tcp(6333))
             .with_exposed_port(ContainerPort::Tcp(6334))
             .with_wait_for(WaitFor::message_on_stdout("Qdrant gRPC listening"))
@@ -382,167 +343,14 @@ pub async fn get_shared_neo4j() -> Result<Arc<TestNeo4j>> {
     }
 }
 
-/// Test Outbox Processor instance running as a container
-pub struct TestOutboxProcessor {
-    container_id: String,
-    container_name: String,
-}
-
-impl TestOutboxProcessor {
-    /// Start a new outbox processor instance
-    ///
-    /// Connects to the provided Postgres and Qdrant instances.
-    ///
-    /// This uses a Docker container built from Dockerfile.outbox-processor
-    /// Collection names are read from the database (entity_outbox.collection_name column)
-    pub fn start(
-        postgres: &Arc<TestPostgres>,
-        qdrant: &Arc<TestQdrant>,
-        db_name: &str,
-    ) -> Result<Self> {
-        Self::start_with_neo4j(postgres, qdrant, None, db_name)
-    }
-
-    /// Start a new outbox processor instance with Neo4j support
-    ///
-    /// Connects to the provided Postgres, Qdrant, and optionally Neo4j instances.
-    ///
-    /// This uses a Docker container built from Dockerfile.outbox-processor
-    /// Collection names are read from the database (entity_outbox.collection_name column)
-    pub fn start_with_neo4j(
-        postgres: &Arc<TestPostgres>,
-        qdrant: &Arc<TestQdrant>,
-        neo4j: Option<&Arc<TestNeo4j>>,
-        db_name: &str,
-    ) -> Result<Self> {
-        // Ensure the Docker image is built (thread-safe, happens only once)
-        ensure_outbox_image_built()?;
-
-        let container_name = format!("outbox-processor-test-{}", Uuid::new_v4());
-
-        // On Linux, use --network host to access localhost services
-        // On macOS/Windows, use host.docker.internal
-        let mut cmd = Command::new("docker");
-        cmd.args(["run", "-d", "--name", &container_name]);
-
-        let host = if cfg!(target_os = "linux") {
-            cmd.arg("--network").arg("host");
-            "localhost"
-        } else {
-            cmd.arg("--add-host")
-                .arg("host.docker.internal:host-gateway");
-            "host.docker.internal"
-        };
-
-        cmd.arg("-e")
-            .arg(format!("POSTGRES_HOST={host}"))
-            .arg("-e")
-            .arg(format!("POSTGRES_PORT={}", postgres.port()))
-            .arg("-e")
-            .arg(format!("POSTGRES_DATABASE={db_name}"))
-            .arg("-e")
-            .arg("POSTGRES_USER=codesearch")
-            .arg("-e")
-            .arg("POSTGRES_PASSWORD=codesearch")
-            .arg("-e")
-            .arg(format!("QDRANT_HOST={host}"))
-            .arg("-e")
-            .arg(format!("QDRANT_PORT={}", qdrant.port()))
-            .arg("-e")
-            .arg(format!("QDRANT_REST_PORT={}", qdrant.rest_port()));
-
-        // Add Neo4j configuration if provided
-        if let Some(neo4j) = neo4j {
-            cmd.arg("-e")
-                .arg(format!("NEO4J_HOST={host}"))
-                .arg("-e")
-                .arg(format!("NEO4J_BOLT_PORT={}", neo4j.bolt_port()))
-                .arg("-e")
-                .arg(format!("NEO4J_HTTP_PORT={}", neo4j.http_port()))
-                .arg("-e")
-                .arg("NEO4J_USER=neo4j")
-                .arg("-e")
-                .arg("NEO4J_PASSWORD=");
-        }
-
-        cmd.arg("-e")
-            .arg("RUST_LOG=debug")
-            .arg("codesearch-outbox:test");
-
-        let output = cmd
-            .output()
-            .context("Failed to start outbox processor container")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up container if it was created
-            let _ = Command::new("docker")
-                .args(["rm", "-f", &container_name])
-                .output();
-            return Err(anyhow::anyhow!(
-                "Failed to start outbox processor container: {stderr}"
-            ));
-        }
-
-        let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-        Ok(Self {
-            container_id,
-            container_name,
-        })
-    }
-
-    /// Get container logs for debugging
-    pub fn get_logs(&self) -> String {
-        let output = Command::new("docker")
-            .args(["logs", "--tail", "100", &self.container_id])
-            .output();
-
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                format!("STDOUT:\n{stdout}\n\nSTDERR:\n{stderr}")
-            }
-            Err(e) => format!("Failed to get logs: {e}"),
-        }
-    }
-
-    /// Stop the outbox processor
-    fn cleanup(&self) {
-        // Stop container
-        let _ = Command::new("docker")
-            .args(["stop", &self.container_name])
-            .output();
-
-        // Remove container
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &self.container_name])
-            .output();
-    }
-}
-
 /// Wait for the outbox table to be empty (all entries processed)
 ///
-/// Polls the outbox table every 100ms until all unprocessed entries are gone
+/// Polls the outbox table with adaptive intervals until all unprocessed entries are gone
 /// or the timeout is reached.
 pub async fn wait_for_outbox_empty(
     postgres: &Arc<TestPostgres>,
     db_name: &str,
     timeout: Duration,
-) -> Result<()> {
-    wait_for_outbox_empty_with_processor(postgres, db_name, timeout, None).await
-}
-
-/// Wait for the outbox table to be empty, with optional processor for debugging
-///
-/// Uses adaptive polling: starts with fast polling (50ms) and gradually backs off
-/// to slower intervals (500ms max) to optimize for both fast response and low overhead.
-async fn wait_for_outbox_empty_with_processor(
-    postgres: &Arc<TestPostgres>,
-    db_name: &str,
-    timeout: Duration,
-    processor: Option<&TestOutboxProcessor>,
 ) -> Result<()> {
     use sqlx::PgPool;
 
@@ -581,14 +389,6 @@ async fn wait_for_outbox_empty_with_processor(
 
         if start.elapsed() >= timeout {
             pool.close().await;
-
-            // Dump processor logs if available for debugging
-            if let Some(proc) = processor {
-                eprintln!("\n=== OUTBOX PROCESSOR LOGS ===");
-                eprintln!("{}", proc.get_logs());
-                eprintln!("=== END PROCESSOR LOGS ===\n");
-            }
-
             return Err(anyhow::anyhow!(
                 "Timeout waiting for outbox to be empty. {count} unprocessed entries remain after {timeout:?}"
             ));
@@ -601,67 +401,6 @@ async fn wait_for_outbox_empty_with_processor(
             interval_idx += 1;
         }
     }
-}
-
-/// Start an outbox processor and wait for it to sync all pending entries
-///
-/// This is a convenience function that starts the processor and waits for
-/// the outbox table to be empty with a 15-second timeout using adaptive polling.
-/// No fixed sleep is needed - adaptive polling handles varying startup times efficiently.
-pub async fn start_and_wait_for_outbox_sync(
-    postgres: &Arc<TestPostgres>,
-    qdrant: &Arc<TestQdrant>,
-) -> Result<TestOutboxProcessor> {
-    // Use default database name for backward compatibility
-    start_and_wait_for_outbox_sync_with_db(postgres, qdrant, "codesearch").await
-}
-
-/// Start an outbox processor and wait for it to sync all pending entries (with custom database)
-///
-/// This variant allows specifying a custom database name for database isolation.
-/// Uses adaptive polling (50ms -> 500ms) to efficiently handle varying processor startup times.
-pub async fn start_and_wait_for_outbox_sync_with_db(
-    postgres: &Arc<TestPostgres>,
-    qdrant: &Arc<TestQdrant>,
-    db_name: &str,
-) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start(postgres, qdrant, db_name)?;
-
-    // Wait for outbox to be empty (5 second timeout optimized for tests)
-    // with processor logs on failure
-    wait_for_outbox_empty_with_processor(
-        postgres,
-        db_name,
-        Duration::from_secs(5),
-        Some(&processor),
-    )
-    .await?;
-
-    Ok(processor)
-}
-
-/// Start an outbox processor with full infrastructure including Neo4j
-///
-/// This variant includes Neo4j for full E2E testing with graph resolution.
-/// Uses a longer timeout (30s) to account for Neo4j node creation and relationship resolution.
-pub async fn start_and_wait_for_full_sync(
-    postgres: &Arc<TestPostgres>,
-    qdrant: &Arc<TestQdrant>,
-    neo4j: &Arc<TestNeo4j>,
-    db_name: &str,
-) -> Result<TestOutboxProcessor> {
-    let processor = TestOutboxProcessor::start_with_neo4j(postgres, qdrant, Some(neo4j), db_name)?;
-
-    // Wait for outbox to be empty with longer timeout for Neo4j operations
-    wait_for_outbox_empty_with_processor(
-        postgres,
-        db_name,
-        Duration::from_secs(30),
-        Some(&processor),
-    )
-    .await?;
-
-    Ok(processor)
 }
 
 /// Wait for graph to be marked ready for a repository
@@ -707,12 +446,6 @@ pub async fn wait_for_graph_ready(
         }
 
         tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-}
-
-impl Drop for TestOutboxProcessor {
-    fn drop(&mut self) {
-        self.cleanup();
     }
 }
 

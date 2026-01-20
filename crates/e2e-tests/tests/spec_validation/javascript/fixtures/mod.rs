@@ -70,11 +70,13 @@ function privateHelper() {
         },
     ],
     project_type: ProjectType::NodePackage,
-    manifest: Some(r#"{
+    manifest: Some(
+        r#"{
   "name": "js-test",
   "version": "1.0.0",
   "type": "module"
-}"#),
+}"#,
+    ),
 };
 
 /// JavaScript class with inheritance
@@ -181,15 +183,17 @@ export class Dog extends Animal {
         ExpectedRelationship {
             kind: RelationshipKind::InheritsFrom,
             from: "animals.Dog",
-            to: "Animal",
+            to: "animals.Animal",
         },
     ],
     project_type: ProjectType::NodePackage,
-    manifest: Some(r#"{
+    manifest: Some(
+        r#"{
   "name": "js-test",
   "version": "1.0.0",
   "type": "module"
-}"#),
+}"#,
+    ),
 };
 
 /// JavaScript functions with various patterns
@@ -287,11 +291,13 @@ export const namedExpression = function named() {
         },
     ],
     project_type: ProjectType::NodePackage,
-    manifest: Some(r#"{
+    manifest: Some(
+        r#"{
   "name": "js-test",
   "version": "1.0.0",
   "type": "module"
-}"#),
+}"#,
+    ),
 };
 
 /// JavaScript variables (const, let, var)
@@ -374,9 +380,11 @@ export var legacyFlag = true;
         },
     ],
     project_type: ProjectType::NodePackage,
-    manifest: Some(r#"{
+    manifest: Some(
+        r#"{
   "name": "js-test",
   "version": "1.0.0",
   "type": "module"
-}"#),
+}"#,
+    ),
 };

@@ -287,8 +287,12 @@ impl VectorConfig {
         match self {
             VectorConfig::Single(params) => Some(params.size),
             VectorConfig::Named(map) => {
-                // Return size from first named vector (usually "default" or "")
-                map.values().next().map(|p| p.size)
+                // Look for well-known vector names first for deterministic behavior,
+                // then fall back to any available vector
+                map.get("dense")
+                    .or_else(|| map.get("default"))
+                    .or_else(|| map.values().next())
+                    .map(|p| p.size)
             }
         }
     }
@@ -318,6 +322,35 @@ struct Point {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_vector_config_single_format() {
+        let json = r#"{"size": 384, "distance": "Cosine"}"#;
+        let config: VectorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.get_size(), Some(384));
+    }
+
+    #[test]
+    fn test_vector_config_named_format() {
+        let json = r#"{"dense": {"size": 768, "distance": "Cosine"}}"#;
+        let config: VectorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.get_size(), Some(768));
+    }
+
+    #[test]
+    fn test_vector_config_named_format_with_default() {
+        let json = r#"{"default": {"size": 512, "distance": "Cosine"}}"#;
+        let config: VectorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.get_size(), Some(512));
+    }
+
+    #[test]
+    fn test_vector_config_named_format_prefers_dense() {
+        // When both "dense" and "default" exist, should prefer "dense"
+        let json = r#"{"dense": {"size": 384, "distance": "Cosine"}, "default": {"size": 768, "distance": "Cosine"}}"#;
+        let config: VectorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.get_size(), Some(384));
+    }
 
     #[tokio::test]
     #[ignore] // Requires Docker

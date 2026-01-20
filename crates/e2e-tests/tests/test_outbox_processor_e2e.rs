@@ -73,7 +73,7 @@ fn create_test_configs(
         neo4j_host: "localhost".to_string(),
         neo4j_http_port: neo4j.http_port(),
         neo4j_bolt_port: neo4j.bolt_port(),
-        neo4j_user: "".to_string(),      // Neo4j test container has auth disabled
+        neo4j_user: "".to_string(), // Neo4j test container has auth disabled
         neo4j_password: "".to_string(),
         max_entities_per_db_operation: 10000,
         postgres_pool_size: 20,
@@ -556,6 +556,100 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         error_msg.contains("Invalid DELETE payload"),
         "Error should mention invalid DELETE payload, got: {error_msg}"
     );
+
+    // Cleanup
+    drop_test_collection(&qdrant, &collection_name).await?;
+    drop_test_database(&postgres, &db_name).await?;
+    Ok(())
+}
+
+/// Test that sparse embeddings are correctly stored and retrieved during outbox processing
+#[tokio::test]
+#[ignore]
+async fn test_e2e_insert_with_sparse_embeddings() -> Result<()> {
+    init_test_logging();
+
+    let qdrant = get_shared_qdrant().await?;
+    let postgres = get_shared_postgres().await?;
+    let neo4j = get_shared_neo4j().await?;
+    let db_name = create_test_database(&postgres).await?;
+    let collection_name = format!("test_sparse_{}", Uuid::new_v4());
+
+    // Setup: Connect to database
+    let connection_url = format!(
+        "postgresql://codesearch:codesearch@localhost:{}/{db_name}",
+        postgres.port()
+    );
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&connection_url)
+        .await?;
+
+    let postgres_client: Arc<dyn PostgresClientTrait> =
+        Arc::new(codesearch_storage::PostgresClient::new(pool.clone(), 1000));
+    postgres_client.run_migrations().await?;
+
+    // Create repository
+    let repo_path = std::path::Path::new("/test/repo");
+    let repo_id = postgres_client
+        .ensure_repository(repo_path, &collection_name, None)
+        .await?;
+
+    // Initialize storage (create collection)
+    create_qdrant_collection(&qdrant, &postgres, &neo4j, &db_name, &collection_name, 384).await?;
+
+    // Create entity with sparse embedding
+    let entity = create_test_entity(
+        "sparse_func",
+        "sparse-entity-1",
+        "/test/sparse.rs",
+        &repo_id.to_string(),
+    );
+
+    let dense_embedding = vec![0.1; 384];
+    // Create a sparse embedding with a few non-zero values
+    // Format: Vec<(index, value)>
+    let sparse_embedding: Vec<(u32, f32)> = vec![(5, 0.8), (42, 0.5), (100, 0.3), (255, 0.9)];
+
+    // Store embedding with sparse component
+    let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
+    let embedding_ids = postgres_client
+        .store_embeddings(
+            repo_id,
+            &[(content_hash, dense_embedding, Some(sparse_embedding))],
+            "test-model",
+            384,
+        )
+        .await?;
+    let embedding_id = embedding_ids[0];
+
+    // Store entity with outbox
+    let batch = vec![(
+        &entity,
+        embedding_id,
+        OutboxOperation::Insert,
+        Uuid::new_v4(),
+        TargetStore::Qdrant,
+        None, // git_commit
+        50,   // token_count
+    )];
+    postgres_client
+        .store_entities_with_outbox_batch(repo_id, &collection_name, &batch)
+        .await?;
+
+    // Run outbox processor
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
+
+    // Verify point was inserted
+    assert_point_count(&qdrant, &collection_name, 1).await?;
 
     // Cleanup
     drop_test_collection(&qdrant, &collection_name).await?;

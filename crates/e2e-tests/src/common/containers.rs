@@ -198,7 +198,10 @@ pub async fn drop_test_neo4j_data(neo4j: &Arc<TestNeo4j>, repository_id: &str) -
 
     // Delete all nodes with this repository_id and their relationships
     graph
-        .run(query("MATCH (n {repository_id: $repository_id}) DETACH DELETE n").param("repository_id", repository_id))
+        .run(
+            query("MATCH (n {repository_id: $repository_id}) DETACH DELETE n")
+                .param("repository_id", repository_id),
+        )
         .await
         .context("Failed to delete Neo4j nodes for repository")?;
 

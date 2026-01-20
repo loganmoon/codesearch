@@ -36,6 +36,16 @@ use uuid::Uuid;
 /// RAII guard that ensures test cleanup even on test failure
 ///
 /// Cleans up: Postgres database, Qdrant collection, and Neo4j data
+///
+/// # Two-Phase Initialization
+///
+/// This guard uses two-phase initialization because the `repository_id` is not known
+/// at construction time (it's created during test setup). Call `set_repository_id()`
+/// after the repository is created to enable Neo4j cleanup.
+///
+/// **Important:** If the guard is dropped before `set_repository_id()` is called
+/// (e.g., due to early test failure), Neo4j cleanup will be skipped but Postgres
+/// and Qdrant cleanup will still occur.
 struct TestCleanupGuard {
     postgres: Arc<TestPostgres>,
     qdrant: Arc<TestQdrant>,

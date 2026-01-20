@@ -491,8 +491,10 @@ fn test_contains_relationships_have_matching_entities() {
 
                 // Use structured QualifiedName for proper containment checking
                 // This handles impl blocks, trait impls, and other special cases
-                let parent_qn = QualifiedName::parse(rel.from)
-                    .expect(&format!("Failed to parse parent qualified name: {}", rel.from));
+                let parent_qn = QualifiedName::parse(rel.from).expect(&format!(
+                    "Failed to parse parent qualified name: {}",
+                    rel.from
+                ));
                 let child_qn = QualifiedName::parse(rel.to)
                     .expect(&format!("Failed to parse child qualified name: {}", rel.to));
 

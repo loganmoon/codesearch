@@ -702,7 +702,16 @@ impl OutboxProcessor {
 
             // Get embedding from batch result (sparse embedding is optional)
             let (dense_embedding, sparse_embedding) = match embeddings_map.get(&embedding_id) {
-                Some((dense, sparse)) => (dense.clone(), sparse.clone()),
+                Some((dense, sparse)) => {
+                    if sparse.is_none() {
+                        debug!(
+                            embedding_id = embedding_id,
+                            entity_id = %entry.entity_id,
+                            "Sparse embedding not present, using dense-only indexing"
+                        );
+                    }
+                    (dense.clone(), sparse.clone())
+                }
                 None => {
                     failed_entries.push((
                         entry.outbox_id,

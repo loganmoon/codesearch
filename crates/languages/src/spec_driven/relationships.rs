@@ -709,7 +709,19 @@ fn build_source_reference(
 /// Handles:
 /// - Qualified paths with `::` or `.` separators
 /// - Generic types by stripping `<...>` suffixes
+/// - UFCS patterns like `<Type as Trait>::method`
 fn extract_simple_name(name: &str) -> &str {
+    // Handle UFCS patterns: <Type as Trait>::method
+    // For these, we want the part after the final `>::`
+    if name.starts_with('<') {
+        if let Some(method_part) = name.rsplit(">::").next() {
+            // Only use this if we actually found >::, not if rsplit returned the whole string
+            if method_part != name {
+                return method_part.rsplit("::").next().unwrap_or(method_part);
+            }
+        }
+    }
+
     // First strip generic parameters if present
     let name = name.split('<').next().unwrap_or(name);
 

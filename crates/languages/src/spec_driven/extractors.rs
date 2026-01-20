@@ -595,3 +595,105 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod ufcs_debug_test {
+    use tree_sitter::{Node, Parser};
+
+    fn print_tree(node: Node, source: &str, indent: usize) {
+        let text = node.utf8_text(source.as_bytes()).unwrap_or("???");
+        let text_short: String = text.chars().take(60).collect();
+        println!(
+            "{:indent$}{}: {}",
+            "",
+            node.kind(),
+            text_short.replace('\n', "\\n"),
+            indent = indent
+        );
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            print_tree(child, source, indent + 2);
+        }
+    }
+
+    #[test]
+    fn debug_ufcs_ast() {
+        let source = r#"
+pub fn use_ufcs(data: &Data) -> i32 {
+    <Data as Processor>::process(data)
+}
+"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        println!("\n=== AST for UFCS call ===");
+        print_tree(tree.root_node(), source, 0);
+    }
+
+    #[test]
+    fn test_blanket_impl_extraction() {
+        use super::SpecDrivenRustExtractor;
+        use crate::Extractor;
+        use std::path::{Path, PathBuf};
+
+        let source = r#"
+pub trait Printable {
+    fn to_string(&self) -> String;
+}
+
+pub trait Debug {
+    fn debug(&self) -> String;
+}
+
+// Blanket impl: any Debug is also Printable
+impl<T: Debug> Printable for T {
+    fn to_string(&self) -> String {
+        self.debug()
+    }
+}
+
+pub struct MyType {
+    value: i32,
+}
+
+impl Debug for MyType {
+    fn debug(&self) -> String {
+        format!("MyType({})", self.value)
+    }
+}
+"#;
+
+        let extractor = SpecDrivenRustExtractor::new(
+            "test-repo".to_string(),
+            Some("test_crate".to_string()),
+            None,
+            PathBuf::from("/test"),
+        )
+        .expect("Failed to create extractor");
+
+        let result = extractor.extract(source, Path::new("/test/src/lib.rs"));
+        assert!(result.is_ok(), "Extraction failed: {:?}", result.err());
+
+        let entities = result.unwrap();
+        println!("\n=== Blanket impl extraction results ===");
+        println!("Extracted {} entities:", entities.len());
+        for entity in &entities {
+            println!(
+                "  {} - {} - {}",
+                entity.entity_type, entity.name, entity.qualified_name
+            );
+        }
+
+        // Should have Module, 2 Traits, 1 Struct, 2 ImplBlocks, trait methods, impl methods
+        assert!(
+            entities.len() > 5,
+            "Expected at least 5 entities, got {}",
+            entities.len()
+        );
+    }
+}

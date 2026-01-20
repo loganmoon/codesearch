@@ -19,7 +19,7 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 use async_trait::async_trait;
-use codesearch_core::entities::{CodeEntity, RelationshipType};
+use codesearch_core::entities::{CodeEntity, RelationshipType, SourceReference};
 use codesearch_core::error::Result;
 use codesearch_core::resolution::{LookupStrategy, RelationshipDef};
 use std::collections::{HashMap, HashSet};
@@ -48,6 +48,16 @@ struct ExtractedRef {
     simple_name: String,
     /// Whether this reference targets an external (non-local) entity
     is_external: bool,
+}
+
+impl From<&SourceReference> for ExtractedRef {
+    fn from(sr: &SourceReference) -> Self {
+        Self {
+            target: sr.target().to_string(),
+            simple_name: sr.simple_name().to_string(),
+            is_external: sr.is_external(),
+        }
+    }
 }
 
 /// Lookup maps for resolving entity references
@@ -83,16 +93,7 @@ struct CallsExtractor;
 
 impl ReferenceExtractor for CallsExtractor {
     fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
-        entity
-            .relationships
-            .calls
-            .iter()
-            .map(|sr| ExtractedRef {
-                target: sr.target().to_string(),
-                simple_name: sr.simple_name().to_string(),
-                is_external: sr.is_external(),
-            })
-            .collect()
+        entity.relationships.calls.iter().map(Into::into).collect()
     }
 }
 
@@ -105,11 +106,7 @@ impl ReferenceExtractor for UsesExtractor {
             .relationships
             .uses_types
             .iter()
-            .map(|sr| ExtractedRef {
-                target: sr.target().to_string(),
-                simple_name: sr.simple_name().to_string(),
-                is_external: sr.is_external(),
-            })
+            .map(Into::into)
             .collect()
     }
 }
@@ -120,27 +117,14 @@ struct ImplementsExtractor;
 
 impl ReferenceExtractor for ImplementsExtractor {
     fn extract_refs(&self, entity: &CodeEntity) -> Vec<ExtractedRef> {
-        let mut refs = Vec::new();
-
-        // Rust impl blocks: implements_trait (single trait)
-        if let Some(src_ref) = entity.relationships.implements_trait.as_ref() {
-            refs.push(ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
-                is_external: src_ref.is_external(),
-            });
-        }
-
-        // TypeScript/JavaScript classes: implements (multiple interfaces)
-        for src_ref in &entity.relationships.implements {
-            refs.push(ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
-                is_external: src_ref.is_external(),
-            });
-        }
-
-        refs
+        // Combine Rust impl trait (single) with TS/JS implements (multiple)
+        entity
+            .relationships
+            .implements_trait
+            .iter()
+            .chain(entity.relationships.implements.iter())
+            .map(Into::into)
+            .collect()
     }
 }
 
@@ -152,15 +136,9 @@ impl ReferenceExtractor for AssociatesExtractor {
         entity
             .relationships
             .for_type
-            .as_ref()
-            .map(|src_ref| {
-                vec![ExtractedRef {
-                    target: src_ref.target().to_string(),
-                    simple_name: src_ref.simple_name().to_string(),
-                    is_external: src_ref.is_external(),
-                }]
-            })
-            .unwrap_or_default()
+            .iter()
+            .map(Into::into)
+            .collect()
     }
 }
 
@@ -175,11 +153,7 @@ impl ReferenceExtractor for ExtendedTypesExtractor {
             .relationships
             .extended_types
             .iter()
-            .map(|src_ref| ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
-                is_external: src_ref.is_external(),
-            })
+            .map(Into::into)
             .collect()
     }
 }
@@ -193,11 +167,7 @@ impl ReferenceExtractor for InheritsExtractor {
             .relationships
             .extends
             .iter()
-            .map(|src_ref| ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
-                is_external: src_ref.is_external(),
-            })
+            .map(Into::into)
             .collect()
     }
 }
@@ -211,11 +181,7 @@ impl ReferenceExtractor for ImportsExtractor {
             .relationships
             .imports
             .iter()
-            .map(|sr| ExtractedRef {
-                target: sr.target().to_string(),
-                simple_name: sr.simple_name().to_string(),
-                is_external: sr.is_external(),
-            })
+            .map(Into::into)
             .collect()
     }
 }
@@ -229,11 +195,7 @@ impl ReferenceExtractor for ReexportsExtractor {
             .relationships
             .reexports
             .iter()
-            .map(|sr| ExtractedRef {
-                target: sr.target().to_string(),
-                simple_name: sr.simple_name().to_string(),
-                is_external: sr.is_external(),
-            })
+            .map(Into::into)
             .collect()
     }
 }

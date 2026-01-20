@@ -34,8 +34,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
-use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
-use std::collections::HashMap;
+use codesearch_storage::PostgresClientTrait;
+use std::collections::{HashMap, HashSet};
 use tracing::info;
 use uuid::Uuid;
 
@@ -113,13 +113,11 @@ pub trait RelationshipResolver: Send + Sync {
     async fn resolve(&self, cache: &EntityCache) -> Result<ResolverOutput>;
 }
 
-/// Generic function to resolve relationships using a resolver implementation
+/// Generic function to collect relationships and external refs from a resolver
 ///
-/// This function provides the common infrastructure for all relationship resolvers:
-/// 1. Calls the resolver's `resolve()` method to extract relationships from cache
-/// 2. Batch creates all relationships in Neo4j
-/// 3. Accumulates external refs for batch creation later
-/// 4. Logs progress and results
+/// This function extracts relationship data from a resolver without creating them in Neo4j.
+/// The caller is responsible for creating external nodes first, then batch creating all
+/// relationships to ensure no dangling references.
 ///
 /// # Prerequisites
 /// The caller MUST ensure the Neo4j database is already selected via `use_database()`
@@ -128,8 +126,8 @@ pub trait RelationshipResolver: Send + Sync {
 ///
 /// # Arguments
 /// * `cache` - Pre-populated entity cache for the repository
-/// * `neo4j` - Neo4j client for creating relationships (must have database already selected)
 /// * `resolver` - Implementation of the RelationshipResolver trait
+/// * `all_relationships` - Accumulator for all relationships (for batch creation later)
 /// * `external_refs` - Accumulator for external refs (for batch creation later)
 ///
 /// # Example
@@ -137,36 +135,35 @@ pub trait RelationshipResolver: Send + Sync {
 /// // Caller must select database and create cache first
 /// neo4j.use_database(&db_name).await?;
 /// let cache = EntityCache::new(&postgres, repository_id).await?;
+/// let mut all_relationships = Vec::new();
 /// let mut external_refs = HashSet::new();
 /// let resolver = ContainsResolver;
-/// resolve_relationships_generic(&cache, &neo4j, &resolver, &mut external_refs).await?;
+/// collect_relationships(&cache, &resolver, &mut all_relationships, &mut external_refs).await?;
+/// // Then create external nodes, then batch create relationships
 /// ```
-pub async fn resolve_relationships_generic(
+pub async fn collect_relationships(
     cache: &EntityCache,
-    neo4j: &dyn Neo4jClientTrait,
     resolver: &dyn RelationshipResolver,
-    external_refs: &mut std::collections::HashSet<ExternalRef>,
+    all_relationships: &mut Vec<(String, String, String)>,
+    external_refs: &mut HashSet<ExternalRef>,
 ) -> Result<()> {
-    info!("Resolving {} relationships...", resolver.name());
+    info!("Collecting {} relationships...", resolver.name());
 
     // Resolve relationships using cached entity data
     let output = resolver.resolve(cache).await?;
 
-    // Accumulate external refs for batch creation later
+    let rel_count = output.relationships.len();
+    let ext_count = output.external_refs.len();
+
+    // Accumulate relationships and external refs for batch creation later
+    all_relationships.extend(output.relationships);
     external_refs.extend(output.external_refs);
 
-    // Batch create all relationships
-    if !output.relationships.is_empty() {
-        neo4j
-            .batch_create_relationships(&output.relationships)
-            .await
-            .with_context(|| format!("Failed to batch create {} relationships", resolver.name()))?;
-    }
-
     info!(
-        "Resolved {} {} relationships",
-        output.relationships.len(),
-        resolver.name()
+        "Collected {} {} relationships ({} external refs)",
+        rel_count,
+        resolver.name(),
+        ext_count
     );
 
     Ok(())
@@ -227,20 +224,15 @@ pub struct ResolverOutput {
     /// Relationships to create: (from_id, to_id, relationship_type)
     pub relationships: Vec<(String, String, String)>,
     /// External references discovered during resolution (deduplicated later)
-    pub external_refs: std::collections::HashSet<ExternalRef>,
+    pub external_refs: HashSet<ExternalRef>,
 }
 
 impl ResolverOutput {
-    /// Create a new empty resolver output
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Create resolver output with only relationships (no external refs)
     pub fn relationships_only(relationships: Vec<(String, String, String)>) -> Self {
         Self {
             relationships,
-            external_refs: std::collections::HashSet::new(),
+            external_refs: HashSet::new(),
         }
     }
 }

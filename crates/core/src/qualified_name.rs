@@ -51,7 +51,8 @@ pub enum QualifiedName {
         type_path: Vec<String>,
     },
 
-    /// Trait impl block: `<crate::Type as crate::Trait>`
+    /// Trait impl block: `<crate::Type as crate::Trait>` or with where clause
+    /// `<crate::Type as crate::Trait where T: Bound>`
     TraitImpl {
         /// Module scope containing the impl (not serialized, used for containment)
         scope: Vec<String>,
@@ -59,6 +60,8 @@ pub enum QualifiedName {
         type_path: Vec<String>,
         /// Trait being implemented (e.g., `["crate", "Trait"]`)
         trait_path: Vec<String>,
+        /// Optional where clause for blanket impls (e.g., `"T: Debug"`)
+        where_clause: Option<String>,
     },
 
     /// Trait impl item: `<crate::Type as crate::Trait>::method`
@@ -154,6 +157,7 @@ impl QualifiedName {
 
     fn parse_trait_impl(s: &str) -> Result<Self> {
         // Pattern: <type_path as trait_path> or <type_path as trait_path>::item
+        // Also supports: <type_path as trait_path where clause>
         let s = s
             .strip_prefix('<')
             .ok_or_else(|| Error::invalid_input("trait impl must start with '<'"))?;
@@ -182,12 +186,21 @@ impl QualifiedName {
                 item_name: item.to_string(),
             })
         } else {
-            // Just impl block: <Type as Trait>
-            let inner = s
-                .strip_suffix('>')
-                .ok_or_else(|| Error::invalid_input("trait impl must end with '>'"))?;
+            // Just impl block: <Type as Trait> or <Type as Trait where T: Bound>
+            // Check for where clause first
+            let (core_part, where_clause) =
+                if let Some((before_where, after_where)) = s.rsplit_once("> where ") {
+                    // Has where clause: <Type as Trait where T: Bound>
+                    (before_where, Some(after_where.to_string()))
+                } else {
+                    // No where clause: <Type as Trait>
+                    let inner = s
+                        .strip_suffix('>')
+                        .ok_or_else(|| Error::invalid_input("trait impl must end with '>'"))?;
+                    (inner, None)
+                };
 
-            let (type_str, trait_str) = inner
+            let (type_str, trait_str) = core_part
                 .split_once(" as ")
                 .ok_or_else(|| Error::invalid_input(format!("trait impl missing ' as ': {s}")))?;
 
@@ -204,6 +217,7 @@ impl QualifiedName {
                 scope: vec![], // Unknown from string alone
                 type_path,
                 trait_path,
+                where_clause,
             })
         }
     }
@@ -261,6 +275,7 @@ impl QualifiedName {
                     scope,
                     type_path,
                     trait_path,
+                    ..
                 },
                 QualifiedName::SimplePath { segments, .. },
             ) => {
@@ -327,11 +342,13 @@ impl QualifiedName {
             QualifiedName::TraitImpl {
                 type_path,
                 trait_path,
+                where_clause,
                 ..
             } => QualifiedName::TraitImpl {
                 scope,
                 type_path,
                 trait_path,
+                where_clause,
             },
             other => other,
         }
@@ -396,10 +413,20 @@ impl Display for QualifiedName {
             QualifiedName::TraitImpl {
                 type_path,
                 trait_path,
+                where_clause,
                 ..
             } => {
                 // Note: scope is NOT included in serialized form
-                write!(f, "<{} as {}>", type_path.join("::"), trait_path.join("::"))
+                match where_clause {
+                    Some(clause) => write!(
+                        f,
+                        "<{} as {} where {}>",
+                        type_path.join("::"),
+                        trait_path.join("::"),
+                        clause
+                    ),
+                    None => write!(f, "<{} as {}>", type_path.join("::"), trait_path.join("::")),
+                }
             }
             QualifiedName::TraitImplItem {
                 type_path,

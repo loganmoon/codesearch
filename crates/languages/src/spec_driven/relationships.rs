@@ -98,10 +98,15 @@ const RUST_USE_QUERY: &str = r#"
 // Primitive type filters
 // =============================================================================
 
-/// Rust primitive types to filter out from type references
+/// Rust primitive types to filter out from type reference extraction.
+///
+/// NOTE: Option and Result are intentionally excluded because they are prelude types
+/// that can be legitimately shadowed by user-defined types. When shadowed, we want
+/// USES relationships to be created so they can resolve to the local definition.
+/// Vec and Box are also common std types but rarely shadowed, so keeping them filtered.
 const RUST_PRIMITIVES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
-    "f64", "bool", "char", "str", "String", "Self", "()", "Option", "Result", "Vec", "Box",
+    "f64", "bool", "char", "str", "String", "Self", "()", "Vec", "Box",
 ];
 
 /// TypeScript/JavaScript primitive types to filter out
@@ -424,6 +429,10 @@ fn extract_parameter_type<'a>(
 fn extract_type_name(type_node: Node, source: &str) -> Option<(String, bool)> {
     match type_node.kind() {
         "type_identifier" => Some((node_text(type_node, source).to_string(), false)),
+        "primitive_type" => {
+            // e.g., `str`, `i32`, `bool` - primitive types
+            Some((node_text(type_node, source).to_string(), false))
+        }
         "generic_type" => {
             // e.g., `Option<T>` - extract the base type
             if let Some(name) = type_node.child_by_field_name("type") {
@@ -704,15 +713,31 @@ fn build_source_reference(
 /// Handles:
 /// - Qualified paths with `::` or `.` separators
 /// - Generic types by stripping `<...>` suffixes
+/// - UFCS patterns like `<Type as Trait>::method`
 fn extract_simple_name(name: &str) -> &str {
+    // Handle UFCS patterns: <Type as Trait>::method
+    // For these, we want the part after the final `>::`
+    if name.starts_with('<') {
+        if let Some(method_part) = name.rsplit(">::").next() {
+            // Only use this if we actually found >::, not if rsplit returned the whole string
+            if method_part != name {
+                return method_part.rsplit("::").next().unwrap_or(method_part);
+            }
+        }
+    }
+
     // First strip generic parameters if present
     let name = name.split('<').next().unwrap_or(name);
 
     // Handle both Rust (::) and JS (.) separators
-    name.rsplit("::")
-        .next()
-        .or_else(|| name.rsplit('.').next())
-        .unwrap_or(name)
+    // Try Rust separator first, then JS separator
+    if name.contains("::") {
+        name.rsplit("::").next().unwrap_or(name)
+    } else if name.contains('.') {
+        name.rsplit('.').next().unwrap_or(name)
+    } else {
+        name
+    }
 }
 
 // =============================================================================
@@ -2038,5 +2063,54 @@ pub fn extract_relationships(
                 ..Default::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_simple_name_qualified() {
+        assert_eq!(extract_simple_name("std::collections::HashMap"), "HashMap");
+        assert_eq!(extract_simple_name("crate::module::Type"), "Type");
+    }
+
+    #[test]
+    fn test_extract_simple_name_with_generics() {
+        assert_eq!(extract_simple_name("Vec<String>"), "Vec");
+        assert_eq!(extract_simple_name("HashMap<K, V>"), "HashMap");
+        assert_eq!(
+            extract_simple_name("std::collections::HashMap<String, i32>"),
+            "HashMap"
+        );
+    }
+
+    #[test]
+    fn test_extract_simple_name_ufcs() {
+        // UFCS patterns: <Type as Trait>::method
+        assert_eq!(extract_simple_name("<MyStruct as Display>::fmt"), "fmt");
+        assert_eq!(
+            extract_simple_name("<Vec<T> as IntoIterator>::into_iter"),
+            "into_iter"
+        );
+        // Nested UFCS
+        assert_eq!(
+            extract_simple_name("<T as Trait>::Associated::method"),
+            "method"
+        );
+    }
+
+    #[test]
+    fn test_extract_simple_name_simple() {
+        assert_eq!(extract_simple_name("foo"), "foo");
+        assert_eq!(extract_simple_name("MyType"), "MyType");
+    }
+
+    #[test]
+    fn test_extract_simple_name_js_separator() {
+        // JavaScript uses . separator
+        assert_eq!(extract_simple_name("window.document.body"), "body");
+        assert_eq!(extract_simple_name("module.exports"), "exports");
     }
 }

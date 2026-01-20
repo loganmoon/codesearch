@@ -236,6 +236,10 @@ impl SpecDrivenRustExtractor {
         // Build import map for reference resolution
         let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
 
+        // Build type alias map for resolving type aliases to canonical types
+        let type_alias_map =
+            crate::rust::import_resolution::parse_rust_type_aliases(tree.root_node(), source)?;
+
         // Create edge case registry for Rust-specific patterns
         let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
 
@@ -251,6 +255,7 @@ impl SpecDrivenRustExtractor {
             import_map: &import_map,
             path_config: &CRATE_BASED_PATH_CONFIG,
             edge_case_handlers: Some(&edge_case_registry),
+            type_alias_map: &type_alias_map,
         };
 
         let mut all_entities = Vec::new();
@@ -321,6 +326,9 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -333,6 +341,7 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No JS-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         use super::javascript::handler_configs::ALL_HANDLERS;
@@ -398,6 +407,9 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -410,6 +422,7 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No TS-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         use super::typescript::handler_configs::ALL_HANDLERS;
@@ -477,6 +490,9 @@ impl Extractor for SpecDrivenTsxExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         // TSX uses TypeScript language enum since they share the same type system
         let ctx = SpecDrivenContext {
             source,
@@ -490,6 +506,7 @@ impl Extractor for SpecDrivenTsxExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No TSX-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         // TSX uses the same handlers as TypeScript
@@ -593,5 +610,155 @@ mod tests {
         for entity in &entities {
             println!("  - {} ({})", entity.name, entity.entity_type);
         }
+    }
+}
+
+#[cfg(test)]
+mod ufcs_debug_test {
+    use tree_sitter::{Node, Parser};
+
+    fn print_tree(node: Node, source: &str, indent: usize) {
+        let text = node.utf8_text(source.as_bytes()).unwrap_or("???");
+        let text_short: String = text.chars().take(60).collect();
+        println!(
+            "{:indent$}{}: {}",
+            "",
+            node.kind(),
+            text_short.replace('\n', "\\n"),
+            indent = indent
+        );
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            print_tree(child, source, indent + 2);
+        }
+    }
+
+    #[test]
+    fn debug_ufcs_ast() {
+        let source = r#"
+pub fn use_ufcs(data: &Data) -> i32 {
+    <Data as Processor>::process(data)
+}
+"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        println!("\n=== AST for UFCS call ===");
+        print_tree(tree.root_node(), source, 0);
+    }
+
+    #[test]
+    fn test_blanket_impl_extraction() {
+        use super::SpecDrivenRustExtractor;
+        use crate::Extractor;
+        use std::path::{Path, PathBuf};
+
+        let source = r#"
+pub trait Printable {
+    fn to_string(&self) -> String;
+}
+
+pub trait Debug {
+    fn debug(&self) -> String;
+}
+
+// Blanket impl: any Debug is also Printable
+impl<T: Debug> Printable for T {
+    fn to_string(&self) -> String {
+        self.debug()
+    }
+}
+
+pub struct MyType {
+    value: i32,
+}
+
+impl Debug for MyType {
+    fn debug(&self) -> String {
+        format!("MyType({})", self.value)
+    }
+}
+"#;
+
+        let extractor = SpecDrivenRustExtractor::new(
+            "test-repo".to_string(),
+            Some("test_crate".to_string()),
+            None,
+            PathBuf::from("/test"),
+        )
+        .expect("Failed to create extractor");
+
+        let result = extractor.extract(source, Path::new("/test/src/lib.rs"));
+        assert!(result.is_ok(), "Extraction failed: {:?}", result.err());
+
+        let entities = result.unwrap();
+        println!("\n=== Blanket impl extraction results ===");
+        println!("Extracted {} entities:", entities.len());
+        for entity in &entities {
+            println!(
+                "  {} - {} - {}",
+                entity.entity_type, entity.name, entity.qualified_name
+            );
+        }
+
+        // Should have Module, 2 Traits, 1 Struct, 2 ImplBlocks, trait methods, impl methods
+        // Expected entities:
+        // - Module: test_crate
+        // - Trait: Printable, Debug
+        // - Struct: MyType
+        // - ImplBlock: <T as Printable> where T: Debug, <MyType as Debug>
+        // - Methods: to_string (x2), debug (x2)
+
+        // Verify minimum count
+        assert!(
+            entities.len() >= 9,
+            "Expected at least 9 entities (module, 2 traits, 1 struct, 2 impl blocks, 3+ methods), got {}",
+            entities.len()
+        );
+
+        // Verify key traits exist
+        let trait_names: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Trait)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            trait_names.contains(&"Printable"),
+            "Expected Printable trait"
+        );
+        assert!(trait_names.contains(&"Debug"), "Expected Debug trait");
+
+        // Verify struct exists
+        let struct_names: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Struct)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(struct_names.contains(&"MyType"), "Expected MyType struct");
+
+        // Verify blanket impl block has where clause in qualified name
+        let impl_blocks: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Impl)
+            .collect();
+        assert!(impl_blocks.len() >= 2, "Expected at least 2 impl blocks");
+
+        // Blanket impl should have "where T: Debug" or "where T: test_crate::Debug"
+        let blanket_impl = impl_blocks
+            .iter()
+            .find(|e| e.qualified_name.to_string().contains("where"));
+        assert!(
+            blanket_impl.is_some(),
+            "Expected blanket impl with where clause, got: {:?}",
+            impl_blocks
+                .iter()
+                .map(|e| &e.qualified_name)
+                .collect::<Vec<_>>()
+        );
     }
 }

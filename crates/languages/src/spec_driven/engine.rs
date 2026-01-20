@@ -12,6 +12,7 @@ use crate::common::{find_capture_node, node_to_text};
 use codesearch_core::entities::{
     EntityMetadata, EntityRelationshipData, EntityType, Language, Visibility,
 };
+use codesearch_core::entity_id::generate_entity_id;
 use codesearch_core::error::{Error, Result};
 use codesearch_core::CodeEntity;
 use std::collections::HashMap;
@@ -56,6 +57,9 @@ pub struct SpecDrivenContext<'a> {
 
     /// Optional edge case handlers for language-specific patterns
     pub edge_case_handlers: Option<&'a EdgeCaseRegistry>,
+
+    /// Type alias map for resolving type aliases to canonical types (Rust only)
+    pub type_alias_map: &'a crate::rust::import_resolution::TypeAliasMap,
 }
 
 /// Extract entities using a handler configuration
@@ -123,12 +127,26 @@ pub fn extract_with_config(
         // Compute qualified impl type for UFCS call alias generation (Rust methods only).
         // Must be done here while we have access to the original AST-derived parent_scope,
         // which provides the correct module context for type name resolution.
-        let qualified_impl_type =
-            resolve_impl_type_name(&captures, components.parent_scope.as_deref());
+        let qualified_impl_type = resolve_impl_type_name(
+            &captures,
+            components.parent_scope.as_deref(),
+            ctx.import_map,
+            ctx.type_alias_map,
+            ctx.package_name,
+        );
 
         // Build qualified name from template if provided
         let qualified_name = if let Some(template) = config.qualified_name_template {
-            expand_qualified_name_template(template, &captures, &components)
+            let expansion_ctx = TemplateExpansionContext {
+                captures: &captures,
+                components: &components,
+                import_map: ctx.import_map,
+                type_alias_map: ctx.type_alias_map,
+                package_name: ctx.package_name,
+                main_node: Some(main_node),
+                source: Some(ctx.source),
+            };
+            expand_qualified_name_template(template, &expansion_ctx)
         } else {
             components.qualified_name.clone()
         };
@@ -144,7 +162,17 @@ pub fn extract_with_config(
         // template (e.g., "<{impl_type_name} as {trait_name}>").
         let parent_scope = if let Some(template) = config.parent_scope_template {
             // Use explicit parent_scope template (for extern items, etc.)
-            let expanded = expand_qualified_name_template(template, &captures, &components);
+            // Note: parent_scope templates don't need where clause logic
+            let expansion_ctx = TemplateExpansionContext {
+                captures: &captures,
+                components: &components,
+                import_map: ctx.import_map,
+                type_alias_map: ctx.type_alias_map,
+                package_name: ctx.package_name,
+                main_node: None,
+                source: None,
+            };
+            let expanded = expand_qualified_name_template(template, &expansion_ctx);
             if expanded.is_empty() {
                 None
             } else {
@@ -166,7 +194,26 @@ pub fn extract_with_config(
             components.parent_scope.clone()
         };
 
+        // Regenerate entity_id if qualified_name changed (due to template expansion).
+        // This ensures unique entity_ids for entities like trait impl methods that have
+        // different qualified names but the same AST-derived scope.
+        let entity_id = if qualified_name != components.qualified_name {
+            let file_path_str = ctx
+                .file_path
+                .to_str()
+                .ok_or_else(|| Error::entity_extraction("Invalid file path"))?;
+            generate_entity_id(
+                ctx.repository_id,
+                file_path_str,
+                &qualified_name,
+                &entity_type.to_string(),
+            )
+        } else {
+            components.entity_id.clone()
+        };
+
         let components = CommonEntityComponents {
+            entity_id,
             qualified_name,
             parent_scope,
             ..components
@@ -476,54 +523,253 @@ fn expand_template(template: &str, captures: &HashMap<String, String>) -> String
     result
 }
 
-/// Resolve impl_type_name to a fully qualified name using captures and scope.
+/// Extract where clause from an impl_item node for blanket impl qualified names.
+///
+/// Handles both:
+/// - Inline bounds: `impl<T: Debug> Printable for T` -> extracts from type_parameters
+/// - Explicit where: `impl<T> Printable for T where T: Debug` -> extracts from where_clause
+///
+/// Returns formatted bounds like `[("T", ["Debug", "Clone"])]` which can be used
+/// to build a where clause suffix like `where T: Debug + Clone`.
+fn extract_type_parameter_bounds<'a>(
+    impl_node: tree_sitter::Node<'a>,
+    source: &'a str,
+    import_map: &crate::common::import_map::ImportMap,
+    package_name: Option<&str>,
+    parent_scope: Option<&str>,
+) -> Vec<(String, Vec<String>)> {
+    fn node_text<'a>(node: tree_sitter::Node<'a>, source: &'a str) -> &'a str {
+        node.utf8_text(source.as_bytes()).unwrap_or("")
+    }
+
+    fn resolve_trait_name(
+        trait_name: &str,
+        import_map: &crate::common::import_map::ImportMap,
+        package_name: Option<&str>,
+        parent_scope: Option<&str>,
+    ) -> String {
+        // Check if it's a well-known std trait or primitive
+        if crate::rust::edge_case_handlers::is_std_type(trait_name) {
+            return trait_name.to_string();
+        }
+
+        // Try import map resolution
+        if let Some(resolved) = import_map.resolve(trait_name) {
+            if let Some(stripped) = resolved.strip_prefix("crate::") {
+                if let Some(pkg) = package_name {
+                    return format!("{pkg}::{stripped}");
+                }
+            }
+            return resolved.to_string();
+        }
+
+        // Prepend parent scope
+        if let Some(scope) = parent_scope {
+            return format!("{scope}::{trait_name}");
+        }
+
+        trait_name.to_string()
+    }
+
+    /// Extract type name and trait bounds from a node (where_predicate or type_parameter).
+    /// Returns (type_name, trait_bounds) if valid bounds are found.
+    fn extract_bounds_from_node(
+        node: tree_sitter::Node,
+        source: &str,
+        import_map: &crate::common::import_map::ImportMap,
+        package_name: Option<&str>,
+        parent_scope: Option<&str>,
+    ) -> Option<(String, Vec<String>)> {
+        let mut type_name: Option<String> = None;
+        let mut trait_bounds: Vec<String> = Vec::new();
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "type_identifier" && type_name.is_none() {
+                type_name = Some(node_text(child, source).to_string());
+            } else if child.kind() == "trait_bounds" {
+                let mut bounds_cursor = child.walk();
+                for bound_child in child.children(&mut bounds_cursor) {
+                    if bound_child.kind() == "type_identifier" {
+                        let trait_text = node_text(bound_child, source);
+                        let qualified =
+                            resolve_trait_name(trait_text, import_map, package_name, parent_scope);
+                        trait_bounds.push(qualified);
+                    } else if bound_child.kind() == "generic_type" {
+                        // Handle generic trait like Iterator<Item = T>
+                        if let Some(type_node) = bound_child.child_by_field_name("type") {
+                            let trait_text = node_text(type_node, source);
+                            let qualified = resolve_trait_name(
+                                trait_text,
+                                import_map,
+                                package_name,
+                                parent_scope,
+                            );
+                            trait_bounds.push(qualified);
+                        }
+                    }
+                }
+            }
+        }
+
+        type_name
+            .filter(|_| !trait_bounds.is_empty())
+            .map(|t| (t, trait_bounds))
+    }
+
+    let mut bounds: Vec<(String, Vec<String>)> = Vec::new();
+
+    // First check for explicit where_clause
+    let mut cursor = impl_node.walk();
+    for child in impl_node.children(&mut cursor) {
+        if child.kind() == "where_clause" {
+            let mut pred_cursor = child.walk();
+            for predicate in child.children(&mut pred_cursor) {
+                if predicate.kind() == "where_predicate" {
+                    if let Some(bound) = extract_bounds_from_node(
+                        predicate,
+                        source,
+                        import_map,
+                        package_name,
+                        parent_scope,
+                    ) {
+                        bounds.push(bound);
+                    }
+                }
+            }
+            return bounds;
+        }
+    }
+
+    // No where_clause, check for inline bounds in type_parameters
+    let mut cursor = impl_node.walk();
+    for child in impl_node.children(&mut cursor) {
+        if child.kind() == "type_parameters" {
+            let mut param_cursor = child.walk();
+            for type_param in child.children(&mut param_cursor) {
+                if type_param.kind() == "type_parameter" {
+                    if let Some(bound) = extract_bounds_from_node(
+                        type_param,
+                        source,
+                        import_map,
+                        package_name,
+                        parent_scope,
+                    ) {
+                        bounds.push(bound);
+                    }
+                }
+            }
+        }
+    }
+
+    bounds
+}
+
+/// Format type parameter bounds as a where clause suffix.
+///
+/// Takes bounds like `[("T", ["Debug", "Clone"])]` and returns
+/// `" where T: Debug + Clone"` or empty string if no bounds.
+fn format_where_clause(bounds: &[(String, Vec<String>)]) -> String {
+    if bounds.is_empty() {
+        return String::new();
+    }
+
+    let clauses: Vec<String> = bounds
+        .iter()
+        .map(|(type_name, traits)| format!("{}: {}", type_name, traits.join(" + ")))
+        .collect();
+
+    format!(" where {}", clauses.join(", "))
+}
+
+/// Resolve impl_type_name to a fully qualified name using captures, scope, and import map.
 ///
 /// Resolution order:
 /// 1. If impl_type_path was captured (e.g., `mod::Type`), use path::type_name
 /// 2. If impl_type_name is a well-known std/primitive type, don't prefix
-/// 3. If parent_scope already ends with the type name (method context), use scope as-is
-/// 4. Otherwise (impl block context), prepend the module-level scope
-/// 5. If no scope available, use the simple type name
+/// 3. If import_map can resolve the type name (e.g., imported via `use crate::types::Widget`),
+///    use the resolved path
+/// 4. If parent_scope already ends with the type name (method context), use scope as-is
+/// 5. Otherwise (impl block context), prepend the module-level scope
+/// 6. If no scope available, use the simple type name
 ///
 /// Returns `None` if impl_type_name is not present in captures.
 fn resolve_impl_type_name(
     captures: &HashMap<String, String>,
     parent_scope: Option<&str>,
+    import_map: &crate::common::import_map::ImportMap,
+    type_alias_map: &crate::rust::import_resolution::TypeAliasMap,
+    package_name: Option<&str>,
 ) -> Option<String> {
     let impl_type_name = captures.get("impl_type_name")?;
 
+    // Resolve through type alias chain to get canonical type name
+    // e.g., Settings -> AppConfig -> Config -> RawConfig
+    let canonical_type_name =
+        crate::rust::import_resolution::resolve_type_alias_chain(impl_type_name, type_alias_map);
+
     let qualified = if let Some(impl_type_path) = captures.get("impl_type_path") {
         // Case 1: Scoped type like `mod::Type`
-        format!("{impl_type_path}::{impl_type_name}")
-    } else if crate::rust::edge_case_handlers::is_std_type(impl_type_name) {
+        format!("{impl_type_path}::{canonical_type_name}")
+    } else if crate::rust::edge_case_handlers::is_std_type(&canonical_type_name) {
         // Case 2: Well-known std/primitive type - don't add scope prefix
-        impl_type_name.clone()
-    } else if let Some(scope) = parent_scope {
-        if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
-            // Case 3: Method context - scope already is the qualified type name
-            scope.to_string()
+        canonical_type_name
+    } else if let Some(resolved) = import_map.resolve(&canonical_type_name) {
+        // Case 3: Type was imported (e.g., `use crate::types::Widget`)
+        // The resolved path may start with "crate::" which needs to be replaced
+        // with the actual package name
+        if let Some(stripped) = resolved.strip_prefix("crate::") {
+            if let Some(pkg) = package_name {
+                format!("{pkg}::{stripped}")
+            } else {
+                resolved.to_string()
+            }
         } else {
-            // Case 4: Impl block context - prepend module scope
-            format!("{scope}::{impl_type_name}")
+            resolved.to_string()
+        }
+    } else if let Some(scope) = parent_scope {
+        if scope.ends_with(&format!("::{canonical_type_name}")) || scope == canonical_type_name {
+            // Case 4: Method context - scope already is the qualified type name
+            scope.to_string()
+        } else if scope.ends_with(&format!("::{impl_type_name}")) {
+            // Case 5a: Scope ends with the original alias name - replace it with canonical
+            // e.g., "test_crate::Settings" + RawConfig -> "test_crate::RawConfig"
+            let prefix_len = scope.len() - impl_type_name.len();
+            format!("{}{canonical_type_name}", &scope[..prefix_len])
+        } else if scope == impl_type_name {
+            // Case 5b: Scope IS the original alias name - use canonical directly
+            canonical_type_name
+        } else {
+            // Case 5c: Impl block context - prepend module scope
+            format!("{scope}::{canonical_type_name}")
         }
     } else {
-        // Case 5: No scope available
-        impl_type_name.clone()
+        // Case 6: No scope available
+        canonical_type_name
     };
 
     Some(qualified)
 }
 
+/// Context for template expansion, bundling all resolution-related parameters.
+struct TemplateExpansionContext<'a> {
+    captures: &'a HashMap<String, String>,
+    components: &'a CommonEntityComponents,
+    import_map: &'a crate::common::import_map::ImportMap,
+    type_alias_map: &'a crate::rust::import_resolution::TypeAliasMap,
+    package_name: Option<&'a str>,
+    /// Optional node for where clause extraction (only needed for impl blocks)
+    main_node: Option<tree_sitter::Node<'a>>,
+    /// Optional source for where clause extraction (only needed for impl blocks)
+    source: Option<&'a str>,
+}
+
 /// Expand a qualified name template with captures and common components
-fn expand_qualified_name_template(
-    template: &str,
-    captures: &HashMap<String, String>,
-    components: &CommonEntityComponents,
-) -> String {
+fn expand_qualified_name_template(template: &str, ctx: &TemplateExpansionContext) -> String {
     let mut result = template.to_string();
 
     // Replace engine-provided placeholders
-    if let Some(ref scope) = components.parent_scope {
+    if let Some(ref scope) = ctx.components.parent_scope {
         result = result.replace("{scope}", scope);
     } else {
         result = result.replace("{scope}::", "");
@@ -532,25 +778,40 @@ fn expand_qualified_name_template(
     }
 
     // Replace {name} with the entity's derived name
-    result = result.replace("{name}", &components.name);
+    result = result.replace("{name}", &ctx.components.name);
 
     // Resolve {impl_type_name} to a fully qualified name. This ensures templates
     // like `<{impl_type_name}>::{name}` produce `<my_crate::MyStruct>::foo`
     // instead of just `<MyStruct>::foo`.
-    if let Some(qualified_impl_type) =
-        resolve_impl_type_name(captures, components.parent_scope.as_deref())
-    {
+    if let Some(qualified_impl_type) = resolve_impl_type_name(
+        ctx.captures,
+        ctx.components.parent_scope.as_deref(),
+        ctx.import_map,
+        ctx.type_alias_map,
+        ctx.package_name,
+    ) {
         result = result.replace("{impl_type_name}", &qualified_impl_type);
     }
 
     // Resolve {trait_name} to a fully qualified name for trait impls.
     // This ensures `<Type as {trait_name}>::method` produces `<Type as my_crate::Trait>::method`
-    if let Some(trait_name) = captures.get("trait_name") {
-        let qualified_trait = if let Some(trait_path) = captures.get("trait_path") {
+    if let Some(trait_name) = ctx.captures.get("trait_name") {
+        let qualified_trait = if let Some(trait_path) = ctx.captures.get("trait_path") {
             // Case 1: Scoped trait like `mod::Trait`
             format!("{trait_path}::{trait_name}")
-        } else if let Some(ref scope) = components.parent_scope {
-            // Case 2: Simple trait name - prepend module scope
+        } else if let Some(resolved) = ctx.import_map.resolve(trait_name) {
+            // Case 2: Trait was imported - resolve through import map
+            if let Some(stripped) = resolved.strip_prefix("crate::") {
+                if let Some(pkg) = ctx.package_name {
+                    format!("{pkg}::{stripped}")
+                } else {
+                    resolved.to_string()
+                }
+            } else {
+                resolved.to_string()
+            }
+        } else if let Some(ref scope) = ctx.components.parent_scope {
+            // Case 3: Simple trait name - prepend module scope
             // Find the module-level scope (everything before the type in the scope)
             // For methods, scope is like "crate::Type", for impl blocks it's "crate"
             let module_scope = scope
@@ -559,14 +820,14 @@ fn expand_qualified_name_template(
                 .unwrap_or(scope.as_str());
             format!("{module_scope}::{trait_name}")
         } else {
-            // Case 3: No scope available
+            // Case 4: No scope available
             trait_name.clone()
         };
         result = result.replace("{trait_name}", &qualified_trait);
     }
 
     // Replace remaining capture placeholders (skip those with special handling above)
-    for (capture_name, value) in captures {
+    for (capture_name, value) in ctx.captures {
         if capture_name == "impl_type_name"
             || capture_name == "impl_type_path"
             || capture_name == "trait_name"
@@ -575,6 +836,26 @@ fn expand_qualified_name_template(
             continue;
         }
         result = result.replace(&format!("{{{capture_name}}}"), value);
+    }
+
+    // For trait impl blocks (templates like `<{impl_type_name} as {trait_name}>`),
+    // append where clause for blanket impls with type parameter bounds.
+    // Only applies to impl block templates (not method templates which have `::` suffix).
+    if template.starts_with("<{impl_type_name} as {trait_name}>") && !template.contains("::") {
+        if let (Some(node), Some(src)) = (ctx.main_node, ctx.source) {
+            // Only process impl_item nodes
+            if node.kind() == "impl_item" {
+                let bounds = extract_type_parameter_bounds(
+                    node,
+                    src,
+                    ctx.import_map,
+                    ctx.package_name,
+                    ctx.components.parent_scope.as_deref(),
+                );
+                let where_clause = format_where_clause(&bounds);
+                result.push_str(&where_clause);
+            }
+        }
     }
 
     result
@@ -722,8 +1003,9 @@ fn parse_binary_predicate_args<'a, 'b>(
 fn evaluate_not_has_child(args: &[QueryPredicateArg], query_match: &QueryMatch) -> bool {
     let Some((node, child_spec)) = parse_binary_predicate_args(args, query_match, "not-has-child?")
     else {
-        // Invalid or missing args - don't filter
-        return true;
+        // Invalid or missing args - reject match to avoid false positives
+        tracing::warn!("not-has-child? predicate has invalid args, rejecting match");
+        return false;
     };
 
     // First try as a field name (e.g., "trait" field on impl_item)
@@ -750,8 +1032,9 @@ fn evaluate_not_has_ancestor(args: &[QueryPredicateArg], query_match: &QueryMatc
     let Some((node, node_kind)) =
         parse_binary_predicate_args(args, query_match, "not-has-ancestor?")
     else {
-        // Invalid or missing args - don't filter
-        return true;
+        // Invalid or missing args - reject match to avoid false positives
+        tracing::warn!("not-has-ancestor? predicate has invalid args, rejecting match");
+        return false;
     };
 
     // Return true if the node does NOT have an ancestor of the specified kind
@@ -1439,5 +1722,175 @@ mod tests {
             expand_template("{impl_type_name}::{name}", &captures),
             "MyStruct::foo"
         );
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_inline() {
+        let source = "impl<T: Debug> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        // Find the impl_item node
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+        assert_eq!(impl_node.kind(), "impl_item");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert_eq!(bounds[0].1, vec!["Debug"]);
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_where_clause() {
+        let source = "impl<T> Foo for T where T: Clone {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+        assert_eq!(impl_node.kind(), "impl_item");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert_eq!(bounds[0].1, vec!["Clone"]);
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_multiple() {
+        let source = "impl<T: Debug + Clone> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert!(bounds[0].1.contains(&"Debug".to_string()));
+        assert!(bounds[0].1.contains(&"Clone".to_string()));
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_no_bounds() {
+        let source = "impl<T> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert!(bounds.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_path() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "Widget".to_string());
+        captures.insert("impl_type_path".to_string(), "crate::ui".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        assert_eq!(result, Some("crate::ui::Widget".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_std_type() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "String".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // String is a std type, should not be prefixed
+        assert_eq!(result, Some("String".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_scope() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "MyStruct".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate::module"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // Should prepend scope
+        assert_eq!(result, Some("test_crate::module::MyStruct".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_type_alias() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "Settings".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let mut type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+        type_alias_map.insert("Settings".to_string(), "Config".to_string());
+        type_alias_map.insert("Config".to_string(), "RawConfig".to_string());
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // Should resolve through the alias chain to RawConfig
+        assert_eq!(result, Some("test_crate::RawConfig".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_none_without_capture() {
+        let captures = HashMap::new(); // no impl_type_name
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        assert_eq!(result, None);
     }
 }

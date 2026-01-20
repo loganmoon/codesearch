@@ -10,6 +10,7 @@
 use crate::common::import_map::ImportMap;
 use crate::common::language_path::LanguagePath;
 use crate::common::path_config::RUST_PATH_CONFIG;
+use anyhow::{bail, Result};
 use streaming_iterator::StreamingIterator;
 use tracing::{debug, error};
 use tree_sitter::{Node, Query, QueryCursor};
@@ -261,6 +262,122 @@ fn parse_rust_use_list(list_node: Node, source: &str, base_path: &str, import_ma
     }
 }
 
+/// Type alias mappings from alias name to target type name
+///
+/// This stores simple name -> target mappings, e.g.:
+/// - "Settings" -> "AppConfig"
+/// - "AppConfig" -> "Config"
+/// - "Config" -> "RawConfig"
+pub type TypeAliasMap = std::collections::HashMap<String, String>;
+
+/// Parse Rust type alias declarations to build a mapping
+///
+/// For each `type Alias = Target;`, extracts the alias name and target type name.
+/// Only handles simple type aliases (not generic aliases) for now.
+///
+/// # Example
+/// ```text
+/// type Config = RawConfig;
+/// type AppConfig = Config;
+/// ```
+/// Returns: {"Config" -> "RawConfig", "AppConfig" -> "Config"}
+///
+/// # Errors
+/// Returns an error if the tree-sitter query fails to compile (indicates a bug).
+pub fn parse_rust_type_aliases(root: Node, source: &str) -> Result<TypeAliasMap> {
+    let mut alias_map = TypeAliasMap::new();
+
+    let query_source = r#"
+        (type_item
+          name: (type_identifier) @alias_name
+          type: (_) @target_type)
+    "#;
+
+    let query = Query::new(&tree_sitter_rust::LANGUAGE.into(), query_source)
+        .map_err(|e| anyhow::anyhow!("Failed to compile type alias query: {e}"))?;
+
+    let alias_idx = query.capture_index_for_name("alias_name");
+    let target_idx = query.capture_index_for_name("target_type");
+
+    let (Some(alias_idx), Some(target_idx)) = (alias_idx, target_idx) else {
+        bail!("Missing capture indices in type alias query (query: alias_name={alias_idx:?}, target_type={target_idx:?})");
+    };
+
+    let source_bytes = source.as_bytes();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&query, root, source_bytes);
+
+    while let Some(m) = matches.next() {
+        let mut alias_name: Option<&str> = None;
+        let mut target_type: Option<&str> = None;
+
+        for capture in m.captures {
+            if capture.index == alias_idx {
+                alias_name = node_text(capture.node, source_bytes, "type_alias_name");
+            } else if capture.index == target_idx {
+                // For the target type, extract just the simple name if it's a type identifier
+                // For more complex types (generics, references), use the full text
+                let target_node = capture.node;
+                match target_node.kind() {
+                    "type_identifier" => {
+                        target_type = node_text(target_node, source_bytes, "type_alias_target");
+                    }
+                    "scoped_type_identifier" => {
+                        // For scoped types like `mod::Type`, use the full path
+                        target_type = node_text(target_node, source_bytes, "type_alias_target");
+                    }
+                    _ => {
+                        // For generic types, references, etc., skip for now
+                        // These require more complex handling
+                        debug!(
+                            target_kind = target_node.kind(),
+                            "Skipping complex type alias target"
+                        );
+                    }
+                }
+            }
+        }
+
+        if let (Some(alias), Some(target)) = (alias_name, target_type) {
+            debug!(alias = alias, target = target, "Parsed type alias");
+            alias_map.insert(alias.to_string(), target.to_string());
+        }
+    }
+
+    Ok(alias_map)
+}
+
+/// Resolve a type name through the alias chain to find the canonical type
+///
+/// Follows the chain of type aliases until no more aliases are found.
+/// Returns the original name if it's not an alias.
+///
+/// # Example
+/// Given aliases: {"Settings" -> "AppConfig", "AppConfig" -> "Config", "Config" -> "RawConfig"}
+/// - resolve_type_alias_chain("Settings", &map) -> "RawConfig"
+/// - resolve_type_alias_chain("RawConfig", &map) -> "RawConfig"
+///
+/// Handles cycles defensively with a seen set to prevent infinite loops.
+pub fn resolve_type_alias_chain(type_name: &str, alias_map: &TypeAliasMap) -> String {
+    let mut current = type_name.to_string();
+    let mut seen = std::collections::HashSet::new();
+
+    while let Some(target) = alias_map.get(&current) {
+        if !seen.insert(current.clone()) {
+            // Cycle detected, return current value
+            debug!(
+                type_name = type_name,
+                current = current,
+                "Cycle detected in type alias chain"
+            );
+            break;
+        }
+        current = target.clone();
+    }
+
+    current
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -363,5 +480,67 @@ use network::{
             Some("network::tcp::connect"),
             "tcp_connect should resolve to network::tcp::connect"
         );
+    }
+
+    // ========================================================================
+    // Tests for parse_rust_type_aliases
+    // ========================================================================
+
+    #[test]
+    fn test_parse_type_aliases() {
+        let source = r#"
+type Config = RawConfig;
+type AppConfig = Config;
+type Settings = AppConfig;
+"#;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).unwrap();
+
+        let alias_map = parse_rust_type_aliases(tree.root_node(), source).unwrap();
+
+        assert_eq!(alias_map.get("Config"), Some(&"RawConfig".to_string()));
+        assert_eq!(alias_map.get("AppConfig"), Some(&"Config".to_string()));
+        assert_eq!(alias_map.get("Settings"), Some(&"AppConfig".to_string()));
+        assert_eq!(alias_map.get("RawConfig"), None);
+    }
+
+    #[test]
+    fn test_resolve_type_alias_chain() {
+        let mut alias_map = TypeAliasMap::new();
+        alias_map.insert("Settings".to_string(), "AppConfig".to_string());
+        alias_map.insert("AppConfig".to_string(), "Config".to_string());
+        alias_map.insert("Config".to_string(), "RawConfig".to_string());
+
+        assert_eq!(
+            resolve_type_alias_chain("Settings", &alias_map),
+            "RawConfig"
+        );
+        assert_eq!(
+            resolve_type_alias_chain("AppConfig", &alias_map),
+            "RawConfig"
+        );
+        assert_eq!(resolve_type_alias_chain("Config", &alias_map), "RawConfig");
+        assert_eq!(
+            resolve_type_alias_chain("RawConfig", &alias_map),
+            "RawConfig"
+        );
+        assert_eq!(
+            resolve_type_alias_chain("UnknownType", &alias_map),
+            "UnknownType"
+        );
+    }
+
+    #[test]
+    fn test_resolve_type_alias_chain_cycle_detection() {
+        let mut alias_map = TypeAliasMap::new();
+        alias_map.insert("A".to_string(), "B".to_string());
+        alias_map.insert("B".to_string(), "C".to_string());
+        alias_map.insert("C".to_string(), "A".to_string()); // Creates a cycle
+
+        // Should not hang, should return some value in the cycle
+        let result = resolve_type_alias_chain("A", &alias_map);
+        // The exact result depends on cycle detection order, but it should be one of A, B, or C
+        assert!(result == "A" || result == "B" || result == "C");
     }
 }

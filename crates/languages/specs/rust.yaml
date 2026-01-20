@@ -811,14 +811,16 @@ extraction_hints:
     # --- Function queries (free functions, not in impl/trait) ---
 
     FUNCTION_FREE:
-      description: "Free functions at module level"
+      description: "Free functions at module level (not in impl/trait blocks)"
       capture: "function"
       query: |
-        (function_item
+        ((function_item
           name: (identifier) @name
           parameters: (parameters) @params
           return_type: (_)? @return_type
           body: (block) @body) @function
+          (#not-has-ancestor? @function impl_item)
+          (#not-has-ancestor? @function trait_item))
 
     # --- Impl block queries ---
 
@@ -826,7 +828,7 @@ extraction_hints:
       description: "Inherent impl blocks (impl Type)"
       capture: "impl"
       query: |
-        (impl_item
+        ((impl_item
           type_parameters: (type_parameters)? @type_params
           type: [
             (type_identifier) @impl_type_name
@@ -838,7 +840,7 @@ extraction_hints:
               name: (type_identifier) @impl_type_name)
           ]
           body: (declaration_list) @body) @impl
-        (#not-has-child? @impl trait)
+          (#not-has-child? @impl trait))
 
     IMPL_TRAIT:
       description: "Trait impl blocks (impl Trait for Type)"
@@ -873,7 +875,7 @@ extraction_hints:
       description: "Methods with self parameter in inherent impl"
       capture: "method"
       query: |
-        (impl_item
+        ((impl_item
           type: [
             (type_identifier) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
@@ -886,13 +888,13 @@ extraction_hints:
                 (self_parameter) @self_param)
               return_type: (_)? @return_type
               body: (block) @body) @method)) @impl
-        (#not-has-child? @impl trait)
+          (#not-has-child? @impl trait))
 
     METHOD_RETURNS_SELF_IN_INHERENT_IMPL:
       description: "Constructor methods returning Self in inherent impl"
       capture: "method"
       query: |
-        (impl_item
+        ((impl_item
           type: [
             (type_identifier) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
@@ -904,15 +906,15 @@ extraction_hints:
               parameters: (parameters) @params
               return_type: (type_identifier) @return_type
               body: (block) @body) @method)) @impl
-        (#not-has-child? @impl trait)
-        (#not-has-child? @params self_parameter)
-        (#eq? @return_type "Self")
+          (#not-has-child? @impl trait)
+          (#not-has-child? @params self_parameter)
+          (#eq? @return_type "Self"))
 
     ASSOCIATED_FUNCTION_IN_INHERENT_IMPL:
       description: "Associated functions (no self, not returning Self) in inherent impl"
       capture: "function"
       query: |
-        (impl_item
+        ((impl_item
           type: [
             (type_identifier) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
@@ -924,9 +926,9 @@ extraction_hints:
               parameters: (parameters) @params
               return_type: (_)? @return_type
               body: (block) @body) @function)) @impl
-        (#not-has-child? @impl trait)
-        (#not-has-child? @params self_parameter)
-        (#not-eq? @return_type "Self")
+          (#not-has-child? @impl trait)
+          (#not-has-child? @params self_parameter)
+          (#not-eq? @return_type "Self"))
 
     METHOD_IN_TRAIT_IMPL:
       description: "Methods in trait impl blocks"
@@ -1011,9 +1013,12 @@ extraction_hints:
             name: (field_identifier) @name
             type: (_) @field_type) @field)
 
-    # Note: Tuple struct fields are positional and don't have field_declaration nodes
-    # They would need special handling with PositionalIndex name strategy
-    # For now, we skip individual tuple field extraction
+    TUPLE_STRUCT_FIELD:
+      description: "Tuple struct fields (positional)"
+      capture: "field_type"
+      query: |
+        (ordered_field_declaration_list
+          type: (_) @field_type)
 
     ENUM:
       description: "Enum definitions"
@@ -1059,13 +1064,14 @@ extraction_hints:
               type: (_) @field_type) @field))
 
     TYPE_ALIAS:
-      description: "Type alias definitions"
+      description: "Type alias definitions at module level (not in impl blocks)"
       capture: "type_alias"
       query: |
-        (type_item
+        ((type_item
           name: (type_identifier) @name
           type_parameters: (type_parameters)? @type_params
           type: (_) @aliased_type) @type_alias
+          (#not-has-ancestor? @type_alias impl_item))
 
     ASSOCIATED_TYPE_IN_TRAIT_IMPL:
       description: "Associated types in trait impl blocks"
@@ -1102,7 +1108,7 @@ extraction_hints:
       description: "Associated constants in inherent impl blocks"
       capture: "const"
       query: |
-        (impl_item
+        ((impl_item
           type: [
             (type_identifier) @impl_type_name
             (generic_type type: (type_identifier) @impl_type_name)
@@ -1113,7 +1119,7 @@ extraction_hints:
               name: (identifier) @name
               type: (_) @const_type
               value: (_) @value) @const)) @impl
-        (#not-has-child? @impl trait)
+          (#not-has-child? @impl trait))
 
     CONST_IN_TRAIT_IMPL:
       description: "Associated constants in trait impl blocks"
@@ -1391,8 +1397,12 @@ extraction_hints:
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
 
-    # TupleStructField handler removed - tuple fields need special handling
-    # since ordered_field_declaration_list doesn't contain field_declaration nodes
+    TupleStructField:
+      entity_rule: E-PROPERTY
+      query: TUPLE_STRUCT_FIELD
+      capture: "field_type"
+      name_strategy: positional_index
+      qualified_name_template: "{scope}::{name}"
 
     Enum:
       entity_rule: E-ENUM

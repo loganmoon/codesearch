@@ -18,6 +18,11 @@ use tree_sitter::{Node, Query, QueryCursor};
 // =============================================================================
 
 /// Rust function call query
+///
+/// Captures:
+/// - @callee: Direct function calls (identifier or scoped_identifier)
+/// - @method_callee: Method name in method calls
+/// - @method_receiver: Receiver expression in method calls (for type analysis)
 const RUST_CALL_QUERY: &str = r#"
 [
   (call_expression
@@ -28,6 +33,7 @@ const RUST_CALL_QUERY: &str = r#"
 
   (call_expression
     function: (field_expression
+      value: (_) @method_receiver
       field: (field_identifier) @method_callee))
 ]
 "#;
@@ -350,6 +356,301 @@ fn node_text<'a>(node: Node, source: &'a str) -> &'a str {
     }
 }
 
+// =============================================================================
+// Rust method call receiver analysis
+// =============================================================================
+
+/// Result of analyzing a method call receiver
+#[derive(Debug)]
+struct ReceiverTypeInfo {
+    /// The type name (e.g., "IntProducer" or "T")
+    type_name: String,
+    /// If the type is a generic parameter, all trait bounds (e.g., ["Validator", "Processor"])
+    /// Multiple bounds occur with `T: A + B` syntax.
+    trait_bounds: Vec<String>,
+}
+
+/// Find the enclosing function item for a node
+fn find_enclosing_function(mut node: Node) -> Option<Node> {
+    while let Some(parent) = node.parent() {
+        if parent.kind() == "function_item" || parent.kind() == "function_signature_item" {
+            return Some(parent);
+        }
+        node = parent;
+    }
+    None
+}
+
+/// Extract parameter type for a given parameter name from function parameters
+///
+/// Returns (type_name, is_reference) where is_reference indicates if the type
+/// is behind a reference (e.g., `&IntProducer` -> ("IntProducer", true))
+fn extract_parameter_type<'a>(
+    function: Node<'a>,
+    param_name: &str,
+    source: &'a str,
+) -> Option<(String, bool)> {
+    // Find the parameters node
+    let parameters = function.child_by_field_name("parameters")?;
+
+    let mut cursor = parameters.walk();
+    for param in parameters.children(&mut cursor) {
+        if param.kind() == "parameter" {
+            // Get the pattern (parameter name)
+            if let Some(pattern) = param.child_by_field_name("pattern") {
+                let pattern_text = node_text(pattern, source);
+                if pattern_text == param_name {
+                    // Get the type
+                    if let Some(type_node) = param.child_by_field_name("type") {
+                        return extract_type_name(type_node, source);
+                    }
+                }
+            }
+        } else if param.kind() == "self_parameter" {
+            // Handle self, &self, &mut self
+            let param_text = node_text(param, source);
+            if param_name == "self" || param_text.contains("self") {
+                // For self parameters, return Self as the type
+                return Some(("Self".to_string(), param_text.contains('&')));
+            }
+        }
+    }
+    None
+}
+
+/// Extract the type name from a type node, handling references and generic types
+///
+/// Returns (type_name, is_reference)
+fn extract_type_name(type_node: Node, source: &str) -> Option<(String, bool)> {
+    match type_node.kind() {
+        "type_identifier" => Some((node_text(type_node, source).to_string(), false)),
+        "generic_type" => {
+            // e.g., `Option<T>` - extract the base type
+            if let Some(name) = type_node.child_by_field_name("type") {
+                return Some((node_text(name, source).to_string(), false));
+            }
+            None
+        }
+        "reference_type" => {
+            // e.g., `&IntProducer` or `&mut T` - extract the inner type
+            if let Some(inner) = type_node.child_by_field_name("type") {
+                if let Some((name, _)) = extract_type_name(inner, source) {
+                    return Some((name, true));
+                }
+            }
+            None
+        }
+        "scoped_type_identifier" => {
+            // e.g., `module::Type` - use the full path
+            Some((node_text(type_node, source).to_string(), false))
+        }
+        _ => None,
+    }
+}
+
+/// Check if a type name is a generic parameter in the function signature
+/// and extract all its trait bounds
+///
+/// For `fn foo<T: Validator + Processor>(item: &T)`, returns `["Validator", "Processor"]` for type "T"
+fn extract_generic_bounds(function: Node, type_name: &str, source: &str) -> Vec<String> {
+    // Find type_parameters in the function
+    let Some(type_params) = function.child_by_field_name("type_parameters") else {
+        return Vec::new();
+    };
+
+    let mut cursor = type_params.walk();
+    for child in type_params.children(&mut cursor) {
+        // Handle both constrained_type_parameter (older tree-sitter) and
+        // type_parameter (newer tree-sitter) node kinds
+        if child.kind() == "constrained_type_parameter" || child.kind() == "type_parameter" {
+            // Structure: `T: Clone + Send` or `T: Trait`
+            // First child is the type name, remaining are bounds
+            let mut child_cursor = child.walk();
+            let mut found_type = false;
+            let mut first_child = true;
+            for type_param_child in child.children(&mut child_cursor) {
+                if first_child && type_param_child.kind() == "type_identifier" {
+                    // This is the type parameter name
+                    let param_name = node_text(type_param_child, source);
+                    if param_name == type_name {
+                        found_type = true;
+                    }
+                    first_child = false;
+                } else if found_type {
+                    // Look for trait bounds
+                    match type_param_child.kind() {
+                        "trait_bounds" => {
+                            return extract_all_trait_bounds(type_param_child, source);
+                        }
+                        "type_identifier" | "scoped_type_identifier" => {
+                            // Direct trait bound without trait_bounds wrapper
+                            return vec![node_text(type_param_child, source).to_string()];
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        } else if child.kind() == "type_identifier" {
+            // Unbounded type parameter - check where clause
+            let param_name = node_text(child, source);
+            if param_name == type_name {
+                // Look for where clause
+                let where_bounds = find_where_clause_bounds(function, type_name, source);
+                if !where_bounds.is_empty() {
+                    return where_bounds;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Extract all trait bounds from a trait_bounds node
+///
+/// For `T: Clone + Send + MyTrait`, returns `["Clone", "Send", "MyTrait"]`
+fn extract_all_trait_bounds(bounds: Node, source: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut cursor = bounds.walk();
+    for child in bounds.children(&mut cursor) {
+        match child.kind() {
+            "type_identifier" | "scoped_type_identifier" => {
+                results.push(node_text(child, source).to_string());
+            }
+            "generic_type" => {
+                if let Some(name) = child.child_by_field_name("type") {
+                    results.push(node_text(name, source).to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    results
+}
+
+/// Find all where clause bounds for a type parameter
+///
+/// For `where T: Clone + Send`, returns `["Clone", "Send"]`
+fn find_where_clause_bounds(function: Node, type_name: &str, source: &str) -> Vec<String> {
+    // Look for where_clause in function
+    let mut cursor = function.walk();
+    for child in function.children(&mut cursor) {
+        if child.kind() == "where_clause" {
+            let mut where_cursor = child.walk();
+            for predicate in child.children(&mut where_cursor) {
+                if predicate.kind() == "where_predicate" {
+                    // Check if this predicate is for our type
+                    if let Some(left) = predicate.child_by_field_name("left") {
+                        let predicate_type = node_text(left, source);
+                        if predicate_type == type_name {
+                            // Find the bounds
+                            if let Some(bounds) = predicate.child_by_field_name("bounds") {
+                                return extract_all_trait_bounds(bounds, source);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Analyze a method call receiver to determine its type information
+///
+/// This is used to construct more qualified method call targets. For example:
+/// - `p.produce()` where `p: &IntProducer` -> type is "IntProducer"
+/// - `item.validate()` where `item: &T` and `T: Validator` -> type is generic with bounds ["Validator"]
+fn analyze_rust_method_receiver(receiver_node: Node, source: &str) -> Option<ReceiverTypeInfo> {
+    // Only handle simple identifier receivers for now
+    if receiver_node.kind() != "identifier" {
+        tracing::trace!(
+            receiver_kind = receiver_node.kind(),
+            "Skipping receiver analysis for non-identifier node"
+        );
+        return None;
+    }
+
+    let receiver_name = node_text(receiver_node, source);
+    if receiver_name.is_empty() {
+        return None;
+    }
+
+    // Find the enclosing function
+    let function = find_enclosing_function(receiver_node)?;
+
+    // Look up the parameter type
+    let (type_name, _is_ref) = extract_parameter_type(function, receiver_name, source)?;
+
+    // Check if this is a generic type parameter with bounds
+    let trait_bounds = extract_generic_bounds(function, &type_name, source);
+
+    Some(ReceiverTypeInfo {
+        type_name,
+        trait_bounds,
+    })
+}
+
+/// Build qualified method call target candidates for Rust
+///
+/// Uses receiver type analysis to construct more precise targets:
+/// - For concrete types: returns `[(crate::Type::method, is_external)]`
+/// - For generic types with multiple bounds: returns candidates for ALL trait bounds
+///
+/// Multiple candidates are returned for generic parameters with multiple trait bounds
+/// (e.g., `T: Processor + Validator`). Rust's trait coherence guarantees only one
+/// trait can provide the method, so the resolution layer will find the valid one.
+fn build_rust_method_targets(
+    method_name: &str,
+    receiver_info: Option<&ReceiverTypeInfo>,
+    ctx: &SpecDrivenContext,
+) -> Vec<(String, bool)> {
+    let Some(info) = receiver_info else {
+        // No type info - return just the method name for SimpleName resolution
+        return vec![(method_name.to_string(), false)];
+    };
+
+    // If the type is a generic parameter with trait bounds, emit candidates for ALL bounds.
+    // Rust's trait coherence guarantees only one trait can provide the method.
+    if !info.trait_bounds.is_empty() {
+        let resolution_ctx = build_resolution_context(ctx, None);
+        return info
+            .trait_bounds
+            .iter()
+            .map(|trait_bound| {
+                let resolved = resolve_reference(trait_bound, trait_bound, &resolution_ctx);
+                let target = format!("{}::{method_name}", resolved.target);
+                (target, resolved.is_external)
+            })
+            .collect();
+    }
+
+    // For concrete types, we need to find if there's a trait impl method or inherent method
+    // For now, we'll just construct a type-qualified name that might match
+    // The resolution layer will handle finding the actual target
+    let type_name = &info.type_name;
+
+    // Skip "Self" as it's not directly resolvable
+    if type_name == "Self" {
+        return vec![(method_name.to_string(), false)];
+    }
+
+    // For type resolution, use module scope (not function scope) since types are
+    // defined at module level, not inside functions. We pass None for parent_scope
+    // to avoid incorrect scoping like `test_crate::my_function::MyType`.
+    let resolution_ctx = build_resolution_context(ctx, None);
+    let resolved = resolve_reference(type_name, type_name, &resolution_ctx);
+
+    // Construct a type-qualified name: `crate::Type::method`
+    // This won't match UFCS format (<Type as Trait>::method) directly,
+    // so we rely on CallAliases at resolution time for trait impl methods
+    let target = format!("{}::{method_name}", resolved.target);
+    vec![(target, resolved.is_external)]
+}
+
+// =============================================================================
+// Resolution context building
+// =============================================================================
+
 /// Build a ResolutionContext from SpecDrivenContext
 fn build_resolution_context<'a>(
     ctx: &'a SpecDrivenContext<'a>,
@@ -399,7 +700,14 @@ fn build_source_reference(
 }
 
 /// Extract simple name from a potentially qualified name
+///
+/// Handles:
+/// - Qualified paths with `::` or `.` separators
+/// - Generic types by stripping `<...>` suffixes
 fn extract_simple_name(name: &str) -> &str {
+    // First strip generic parameters if present
+    let name = name.split('<').next().unwrap_or(name);
+
     // Handle both Rust (::) and JS (.) separators
     name.rsplit("::")
         .next()
@@ -411,12 +719,80 @@ fn extract_simple_name(name: &str) -> &str {
 // Call extraction
 // =============================================================================
 
+/// Process a direct function call (e.g., `foo()` or `module::bar()`)
+fn process_direct_call(
+    callee_node: Node,
+    ctx: &SpecDrivenContext,
+    parent_scope: Option<&str>,
+) -> Option<SourceReference> {
+    let callee_text = node_text(callee_node, ctx.source);
+    if callee_text.is_empty() {
+        return None;
+    }
+
+    let simple_name = extract_simple_name(callee_text);
+    let resolution_ctx = build_resolution_context(ctx, parent_scope);
+    let resolved = resolve_reference(callee_text, simple_name, &resolution_ctx);
+
+    build_source_reference(
+        resolved.target,
+        simple_name.to_string(),
+        resolved.is_external,
+        callee_node,
+        ReferenceType::Call,
+    )
+}
+
+/// Process a method call (e.g., `receiver.method()`)
+///
+/// For Rust, attempts to analyze the receiver type to construct more qualified targets.
+/// When the receiver is a generic with multiple trait bounds (e.g., `T: A + B`), emits
+/// reference candidates for ALL bounds. Rust's trait coherence guarantees only one can
+/// provide the method, so the resolution layer will find the valid one.
+///
+/// For other languages, uses just the method name.
+fn process_method_calls(
+    callee_node: Node,
+    receiver_node: Option<Node>,
+    ctx: &SpecDrivenContext,
+    is_rust: bool,
+) -> Vec<SourceReference> {
+    let method_name = node_text(callee_node, ctx.source);
+    if method_name.is_empty() {
+        return Vec::new();
+    }
+
+    let targets: Vec<(String, bool)> = if is_rust {
+        // For Rust, try to analyze the receiver type
+        let receiver_info = receiver_node.and_then(|r| analyze_rust_method_receiver(r, ctx.source));
+        build_rust_method_targets(method_name, receiver_info.as_ref(), ctx)
+    } else {
+        // For other languages, keep just the method name
+        vec![(method_name.to_string(), false)]
+    };
+
+    targets
+        .into_iter()
+        .filter_map(|(target, is_external)| {
+            build_source_reference(
+                target,
+                method_name.to_string(),
+                is_external,
+                callee_node,
+                ReferenceType::Call,
+            )
+        })
+        .collect()
+}
+
 /// Extract function calls from a node (typically function/method body)
 ///
-/// Method calls in chains (e.g., `foo.bar().baz()`) are captured as unresolved
-/// calls with just the method name, since we don't have type information to
-/// determine which type's method is being called. Post-processing can match
-/// these unresolved calls to their implementations.
+/// For method calls (e.g., `receiver.method()`), attempts to analyze the receiver's
+/// type to construct a more qualified target name. This enables better resolution:
+/// - For concrete types: targets like `crate::Type::method`
+/// - For generic types with trait bounds: targets like `crate::Trait::method`
+///
+/// Falls back to simple method name when receiver type cannot be determined.
 pub fn extract_function_calls(
     node: Node,
     ctx: &SpecDrivenContext,
@@ -439,6 +815,7 @@ pub fn extract_function_calls(
         return Vec::new();
     };
 
+    let is_rust = ctx.language_str == "rust";
     let mut calls = Vec::new();
     let mut seen = HashSet::new();
     let mut cursor = QueryCursor::new();
@@ -446,48 +823,47 @@ pub fn extract_function_calls(
     let mut matches = cursor.matches(query, node, ctx.source.as_bytes());
 
     while let Some(query_match) = matches.next() {
+        // For Rust method calls, we need both the method name and receiver
+        // Build a map of capture names to nodes for this match
+        let mut method_callee_node: Option<Node> = None;
+        let mut method_receiver_node: Option<Node> = None;
+        let mut direct_callee_node: Option<Node> = None;
+
         for capture in query_match.captures {
-            let callee_node = capture.node;
-            let callee_text = node_text(callee_node, ctx.source);
-
-            if callee_text.is_empty() {
-                continue;
-            }
-
-            // Skip if we've already processed this call at this location
-            let key = (callee_text.to_string(), callee_node.start_byte());
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.insert(key);
-
-            // Check if this is a method call (method_callee capture) vs direct function call (callee capture)
-            // Method calls like `.name()` in a chain can't be resolved without type information,
-            // so we keep them as unresolved calls with just the method name.
             let capture_name = query.capture_names()[capture.index as usize];
-            let is_method_call = capture_name == "method_callee";
+            match capture_name {
+                "method_callee" => method_callee_node = Some(capture.node),
+                "method_receiver" => method_receiver_node = Some(capture.node),
+                "callee" => direct_callee_node = Some(capture.node),
+                _ => {}
+            }
+        }
 
-            let simple_name = extract_simple_name(callee_text);
+        // Process direct function calls
+        if let Some(callee_node) = direct_callee_node {
+            let callee_text = node_text(callee_node, ctx.source);
+            let key = (callee_text.to_string(), callee_node.start_byte());
+            if !seen.contains(&key) {
+                seen.insert(key);
+                if let Some(source_ref) = process_direct_call(callee_node, ctx, parent_scope) {
+                    calls.push(source_ref);
+                }
+            }
+        }
 
-            let (target, is_external) = if is_method_call {
-                // For method calls, keep as unresolved - just the method name
-                // This allows post-processing to match against known methods
-                (simple_name.to_string(), false)
-            } else {
-                // For direct function calls, resolve normally
-                let resolution_ctx = build_resolution_context(ctx, parent_scope);
-                let resolved = resolve_reference(callee_text, simple_name, &resolution_ctx);
-                (resolved.target, resolved.is_external)
-            };
-
-            if let Some(source_ref) = build_source_reference(
-                target,
-                simple_name.to_string(),
-                is_external,
-                callee_node,
-                ReferenceType::Call,
-            ) {
-                calls.push(source_ref);
+        // Process method calls - may emit multiple candidates for generic receivers
+        // with multiple trait bounds (e.g., `T: Processor + Validator`)
+        if let Some(callee_node) = method_callee_node {
+            let method_name = node_text(callee_node, ctx.source);
+            let key = (method_name.to_string(), callee_node.start_byte());
+            if !seen.contains(&key) {
+                seen.insert(key);
+                calls.extend(process_method_calls(
+                    callee_node,
+                    method_receiver_node,
+                    ctx,
+                    is_rust,
+                ));
             }
         }
     }
@@ -841,9 +1217,11 @@ pub fn extract_impl_trait_reference(
                     "Trait node found but text is empty"
                 );
             } else {
-                let simple_name = extract_simple_name(type_text);
+                // Strip generic parameters for resolution (e.g., Transformer<String, i32> -> Transformer)
+                let type_name = type_text.split('<').next().unwrap_or(type_text);
+                let simple_name = extract_simple_name(type_name);
                 let resolution_ctx = build_resolution_context(ctx, parent_scope);
-                let resolved = resolve_reference(type_text, simple_name, &resolution_ctx);
+                let resolved = resolve_reference(type_name, simple_name, &resolution_ctx);
                 if let Some(source_ref) = build_source_reference(
                     resolved.target,
                     resolved.simple_name,

@@ -57,6 +57,9 @@ pub struct SpecDrivenContext<'a> {
 
     /// Optional edge case handlers for language-specific patterns
     pub edge_case_handlers: Option<&'a EdgeCaseRegistry>,
+
+    /// Type alias map for resolving type aliases to canonical types (Rust only)
+    pub type_alias_map: &'a crate::rust::import_resolution::TypeAliasMap,
 }
 
 /// Extract entities using a handler configuration
@@ -128,6 +131,7 @@ pub fn extract_with_config(
             &captures,
             components.parent_scope.as_deref(),
             ctx.import_map,
+            ctx.type_alias_map,
             ctx.package_name,
         );
 
@@ -138,6 +142,7 @@ pub fn extract_with_config(
                 &captures,
                 &components,
                 ctx.import_map,
+                ctx.type_alias_map,
                 ctx.package_name,
                 Some(main_node),
                 Some(ctx.source),
@@ -163,6 +168,7 @@ pub fn extract_with_config(
                 &captures,
                 &components,
                 ctx.import_map,
+                ctx.type_alias_map,
                 ctx.package_name,
                 None,
                 None,
@@ -715,17 +721,23 @@ fn resolve_impl_type_name(
     captures: &HashMap<String, String>,
     parent_scope: Option<&str>,
     import_map: &crate::common::import_map::ImportMap,
+    type_alias_map: &crate::rust::import_resolution::TypeAliasMap,
     package_name: Option<&str>,
 ) -> Option<String> {
     let impl_type_name = captures.get("impl_type_name")?;
 
+    // Resolve through type alias chain to get canonical type name
+    // e.g., Settings -> AppConfig -> Config -> RawConfig
+    let canonical_type_name =
+        crate::rust::import_resolution::resolve_type_alias_chain(impl_type_name, type_alias_map);
+
     let qualified = if let Some(impl_type_path) = captures.get("impl_type_path") {
         // Case 1: Scoped type like `mod::Type`
-        format!("{impl_type_path}::{impl_type_name}")
-    } else if crate::rust::edge_case_handlers::is_std_type(impl_type_name) {
+        format!("{impl_type_path}::{canonical_type_name}")
+    } else if crate::rust::edge_case_handlers::is_std_type(&canonical_type_name) {
         // Case 2: Well-known std/primitive type - don't add scope prefix
-        impl_type_name.clone()
-    } else if let Some(resolved) = import_map.resolve(impl_type_name) {
+        canonical_type_name
+    } else if let Some(resolved) = import_map.resolve(&canonical_type_name) {
         // Case 3: Type was imported (e.g., `use crate::types::Widget`)
         // The resolved path may start with "crate::" which needs to be replaced
         // with the actual package name
@@ -739,27 +751,37 @@ fn resolve_impl_type_name(
             resolved.to_string()
         }
     } else if let Some(scope) = parent_scope {
-        if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
+        if scope.ends_with(&format!("::{canonical_type_name}")) || scope == canonical_type_name {
             // Case 4: Method context - scope already is the qualified type name
             scope.to_string()
+        } else if scope.ends_with(&format!("::{impl_type_name}")) {
+            // Case 5a: Scope ends with the original alias name - replace it with canonical
+            // e.g., "test_crate::Settings" + RawConfig -> "test_crate::RawConfig"
+            let prefix_len = scope.len() - impl_type_name.len();
+            format!("{}{canonical_type_name}", &scope[..prefix_len])
+        } else if scope == impl_type_name {
+            // Case 5b: Scope IS the original alias name - use canonical directly
+            canonical_type_name
         } else {
-            // Case 5: Impl block context - prepend module scope
-            format!("{scope}::{impl_type_name}")
+            // Case 5c: Impl block context - prepend module scope
+            format!("{scope}::{canonical_type_name}")
         }
     } else {
         // Case 6: No scope available
-        impl_type_name.clone()
+        canonical_type_name
     };
 
     Some(qualified)
 }
 
 /// Expand a qualified name template with captures and common components
+#[allow(clippy::too_many_arguments)]
 fn expand_qualified_name_template(
     template: &str,
     captures: &HashMap<String, String>,
     components: &CommonEntityComponents,
     import_map: &crate::common::import_map::ImportMap,
+    type_alias_map: &crate::rust::import_resolution::TypeAliasMap,
     package_name: Option<&str>,
     main_node: Option<tree_sitter::Node>,
     source: Option<&str>,
@@ -785,6 +807,7 @@ fn expand_qualified_name_template(
         captures,
         components.parent_scope.as_deref(),
         import_map,
+        type_alias_map,
         package_name,
     ) {
         result = result.replace("{impl_type_name}", &qualified_impl_type);
@@ -1000,8 +1023,9 @@ fn parse_binary_predicate_args<'a, 'b>(
 fn evaluate_not_has_child(args: &[QueryPredicateArg], query_match: &QueryMatch) -> bool {
     let Some((node, child_spec)) = parse_binary_predicate_args(args, query_match, "not-has-child?")
     else {
-        // Invalid or missing args - don't filter
-        return true;
+        // Invalid or missing args - reject match to avoid false positives
+        tracing::warn!("not-has-child? predicate has invalid args, rejecting match");
+        return false;
     };
 
     // First try as a field name (e.g., "trait" field on impl_item)

@@ -236,6 +236,10 @@ impl SpecDrivenRustExtractor {
         // Build import map for reference resolution
         let import_map = parse_file_imports(tree.root_node(), source, Language::Rust, None);
 
+        // Build type alias map for resolving type aliases to canonical types
+        let type_alias_map =
+            crate::rust::import_resolution::parse_rust_type_aliases(tree.root_node(), source);
+
         // Create edge case registry for Rust-specific patterns
         let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
 
@@ -251,6 +255,7 @@ impl SpecDrivenRustExtractor {
             import_map: &import_map,
             path_config: &CRATE_BASED_PATH_CONFIG,
             edge_case_handlers: Some(&edge_case_registry),
+            type_alias_map: &type_alias_map,
         };
 
         let mut all_entities = Vec::new();
@@ -321,6 +326,9 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -333,6 +341,7 @@ impl Extractor for SpecDrivenJavaScriptExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No JS-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         use super::javascript::handler_configs::ALL_HANDLERS;
@@ -398,6 +407,9 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         let ctx = SpecDrivenContext {
             source,
             file_path,
@@ -410,6 +422,7 @@ impl Extractor for SpecDrivenTypeScriptExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No TS-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         use super::typescript::handler_configs::ALL_HANDLERS;
@@ -477,6 +490,9 @@ impl Extractor for SpecDrivenTsxExtractor {
             module_path.as_deref(),
         );
 
+        // Empty type alias map (type aliases are Rust-only)
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
         // TSX uses TypeScript language enum since they share the same type system
         let ctx = SpecDrivenContext {
             source,
@@ -490,6 +506,7 @@ impl Extractor for SpecDrivenTsxExtractor {
             import_map: &import_map,
             path_config: &MODULE_BASED_PATH_CONFIG,
             edge_case_handlers: None, // No TSX-specific edge case handlers yet
+            type_alias_map: &type_alias_map,
         };
 
         // TSX uses the same handlers as TypeScript

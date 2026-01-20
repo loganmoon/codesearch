@@ -429,6 +429,10 @@ fn extract_parameter_type<'a>(
 fn extract_type_name(type_node: Node, source: &str) -> Option<(String, bool)> {
     match type_node.kind() {
         "type_identifier" => Some((node_text(type_node, source).to_string(), false)),
+        "primitive_type" => {
+            // e.g., `str`, `i32`, `bool` - primitive types
+            Some((node_text(type_node, source).to_string(), false))
+        }
         "generic_type" => {
             // e.g., `Option<T>` - extract the base type
             if let Some(name) = type_node.child_by_field_name("type") {

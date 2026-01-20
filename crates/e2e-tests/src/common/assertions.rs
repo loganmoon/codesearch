@@ -231,7 +231,13 @@ pub async fn assert_vector_dimensions(
         .await
         .context("Failed to parse collection info")?;
 
-    let actual_dims = info.result.config.params.vectors.size;
+    let actual_dims = info
+        .result
+        .config
+        .params
+        .vectors
+        .get_size()
+        .ok_or_else(|| anyhow::anyhow!("No vector configuration found in collection"))?;
     if actual_dims != expected_dims {
         return Err(anyhow::anyhow!(
             "Expected vector dimensions {expected_dims} but found {actual_dims}"
@@ -263,7 +269,29 @@ struct CollectionConfig {
 
 #[derive(Debug, Deserialize)]
 struct CollectionParams {
-    vectors: VectorParams,
+    vectors: VectorConfig,
+}
+
+/// Vector configuration can be either a single config or named vectors map
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum VectorConfig {
+    /// Named vectors (new format): { "default": { "size": 384, ... } }
+    Named(std::collections::HashMap<String, VectorParams>),
+    /// Single vector config (legacy): { "size": 384, ... }
+    Single(VectorParams),
+}
+
+impl VectorConfig {
+    fn get_size(&self) -> Option<usize> {
+        match self {
+            VectorConfig::Single(params) => Some(params.size),
+            VectorConfig::Named(map) => {
+                // Return size from first named vector (usually "default" or "")
+                map.values().next().map(|p| p.size)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -25,8 +25,8 @@ pub use assertions::{
 };
 pub use containers::{
     create_test_database, drop_test_collection, drop_test_database, get_shared_neo4j,
-    get_shared_postgres, get_shared_qdrant, start_and_wait_for_outbox_sync_with_db,
-    wait_for_graph_ready, TestNeo4j, TestPostgres, TestQdrant,
+    get_shared_postgres, get_shared_qdrant, wait_for_graph_ready, wait_for_outbox_empty, TestNeo4j,
+    TestPostgres, TestQdrant,
 };
 pub use logging::init_test_logging;
 

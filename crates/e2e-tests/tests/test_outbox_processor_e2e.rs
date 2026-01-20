@@ -11,7 +11,7 @@ use codesearch_core::{CodeEntity, QualifiedName};
 use codesearch_e2e_tests::common::*;
 use codesearch_outbox_processor::OutboxProcessor;
 use codesearch_storage::{
-    create_collection_manager, OutboxOperation, PostgresClientTrait, TargetStore,
+    create_collection_manager, OutboxOperation, PostgresClientTrait, QdrantConfig, TargetStore,
 };
 use sqlx::postgres::PgPoolOptions;
 use std::path::PathBuf;
@@ -46,14 +46,19 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
     }
 }
 
-/// Helper to create Qdrant collection using the collection manager
-async fn create_qdrant_collection(
+/// Create storage and qdrant configs for testing
+fn create_test_configs(
     qdrant: &TestQdrant,
     postgres: &TestPostgres,
+    neo4j: &TestNeo4j,
     db_name: &str,
-    collection_name: &str,
-    vector_size: usize,
-) -> Result<()> {
+) -> (QdrantConfig, codesearch_core::config::StorageConfig) {
+    let qdrant_config = QdrantConfig {
+        host: "localhost".to_string(),
+        port: qdrant.port(),
+        rest_port: qdrant.rest_port(),
+    };
+
     let storage_config = codesearch_core::config::StorageConfig {
         qdrant_host: "localhost".to_string(),
         qdrant_port: qdrant.port(),
@@ -66,19 +71,85 @@ async fn create_qdrant_collection(
         postgres_user: "codesearch".to_string(),
         postgres_password: "codesearch".to_string(),
         neo4j_host: "localhost".to_string(),
-        neo4j_http_port: 7474,
-        neo4j_bolt_port: 7687,
-        neo4j_user: "neo4j".to_string(),
-        neo4j_password: "codesearch".to_string(),
+        neo4j_http_port: neo4j.http_port(),
+        neo4j_bolt_port: neo4j.bolt_port(),
+        neo4j_user: "".to_string(),      // Neo4j test container has auth disabled
+        neo4j_password: "".to_string(),
         max_entities_per_db_operation: 10000,
         postgres_pool_size: 20,
     };
 
+    (qdrant_config, storage_config)
+}
+
+/// Helper to create Qdrant collection using the collection manager
+async fn create_qdrant_collection(
+    qdrant: &TestQdrant,
+    postgres: &TestPostgres,
+    neo4j: &TestNeo4j,
+    db_name: &str,
+    collection_name: &str,
+    vector_size: usize,
+) -> Result<()> {
+    let (_, storage_config) = create_test_configs(qdrant, postgres, neo4j, db_name);
     let collection_manager = create_collection_manager(&storage_config).await?;
     collection_manager
         .ensure_collection(collection_name, vector_size)
         .await?;
     Ok(())
+}
+
+/// Run outbox processor in-process until the outbox is empty
+///
+/// This runs the processor directly (not in Docker) and processes batches
+/// until no pending entries remain.
+async fn run_outbox_processor_until_empty(
+    postgres_client: Arc<dyn PostgresClientTrait>,
+    qdrant: &TestQdrant,
+    postgres: &TestPostgres,
+    neo4j: &TestNeo4j,
+    db_name: &str,
+    timeout: Duration,
+) -> Result<()> {
+    let (qdrant_config, storage_config) = create_test_configs(qdrant, postgres, neo4j, db_name);
+
+    let processor = OutboxProcessor::new(
+        Arc::clone(&postgres_client),
+        qdrant_config,
+        storage_config,
+        Duration::from_millis(50), // Fast poll for tests
+        100,                       // batch_size
+        3,                         // max_retries
+        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
+        200, // max_cached_collections
+    );
+
+    let start = std::time::Instant::now();
+
+    loop {
+        // Check timeout
+        if start.elapsed() > timeout {
+            let pending = postgres_client.count_pending_outbox_entries().await?;
+            anyhow::bail!(
+                "Timeout waiting for outbox to empty. {} entries still pending",
+                pending
+            );
+        }
+
+        // Process a batch
+        let had_work = processor.process_batch().await?;
+
+        // Check if outbox is empty
+        let pending = postgres_client.count_pending_outbox_entries().await?;
+        if pending == 0 {
+            return Ok(());
+        }
+
+        // If no work was done, wait a bit before next poll
+        if !had_work {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
 }
 
 #[tokio::test]
@@ -88,6 +159,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
+    let neo4j = get_shared_neo4j().await?;
     let db_name = create_test_database(&postgres).await?;
     let collection_name = format!("test_delete_{}", Uuid::new_v4());
 
@@ -112,7 +184,7 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
         .await?;
 
     // Initialize storage (create collection)
-    create_qdrant_collection(&qdrant, &postgres, &db_name, &collection_name, 384).await?;
+    create_qdrant_collection(&qdrant, &postgres, &neo4j, &db_name, &collection_name, 384).await?;
 
     // Step 1: INSERT 3 entities to Qdrant
     let entities: Vec<CodeEntity> = (0..3)
@@ -129,12 +201,12 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     // Store entities with outbox
     for entity in &entities {
         let embedding = vec![0.1; 384];
-        // Store embedding to get its ID
+        // Store embedding to get its ID (sparse embedding is optional, test with None)
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = postgres_client
             .store_embeddings(
                 repo_id,
-                &[(content_hash, embedding, None)],
+                &[(content_hash, embedding, None)], // No sparse embedding
                 "test-model",
                 384,
             )
@@ -156,8 +228,15 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     }
 
     // Run outbox processor to sync INSERTs
-    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
-    drop(processor);
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
 
     // Verify 3 points exist in Qdrant
     assert_min_point_count(&qdrant, &collection_name, 3).await?;
@@ -183,8 +262,15 @@ async fn test_e2e_delete_operations_sync_to_qdrant() -> Result<()> {
     .await?;
 
     // Run processor again to sync DELETEs
-    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
-    drop(processor);
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
 
     // Verify only 1 point remains in Qdrant
     assert_point_count(&qdrant, &collection_name, 1).await?;
@@ -202,6 +288,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
+    let neo4j = get_shared_neo4j().await?;
     let db_name = create_test_database(&postgres).await?;
     let collection_name = format!("test_mixed_{}", Uuid::new_v4());
 
@@ -226,7 +313,7 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
         .await?;
 
     // Initialize storage
-    create_qdrant_collection(&qdrant, &postgres, &db_name, &collection_name, 384).await?;
+    create_qdrant_collection(&qdrant, &postgres, &neo4j, &db_name, &collection_name, 384).await?;
 
     // Create 5 entities for testing
     for i in 0..5 {
@@ -237,12 +324,12 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
             &repo_id.to_string(),
         );
         let embedding = vec![0.1; 384];
-        // Store embedding to get its ID
+        // Store embedding to get its ID (sparse embedding is optional, test with None)
         let content_hash = format!("{:032x}", Uuid::new_v4().as_u128());
         let embedding_ids = postgres_client
             .store_embeddings(
                 repo_id,
-                &[(content_hash, embedding, None)],
+                &[(content_hash, embedding, None)], // No sparse embedding
                 "test-model",
                 384,
             )
@@ -264,8 +351,15 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
     }
 
     // Process INSERTs
-    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
-    drop(processor);
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
 
     assert_min_point_count(&qdrant, &collection_name, 5).await?;
 
@@ -310,8 +404,15 @@ async fn test_e2e_mixed_operations_in_single_batch() -> Result<()> {
     .await?;
 
     // Process mixed batch
-    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
-    drop(processor);
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
 
     // Should have 4 points now (5 - 1 deleted)
     assert_point_count(&qdrant, &collection_name, 4).await?;
@@ -329,6 +430,7 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
+    let neo4j = get_shared_neo4j().await?;
     let db_name = create_test_database(&postgres).await?;
     let collection_name = format!("test_invalid_delete_{}", Uuid::new_v4());
 
@@ -353,13 +455,13 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
         .await?;
 
     // Initialize storage
-    create_qdrant_collection(&qdrant, &postgres, &db_name, &collection_name, 384).await?;
+    create_qdrant_collection(&qdrant, &postgres, &neo4j, &db_name, &collection_name, 384).await?;
 
     // Create entity metadata
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
          entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(repo_id)
     .bind("invalid-entity")
@@ -393,75 +495,67 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    // Start processor - it should fail to process and record failure
-    let qdrant_config = codesearch_storage::QdrantConfig {
-        host: "localhost".to_string(),
-        port: qdrant.port(),
-        rest_port: qdrant.rest_port(),
-    };
-    let storage_config = codesearch_core::config::StorageConfig {
-        qdrant_host: "localhost".to_string(),
-        qdrant_port: qdrant.port(),
-        qdrant_rest_port: qdrant.rest_port(),
-        auto_start_deps: false,
-        docker_compose_file: None,
-        postgres_host: "localhost".to_string(),
-        postgres_port: postgres.port(),
-        postgres_database: db_name.to_string(),
-        postgres_user: "codesearch".to_string(),
-        postgres_password: "codesearch".to_string(),
-        neo4j_host: "localhost".to_string(),
-        neo4j_http_port: 7474,
-        neo4j_bolt_port: 7687,
-        neo4j_user: "neo4j".to_string(),
-        neo4j_password: "codesearch".to_string(),
-        max_entities_per_db_operation: 10000,
-        postgres_pool_size: 20,
-    };
-    let _processor = OutboxProcessor::new(
+    // Create and run processor for enough batches to exhaust retries (max_retries = 3)
+    let (qdrant_config, storage_config) = create_test_configs(&qdrant, &postgres, &neo4j, &db_name);
+    let processor = OutboxProcessor::new(
         Arc::clone(&postgres_client),
         qdrant_config,
         storage_config,
-        Duration::from_millis(100),
+        Duration::from_millis(50),
         10,
-        3,
+        3, // max_retries
         OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
+        200,
     );
 
-    // Run one batch
-    // Note: We can't use the helper because it expects success
-    // Instead, we'll run a single batch manually
-    let _handle = tokio::spawn(async move {
-        // Let it run for a bit
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Run batches until entry is processed (either successfully or after max retries)
+    for _ in 0..10 {
+        let _ = processor.process_batch().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Check that entry was NOT marked as processed (invalid payload causes failure)
-    let unprocessed_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+        // Check if entry has been processed
+        let unprocessed_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NULL")
+                .fetch_one(&pool)
+                .await?;
+        if unprocessed_count == 0 {
+            break;
+        }
+    }
+
+    // Check that entry was eventually marked as processed (after max retries)
+    let processed_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM entity_outbox WHERE processed_at IS NOT NULL")
             .fetch_one(&pool)
             .await?;
 
-    // Entry should still be unprocessed due to invalid payload
+    // Entry should be marked processed after exhausting retries (to avoid poison pills)
     assert_eq!(
-        unprocessed_count, 1,
-        "Entry with invalid DELETE payload should remain unprocessed"
+        processed_count, 1,
+        "Entry with invalid DELETE payload should be marked processed after max retries"
     );
 
-    // Check that retry_count was incremented or error was recorded
+    // Check that retry_count reached max and error was recorded
     let entry: Option<(i32, Option<String>)> = sqlx::query_as(
         "SELECT retry_count, last_error FROM entity_outbox WHERE entity_id = 'invalid-entity'",
     )
     .fetch_optional(&pool)
     .await?;
 
-    // Entry should exist (we might not have processed it yet depending on timing)
-    if let Some((retry_count, last_error)) = entry {
-        eprintln!("Entry state: retry_count={retry_count}, last_error={last_error:?}");
-        // Either retried or error recorded would indicate proper failure handling
-    }
+    let (retry_count, last_error) = entry.expect("Entry should exist");
+    assert!(
+        retry_count >= 3,
+        "Entry should have been retried at least 3 times, got {retry_count}"
+    );
+    assert!(
+        last_error.is_some(),
+        "Entry should have error message recorded"
+    );
+    let error_msg = last_error.unwrap();
+    assert!(
+        error_msg.contains("Invalid DELETE payload"),
+        "Error should mention invalid DELETE payload, got: {error_msg}"
+    );
 
     // Cleanup
     drop_test_collection(&qdrant, &collection_name).await?;
@@ -476,6 +570,7 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
 
     let qdrant = get_shared_qdrant().await?;
     let postgres = get_shared_postgres().await?;
+    let neo4j = get_shared_neo4j().await?;
     let db_name = create_test_database(&postgres).await?;
     let collection_name = format!("test_retry_{}", Uuid::new_v4());
 
@@ -500,13 +595,13 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
         .await?;
 
     // Initialize storage
-    create_qdrant_collection(&qdrant, &postgres, &db_name, &collection_name, 384).await?;
+    create_qdrant_collection(&qdrant, &postgres, &neo4j, &db_name, &collection_name, 384).await?;
 
     // Create entity metadata
     sqlx::query(
         "INSERT INTO entity_metadata (repository_id, entity_id, qualified_name, name,
          entity_type, language, file_path, visibility, entity_data, git_commit_hash, qdrant_point_id, content)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(repo_id)
     .bind("max-retry-entity")
@@ -543,9 +638,16 @@ async fn test_e2e_retry_exhaustion_marks_entry_processed() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    // Start processor - entry should be marked as processed immediately
-    let processor = start_and_wait_for_outbox_sync_with_db(&postgres, &qdrant, &db_name).await?;
-    drop(processor);
+    // Run outbox processor - entry should be marked as processed immediately
+    run_outbox_processor_until_empty(
+        Arc::clone(&postgres_client),
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        Duration::from_secs(30),
+    )
+    .await?;
 
     // Verify entry was marked as processed
     let processed_count: i64 =

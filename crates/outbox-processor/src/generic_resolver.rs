@@ -22,10 +22,12 @@ use async_trait::async_trait;
 use codesearch_core::entities::{CodeEntity, RelationshipType};
 use codesearch_core::error::Result;
 use codesearch_core::resolution::{LookupStrategy, RelationshipDef};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, trace, warn};
 
-use crate::neo4j_relationship_resolver::{EntityCache, RelationshipResolver};
+use crate::neo4j_relationship_resolver::{
+    normalize_external_ref, EntityCache, ExternalRef, RelationshipResolver, ResolverOutput,
+};
 
 /// Qualified name prefix character indicating a trait impl item (method, assoc type, etc.)
 ///
@@ -44,6 +46,8 @@ struct ExtractedRef {
     target: String,
     /// Pre-computed simple name (last path segment)
     simple_name: String,
+    /// Whether this reference targets an external (non-local) entity
+    is_external: bool,
 }
 
 /// Lookup maps for resolving entity references
@@ -86,6 +90,7 @@ impl ReferenceExtractor for CallsExtractor {
             .map(|sr| ExtractedRef {
                 target: sr.target().to_string(),
                 simple_name: sr.simple_name().to_string(),
+                is_external: sr.is_external(),
             })
             .collect()
     }
@@ -103,6 +108,7 @@ impl ReferenceExtractor for UsesExtractor {
             .map(|sr| ExtractedRef {
                 target: sr.target().to_string(),
                 simple_name: sr.simple_name().to_string(),
+                is_external: sr.is_external(),
             })
             .collect()
     }
@@ -121,6 +127,7 @@ impl ReferenceExtractor for ImplementsExtractor {
             refs.push(ExtractedRef {
                 target: src_ref.target().to_string(),
                 simple_name: src_ref.simple_name().to_string(),
+                is_external: src_ref.is_external(),
             });
         }
 
@@ -129,6 +136,7 @@ impl ReferenceExtractor for ImplementsExtractor {
             refs.push(ExtractedRef {
                 target: src_ref.target().to_string(),
                 simple_name: src_ref.simple_name().to_string(),
+                is_external: src_ref.is_external(),
             });
         }
 
@@ -149,6 +157,7 @@ impl ReferenceExtractor for AssociatesExtractor {
                 vec![ExtractedRef {
                     target: src_ref.target().to_string(),
                     simple_name: src_ref.simple_name().to_string(),
+                    is_external: src_ref.is_external(),
                 }]
             })
             .unwrap_or_default()
@@ -169,6 +178,7 @@ impl ReferenceExtractor for ExtendedTypesExtractor {
             .map(|src_ref| ExtractedRef {
                 target: src_ref.target().to_string(),
                 simple_name: src_ref.simple_name().to_string(),
+                is_external: src_ref.is_external(),
             })
             .collect()
     }
@@ -186,6 +196,7 @@ impl ReferenceExtractor for InheritsExtractor {
             .map(|src_ref| ExtractedRef {
                 target: src_ref.target().to_string(),
                 simple_name: src_ref.simple_name().to_string(),
+                is_external: src_ref.is_external(),
             })
             .collect()
     }
@@ -200,9 +211,10 @@ impl ReferenceExtractor for ImportsExtractor {
             .relationships
             .imports
             .iter()
-            .map(|src_ref| ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
+            .map(|sr| ExtractedRef {
+                target: sr.target().to_string(),
+                simple_name: sr.simple_name().to_string(),
+                is_external: sr.is_external(),
             })
             .collect()
     }
@@ -217,9 +229,10 @@ impl ReferenceExtractor for ReexportsExtractor {
             .relationships
             .reexports
             .iter()
-            .map(|src_ref| ExtractedRef {
-                target: src_ref.target().to_string(),
-                simple_name: src_ref.simple_name().to_string(),
+            .map(|sr| ExtractedRef {
+                target: sr.target().to_string(),
+                simple_name: sr.simple_name().to_string(),
+                is_external: sr.is_external(),
             })
             .collect()
     }
@@ -409,7 +422,7 @@ impl RelationshipResolver for GenericResolver {
         self.def.name
     }
 
-    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+    async fn resolve(&self, cache: &EntityCache) -> Result<ResolverOutput> {
         // Build target lookup maps
         let maps = self.build_target_maps(cache);
 
@@ -436,6 +449,7 @@ impl RelationshipResolver for GenericResolver {
         );
 
         let mut relationships = Vec::new();
+        let mut external_refs: HashSet<ExternalRef> = HashSet::new();
 
         for source in source_entities {
             let refs = self.extractor.extract_refs(source);
@@ -451,6 +465,7 @@ impl RelationshipResolver for GenericResolver {
             );
 
             for ext_ref in refs {
+                // Try internal resolution first
                 if let Some(target_id) = self.resolve_reference(&ext_ref, &maps) {
                     // Skip self-references (except for CALLS - recursive functions are valid)
                     if target_id == source.entity_id
@@ -459,10 +474,22 @@ impl RelationshipResolver for GenericResolver {
                         continue;
                     }
 
-                    // Forward edge
+                    // Forward edge to internal target
                     relationships.push((
                         source.entity_id.clone(),
                         target_id,
+                        self.def.forward_rel.to_string(),
+                    ));
+                } else if ext_ref.is_external {
+                    // Internal resolution failed but ref is marked external:
+                    // create External node and relationship
+                    let normalized = normalize_external_ref(&ext_ref.target);
+                    let external_ref = ExternalRef::new(normalized);
+                    let ext_id = external_ref.entity_id();
+                    external_refs.insert(external_ref);
+                    relationships.push((
+                        source.entity_id.clone(),
+                        ext_id,
                         self.def.forward_rel.to_string(),
                     ));
                 } else {
@@ -474,7 +501,10 @@ impl RelationshipResolver for GenericResolver {
             }
         }
 
-        Ok(relationships)
+        Ok(ResolverOutput {
+            relationships,
+            external_refs,
+        })
     }
 }
 
@@ -624,8 +654,10 @@ mod tests {
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].target, "crate::bar");
         assert_eq!(refs[0].simple_name, "bar");
+        assert!(!refs[0].is_external);
         assert_eq!(refs[1].target, "crate::baz");
         assert_eq!(refs[1].simple_name, "baz");
+        assert!(!refs[1].is_external);
     }
 
     #[test]
@@ -657,6 +689,7 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, "crate::MyStruct");
         assert_eq!(refs[0].simple_name, "MyStruct");
+        assert!(!refs[0].is_external);
     }
 
     #[test]
@@ -685,6 +718,7 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, "crate::MyTrait");
         assert_eq!(refs[0].simple_name, "MyTrait");
+        assert!(!refs[0].is_external);
     }
 
     #[test]
@@ -724,8 +758,10 @@ mod tests {
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].target, "crate::BaseTrait");
         assert_eq!(refs[0].simple_name, "BaseTrait");
+        assert!(!refs[0].is_external);
         assert_eq!(refs[1].target, "crate::OtherTrait");
         assert_eq!(refs[1].simple_name, "OtherTrait");
+        assert!(!refs[1].is_external);
     }
 
     #[test]
@@ -752,6 +788,7 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, "crate::other::Thing");
         assert_eq!(refs[0].simple_name, "Thing");
+        assert!(!refs[0].is_external);
     }
 
     #[test]
@@ -784,6 +821,7 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].target, "crate::factorial");
         assert_eq!(refs[0].simple_name, "factorial");
+        assert!(!refs[0].is_external);
         // The extractor should return the self-call; filtering happens in GenericResolver
         // which now allows self-references for CALLS relationships
     }

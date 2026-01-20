@@ -1069,6 +1069,9 @@ impl OutboxProcessor {
     /// - imports_resolver: IMPORTS for module imports
     /// - reexports_resolver: REEXPORTS for module re-exports (barrel exports)
     ///
+    /// External references are now handled by each resolver during their resolution pass,
+    /// and External nodes are batch-created at the end.
+    ///
     /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
         use crate::generic_resolver::{
@@ -1076,8 +1079,9 @@ impl OutboxProcessor {
             imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
         };
         use crate::neo4j_relationship_resolver::{
-            resolve_relationships_generic, ContainsResolver, EntityCache,
+            collect_relationships, ContainsResolver, EntityCache, ExternalRef,
         };
+        use std::collections::HashSet;
 
         // Get repositories that need resolution
         let repo_ids = self
@@ -1182,14 +1186,23 @@ impl OutboxProcessor {
                 entity_count
             );
 
-            // Run all resolvers using cached entity data, tracking failures
+            // Accumulators for relationships and external refs across all resolvers
+            let mut all_relationships: Vec<(String, String, String)> = Vec::new();
+            let mut all_external_refs: HashSet<ExternalRef> = HashSet::new();
+
+            // Collect relationships from all resolvers (without creating them yet)
             let mut failed_resolvers: Vec<&str> = Vec::new();
             for resolver in &resolvers {
-                if let Err(e) =
-                    resolve_relationships_generic(&cache, neo4j_client.as_ref(), *resolver).await
+                if let Err(e) = collect_relationships(
+                    &cache,
+                    *resolver,
+                    &mut all_relationships,
+                    &mut all_external_refs,
+                )
+                .await
                 {
                     warn!(
-                        "Failed to resolve {} relationships for repository {}: {}",
+                        "Failed to collect {} relationships for repository {}: {}",
                         resolver.name(),
                         repository_id,
                         e
@@ -1199,21 +1212,53 @@ impl OutboxProcessor {
                 }
             }
 
-            // Resolve external references (creates External stub nodes)
-            let mut external_resolution_failed = false;
-            if let Err(e) = crate::neo4j_relationship_resolver::resolve_external_references(
-                &cache,
-                neo4j_client.as_ref(),
-                repository_id,
-            )
-            .await
-            {
-                warn!(
-                    "Failed to resolve external references for repository {}: {}",
-                    repository_id, e
-                );
-                external_resolution_failed = true;
-                // Continue even if external resolution fails
+            // Create all External nodes BEFORE creating relationships to avoid dangling refs
+            let mut external_creation_failed = false;
+            if !all_external_refs.is_empty() {
+                let ext_nodes: Vec<(String, String, Option<String>)> = all_external_refs
+                    .iter()
+                    .map(|r| (r.entity_id(), r.qualified_name.clone(), r.package.clone()))
+                    .collect();
+
+                match neo4j_client
+                    .batch_create_external_nodes(&repository_id.to_string(), &ext_nodes)
+                    .await
+                {
+                    Ok(()) => {
+                        info!("Created {} external nodes", ext_nodes.len());
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to create {} external nodes for repository {}: {}",
+                            ext_nodes.len(),
+                            repository_id,
+                            e
+                        );
+                        external_creation_failed = true;
+                    }
+                }
+            }
+
+            // Batch create all relationships (external nodes already exist)
+            let mut relationship_creation_failed = false;
+            if !all_relationships.is_empty() {
+                match neo4j_client
+                    .batch_create_relationships(&all_relationships)
+                    .await
+                {
+                    Ok(()) => {
+                        info!("Created {} relationships", all_relationships.len());
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to create {} relationships for repository {}: {}",
+                            all_relationships.len(),
+                            repository_id,
+                            e
+                        );
+                        relationship_creation_failed = true;
+                    }
+                }
             }
 
             // Clear the pending flag and set graph_ready
@@ -1240,34 +1285,36 @@ impl OutboxProcessor {
             }
 
             // Log completion with summary
-            if failed_resolvers.is_empty() && !external_resolution_failed {
+            let has_failures = !failed_resolvers.is_empty()
+                || external_creation_failed
+                || relationship_creation_failed;
+            if !has_failures {
                 info!(
-                    "Completed relationship resolution for repository {} ({} entities)",
-                    repository_id, entity_count
+                    "Completed relationship resolution for repository {} ({} entities, {} relationships, {} external refs)",
+                    repository_id,
+                    entity_count,
+                    all_relationships.len(),
+                    all_external_refs.len()
                 );
             } else {
-                let failure_summary = if !failed_resolvers.is_empty() {
-                    format!(
+                let mut failure_parts: Vec<String> = Vec::new();
+                if !failed_resolvers.is_empty() {
+                    failure_parts.push(format!(
                         "{} resolver(s) failed: {}",
                         failed_resolvers.len(),
                         failed_resolvers.join(", ")
-                    )
-                } else {
-                    String::new()
-                };
-                let external_summary = if external_resolution_failed {
-                    "external resolution failed"
-                } else {
-                    ""
-                };
-                let separator = if !failure_summary.is_empty() && external_resolution_failed {
-                    "; "
-                } else {
-                    ""
-                };
+                    ));
+                }
+                if external_creation_failed {
+                    failure_parts.push("external node creation failed".to_string());
+                }
+                if relationship_creation_failed {
+                    failure_parts.push("relationship creation failed".to_string());
+                }
                 warn!(
-                    "Completed relationship resolution for repository {} with warnings: {}{}{}",
-                    repository_id, failure_summary, separator, external_summary
+                    "Completed relationship resolution for repository {} with warnings: {}",
+                    repository_id,
+                    failure_parts.join("; ")
                 );
             }
         }

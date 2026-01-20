@@ -34,8 +34,8 @@ use anyhow::Context;
 use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
-use codesearch_storage::{Neo4jClientTrait, PostgresClientTrait};
-use std::collections::HashMap;
+use codesearch_storage::PostgresClientTrait;
+use std::collections::{HashMap, HashSet};
 use tracing::info;
 use uuid::Uuid;
 
@@ -107,16 +107,17 @@ pub trait RelationshipResolver: Send + Sync {
 
     /// Extract relationships using cached entity data
     ///
-    /// Returns Vec<(from_id, to_id, relationship_type)>
-    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>>;
+    /// Returns a `ResolverOutput` containing:
+    /// - `relationships`: Vec of (from_id, to_id, relationship_type) tuples
+    /// - `external_refs`: HashSet of external references discovered during resolution
+    async fn resolve(&self, cache: &EntityCache) -> Result<ResolverOutput>;
 }
 
-/// Generic function to resolve relationships using a resolver implementation
+/// Generic function to collect relationships and external refs from a resolver
 ///
-/// This function provides the common infrastructure for all relationship resolvers:
-/// 1. Calls the resolver's `resolve()` method to extract relationships from cache
-/// 2. Batch creates all relationships in Neo4j
-/// 3. Logs progress and results
+/// This function extracts relationship data from a resolver without creating them in Neo4j.
+/// The caller is responsible for creating external nodes first, then batch creating all
+/// relationships to ensure no dangling references.
 ///
 /// # Prerequisites
 /// The caller MUST ensure the Neo4j database is already selected via `use_database()`
@@ -125,37 +126,44 @@ pub trait RelationshipResolver: Send + Sync {
 ///
 /// # Arguments
 /// * `cache` - Pre-populated entity cache for the repository
-/// * `neo4j` - Neo4j client for creating relationships (must have database already selected)
 /// * `resolver` - Implementation of the RelationshipResolver trait
+/// * `all_relationships` - Accumulator for all relationships (for batch creation later)
+/// * `external_refs` - Accumulator for external refs (for batch creation later)
 ///
 /// # Example
 /// ```ignore
 /// // Caller must select database and create cache first
 /// neo4j.use_database(&db_name).await?;
 /// let cache = EntityCache::new(&postgres, repository_id).await?;
+/// let mut all_relationships = Vec::new();
+/// let mut external_refs = HashSet::new();
 /// let resolver = ContainsResolver;
-/// resolve_relationships_generic(&cache, &neo4j, &resolver).await?;
+/// collect_relationships(&cache, &resolver, &mut all_relationships, &mut external_refs).await?;
+/// // Then create external nodes, then batch create relationships
 /// ```
-pub async fn resolve_relationships_generic(
+pub async fn collect_relationships(
     cache: &EntityCache,
-    neo4j: &dyn Neo4jClientTrait,
     resolver: &dyn RelationshipResolver,
+    all_relationships: &mut Vec<(String, String, String)>,
+    external_refs: &mut HashSet<ExternalRef>,
 ) -> Result<()> {
-    info!("Resolving {} relationships...", resolver.name());
+    info!("Collecting {} relationships...", resolver.name());
 
     // Resolve relationships using cached entity data
-    let relationships = resolver.resolve(cache).await?;
+    let output = resolver.resolve(cache).await?;
 
-    // Batch create all relationships
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .with_context(|| format!("Failed to batch create {} relationships", resolver.name()))?;
+    let rel_count = output.relationships.len();
+    let ext_count = output.external_refs.len();
+
+    // Accumulate relationships and external refs for batch creation later
+    all_relationships.extend(output.relationships);
+    external_refs.extend(output.external_refs);
 
     info!(
-        "Resolved {} {} relationships",
-        relationships.len(),
-        resolver.name()
+        "Collected {} {} relationships ({} external refs)",
+        rel_count,
+        resolver.name(),
+        ext_count
     );
 
     Ok(())
@@ -177,7 +185,7 @@ impl RelationshipResolver for ContainsResolver {
         "containment"
     }
 
-    async fn resolve(&self, cache: &EntityCache) -> Result<Vec<(String, String, String)>> {
+    async fn resolve(&self, cache: &EntityCache) -> Result<ResolverOutput> {
         let entities = cache.all();
         let qname_to_id = cache.qname_map();
 
@@ -198,7 +206,34 @@ impl RelationshipResolver for ContainsResolver {
             }
         }
 
-        Ok(relationships)
+        // CONTAINS has no external references
+        Ok(ResolverOutput::relationships_only(relationships))
+    }
+}
+
+// ============================================================================
+// Resolver Output
+// ============================================================================
+
+/// Output from a relationship resolver containing both relationships and external refs
+///
+/// This unified output type allows resolvers to handle both internal and external
+/// references in a single pass, eliminating the need for separate external resolution.
+#[derive(Debug, Default)]
+pub struct ResolverOutput {
+    /// Relationships to create: (from_id, to_id, relationship_type)
+    pub relationships: Vec<(String, String, String)>,
+    /// External references discovered during resolution (deduplicated later)
+    pub external_refs: HashSet<ExternalRef>,
+}
+
+impl ResolverOutput {
+    /// Create resolver output with only relationships (no external refs)
+    pub fn relationships_only(relationships: Vec<(String, String, String)>) -> Self {
+        Self {
+            relationships,
+            external_refs: HashSet::new(),
+        }
     }
 }
 
@@ -208,15 +243,16 @@ impl RelationshipResolver for ContainsResolver {
 
 /// External reference collected from entity attributes
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ExternalRef {
+pub struct ExternalRef {
     /// Qualified name of the external reference
-    qualified_name: String,
+    pub qualified_name: String,
     /// Package/crate name (extracted from first segment)
-    package: Option<String>,
+    pub package: Option<String>,
 }
 
 impl ExternalRef {
-    fn new(qualified_name: String) -> Self {
+    /// Create a new external reference with the given qualified name
+    pub fn new(qualified_name: String) -> Self {
         // Extract package from first path segment
         let package = qualified_name
             .trim_start_matches("external::")
@@ -231,7 +267,7 @@ impl ExternalRef {
     }
 
     /// Generate a stable entity_id for this external reference
-    fn entity_id(&self) -> String {
+    pub fn entity_id(&self) -> String {
         format!(
             "external::{}",
             self.qualified_name.trim_start_matches("external::")
@@ -239,158 +275,11 @@ impl ExternalRef {
     }
 }
 
-/// Resolve external references and create External stub nodes
-///
-/// This function:
-/// 1. Collects all unresolved references from entity attributes
-/// 2. Creates External stub nodes in Neo4j for those references
-/// 3. Creates relationships from source entities to External nodes
-///
-/// External references are identified by the `is_external` flag on SourceReference fields.
-pub async fn resolve_external_references(
-    cache: &EntityCache,
-    neo4j: &dyn Neo4jClientTrait,
-    repository_id: Uuid,
-) -> Result<()> {
-    use std::collections::HashSet;
-
-    info!("Resolving external references...");
-
-    if cache.is_empty() {
-        return Ok(());
-    }
-
-    let entities = cache.all();
-
-    // Collect all external references with their source relationships
-    let mut external_refs: HashSet<ExternalRef> = HashSet::new();
-    let mut relationships: Vec<(String, String, String)> = Vec::new();
-
-    for entity in entities {
-        // Check implements_trait (typed SourceReference with is_external flag - Rust impl blocks)
-        if let Some(ref trait_ref) = entity.relationships.implements_trait {
-            if trait_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(trait_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
-            }
-        }
-
-        // Check implements (TypeScript/JavaScript classes implementing interfaces)
-        for impl_ref in &entity.relationships.implements {
-            if impl_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(impl_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "IMPLEMENTS".to_string()));
-            }
-        }
-
-        // Check for_type (for Associates relationships on impl blocks)
-        if let Some(ref for_type_ref) = entity.relationships.for_type {
-            if for_type_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(for_type_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "ASSOCIATES".to_string()));
-            }
-        }
-
-        // Check extends (for classes/interfaces - typed SourceReference)
-        for extend_ref in &entity.relationships.extends {
-            if extend_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(extend_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((
-                    entity.entity_id.clone(),
-                    ext_id,
-                    "INHERITS_FROM".to_string(),
-                ));
-            }
-        }
-
-        // Check extended_types (Rust trait bounds, TS interface extends - typed SourceReference)
-        for extended_type_ref in &entity.relationships.extended_types {
-            if extended_type_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(extended_type_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((
-                    entity.entity_id.clone(),
-                    ext_id,
-                    "EXTENDS_INTERFACE".to_string(),
-                ));
-            }
-        }
-
-        // Check uses_types (typed SourceReference with is_external flag)
-        for type_ref in &entity.relationships.uses_types {
-            if type_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(type_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "USES".to_string()));
-            }
-        }
-
-        // Check calls (typed SourceReference with is_external flag)
-        for call_ref in &entity.relationships.calls {
-            if call_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(call_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "CALLS".to_string()));
-            }
-        }
-
-        // Check imports (typed SourceReference with is_external flag)
-        for import_ref in &entity.relationships.imports {
-            if import_ref.is_external() {
-                let ext_ref = ExternalRef::new(normalize_external_ref(import_ref.target()));
-                let ext_id = ext_ref.entity_id();
-                external_refs.insert(ext_ref);
-                relationships.push((entity.entity_id.clone(), ext_id, "IMPORTS".to_string()));
-            }
-        }
-    }
-
-    if external_refs.is_empty() {
-        info!("No external references to resolve");
-        return Ok(());
-    }
-
-    // Create External nodes
-    let ext_nodes: Vec<(String, String, Option<String>)> = external_refs
-        .iter()
-        .map(|r| (r.entity_id(), r.qualified_name.clone(), r.package.clone()))
-        .collect();
-
-    neo4j
-        .batch_create_external_nodes(&repository_id.to_string(), &ext_nodes)
-        .await
-        .context("Failed to create external nodes")?;
-
-    info!("Created {} external nodes", ext_nodes.len());
-
-    // Create relationships to external nodes
-    neo4j
-        .batch_create_relationships(&relationships)
-        .await
-        .context("Failed to create external relationships")?;
-
-    info!(
-        "Resolved {} external references ({} relationships)",
-        external_refs.len(),
-        relationships.len()
-    );
-
-    Ok(())
-}
-
 /// Normalize an external reference name
-fn normalize_external_ref(ref_name: &str) -> String {
+///
+/// Strips `crate::` prefix, removes generic parameters, and ensures
+/// the result starts with `external::`.
+pub fn normalize_external_ref(ref_name: &str) -> String {
     // Strip crate:: prefix, keep external:: or add it
     let cleaned = ref_name
         .trim_start_matches("crate::")

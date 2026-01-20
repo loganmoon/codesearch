@@ -98,10 +98,15 @@ const RUST_USE_QUERY: &str = r#"
 // Primitive type filters
 // =============================================================================
 
-/// Rust primitive types to filter out from type references
+/// Rust primitive types to filter out from type reference extraction.
+///
+/// NOTE: Option and Result are intentionally excluded because they are prelude types
+/// that can be legitimately shadowed by user-defined types. When shadowed, we want
+/// USES relationships to be created so they can resolve to the local definition.
+/// Vec and Box are also common std types but rarely shadowed, so keeping them filtered.
 const RUST_PRIMITIVES: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize", "f32",
-    "f64", "bool", "char", "str", "String", "Self", "()", "Option", "Result", "Vec", "Box",
+    "f64", "bool", "char", "str", "String", "Self", "()", "Vec", "Box",
 ];
 
 /// TypeScript/JavaScript primitive types to filter out

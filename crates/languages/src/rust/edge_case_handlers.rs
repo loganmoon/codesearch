@@ -16,6 +16,14 @@ use crate::common::reference_resolution::{
 
 /// Well-known std types that should never be prefixed with a local crate name.
 /// These are foreign types from the standard library.
+///
+/// NOTE: Option and Result are intentionally excluded because they are prelude types
+/// that can be legitimately shadowed by user-defined types. When shadowed, references
+/// should resolve to the local definition, not the std types. Excluding them allows
+/// normal resolution to handle them (prepending the package name).
+///
+/// Some, None, Ok, Err are also excluded because they are enum variants (constructors),
+/// not types, and would not be matched by the type_identifier query anyway.
 const STD_TYPES: &[&str] = &[
     // Primitive types (not really std but also shouldn't be prefixed)
     "bool",
@@ -35,7 +43,7 @@ const STD_TYPES: &[&str] = &[
     "usize",
     "f32",
     "f64",
-    // Common std types
+    // Common std types (excluding Option/Result which can be shadowed)
     "String",
     "Vec",
     "Box",
@@ -43,12 +51,6 @@ const STD_TYPES: &[&str] = &[
     "Arc",
     "Cell",
     "RefCell",
-    "Option",
-    "Result",
-    "Some",
-    "None",
-    "Ok",
-    "Err",
     "HashMap",
     "HashSet",
     "BTreeMap",
@@ -294,8 +296,11 @@ mod tests {
         assert!(STD_TYPE_HANDLER.applies("Vec", &ctx));
         assert!(STD_TYPE_HANDLER.applies("String", &ctx));
         assert!(STD_TYPE_HANDLER.applies("HashMap", &ctx));
-        assert!(STD_TYPE_HANDLER.applies("Option", &ctx));
         assert!(STD_TYPE_HANDLER.applies("i32", &ctx));
+
+        // Option and Result are intentionally excluded to allow prelude shadowing
+        assert!(!STD_TYPE_HANDLER.applies("Option", &ctx));
+        assert!(!STD_TYPE_HANDLER.applies("Result", &ctx));
 
         assert!(!STD_TYPE_HANDLER.applies("MyStruct", &ctx));
         assert!(!STD_TYPE_HANDLER.applies("std::vec::Vec", &ctx)); // Qualified path

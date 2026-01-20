@@ -1418,6 +1418,7 @@ extraction_hints:
       capture: "variant"
       name_strategy: capture
       qualified_name_template: "{scope}::{name}"
+      relationships: extract_type_relationships
 
     Union:
       entity_rule: E-UNION

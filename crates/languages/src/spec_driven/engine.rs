@@ -120,6 +120,12 @@ pub fn extract_with_config(
         // Build common components with the derived name
         let components = build_common_components(ctx, &name, main_node, entity_type)?;
 
+        // Compute qualified impl type for UFCS call alias generation (Rust methods only).
+        // Must be done here while we have access to the original AST-derived parent_scope,
+        // which provides the correct module context for type name resolution.
+        let qualified_impl_type =
+            resolve_impl_type_name(&captures, components.parent_scope.as_deref());
+
         // Build qualified name from template if provided
         let qualified_name = if let Some(template) = config.qualified_name_template {
             expand_qualified_name_template(template, &captures, &components)
@@ -183,9 +189,13 @@ pub fn extract_with_config(
 
         // For Rust trait impl methods, generate call aliases for UFCS resolution.
         // This allows `Type::method` to resolve to `<Type as Trait>::method`.
+        // We use the pre-computed qualified_impl_type from captures rather than
+        // parsing the qualified_name string, which is more robust.
         if ctx.language_str == "rust" && entity_type == EntityType::Method {
-            if let Some(alias) = generate_ufcs_call_alias(&components.qualified_name) {
-                relationships.call_aliases.push(alias);
+            if let Some(ref impl_type) = qualified_impl_type {
+                relationships
+                    .call_aliases
+                    .push(format!("{impl_type}::{name}"));
             }
         }
 
@@ -466,6 +476,44 @@ fn expand_template(template: &str, captures: &HashMap<String, String>) -> String
     result
 }
 
+/// Resolve impl_type_name to a fully qualified name using captures and scope.
+///
+/// Resolution order:
+/// 1. If impl_type_path was captured (e.g., `mod::Type`), use path::type_name
+/// 2. If impl_type_name is a well-known std/primitive type, don't prefix
+/// 3. If parent_scope already ends with the type name (method context), use scope as-is
+/// 4. Otherwise (impl block context), prepend the module-level scope
+/// 5. If no scope available, use the simple type name
+///
+/// Returns `None` if impl_type_name is not present in captures.
+fn resolve_impl_type_name(
+    captures: &HashMap<String, String>,
+    parent_scope: Option<&str>,
+) -> Option<String> {
+    let impl_type_name = captures.get("impl_type_name")?;
+
+    let qualified = if let Some(impl_type_path) = captures.get("impl_type_path") {
+        // Case 1: Scoped type like `mod::Type`
+        format!("{impl_type_path}::{impl_type_name}")
+    } else if crate::rust::edge_case_handlers::is_std_type(impl_type_name) {
+        // Case 2: Well-known std/primitive type - don't add scope prefix
+        impl_type_name.clone()
+    } else if let Some(scope) = parent_scope {
+        if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
+            // Case 3: Method context - scope already is the qualified type name
+            scope.to_string()
+        } else {
+            // Case 4: Impl block context - prepend module scope
+            format!("{scope}::{impl_type_name}")
+        }
+    } else {
+        // Case 5: No scope available
+        impl_type_name.clone()
+    };
+
+    Some(qualified)
+}
+
 /// Expand a qualified name template with captures and common components
 fn expand_qualified_name_template(
     template: &str,
@@ -489,32 +537,9 @@ fn expand_qualified_name_template(
     // Resolve {impl_type_name} to a fully qualified name. This ensures templates
     // like `<{impl_type_name}>::{name}` produce `<my_crate::MyStruct>::foo`
     // instead of just `<MyStruct>::foo`.
-    //
-    // Resolution order:
-    // 1. If impl_type_path was captured (e.g., `mod::Type`), use path::type_name
-    // 2. If impl_type_name is a well-known std/primitive type, don't prefix
-    // 3. If parent_scope already ends with the type name (method context), use scope as-is
-    // 4. Otherwise (impl block context), prepend the module-level scope
-    // 5. If no scope available, use the simple type name
-    if let Some(impl_type_name) = captures.get("impl_type_name") {
-        let qualified_impl_type = if let Some(impl_type_path) = captures.get("impl_type_path") {
-            // Case 1: Scoped type like `mod::Type`
-            format!("{impl_type_path}::{impl_type_name}")
-        } else if crate::rust::edge_case_handlers::is_std_type(impl_type_name) {
-            // Case 2: Well-known std/primitive type - don't add scope prefix
-            impl_type_name.clone()
-        } else if let Some(ref scope) = components.parent_scope {
-            if scope.ends_with(&format!("::{impl_type_name}")) || scope == impl_type_name {
-                // Case 3: Method context - scope already is the qualified type name
-                scope.clone()
-            } else {
-                // Case 4: Impl block context - prepend module scope
-                format!("{scope}::{impl_type_name}")
-            }
-        } else {
-            // Case 5: No scope available
-            impl_type_name.clone()
-        };
+    if let Some(qualified_impl_type) =
+        resolve_impl_type_name(captures, components.parent_scope.as_deref())
+    {
         result = result.replace("{impl_type_name}", &qualified_impl_type);
     }
 
@@ -621,12 +646,12 @@ fn evaluate_custom_predicates(
 
         match operator {
             "not-has-child?" => {
-                if !evaluate_not_has_child(predicate.args.as_ref(), query, query_match) {
+                if !evaluate_not_has_child(predicate.args.as_ref(), query_match) {
                     return false;
                 }
             }
             "not-has-ancestor?" => {
-                if !evaluate_not_has_ancestor(predicate.args.as_ref(), query, query_match) {
+                if !evaluate_not_has_ancestor(predicate.args.as_ref(), query_match) {
                     return false;
                 }
             }
@@ -644,6 +669,49 @@ fn evaluate_custom_predicates(
     true
 }
 
+/// Parse arguments for binary predicates like `#not-has-child?` and `#not-has-ancestor?`.
+///
+/// Binary predicates expect exactly 2 arguments: `@capture string_value`
+/// Returns `Some((node, string_arg))` if valid, `None` otherwise.
+fn parse_binary_predicate_args<'a, 'b>(
+    args: &'b [QueryPredicateArg],
+    query_match: &'a QueryMatch,
+    predicate_name: &str,
+) -> Option<(Node<'a>, &'b str)> {
+    if args.len() != 2 {
+        tracing::warn!(
+            "{predicate_name} predicate expects 2 arguments, got {}",
+            args.len()
+        );
+        return None;
+    }
+
+    let capture_index = match &args[0] {
+        QueryPredicateArg::Capture(idx) => *idx,
+        _ => {
+            tracing::warn!("{predicate_name} first argument must be a capture");
+            return None;
+        }
+    };
+
+    let string_arg = match &args[1] {
+        QueryPredicateArg::String(s) => s.as_ref(),
+        _ => {
+            tracing::warn!("{predicate_name} second argument must be a string");
+            return None;
+        }
+    };
+
+    // Find the captured node
+    let node = query_match
+        .captures
+        .iter()
+        .find(|c| c.index == capture_index)
+        .map(|c| c.node)?;
+
+    Some((node, string_arg))
+}
+
 /// Evaluate `#not-has-child? @capture child_spec` predicate.
 ///
 /// The child_spec can be either:
@@ -651,44 +719,10 @@ fn evaluate_custom_predicates(
 /// - A node kind (e.g., "self_parameter") - checks for any child of that kind
 ///
 /// Returns true if the captured node does NOT have the specified child.
-fn evaluate_not_has_child(
-    args: &[QueryPredicateArg],
-    _query: &Query,
-    query_match: &QueryMatch,
-) -> bool {
-    // Expected: [Capture(index), String(child_spec)]
-    if args.len() != 2 {
-        tracing::warn!(
-            "not-has-child? predicate expects 2 arguments, got {}",
-            args.len()
-        );
-        return true; // Don't filter on malformed predicates
-    }
-
-    let capture_index = match &args[0] {
-        QueryPredicateArg::Capture(idx) => *idx,
-        _ => {
-            tracing::warn!("not-has-child? first argument must be a capture");
-            return true;
-        }
-    };
-
-    let child_spec = match &args[1] {
-        QueryPredicateArg::String(s) => s.as_ref(),
-        _ => {
-            tracing::warn!("not-has-child? second argument must be a string");
-            return true;
-        }
-    };
-
-    // Find the captured node
-    let Some(node) = query_match
-        .captures
-        .iter()
-        .find(|c| c.index == capture_index)
-        .map(|c| c.node)
+fn evaluate_not_has_child(args: &[QueryPredicateArg], query_match: &QueryMatch) -> bool {
+    let Some((node, child_spec)) = parse_binary_predicate_args(args, query_match, "not-has-child?")
     else {
-        // Capture not found in this match - this can happen with alternative patterns
+        // Invalid or missing args - don't filter
         return true;
     };
 
@@ -712,51 +746,16 @@ fn evaluate_not_has_child(
 /// Evaluate `#not-has-ancestor? @capture node_kind` predicate.
 ///
 /// Returns true if the captured node does NOT have an ancestor of the specified kind.
-fn evaluate_not_has_ancestor(
-    args: &[QueryPredicateArg],
-    _query: &Query,
-    query_match: &QueryMatch,
-) -> bool {
-    // Expected: [Capture(index), String(node_kind)]
-    if args.len() != 2 {
-        tracing::warn!(
-            "not-has-ancestor? predicate expects 2 arguments, got {}",
-            args.len()
-        );
-        return true;
-    }
-
-    let capture_index = match &args[0] {
-        QueryPredicateArg::Capture(idx) => *idx,
-        _ => {
-            tracing::warn!("not-has-ancestor? first argument must be a capture");
-            return true;
-        }
-    };
-
-    let node_kind = match &args[1] {
-        QueryPredicateArg::String(s) => s.as_ref(),
-        _ => {
-            tracing::warn!("not-has-ancestor? second argument must be a string");
-            return true;
-        }
-    };
-
-    // Find the captured node
-    let Some(node) = query_match
-        .captures
-        .iter()
-        .find(|c| c.index == capture_index)
-        .map(|c| c.node)
+fn evaluate_not_has_ancestor(args: &[QueryPredicateArg], query_match: &QueryMatch) -> bool {
+    let Some((node, node_kind)) =
+        parse_binary_predicate_args(args, query_match, "not-has-ancestor?")
     else {
+        // Invalid or missing args - don't filter
         return true;
     };
 
-    // Check if any ancestor has the specified kind
-    let has_ancestor = find_ancestor_of_kind(node, node_kind).is_some();
-
-    // Return true if the node does NOT have the ancestor (predicate satisfied)
-    !has_ancestor
+    // Return true if the node does NOT have an ancestor of the specified kind
+    find_ancestor_of_kind(node, node_kind).is_none()
 }
 
 /// Find an ancestor node of a specific kind
@@ -896,32 +895,6 @@ fn extract_relationships(
     };
 
     super::relationships::extract_relationships(extractor, node, ctx, parent_scope)
-}
-
-/// Generate a call alias for UFCS-formatted qualified names
-///
-/// For qualified names in UFCS format like `<crate::Type as crate::Trait>::method`,
-/// generates an alias like `crate::Type::method` to enable resolution when
-/// the caller uses the type-qualified form.
-///
-/// Returns `None` if the qualified name is not in UFCS format.
-fn generate_ufcs_call_alias(qualified_name: &str) -> Option<String> {
-    // Check if this is UFCS format: starts with '<' and contains '>::'
-    if !qualified_name.starts_with('<') {
-        return None;
-    }
-
-    // Parse UFCS format: <Type as Trait>::method
-    // Find the position of " as " to extract the type
-    let as_pos = qualified_name.find(" as ")?;
-    let type_name = &qualified_name[1..as_pos]; // Skip leading '<'
-
-    // Find the position of '>::' to extract the method name
-    let method_separator = qualified_name.find(">::")?;
-    let method_name = &qualified_name[method_separator + 3..]; // Skip '>::'
-
-    // Construct alias: Type::method
-    Some(format!("{type_name}::{method_name}"))
 }
 
 /// Extract relationships, with automatic fallback for Property entities.

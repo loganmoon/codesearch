@@ -27,6 +27,16 @@ use tracing::{debug, trace, warn};
 
 use crate::neo4j_relationship_resolver::{EntityCache, RelationshipResolver};
 
+/// Qualified name prefix character indicating a trait impl item (method, assoc type, etc.)
+///
+/// Our qualified naming convention uses UFCS (Universal Function Call Syntax) format
+/// for impl items: `<Type as Trait>::name`. This distinguishes them from trait method
+/// definitions which use the simpler `crate::Trait::method` format.
+///
+/// This constant is used in SimpleName resolution to prefer trait method definitions
+/// over impl methods when there are multiple candidates with the same simple name.
+const IMPL_QUALIFIED_NAME_PREFIX: char = '<';
+
 /// A reference extracted from an entity, with pre-computed simple name.
 #[derive(Debug, Clone)]
 struct ExtractedRef {
@@ -352,36 +362,38 @@ impl GenericResolver {
                 LookupStrategy::SimpleName => {
                     // Use pre-computed simple_name from ExtractedRef
                     // entries are (qualified_name, entity_id) tuples
-                    if let Some(entries) = maps.all_simple_names.get(&ext_ref.simple_name) {
-                        if !entries.is_empty() {
-                            if entries.len() > 1 {
-                                // When multiple entities share a simple name, prefer:
-                                // 1. Trait method definitions (non-UFCS format like "crate::Trait::method")
-                                // 2. Over impl methods (UFCS format like "<Type as Trait>::method")
-                                // This handles generic trait bound resolution where we want the
-                                // trait definition rather than a specific impl.
-                                for (qname, entity_id) in entries {
-                                    // Trait definitions don't start with '<' (which indicates UFCS/impl format)
-                                    if !qname.starts_with('<') {
-                                        trace!(
-                                            "  [SimpleName] preferring trait method {} over {} candidates",
-                                            qname,
-                                            entries.len()
-                                        );
-                                        return Some(entity_id.clone());
-                                    }
-                                }
-                                // Fall back to first match if no trait method found
-                                warn!(
-                                    "  [SimpleName] ambiguous match for {}: {} candidates",
-                                    target,
+                    let entries = match maps.all_simple_names.get(&ext_ref.simple_name) {
+                        Some(e) if !e.is_empty() => e,
+                        _ => continue, // No entries, try next strategy
+                    };
+
+                    // When multiple entities share a simple name, prefer:
+                    // 1. Trait method definitions (non-UFCS format like "crate::Trait::method")
+                    // 2. Over impl methods (UFCS format like "<Type as Trait>::method")
+                    // This handles generic trait bound resolution where we want the
+                    // trait definition rather than a specific impl.
+                    if entries.len() > 1 {
+                        for (qname, entity_id) in entries {
+                            // Trait definitions don't start with IMPL_QUALIFIED_NAME_PREFIX
+                            if !qname.starts_with(IMPL_QUALIFIED_NAME_PREFIX) {
+                                trace!(
+                                    "  [SimpleName] preferring trait method {} over {} candidates",
+                                    qname,
                                     entries.len()
                                 );
+                                return Some(entity_id.clone());
                             }
-                            trace!("  [SimpleName] resolved {} -> {}", target, &entries[0].0);
-                            return Some(entries[0].1.clone());
                         }
+                        // Fall back to first match if no trait method found
+                        warn!(
+                            "  [SimpleName] ambiguous match for {}: {} candidates",
+                            target,
+                            entries.len()
+                        );
                     }
+
+                    trace!("  [SimpleName] resolved {} -> {}", target, &entries[0].0);
+                    return Some(entries[0].1.clone());
                 }
             }
         }

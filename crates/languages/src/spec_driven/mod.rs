@@ -83,6 +83,11 @@ pub struct HandlerConfig {
     /// Useful for extern items where the parent should be the extern block but
     /// the qualified name shouldn't include the extern block path.
     pub parent_scope_template: Option<&'static str>,
+
+    /// Optional list of scope node types to skip when building qualified names.
+    /// This is used for entities like TypeScript parameter properties where the
+    /// constructor scope should be skipped (e.g., `Point.x` instead of `Point.constructor.x`).
+    pub skip_scopes: Option<&'static [&'static str]>,
 }
 
 /// Strategy for deriving entity names from query captures

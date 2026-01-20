@@ -76,6 +76,8 @@ struct HandlerDef {
     relationships: Option<String>,
     #[serde(default)]
     visibility_override: Option<serde_yaml::Value>,
+    #[serde(default)]
+    skip_scopes: Vec<String>,
 }
 
 // =============================================================================
@@ -269,6 +271,18 @@ fn generate_handler_configs(
             )?;
         } else {
             writeln!(output, "        parent_scope_template: None,")?;
+        }
+
+        if handler.skip_scopes.is_empty() {
+            writeln!(output, "        skip_scopes: None,")?;
+        } else {
+            let skip_scopes_str = handler
+                .skip_scopes
+                .iter()
+                .map(|s| format!("\"{s}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(output, "        skip_scopes: Some(&[{skip_scopes_str}]),")?;
         }
 
         writeln!(output, "    }};")?;

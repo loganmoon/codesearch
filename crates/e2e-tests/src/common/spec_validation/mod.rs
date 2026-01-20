@@ -14,8 +14,9 @@ pub use schema::{
 };
 
 use super::containers::{
-    create_test_database, drop_test_database, get_shared_neo4j, get_shared_postgres,
-    get_shared_qdrant, wait_for_graph_ready, TestNeo4j, TestPostgres, TestQdrant,
+    create_test_database, drop_test_collection, drop_test_database, drop_test_neo4j_data,
+    get_shared_neo4j, get_shared_postgres, get_shared_qdrant, wait_for_graph_ready, TestNeo4j,
+    TestPostgres, TestQdrant,
 };
 use anyhow::{bail, Context, Result};
 use assertions::{assert_entities_match, assert_relationships_match};
@@ -30,21 +31,43 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tracing::info;
+use uuid::Uuid;
 
-/// RAII guard that ensures test database cleanup even on test failure
-struct TestDatabaseGuard {
+/// RAII guard that ensures test cleanup even on test failure
+///
+/// Cleans up: Postgres database, Qdrant collection, and Neo4j data
+struct TestCleanupGuard {
     postgres: Arc<TestPostgres>,
+    qdrant: Arc<TestQdrant>,
+    neo4j: Arc<TestNeo4j>,
     db_name: String,
+    collection_name: String,
+    repository_id: Option<String>,
     cleaned_up: bool,
 }
 
-impl TestDatabaseGuard {
-    fn new(postgres: Arc<TestPostgres>, db_name: String) -> Self {
+impl TestCleanupGuard {
+    fn new(
+        postgres: Arc<TestPostgres>,
+        qdrant: Arc<TestQdrant>,
+        neo4j: Arc<TestNeo4j>,
+        db_name: String,
+        collection_name: String,
+    ) -> Self {
         Self {
             postgres,
+            qdrant,
+            neo4j,
             db_name,
+            collection_name,
+            repository_id: None,
             cleaned_up: false,
         }
+    }
+
+    /// Set the repository_id once we know it (needed for Neo4j cleanup)
+    fn set_repository_id(&mut self, repository_id: String) {
+        self.repository_id = Some(repository_id);
     }
 
     /// Mark as cleaned up (call this after successful explicit cleanup)
@@ -53,21 +76,32 @@ impl TestDatabaseGuard {
     }
 }
 
-impl Drop for TestDatabaseGuard {
+impl Drop for TestCleanupGuard {
     fn drop(&mut self) {
         if !self.cleaned_up {
             // Use blocking cleanup since we're in a Drop implementation
             let postgres = self.postgres.clone();
+            let qdrant = self.qdrant.clone();
+            let neo4j = self.neo4j.clone();
             let db_name = self.db_name.clone();
+            let collection_name = self.collection_name.clone();
+            let repository_id = self.repository_id.clone();
             eprintln!(
-                "TestDatabaseGuard: Cleaning up test database {} on drop",
-                db_name
+                "TestCleanupGuard: Cleaning up test resources (db: {}, collection: {}) on drop",
+                db_name, collection_name
             );
             // Schedule cleanup on a new runtime since we can't use async in Drop
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().ok();
                 if let Some(rt) = rt {
                     rt.block_on(async {
+                        // Clean up Neo4j data if we have a repository_id
+                        if let Some(ref repo_id) = repository_id {
+                            let _ = drop_test_neo4j_data(&neo4j, repo_id).await;
+                        }
+                        // Clean up Qdrant collection
+                        let _ = drop_test_collection(&qdrant, &collection_name).await;
+                        // Clean up Postgres database
                         let _ = drop_test_database(&postgres, &db_name).await;
                     });
                 }
@@ -92,10 +126,22 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     let qdrant = get_shared_qdrant().await?;
     let neo4j = get_shared_neo4j().await?;
 
-    // Create isolated test database with RAII cleanup guard
+    // Create isolated test database and generate unique collection name
     let db_name = create_test_database(&postgres).await?;
-    let mut cleanup_guard = TestDatabaseGuard::new(postgres.clone(), db_name.clone());
-    eprintln!("Created test database: {}", db_name);
+    let collection_name = format!("test_{}_{}", fixture.name, Uuid::new_v4().simple());
+
+    // Create RAII cleanup guard for all test resources
+    let mut cleanup_guard = TestCleanupGuard::new(
+        postgres.clone(),
+        qdrant.clone(),
+        neo4j.clone(),
+        db_name.clone(),
+        collection_name.clone(),
+    );
+    eprintln!(
+        "Created test database: {}, collection: {}",
+        db_name, collection_name
+    );
 
     // Create temporary repository with fixture files
     let temp_dir = create_test_repository(fixture)?;
@@ -103,7 +149,15 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     eprintln!("Created test repository at: {}", repo_path.display());
 
     // Run indexer and outbox processor directly (instead of CLI subprocess)
-    run_indexer_directly(repo_path, &qdrant, &postgres, &neo4j, &db_name).await?;
+    run_indexer_directly(
+        repo_path,
+        &qdrant,
+        &postgres,
+        &neo4j,
+        &db_name,
+        &collection_name,
+    )
+    .await?;
 
     eprintln!("Indexing completed, waiting for graph_ready flag...");
     wait_for_graph_ready(&postgres, &db_name, Duration::from_secs(30)).await?;
@@ -112,6 +166,7 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
 
     // Get repository_id from the database
     let repository_id = get_repository_id(&postgres, &db_name).await?;
+    cleanup_guard.set_repository_id(repository_id.clone());
     eprintln!("Repository ID: {}", repository_id);
 
     // Query actual entities and relationships
@@ -150,6 +205,8 @@ pub async fn run_spec_validation(fixture: &Fixture) -> Result<()> {
     eprintln!("\n=== {} PASSED ===\n", fixture.name);
 
     // Explicit cleanup and mark guard as cleaned up
+    drop_test_neo4j_data(&neo4j, &repository_id).await?;
+    drop_test_collection(&qdrant, &collection_name).await?;
     drop_test_database(&postgres, &db_name).await?;
     cleanup_guard.mark_cleaned_up();
 
@@ -297,6 +354,7 @@ async fn run_indexer_directly(
     postgres: &Arc<TestPostgres>,
     neo4j: &Arc<TestNeo4j>,
     db_name: &str,
+    collection_name: &str,
 ) -> Result<()> {
     use codesearch_core::StorageConfig;
     use codesearch_storage::create_postgres_client;
@@ -333,19 +391,9 @@ async fn run_indexer_directly(
         .await
         .context("Failed to connect to Postgres")?;
 
-    // Generate collection name and register the repository
-    // ensure_repository generates a deterministic UUID from the path
-    let collection_name = format!(
-        "test_{}",
-        repo_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("repo")
-    );
-
     // Insert repository record - this returns the deterministic UUID
     let repository_id = postgres_client
-        .ensure_repository(repo_path, &collection_name, None)
+        .ensure_repository(repo_path, collection_name, None)
         .await
         .context("Failed to register repository")?;
 

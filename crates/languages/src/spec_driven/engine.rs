@@ -122,7 +122,8 @@ pub fn extract_with_config(
         let entity_type = entity_type_from_rule(config.entity_rule)?;
 
         // Build common components with the derived name
-        let components = build_common_components(ctx, &name, main_node, entity_type)?;
+        let components =
+            build_common_components(ctx, &name, main_node, entity_type, config.skip_scopes)?;
 
         // Compute qualified impl type for UFCS call alias generation (Rust methods only).
         // Must be done here while we have access to the original AST-derived parent_scope,
@@ -280,8 +281,12 @@ fn build_common_components(
     name: &str,
     main_node: Node,
     entity_type: EntityType,
+    skip_scopes: Option<&'static [&'static str]>,
 ) -> Result<CommonEntityComponents> {
-    use crate::qualified_name::{build_qualified_name_from_ast, derive_module_path_for_language};
+    use crate::qualified_name::{
+        build_qualified_name_from_ast, build_qualified_name_with_skip,
+        derive_module_path_for_language,
+    };
     use codesearch_core::entities::SourceLocation;
     use codesearch_core::entity_id::generate_entity_id;
 
@@ -290,7 +295,12 @@ fn build_common_components(
     }
 
     // Build qualified name via parent traversal using language-specific separator
-    let scope_result = build_qualified_name_from_ast(main_node, ctx.source, ctx.language_str);
+    // If skip_scopes is provided, skip those node kinds when building the scope
+    let scope_result = if let Some(skip_kinds) = skip_scopes {
+        build_qualified_name_with_skip(main_node, ctx.source, ctx.language_str, skip_kinds)
+    } else {
+        build_qualified_name_from_ast(main_node, ctx.source, ctx.language_str)
+    };
     let ast_scope = scope_result.parent_scope;
     let separator = scope_result.separator;
 
@@ -1267,19 +1277,75 @@ fn extract_visibility_from_node(node: Node, source: &str, language: &str) -> Opt
 
 /// Extract JS/TS visibility based on export keyword and access modifiers
 fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
-    // First pass: simple node kind matches for implicitly public nodes
+    // Helper function to extract visibility from accessibility_modifier
+    fn extract_from_accessibility_modifier(node: Node) -> Option<Visibility> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "accessibility_modifier" => {
+                    if let Some(first_child) = child.child(0) {
+                        return match first_child.kind() {
+                            "private" => Some(Visibility::Private),
+                            "protected" => Some(Visibility::Protected),
+                            "public" => Some(Visibility::Public),
+                            _ => None,
+                        };
+                    }
+                }
+                // Check for # private field syntax (class fields)
+                "private_property_identifier" => return Some(Visibility::Private),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    // First pass: handle nodes with their own visibility rules (before export check)
+    // These types have explicit visibility modifiers that should take precedence
     match node.kind() {
         // Module (program) nodes are implicitly public (can be imported)
         // export_statement nodes are explicitly public
         "program" | "export_statement" => return Some(Visibility::Public),
-        _ => {}
-    }
 
-    // Check if this node's parent is an export_statement
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "export_statement" {
+        // Parameter properties (TypeScript constructor parameters with accessibility modifiers)
+        "required_parameter" | "optional_parameter" => {
+            if let Some(vis) = extract_from_accessibility_modifier(node) {
+                return Some(vis);
+            }
+            // Parameter properties without explicit modifier default to public
             return Some(Visibility::Public);
         }
+
+        // Class members: check for TypeScript accessibility modifiers BEFORE export check
+        // A private/protected member inside an exported class should NOT be public
+        "public_field_definition" | "field_definition" | "method_definition" => {
+            if let Some(vis) = extract_from_accessibility_modifier(node) {
+                return Some(vis);
+            }
+            // Default: public for class members without explicit modifier
+            return Some(Visibility::Public);
+        }
+
+        // Interface members are always public
+        "property_signature"
+        | "method_signature"
+        | "call_signature"
+        | "construct_signature"
+        | "index_signature" => return Some(Visibility::Public),
+
+        // Enum members inherit visibility from parent enum (always public within enum)
+        "enum_assignment" => return Some(Visibility::Public),
+
+        // property_identifier in enum context is public
+        "property_identifier" => {
+            if let Some(parent) = node.parent() {
+                if matches!(parent.kind(), "enum_body" | "enum_assignment") {
+                    return Some(Visibility::Public);
+                }
+            }
+        }
+
+        _ => {}
     }
 
     // Check for ambient declarations (declare keyword) - these are public
@@ -1288,17 +1354,33 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         return Some(Visibility::Public);
     }
 
-    // For items inside namespaces, check for export keyword
+    // Check if inside a namespace - items in namespaces have their own export rules
+    // Only the immediate export_statement matters, not the namespace's own export
     if is_inside_namespace(node) {
-        // Check if this node starts with 'export' keyword
-        // The export_statement wraps the actual declaration inside namespaces
+        // For namespace items, check for immediate export_statement parent
+        // (not grandparent - that would be the namespace's export)
         if let Some(parent) = node.parent() {
             if parent.kind() == "export_statement" {
                 return Some(Visibility::Public);
             }
         }
-        // Not exported from namespace → private to namespace
+        // Not exported from namespace - private
         return Some(Visibility::Private);
+    }
+
+    // For non-namespace items, check if this node has an export_statement ancestor
+    // This handles cases like: export const named = function() {}
+    // where the structure is: export_statement -> lexical_declaration -> variable_declarator -> function_expression
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "export_statement" {
+            return Some(Visibility::Public);
+        }
+        // Stop at program/module level to avoid excessive traversal
+        if parent.kind() == "program" {
+            break;
+        }
+        current = parent.parent();
     }
 
     // For JS/TS module-level declarations, check if we're at module level
@@ -1309,56 +1391,7 @@ fn extract_js_ts_visibility(node: Node) -> Option<Visibility> {
         }
     }
 
-    // Second pass: specific entity type visibility rules
-    match node.kind() {
-        // Enum members inherit visibility from parent enum (always public within enum)
-        "enum_assignment" => Some(Visibility::Public),
-
-        // property_identifier in enum context is public
-        "property_identifier" => {
-            if let Some(parent) = node.parent() {
-                if matches!(parent.kind(), "enum_body" | "enum_assignment") {
-                    return Some(Visibility::Public);
-                }
-            }
-            None
-        }
-
-        // Interface members are always public
-        "property_signature"
-        | "method_signature"
-        | "call_signature"
-        | "construct_signature"
-        | "index_signature" => Some(Visibility::Public),
-
-        // Class members: check for TypeScript accessibility modifiers
-        "public_field_definition" | "field_definition" | "method_definition" => {
-            // Check for accessibility_modifier child (public/private/protected)
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                match child.kind() {
-                    "accessibility_modifier" => {
-                        // Get the text to determine which modifier
-                        if let Some(first_child) = child.child(0) {
-                            return match first_child.kind() {
-                                "private" => Some(Visibility::Private),
-                                "protected" => Some(Visibility::Protected),
-                                "public" => Some(Visibility::Public),
-                                _ => None,
-                            };
-                        }
-                    }
-                    // Check for # private field syntax
-                    "private_property_identifier" => return Some(Visibility::Private),
-                    _ => {}
-                }
-            }
-            // Default: public for class members without explicit modifier
-            Some(Visibility::Public)
-        }
-
-        _ => None,
-    }
+    None
 }
 
 /// Check if a node is an ambient declaration (has 'declare' modifier)

@@ -406,14 +406,25 @@ export function formatPost(post: Post): string {  // Uses Post
         },
     ],
     relationships: &[
+        // Member-level USES relationships (current extraction behavior)
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "models.Post",
+            from: "models.Post.author",
             to: "models.User",
         },
         ExpectedRelationship {
             kind: RelationshipKind::Uses,
-            from: "models.UserRepository",
+            from: "models.UserRepository.users",
+            to: "models.User",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "models.UserRepository.getById",
+            to: "models.User",
+        },
+        ExpectedRelationship {
+            kind: RelationshipKind::Uses,
+            from: "models.UserRepository.create",
             to: "models.User",
         },
         ExpectedRelationship {

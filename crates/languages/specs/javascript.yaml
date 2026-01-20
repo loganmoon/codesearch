@@ -1050,6 +1050,21 @@ extraction_hints:
               name: (object_pattern
                 (shorthand_property_identifier_pattern) @name)))) @const
 
+        ;; Object destructuring with renaming: const { original: renamed } = obj
+        (lexical_declaration
+          kind: "const"
+          (variable_declarator
+            name: (object_pattern
+              (pair_pattern
+                value: (identifier) @name)))) @const
+
+        ;; Array destructuring: const [first, second] = arr
+        (lexical_declaration
+          kind: "const"
+          (variable_declarator
+            name: (array_pattern
+              (identifier) @name))) @const
+
     LET:
       description: "Let declarations"
       capture: "let"
@@ -1282,7 +1297,7 @@ extraction_hints:
       query: CLASS_EXPRESSION
       capture: "class"
       name_strategy: fallback
-      name_captures: ["name", "class_name"]
+      name_captures: ["class_name", "name"]
       relationships: extract_class_relationships
 
     # --- Method handlers ---

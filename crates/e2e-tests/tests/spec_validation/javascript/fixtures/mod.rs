@@ -181,7 +181,7 @@ export class Dog extends Animal {
         ExpectedRelationship {
             kind: RelationshipKind::InheritsFrom,
             from: "animals.Dog",
-            to: "Animal",
+            to: "animals.Animal",
         },
     ],
     project_type: ProjectType::NodePackage,

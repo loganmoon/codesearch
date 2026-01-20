@@ -247,6 +247,26 @@ pub async fn drop_test_collection(qdrant: &Arc<TestQdrant>, collection_name: &st
     Ok(())
 }
 
+/// Clean up test data from Neo4j by repository_id
+///
+/// Deletes all nodes with the given repository_id to clean up after a test
+/// while keeping the container running for other tests.
+pub async fn drop_test_neo4j_data(neo4j: &Arc<TestNeo4j>, repository_id: &str) -> Result<()> {
+    use neo4rs::{query, Graph};
+
+    let graph = Graph::new(neo4j.bolt_url(), "", "")
+        .await
+        .context("Failed to connect to Neo4j for cleanup")?;
+
+    // Delete all nodes with this repository_id and their relationships
+    graph
+        .run(query("MATCH (n {repository_id: $repository_id}) DETACH DELETE n").param("repository_id", repository_id))
+        .await
+        .context("Failed to delete Neo4j nodes for repository")?;
+
+    Ok(())
+}
+
 /// Test Qdrant container using testcontainers-rs
 pub struct TestQdrant {
     container: ContainerAsync<GenericImage>,

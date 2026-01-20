@@ -1052,10 +1052,30 @@ pub fn extract_class_relationships(
                 for heritage_child in child.children(&mut heritage_cursor) {
                     match heritage_child.kind() {
                         "extends_clause" => {
+                            // TypeScript uses extends_clause wrapper
                             if let Some(type_ref) =
                                 extract_extends_type(heritage_child, ctx, parent_scope)
                             {
                                 extends.push(type_ref);
+                            }
+                        }
+                        "identifier" => {
+                            // JavaScript: extends identifier is directly in class_heritage
+                            let type_text = node_text(heritage_child, ctx.source);
+                            if !type_text.is_empty() {
+                                let simple_name = extract_simple_name(type_text);
+                                let resolution_ctx = build_resolution_context(ctx, parent_scope);
+                                let resolved =
+                                    resolve_reference(type_text, simple_name, &resolution_ctx);
+                                if let Some(type_ref) = build_source_reference(
+                                    resolved.target,
+                                    resolved.simple_name,
+                                    resolved.is_external,
+                                    heritage_child,
+                                    ReferenceType::Extends,
+                                ) {
+                                    extends.push(type_ref);
+                                }
                             }
                         }
                         "implements_clause" => {

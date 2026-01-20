@@ -9,15 +9,16 @@ static INIT_LOGGING: Once = Once::new();
 /// Checks the following environment variables in order:
 /// 1. CODESEARCH_TEST_LOG - Specific to tests
 /// 2. RUST_LOG - General Rust logging
-/// 3. Default: "error" level
+/// 3. Default: "error" level with outbox processor suppressed (to hide expected test errors)
 ///
 /// This function is safe to call multiple times; logging will only be
 /// initialized once per test run.
 pub fn init_test_logging() {
     INIT_LOGGING.call_once(|| {
+        // Default suppresses outbox processor errors which are expected in some tests
         let log_level = std::env::var("CODESEARCH_TEST_LOG")
             .or_else(|_| std::env::var("RUST_LOG"))
-            .unwrap_or_else(|_| "error".to_string());
+            .unwrap_or_else(|_| "error,codesearch_outbox_processor=off".to_string());
 
         tracing_subscriber::fmt()
             .with_env_filter(log_level)

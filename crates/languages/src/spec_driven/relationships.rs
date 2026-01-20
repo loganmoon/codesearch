@@ -730,10 +730,14 @@ fn extract_simple_name(name: &str) -> &str {
     let name = name.split('<').next().unwrap_or(name);
 
     // Handle both Rust (::) and JS (.) separators
-    name.rsplit("::")
-        .next()
-        .or_else(|| name.rsplit('.').next())
-        .unwrap_or(name)
+    // Try Rust separator first, then JS separator
+    if name.contains("::") {
+        name.rsplit("::").next().unwrap_or(name)
+    } else if name.contains('.') {
+        name.rsplit('.').next().unwrap_or(name)
+    } else {
+        name
+    }
 }
 
 // =============================================================================
@@ -2059,5 +2063,54 @@ pub fn extract_relationships(
                 ..Default::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_simple_name_qualified() {
+        assert_eq!(extract_simple_name("std::collections::HashMap"), "HashMap");
+        assert_eq!(extract_simple_name("crate::module::Type"), "Type");
+    }
+
+    #[test]
+    fn test_extract_simple_name_with_generics() {
+        assert_eq!(extract_simple_name("Vec<String>"), "Vec");
+        assert_eq!(extract_simple_name("HashMap<K, V>"), "HashMap");
+        assert_eq!(
+            extract_simple_name("std::collections::HashMap<String, i32>"),
+            "HashMap"
+        );
+    }
+
+    #[test]
+    fn test_extract_simple_name_ufcs() {
+        // UFCS patterns: <Type as Trait>::method
+        assert_eq!(extract_simple_name("<MyStruct as Display>::fmt"), "fmt");
+        assert_eq!(
+            extract_simple_name("<Vec<T> as IntoIterator>::into_iter"),
+            "into_iter"
+        );
+        // Nested UFCS
+        assert_eq!(
+            extract_simple_name("<T as Trait>::Associated::method"),
+            "method"
+        );
+    }
+
+    #[test]
+    fn test_extract_simple_name_simple() {
+        assert_eq!(extract_simple_name("foo"), "foo");
+        assert_eq!(extract_simple_name("MyType"), "MyType");
+    }
+
+    #[test]
+    fn test_extract_simple_name_js_separator() {
+        // JavaScript uses . separator
+        assert_eq!(extract_simple_name("window.document.body"), "body");
+        assert_eq!(extract_simple_name("module.exports"), "exports");
     }
 }

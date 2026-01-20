@@ -238,7 +238,7 @@ impl SpecDrivenRustExtractor {
 
         // Build type alias map for resolving type aliases to canonical types
         let type_alias_map =
-            crate::rust::import_resolution::parse_rust_type_aliases(tree.root_node(), source);
+            crate::rust::import_resolution::parse_rust_type_aliases(tree.root_node(), source)?;
 
         // Create edge case registry for Rust-specific patterns
         let edge_case_registry = EdgeCaseRegistry::from_handlers(RUST_EDGE_CASE_HANDLERS);
@@ -707,10 +707,58 @@ impl Debug for MyType {
         }
 
         // Should have Module, 2 Traits, 1 Struct, 2 ImplBlocks, trait methods, impl methods
+        // Expected entities:
+        // - Module: test_crate
+        // - Trait: Printable, Debug
+        // - Struct: MyType
+        // - ImplBlock: <T as Printable> where T: Debug, <MyType as Debug>
+        // - Methods: to_string (x2), debug (x2)
+
+        // Verify minimum count
         assert!(
-            entities.len() > 5,
-            "Expected at least 5 entities, got {}",
+            entities.len() >= 9,
+            "Expected at least 9 entities (module, 2 traits, 1 struct, 2 impl blocks, 3+ methods), got {}",
             entities.len()
+        );
+
+        // Verify key traits exist
+        let trait_names: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Trait)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            trait_names.contains(&"Printable"),
+            "Expected Printable trait"
+        );
+        assert!(trait_names.contains(&"Debug"), "Expected Debug trait");
+
+        // Verify struct exists
+        let struct_names: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Struct)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(struct_names.contains(&"MyType"), "Expected MyType struct");
+
+        // Verify blanket impl block has where clause in qualified name
+        let impl_blocks: Vec<_> = entities
+            .iter()
+            .filter(|e| e.entity_type == codesearch_core::EntityType::Impl)
+            .collect();
+        assert!(impl_blocks.len() >= 2, "Expected at least 2 impl blocks");
+
+        // Blanket impl should have "where T: Debug" or "where T: test_crate::Debug"
+        let blanket_impl = impl_blocks
+            .iter()
+            .find(|e| e.qualified_name.to_string().contains("where"));
+        assert!(
+            blanket_impl.is_some(),
+            "Expected blanket impl with where clause, got: {:?}",
+            impl_blocks
+                .iter()
+                .map(|e| &e.qualified_name)
+                .collect::<Vec<_>>()
         );
     }
 }

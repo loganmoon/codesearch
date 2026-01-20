@@ -10,6 +10,7 @@
 use crate::common::import_map::ImportMap;
 use crate::common::language_path::LanguagePath;
 use crate::common::path_config::RUST_PATH_CONFIG;
+use anyhow::{bail, Result};
 use streaming_iterator::StreamingIterator;
 use tracing::{debug, error};
 use tree_sitter::{Node, Query, QueryCursor};
@@ -280,7 +281,10 @@ pub type TypeAliasMap = std::collections::HashMap<String, String>;
 /// type AppConfig = Config;
 /// ```
 /// Returns: {"Config" -> "RawConfig", "AppConfig" -> "Config"}
-pub fn parse_rust_type_aliases(root: Node, source: &str) -> TypeAliasMap {
+///
+/// # Errors
+/// Returns an error if the tree-sitter query fails to compile (indicates a bug).
+pub fn parse_rust_type_aliases(root: Node, source: &str) -> Result<TypeAliasMap> {
     let mut alias_map = TypeAliasMap::new();
 
     let query_source = r#"
@@ -289,20 +293,14 @@ pub fn parse_rust_type_aliases(root: Node, source: &str) -> TypeAliasMap {
           type: (_) @target_type)
     "#;
 
-    let query = match Query::new(&tree_sitter_rust::LANGUAGE.into(), query_source) {
-        Ok(q) => q,
-        Err(e) => {
-            error!(error = %e, "Failed to compile type alias query");
-            return alias_map;
-        }
-    };
+    let query = Query::new(&tree_sitter_rust::LANGUAGE.into(), query_source)
+        .map_err(|e| anyhow::anyhow!("Failed to compile type alias query: {e}"))?;
 
     let alias_idx = query.capture_index_for_name("alias_name");
     let target_idx = query.capture_index_for_name("target_type");
 
     let (Some(alias_idx), Some(target_idx)) = (alias_idx, target_idx) else {
-        error!("Missing capture indices in type alias query");
-        return alias_map;
+        bail!("Missing capture indices in type alias query (query: alias_name={alias_idx:?}, target_type={target_idx:?})");
     };
 
     let source_bytes = source.as_bytes();
@@ -346,7 +344,7 @@ pub fn parse_rust_type_aliases(root: Node, source: &str) -> TypeAliasMap {
         }
     }
 
-    alias_map
+    Ok(alias_map)
 }
 
 /// Resolve a type name through the alias chain to find the canonical type
@@ -499,7 +497,7 @@ type Settings = AppConfig;
         parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
         let tree = parser.parse(source, None).unwrap();
 
-        let alias_map = parse_rust_type_aliases(tree.root_node(), source);
+        let alias_map = parse_rust_type_aliases(tree.root_node(), source).unwrap();
 
         assert_eq!(alias_map.get("Config"), Some(&"RawConfig".to_string()));
         assert_eq!(alias_map.get("AppConfig"), Some(&"Config".to_string()));

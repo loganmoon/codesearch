@@ -137,16 +137,16 @@ pub fn extract_with_config(
 
         // Build qualified name from template if provided
         let qualified_name = if let Some(template) = config.qualified_name_template {
-            expand_qualified_name_template(
-                template,
-                &captures,
-                &components,
-                ctx.import_map,
-                ctx.type_alias_map,
-                ctx.package_name,
-                Some(main_node),
-                Some(ctx.source),
-            )
+            let expansion_ctx = TemplateExpansionContext {
+                captures: &captures,
+                components: &components,
+                import_map: ctx.import_map,
+                type_alias_map: ctx.type_alias_map,
+                package_name: ctx.package_name,
+                main_node: Some(main_node),
+                source: Some(ctx.source),
+            };
+            expand_qualified_name_template(template, &expansion_ctx)
         } else {
             components.qualified_name.clone()
         };
@@ -163,16 +163,16 @@ pub fn extract_with_config(
         let parent_scope = if let Some(template) = config.parent_scope_template {
             // Use explicit parent_scope template (for extern items, etc.)
             // Note: parent_scope templates don't need where clause logic
-            let expanded = expand_qualified_name_template(
-                template,
-                &captures,
-                &components,
-                ctx.import_map,
-                ctx.type_alias_map,
-                ctx.package_name,
-                None,
-                None,
-            );
+            let expansion_ctx = TemplateExpansionContext {
+                captures: &captures,
+                components: &components,
+                import_map: ctx.import_map,
+                type_alias_map: ctx.type_alias_map,
+                package_name: ctx.package_name,
+                main_node: None,
+                source: None,
+            };
+            let expanded = expand_qualified_name_template(template, &expansion_ctx);
             if expanded.is_empty() {
                 None
             } else {
@@ -571,58 +571,69 @@ fn extract_type_parameter_bounds<'a>(
         trait_name.to_string()
     }
 
+    /// Extract type name and trait bounds from a node (where_predicate or type_parameter).
+    /// Returns (type_name, trait_bounds) if valid bounds are found.
+    fn extract_bounds_from_node(
+        node: tree_sitter::Node,
+        source: &str,
+        import_map: &crate::common::import_map::ImportMap,
+        package_name: Option<&str>,
+        parent_scope: Option<&str>,
+    ) -> Option<(String, Vec<String>)> {
+        let mut type_name: Option<String> = None;
+        let mut trait_bounds: Vec<String> = Vec::new();
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "type_identifier" && type_name.is_none() {
+                type_name = Some(node_text(child, source).to_string());
+            } else if child.kind() == "trait_bounds" {
+                let mut bounds_cursor = child.walk();
+                for bound_child in child.children(&mut bounds_cursor) {
+                    if bound_child.kind() == "type_identifier" {
+                        let trait_text = node_text(bound_child, source);
+                        let qualified =
+                            resolve_trait_name(trait_text, import_map, package_name, parent_scope);
+                        trait_bounds.push(qualified);
+                    } else if bound_child.kind() == "generic_type" {
+                        // Handle generic trait like Iterator<Item = T>
+                        if let Some(type_node) = bound_child.child_by_field_name("type") {
+                            let trait_text = node_text(type_node, source);
+                            let qualified = resolve_trait_name(
+                                trait_text,
+                                import_map,
+                                package_name,
+                                parent_scope,
+                            );
+                            trait_bounds.push(qualified);
+                        }
+                    }
+                }
+            }
+        }
+
+        type_name
+            .filter(|_| !trait_bounds.is_empty())
+            .map(|t| (t, trait_bounds))
+    }
+
     let mut bounds: Vec<(String, Vec<String>)> = Vec::new();
 
     // First check for explicit where_clause
     let mut cursor = impl_node.walk();
     for child in impl_node.children(&mut cursor) {
         if child.kind() == "where_clause" {
-            // Extract from where_clause > where_predicate
             let mut pred_cursor = child.walk();
             for predicate in child.children(&mut pred_cursor) {
                 if predicate.kind() == "where_predicate" {
-                    let mut type_name: Option<String> = None;
-                    let mut trait_bounds: Vec<String> = Vec::new();
-
-                    let mut pred_child_cursor = predicate.walk();
-                    for pred_child in predicate.children(&mut pred_child_cursor) {
-                        if pred_child.kind() == "type_identifier" && type_name.is_none() {
-                            type_name = Some(node_text(pred_child, source).to_string());
-                        } else if pred_child.kind() == "trait_bounds" {
-                            // Extract trait names from trait_bounds
-                            let mut bounds_cursor = pred_child.walk();
-                            for bound_child in pred_child.children(&mut bounds_cursor) {
-                                if bound_child.kind() == "type_identifier" {
-                                    let trait_text = node_text(bound_child, source);
-                                    let qualified = resolve_trait_name(
-                                        trait_text,
-                                        import_map,
-                                        package_name,
-                                        parent_scope,
-                                    );
-                                    trait_bounds.push(qualified);
-                                } else if bound_child.kind() == "generic_type" {
-                                    // Handle generic trait like Iterator<Item = T>
-                                    if let Some(type_node) = bound_child.child_by_field_name("type")
-                                    {
-                                        let trait_text = node_text(type_node, source);
-                                        let qualified = resolve_trait_name(
-                                            trait_text,
-                                            import_map,
-                                            package_name,
-                                            parent_scope,
-                                        );
-                                        trait_bounds.push(qualified);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(t) = type_name {
-                        if !trait_bounds.is_empty() {
-                            bounds.push((t, trait_bounds));
-                        }
+                    if let Some(bound) = extract_bounds_from_node(
+                        predicate,
+                        source,
+                        import_map,
+                        package_name,
+                        parent_scope,
+                    ) {
+                        bounds.push(bound);
                     }
                 }
             }
@@ -637,48 +648,14 @@ fn extract_type_parameter_bounds<'a>(
             let mut param_cursor = child.walk();
             for type_param in child.children(&mut param_cursor) {
                 if type_param.kind() == "type_parameter" {
-                    let mut type_name: Option<String> = None;
-                    let mut trait_bounds: Vec<String> = Vec::new();
-
-                    let mut param_child_cursor = type_param.walk();
-                    for param_child in type_param.children(&mut param_child_cursor) {
-                        if param_child.kind() == "type_identifier" && type_name.is_none() {
-                            type_name = Some(node_text(param_child, source).to_string());
-                        } else if param_child.kind() == "trait_bounds" {
-                            // Extract trait names from trait_bounds
-                            let mut bounds_cursor = param_child.walk();
-                            for bound_child in param_child.children(&mut bounds_cursor) {
-                                if bound_child.kind() == "type_identifier" {
-                                    let trait_text = node_text(bound_child, source);
-                                    let qualified = resolve_trait_name(
-                                        trait_text,
-                                        import_map,
-                                        package_name,
-                                        parent_scope,
-                                    );
-                                    trait_bounds.push(qualified);
-                                } else if bound_child.kind() == "generic_type" {
-                                    // Handle generic trait like Iterator<Item = T>
-                                    if let Some(type_node) = bound_child.child_by_field_name("type")
-                                    {
-                                        let trait_text = node_text(type_node, source);
-                                        let qualified = resolve_trait_name(
-                                            trait_text,
-                                            import_map,
-                                            package_name,
-                                            parent_scope,
-                                        );
-                                        trait_bounds.push(qualified);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(t) = type_name {
-                        if !trait_bounds.is_empty() {
-                            bounds.push((t, trait_bounds));
-                        }
+                    if let Some(bound) = extract_bounds_from_node(
+                        type_param,
+                        source,
+                        import_map,
+                        package_name,
+                        parent_scope,
+                    ) {
+                        bounds.push(bound);
                     }
                 }
             }
@@ -774,22 +751,25 @@ fn resolve_impl_type_name(
     Some(qualified)
 }
 
+/// Context for template expansion, bundling all resolution-related parameters.
+struct TemplateExpansionContext<'a> {
+    captures: &'a HashMap<String, String>,
+    components: &'a CommonEntityComponents,
+    import_map: &'a crate::common::import_map::ImportMap,
+    type_alias_map: &'a crate::rust::import_resolution::TypeAliasMap,
+    package_name: Option<&'a str>,
+    /// Optional node for where clause extraction (only needed for impl blocks)
+    main_node: Option<tree_sitter::Node<'a>>,
+    /// Optional source for where clause extraction (only needed for impl blocks)
+    source: Option<&'a str>,
+}
+
 /// Expand a qualified name template with captures and common components
-#[allow(clippy::too_many_arguments)]
-fn expand_qualified_name_template(
-    template: &str,
-    captures: &HashMap<String, String>,
-    components: &CommonEntityComponents,
-    import_map: &crate::common::import_map::ImportMap,
-    type_alias_map: &crate::rust::import_resolution::TypeAliasMap,
-    package_name: Option<&str>,
-    main_node: Option<tree_sitter::Node>,
-    source: Option<&str>,
-) -> String {
+fn expand_qualified_name_template(template: &str, ctx: &TemplateExpansionContext) -> String {
     let mut result = template.to_string();
 
     // Replace engine-provided placeholders
-    if let Some(ref scope) = components.parent_scope {
+    if let Some(ref scope) = ctx.components.parent_scope {
         result = result.replace("{scope}", scope);
     } else {
         result = result.replace("{scope}::", "");
@@ -798,31 +778,31 @@ fn expand_qualified_name_template(
     }
 
     // Replace {name} with the entity's derived name
-    result = result.replace("{name}", &components.name);
+    result = result.replace("{name}", &ctx.components.name);
 
     // Resolve {impl_type_name} to a fully qualified name. This ensures templates
     // like `<{impl_type_name}>::{name}` produce `<my_crate::MyStruct>::foo`
     // instead of just `<MyStruct>::foo`.
     if let Some(qualified_impl_type) = resolve_impl_type_name(
-        captures,
-        components.parent_scope.as_deref(),
-        import_map,
-        type_alias_map,
-        package_name,
+        ctx.captures,
+        ctx.components.parent_scope.as_deref(),
+        ctx.import_map,
+        ctx.type_alias_map,
+        ctx.package_name,
     ) {
         result = result.replace("{impl_type_name}", &qualified_impl_type);
     }
 
     // Resolve {trait_name} to a fully qualified name for trait impls.
     // This ensures `<Type as {trait_name}>::method` produces `<Type as my_crate::Trait>::method`
-    if let Some(trait_name) = captures.get("trait_name") {
-        let qualified_trait = if let Some(trait_path) = captures.get("trait_path") {
+    if let Some(trait_name) = ctx.captures.get("trait_name") {
+        let qualified_trait = if let Some(trait_path) = ctx.captures.get("trait_path") {
             // Case 1: Scoped trait like `mod::Trait`
             format!("{trait_path}::{trait_name}")
-        } else if let Some(resolved) = import_map.resolve(trait_name) {
+        } else if let Some(resolved) = ctx.import_map.resolve(trait_name) {
             // Case 2: Trait was imported - resolve through import map
             if let Some(stripped) = resolved.strip_prefix("crate::") {
-                if let Some(pkg) = package_name {
+                if let Some(pkg) = ctx.package_name {
                     format!("{pkg}::{stripped}")
                 } else {
                     resolved.to_string()
@@ -830,7 +810,7 @@ fn expand_qualified_name_template(
             } else {
                 resolved.to_string()
             }
-        } else if let Some(ref scope) = components.parent_scope {
+        } else if let Some(ref scope) = ctx.components.parent_scope {
             // Case 3: Simple trait name - prepend module scope
             // Find the module-level scope (everything before the type in the scope)
             // For methods, scope is like "crate::Type", for impl blocks it's "crate"
@@ -847,7 +827,7 @@ fn expand_qualified_name_template(
     }
 
     // Replace remaining capture placeholders (skip those with special handling above)
-    for (capture_name, value) in captures {
+    for (capture_name, value) in ctx.captures {
         if capture_name == "impl_type_name"
             || capture_name == "impl_type_path"
             || capture_name == "trait_name"
@@ -862,15 +842,15 @@ fn expand_qualified_name_template(
     // append where clause for blanket impls with type parameter bounds.
     // Only applies to impl block templates (not method templates which have `::` suffix).
     if template.starts_with("<{impl_type_name} as {trait_name}>") && !template.contains("::") {
-        if let (Some(node), Some(src)) = (main_node, source) {
+        if let (Some(node), Some(src)) = (ctx.main_node, ctx.source) {
             // Only process impl_item nodes
             if node.kind() == "impl_item" {
                 let bounds = extract_type_parameter_bounds(
                     node,
                     src,
-                    import_map,
-                    package_name,
-                    components.parent_scope.as_deref(),
+                    ctx.import_map,
+                    ctx.package_name,
+                    ctx.components.parent_scope.as_deref(),
                 );
                 let where_clause = format_where_clause(&bounds);
                 result.push_str(&where_clause);
@@ -1052,8 +1032,9 @@ fn evaluate_not_has_ancestor(args: &[QueryPredicateArg], query_match: &QueryMatc
     let Some((node, node_kind)) =
         parse_binary_predicate_args(args, query_match, "not-has-ancestor?")
     else {
-        // Invalid or missing args - don't filter
-        return true;
+        // Invalid or missing args - reject match to avoid false positives
+        tracing::warn!("not-has-ancestor? predicate has invalid args, rejecting match");
+        return false;
     };
 
     // Return true if the node does NOT have an ancestor of the specified kind
@@ -1741,5 +1722,175 @@ mod tests {
             expand_template("{impl_type_name}::{name}", &captures),
             "MyStruct::foo"
         );
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_inline() {
+        let source = "impl<T: Debug> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        // Find the impl_item node
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+        assert_eq!(impl_node.kind(), "impl_item");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert_eq!(bounds[0].1, vec!["Debug"]);
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_where_clause() {
+        let source = "impl<T> Foo for T where T: Clone {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+        assert_eq!(impl_node.kind(), "impl_item");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert_eq!(bounds[0].1, vec!["Clone"]);
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_multiple() {
+        let source = "impl<T: Debug + Clone> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0].0, "T");
+        assert!(bounds[0].1.contains(&"Debug".to_string()));
+        assert!(bounds[0].1.contains(&"Clone".to_string()));
+    }
+
+    #[test]
+    fn test_extract_type_parameter_bounds_no_bounds() {
+        let source = "impl<T> Foo for T {}";
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_rust::LANGUAGE.into()).ok();
+        let tree = parser.parse(source, None).expect("parse failed");
+
+        let impl_node = tree.root_node().child(0).expect("expected impl_item node");
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let bounds = extract_type_parameter_bounds(impl_node, source, &import_map, None, None);
+
+        assert!(bounds.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_path() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "Widget".to_string());
+        captures.insert("impl_type_path".to_string(), "crate::ui".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        assert_eq!(result, Some("crate::ui::Widget".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_std_type() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "String".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // String is a std type, should not be prefixed
+        assert_eq!(result, Some("String".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_scope() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "MyStruct".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate::module"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // Should prepend scope
+        assert_eq!(result, Some("test_crate::module::MyStruct".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_with_type_alias() {
+        let mut captures = HashMap::new();
+        captures.insert("impl_type_name".to_string(), "Settings".to_string());
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let mut type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+        type_alias_map.insert("Settings".to_string(), "Config".to_string());
+        type_alias_map.insert("Config".to_string(), "RawConfig".to_string());
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        // Should resolve through the alias chain to RawConfig
+        assert_eq!(result, Some("test_crate::RawConfig".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_impl_type_name_none_without_capture() {
+        let captures = HashMap::new(); // no impl_type_name
+
+        let import_map = crate::common::import_map::ImportMap::new("::");
+        let type_alias_map = crate::rust::import_resolution::TypeAliasMap::new();
+
+        let result = resolve_impl_type_name(
+            &captures,
+            Some("test_crate"),
+            &import_map,
+            &type_alias_map,
+            Some("test_crate"),
+        );
+
+        assert_eq!(result, None);
     }
 }

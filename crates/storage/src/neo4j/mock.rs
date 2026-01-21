@@ -13,22 +13,11 @@ use uuid::Uuid;
 
 use super::traits::Neo4jClientTrait;
 
-/// In-memory node data
+/// In-memory node data for mock storage
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct Node {
     entity_id: String,
     entity: CodeEntity,
-    internal_id: i64,
-}
-
-/// In-memory relationship data
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct Relationship {
-    from_id: String,
-    to_id: String,
-    rel_type: String,
 }
 
 #[derive(Debug, Default)]
@@ -37,7 +26,6 @@ struct MockData {
     current_database: Option<String>,
     nodes: HashMap<String, Node>,             // entity_id -> Node
     node_id_counter: i64,                     // Auto-increment for internal IDs
-    relationships: Vec<Relationship>,         // List of relationships
     database_mappings: HashMap<Uuid, String>, // repository_id -> database_name
 }
 
@@ -116,7 +104,6 @@ impl Neo4jClientTrait for MockNeo4jClient {
         let node = Node {
             entity_id: entity.entity_id.clone(),
             entity: entity.clone(),
-            internal_id: node_id,
         };
 
         data.nodes.insert(entity.entity_id.clone(), node);
@@ -174,17 +161,12 @@ impl Neo4jClientTrait for MockNeo4jClient {
 
     async fn create_relationship(
         &self,
-        from_entity_id: &str,
-        to_entity_id: &str,
-        relationship_type: &str,
+        _from_entity_id: &str,
+        _to_entity_id: &str,
+        _relationship_type: &str,
         _properties: &HashMap<String, String>,
     ) -> Result<()> {
-        let mut data = self.data.lock().unwrap();
-        data.relationships.push(Relationship {
-            from_id: from_entity_id.to_string(),
-            to_id: to_entity_id.to_string(),
-            rel_type: relationship_type.to_string(),
-        });
+        // Mock implementation - relationships are not tracked since no query methods read them
         Ok(())
     }
 

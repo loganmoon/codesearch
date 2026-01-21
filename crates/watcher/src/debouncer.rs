@@ -68,30 +68,6 @@ impl EventDebouncer {
                 DebouncedEvent::new(event.clone())
             });
     }
-
-    /// Force flush all pending events
-    #[allow(dead_code)]
-    pub async fn flush(&self) {
-        debug!("Flushing {} pending events", self.pending_events.len());
-
-        let events: Vec<_> = self
-            .pending_events
-            .iter()
-            .map(|entry| entry.value().event.clone())
-            .collect();
-
-        self.pending_events.clear();
-
-        for event in events {
-            let _ = self.output_tx.send(event).await;
-        }
-    }
-
-    /// Get the number of pending events
-    #[allow(dead_code)]
-    pub fn pending_count(&self) -> usize {
-        self.pending_events.len()
-    }
 }
 
 #[cfg(test)]

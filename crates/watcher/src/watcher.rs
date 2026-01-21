@@ -50,7 +50,6 @@ impl FileWatcher {
         // It will be updated when watch() is called with the actual path
         let ignore_filter = IgnoreFilter::builder()
             .patterns(config.ignore_patterns.clone())
-            .follow_symlinks(config.follow_symlinks)
             .max_file_size(config.max_file_size)
             .build()
             .map_err(|e| Error::watcher(format!("Failed to create ignore filter: {e}")))?;
@@ -99,7 +98,6 @@ impl FileWatcher {
         // Recreate ignore filter with the base path for proper relative pattern matching
         let ignore_filter = IgnoreFilter::builder()
             .patterns(self.config.ignore_patterns.clone())
-            .follow_symlinks(self.config.follow_symlinks)
             .max_file_size(self.config.max_file_size)
             .base_path(path.clone())
             .build()

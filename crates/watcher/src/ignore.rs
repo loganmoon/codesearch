@@ -150,11 +150,6 @@ impl IgnoreFilterBuilder {
         self
     }
 
-    /// Set whether to follow symbolic links (currently a no-op, kept for API compatibility)
-    pub fn follow_symlinks(self, _follow: bool) -> Self {
-        self
-    }
-
     /// Set maximum file size
     pub fn max_file_size(mut self, size: u64) -> Self {
         self.max_file_size = size;

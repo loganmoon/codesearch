@@ -131,6 +131,9 @@ pub struct PathConfig {
 }
 
 /// Pre-defined path configuration for Rust
+///
+/// Note: This configuration is semantically identical to `CRATE_BASED_PATH_CONFIG`.
+/// Use `get_family_config(LanguageFamily::CrateBased)` for the canonical reference.
 pub const RUST_PATH_CONFIG: PathConfig = PathConfig {
     separator: "::",
     relative_prefixes: &[
@@ -381,5 +384,47 @@ mod tests {
             package_config.unprefixed_is_external,
             PACKAGE_BASED_PATH_CONFIG.unprefixed_is_external
         );
+    }
+
+    #[test]
+    fn test_rust_config_identical_to_crate_based() {
+        // RUST_PATH_CONFIG and CRATE_BASED_PATH_CONFIG should remain in sync.
+        // This test catches drift if someone modifies one but not the other.
+        assert_eq!(
+            RUST_PATH_CONFIG.separator,
+            CRATE_BASED_PATH_CONFIG.separator
+        );
+        assert_eq!(
+            RUST_PATH_CONFIG.relative_prefixes.len(),
+            CRATE_BASED_PATH_CONFIG.relative_prefixes.len()
+        );
+        assert_eq!(
+            RUST_PATH_CONFIG.external_prefixes.len(),
+            CRATE_BASED_PATH_CONFIG.external_prefixes.len()
+        );
+        assert_eq!(
+            RUST_PATH_CONFIG.unprefixed_is_external,
+            CRATE_BASED_PATH_CONFIG.unprefixed_is_external
+        );
+
+        // Verify prefix details match
+        for (rust_prefix, crate_prefix) in RUST_PATH_CONFIG
+            .relative_prefixes
+            .iter()
+            .zip(CRATE_BASED_PATH_CONFIG.relative_prefixes.iter())
+        {
+            assert_eq!(rust_prefix.prefix, crate_prefix.prefix);
+            assert_eq!(rust_prefix.semantics, crate_prefix.semantics);
+            assert_eq!(rust_prefix.chainable, crate_prefix.chainable);
+        }
+
+        // Verify external prefixes match
+        for (rust_ext, crate_ext) in RUST_PATH_CONFIG
+            .external_prefixes
+            .iter()
+            .zip(CRATE_BASED_PATH_CONFIG.external_prefixes.iter())
+        {
+            assert_eq!(rust_ext, crate_ext);
+        }
     }
 }

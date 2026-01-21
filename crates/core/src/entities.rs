@@ -6,9 +6,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 use strum_macros::{Display, EnumString};
 
-// String interning type alias (using String for now, can be optimized to Arc<str> later)
-pub type InternedString = String;
-
 /// Type of code entity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumString)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -435,10 +432,6 @@ pub struct CodeEntity {
 
     /// Type of the entity
     pub entity_type: EntityType,
-
-    /// List of dependencies (imports, function calls, type references)
-    #[builder(default = "Vec::new()")]
-    pub dependencies: Vec<String>,
 
     /// Documentation summary extracted from comments
     #[builder(default = "None")]

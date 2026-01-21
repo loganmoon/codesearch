@@ -111,9 +111,9 @@ fn truncate_for_reranking(text: &str, max_chars: usize) -> String {
     if text.len() <= max_chars {
         text.to_string()
     } else {
-        // Truncate and add ellipsis
-        let truncated = &text[..max_chars.saturating_sub(3)];
-        format!("{truncated}...")
+        // Use floor_char_boundary to safely truncate at a valid UTF-8 boundary
+        let truncate_at = text.floor_char_boundary(max_chars.saturating_sub(3));
+        format!("{}...", &text[..truncate_at])
     }
 }
 
@@ -210,5 +210,73 @@ impl RerankerProvider for VllmRerankerProvider {
         info!("Reranking complete: returned {} results", scored_docs.len());
 
         Ok(scored_docs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_for_reranking_no_truncation_needed() {
+        let text = "Hello, world!";
+        assert_eq!(truncate_for_reranking(text, 100), "Hello, world!");
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_basic_truncation() {
+        let text = "Hello, world!";
+        assert_eq!(truncate_for_reranking(text, 10), "Hello, ...");
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_exact_boundary() {
+        let text = "Hello";
+        assert_eq!(truncate_for_reranking(text, 5), "Hello");
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_multibyte_emoji() {
+        // Emoji: 🦀 is 4 bytes in UTF-8
+        let text = "Hello 🦀 world";
+        // Without floor_char_boundary, slicing at byte offset could panic
+        let result = truncate_for_reranking(text, 10);
+        // Should truncate safely before the emoji if max_chars is too small
+        assert!(result.ends_with("..."));
+        assert!(result.len() <= 13); // max_chars - 3 + "..."
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_cjk_characters() {
+        // CJK characters: 中文 are 3 bytes each in UTF-8
+        let text = "Hello 中文 世界";
+        let result = truncate_for_reranking(text, 12);
+        // Should truncate at a valid char boundary
+        assert!(result.ends_with("..."));
+        // Verify the result is valid UTF-8 (would panic if not)
+        let _ = result.chars().count();
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_all_multibyte() {
+        // All multi-byte characters
+        let text = "日本語テスト";
+        let result = truncate_for_reranking(text, 10);
+        assert!(result.ends_with("..."));
+        // Verify valid UTF-8
+        let _ = result.chars().count();
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_empty_string() {
+        assert_eq!(truncate_for_reranking("", 10), "");
+    }
+
+    #[test]
+    fn test_truncate_for_reranking_very_small_max() {
+        let text = "Hello";
+        // max_chars = 3 means we try to truncate at 0 chars (3 - 3 for "...")
+        let result = truncate_for_reranking(text, 3);
+        assert_eq!(result, "...");
     }
 }

@@ -37,7 +37,7 @@ pub use repository_indexer::RepositoryIndexer;
 // Re-export public functions and types
 pub use background_updater::{start_background_updater, BackgroundUpdaterHandle};
 pub use catch_up_indexer::{catch_up_from_git, CatchUpStats};
-pub use entity_processor::extract_embedding_content;
+pub use entity_processor::{extract_embedding_content, find_stale_entity_ids};
 pub use file_change_processor::{process_file_changes, ProcessingStats};
 
 use codesearch_watcher::FileChange;

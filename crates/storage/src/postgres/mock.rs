@@ -1070,7 +1070,6 @@ mod tests {
             },
             visibility: Some(Visibility::Public),
             parent_scope: None,
-            dependencies: Vec::new(),
             signature: None,
             documentation_summary: None,
             content: Some("fn test() {}".to_string()),

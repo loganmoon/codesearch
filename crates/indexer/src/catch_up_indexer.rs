@@ -11,6 +11,20 @@ use std::{path::Path, sync::Arc, time::SystemTime};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// Get the short form of a git commit hash (first 8 bytes, or full hash if shorter).
+///
+/// Safe because git hashes contain only ASCII hex digits (0-9, a-f).
+fn short_hash(hash: &str) -> &str {
+    match hash.get(..8) {
+        Some(prefix) => prefix,
+        None => {
+            // Git hashes are always 40 hex chars; a short hash indicates a bug upstream
+            tracing::debug!("Unexpectedly short hash (length: {}): {}", hash.len(), hash);
+            hash
+        }
+    }
+}
+
 /// Statistics for catch-up indexing
 #[derive(Debug, Clone, Default)]
 pub struct CatchUpStats {
@@ -50,19 +64,22 @@ pub async fn catch_up_from_git(
     // Check if we need to catch up
     if let Some(ref last_commit) = last_indexed_commit {
         if last_commit == &current_commit {
-            info!("Index is up-to-date at commit {}", &current_commit[..8]);
+            info!(
+                "Index is up-to-date at commit {}",
+                short_hash(&current_commit)
+            );
             return Ok(stats);
         }
 
         info!(
             "Catching up index from {}..{} (git diff)",
-            &last_commit[..8],
-            &current_commit[..8]
+            short_hash(last_commit),
+            short_hash(&current_commit)
         );
     } else {
         info!(
             "No previous index found, will update to commit {}",
-            &current_commit[..8]
+            short_hash(&current_commit)
         );
     }
 
@@ -135,7 +152,7 @@ pub async fn catch_up_from_git(
 
     info!(
         "Catch-up indexing completed at commit {} ({} processed, {} failed)",
-        &current_commit[..8],
+        short_hash(&current_commit),
         stats.files_processed,
         stats.files_failed
     );

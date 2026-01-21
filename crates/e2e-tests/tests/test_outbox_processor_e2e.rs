@@ -112,16 +112,14 @@ async fn run_outbox_processor_until_empty(
 ) -> Result<()> {
     let (qdrant_config, storage_config) = create_test_configs(qdrant, postgres, neo4j, db_name);
 
-    let processor = OutboxProcessor::new(
-        Arc::clone(&postgres_client),
-        qdrant_config,
-        storage_config,
-        Duration::from_millis(50), // Fast poll for tests
-        100,                       // batch_size
-        3,                         // max_retries
-        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
-    );
+    let processor = OutboxProcessor::builder(Arc::clone(&postgres_client))
+        .with_qdrant_config(qdrant_config)
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_millis(50)) // Fast poll for tests
+        .with_batch_size(100)
+        .with_max_retries(3)
+        .with_max_cached_collections(200)
+        .build()?;
 
     let start = std::time::Instant::now();
 
@@ -496,16 +494,14 @@ async fn test_e2e_invalid_delete_payload_recorded_as_failure() -> Result<()> {
 
     // Create and run processor for enough batches to exhaust retries (max_retries = 3)
     let (qdrant_config, storage_config) = create_test_configs(&qdrant, &postgres, &neo4j, &db_name);
-    let processor = OutboxProcessor::new(
-        Arc::clone(&postgres_client),
-        qdrant_config,
-        storage_config,
-        Duration::from_millis(50),
-        10,
-        3, // max_retries
-        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200,
-    );
+    let processor = OutboxProcessor::builder(Arc::clone(&postgres_client))
+        .with_qdrant_config(qdrant_config)
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_millis(50))
+        .with_batch_size(10)
+        .with_max_retries(3)
+        .with_max_cached_collections(200)
+        .build()?;
 
     // Run batches until entry is processed (either successfully or after max retries)
     for _ in 0..10 {

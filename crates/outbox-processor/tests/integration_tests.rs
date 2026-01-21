@@ -92,16 +92,15 @@ async fn test_outbox_processor_basic_initialization() {
     };
 
     // Create processor
-    let _processor = OutboxProcessor::new(
-        postgres_client,
-        qdrant_config,
-        storage_config,
-        Duration::from_secs(1),
-        10,
-        3,
-        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
-    );
+    let _processor = OutboxProcessor::builder(postgres_client)
+        .with_qdrant_config(qdrant_config)
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_secs(1))
+        .with_batch_size(10)
+        .with_max_retries(3)
+        .with_max_cached_collections(200)
+        .build()
+        .unwrap();
 
     // If we get here, initialization succeeded
 }
@@ -234,16 +233,15 @@ async fn test_client_cache_reuses_clients() {
         postgres_pool_size: 20,
     };
 
-    let processor = OutboxProcessor::new(
-        postgres_client,
-        qdrant_config,
-        storage_config,
-        Duration::from_secs(1),
-        10,
-        3,
-        OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
-        200, // max_cached_collections
-    );
+    let processor = OutboxProcessor::builder(postgres_client)
+        .with_qdrant_config(qdrant_config)
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_secs(1))
+        .with_batch_size(10)
+        .with_max_retries(3)
+        .with_max_cached_collections(200)
+        .build()
+        .unwrap();
 
     // Access the cache through a method call
     // The processor should successfully initialize with an empty cache

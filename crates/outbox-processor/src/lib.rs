@@ -23,7 +23,7 @@ pub use neo4j_relationship_resolver::{
     collect_relationships, ContainsResolver, EntityCache, ExternalRef, RelationshipResolver,
     ResolverOutput,
 };
-pub use processor::OutboxProcessor;
+pub use processor::{OutboxProcessor, OutboxProcessorBuilder};
 
 /// Public API for starting outbox processor
 ///
@@ -55,16 +55,15 @@ pub async fn start_outbox_processor(
     config: &OutboxConfig,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
-    let processor = OutboxProcessor::new(
-        postgres_client,
-        qdrant_config.clone(),
-        storage_config,
-        Duration::from_millis(config.poll_interval_ms),
-        config.entries_per_poll,
-        config.max_retries,
-        config.max_embedding_dim,
-        config.max_cached_collections as u64,
-    );
+    let processor = OutboxProcessor::builder(postgres_client)
+        .with_qdrant_config(qdrant_config.clone())
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_millis(config.poll_interval_ms))
+        .with_batch_size(config.entries_per_poll)
+        .with_max_retries(config.max_retries)
+        .with_max_embedding_dim(config.max_embedding_dim)
+        .with_max_cached_collections(config.max_cached_collections as u64)
+        .build()?;
 
     info!(
         entries_per_poll = config.entries_per_poll,
@@ -134,16 +133,15 @@ pub async fn start_outbox_processor_with_drain(
     config: &OutboxConfig,
     drain_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
-    let processor = OutboxProcessor::new(
-        Arc::clone(&postgres_client),
-        qdrant_config.clone(),
-        storage_config,
-        Duration::from_millis(config.poll_interval_ms),
-        config.entries_per_poll,
-        config.max_retries,
-        config.max_embedding_dim,
-        config.max_cached_collections as u64,
-    );
+    let processor = OutboxProcessor::builder(Arc::clone(&postgres_client))
+        .with_qdrant_config(qdrant_config.clone())
+        .with_storage_config(storage_config)
+        .with_poll_interval(Duration::from_millis(config.poll_interval_ms))
+        .with_batch_size(config.entries_per_poll)
+        .with_max_retries(config.max_retries)
+        .with_max_embedding_dim(config.max_embedding_dim)
+        .with_max_cached_collections(config.max_cached_collections as u64)
+        .build()?;
 
     info!(
         entries_per_poll = config.entries_per_poll,

@@ -1,9 +1,48 @@
 //! Storage-related configuration methods
 
 use crate::error::{Error, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::StorageConfig;
+
+/// Normalize a repository path to an absolute, canonical form
+///
+/// This function:
+/// 1. Converts relative paths to absolute using the current working directory
+/// 2. Attempts to canonicalize (resolve symlinks, normalize `.` and `..`)
+/// 3. Falls back to the absolute path if canonicalization fails, with a warning
+///
+/// The `context` parameter is used in warning messages to identify the caller.
+fn normalize_repository_path(repo_path: &Path, context: &str) -> Result<PathBuf> {
+    // Get the absolute path without requiring it to exist
+    let absolute_path = if repo_path.is_absolute() {
+        repo_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
+            .join(repo_path)
+    };
+
+    // Canonicalize the path to resolve symlinks and normalize
+    // If canonicalization fails, fall back to the absolute path and log a warning
+    let normalized_path = match std::fs::canonicalize(&absolute_path) {
+        Ok(canonical) => canonical,
+        Err(e) => {
+            // Log warning for non-NotFound errors (permissions, I/O, etc.)
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(
+                    path = %absolute_path.display(),
+                    error = %e,
+                    "Failed to canonicalize repository path for {context}. \
+                     Different path representations may generate different results."
+                );
+            }
+            absolute_path
+        }
+    };
+
+    Ok(normalized_path)
+}
 
 impl StorageConfig {
     /// Generate a collection name from a repository path
@@ -24,21 +63,7 @@ impl StorageConfig {
     pub fn generate_collection_name(repo_path: &Path) -> Result<String> {
         use twox_hash::XxHash3_128;
 
-        // Get the absolute path without requiring it to exist
-        let absolute_path = if repo_path.is_absolute() {
-            repo_path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
-                .join(repo_path)
-        };
-
-        // Canonicalize the path to resolve symlinks and normalize (e.g., remove .. and .)
-        // This prevents the same repository from being registered multiple times with
-        // different path representations (e.g., /home/user/repo vs /home/user/../user/repo)
-        // If the path doesn't exist, fall back to the absolute path
-        let normalized_path =
-            std::fs::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
+        let normalized_path = normalize_repository_path(repo_path, "collection name generation")?;
 
         // Extract repository name (last component of path)
         let repo_name = normalized_path
@@ -128,32 +153,7 @@ impl StorageConfig {
     /// assert_ne!(id1, id3);
     /// ```
     pub fn generate_repository_id(repo_path: &Path) -> Result<uuid::Uuid> {
-        // Get the absolute path without requiring it to exist
-        let absolute_path = if repo_path.is_absolute() {
-            repo_path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map_err(|e| Error::config(format!("Failed to get current dir: {e}")))?
-                .join(repo_path)
-        };
-
-        // Canonicalize the path to resolve symlinks and normalize
-        // If canonicalization fails, fall back to the absolute path and log a warning
-        let normalized_path = match std::fs::canonicalize(&absolute_path) {
-            Ok(canonical) => canonical,
-            Err(e) => {
-                // Log warning for non-NotFound errors (permissions, I/O, etc.)
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    tracing::warn!(
-                        path = %absolute_path.display(),
-                        error = %e,
-                        "Failed to canonicalize repository path, using absolute path. \
-                         Different path representations may generate different repository IDs."
-                    );
-                }
-                absolute_path.clone()
-            }
-        };
+        let normalized_path = normalize_repository_path(repo_path, "repository ID generation")?;
 
         // Generate deterministic UUID v5 from the normalized path
         // Using DNS namespace as it's a standard namespace for name-based UUIDs

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use codesearch_core::entities::{CodeEntity, EntityType};
 use codesearch_core::error::{Error, Result};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use tracing::warn;
 use uuid::Uuid;
 
 // Import Neo4j relationship builders (internal to crate)
@@ -577,18 +578,31 @@ impl PostgresClient {
             Error::storage(format!("Failed to get entities by type {entity_type}: {e}"))
         })?;
 
+        let mut deserialize_failures = 0;
         let entities = rows
             .into_iter()
-            .filter_map(|(json, content)| {
-                serde_json::from_value::<CodeEntity>(json)
-                    .ok()
-                    .map(|mut entity| {
-                        // Use content from column, overriding any value in JSON
+            .filter_map(
+                |(json, content)| match serde_json::from_value::<CodeEntity>(json) {
+                    Ok(mut entity) => {
                         entity.content = content;
-                        entity
-                    })
-            })
+                        Some(entity)
+                    }
+                    Err(e) => {
+                        deserialize_failures += 1;
+                        warn!(error = %e, "Failed to deserialize entity from database");
+                        None
+                    }
+                },
+            )
             .collect();
+
+        if deserialize_failures > 0 {
+            warn!(
+                count = deserialize_failures,
+                entity_type = %entity_type,
+                "Skipped entities due to deserialization failures"
+            );
+        }
 
         Ok(entities)
     }
@@ -607,18 +621,30 @@ impl PostgresClient {
         .await
         .map_err(|e| Error::storage(format!("Failed to get type entities: {e}")))?;
 
+        let mut deserialize_failures = 0;
         let entities = rows
             .into_iter()
-            .filter_map(|(json, content)| {
-                serde_json::from_value::<CodeEntity>(json)
-                    .ok()
-                    .map(|mut entity| {
-                        // Use content from column, overriding any value in JSON
+            .filter_map(
+                |(json, content)| match serde_json::from_value::<CodeEntity>(json) {
+                    Ok(mut entity) => {
                         entity.content = content;
-                        entity
-                    })
-            })
+                        Some(entity)
+                    }
+                    Err(e) => {
+                        deserialize_failures += 1;
+                        warn!(error = %e, "Failed to deserialize entity from database");
+                        None
+                    }
+                },
+            )
             .collect();
+
+        if deserialize_failures > 0 {
+            warn!(
+                count = deserialize_failures,
+                "Skipped type entities due to deserialization failures"
+            );
+        }
 
         Ok(entities)
     }
@@ -636,17 +662,31 @@ impl PostgresClient {
         .await
         .map_err(|e| Error::storage(format!("Failed to get all entities: {e}")))?;
 
+        let mut deserialize_failures = 0;
         let entities = rows
             .into_iter()
-            .filter_map(|(json, content)| {
-                serde_json::from_value::<CodeEntity>(json)
-                    .ok()
-                    .map(|mut entity| {
+            .filter_map(
+                |(json, content)| match serde_json::from_value::<CodeEntity>(json) {
+                    Ok(mut entity) => {
                         entity.content = content;
-                        entity
-                    })
-            })
+                        Some(entity)
+                    }
+                    Err(e) => {
+                        deserialize_failures += 1;
+                        warn!(error = %e, "Failed to deserialize entity from database");
+                        None
+                    }
+                },
+            )
             .collect();
+
+        if deserialize_failures > 0 {
+            warn!(
+                count = deserialize_failures,
+                %repository_id,
+                "Skipped entities due to deserialization failures"
+            );
+        }
 
         Ok(entities)
     }

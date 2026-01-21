@@ -22,6 +22,58 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+/// Build a crate root module entity
+///
+/// Helper function to create a Module entity for a crate root, used by both
+/// manifest-based and fallback crate discovery paths.
+fn build_crate_root_entity(
+    name: &str,
+    entry_path: &Path,
+    repo_id: &str,
+) -> Option<codesearch_core::CodeEntity> {
+    let entity_id = uuid::Uuid::new_v4().to_string();
+
+    // Extract file-level imports for IMPORTS relationships
+    let imports = extract_file_level_imports(entry_path);
+    let relationships = EntityRelationshipData {
+        imports,
+        ..Default::default()
+    };
+
+    let qn = match QualifiedName::parse(name) {
+        Ok(qn) => qn,
+        Err(e) => {
+            warn!("Failed to parse qualified name for {name}: {e}");
+            return None;
+        }
+    };
+
+    match CodeEntityBuilder::default()
+        .entity_id(entity_id)
+        .repository_id(repo_id.to_string())
+        .name(name.to_string())
+        .qualified_name(qn)
+        .entity_type(EntityType::Module)
+        .file_path(entry_path.to_path_buf())
+        .location(SourceLocation {
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 1,
+        })
+        .visibility(Some(Visibility::Public))
+        .language(Language::Rust)
+        .relationships(relationships)
+        .build()
+    {
+        Ok(entity) => Some(entity),
+        Err(e) => {
+            warn!("Failed to build crate root entity for {name}: {e}");
+            None
+        }
+    }
+}
+
 /// Create crate root module entities from the project manifest
 ///
 /// This creates a Module entity for each crate in the project.
@@ -49,53 +101,7 @@ pub(crate) fn create_crate_root_entities(
                             );
                             return None;
                         }
-
-                        let entity_id = uuid::Uuid::new_v4().to_string();
-
-                        // Extract file-level imports for IMPORTS relationships
-                        let imports = extract_file_level_imports(&crate_info.entry_path);
-                        let relationships = EntityRelationshipData {
-                            imports,
-                            ..Default::default()
-                        };
-
-                        let qn = match QualifiedName::parse(&crate_info.name) {
-                            Ok(qn) => qn,
-                            Err(e) => {
-                                warn!(
-                                    "Failed to parse qualified name for {}: {}",
-                                    crate_info.name, e
-                                );
-                                return None;
-                            }
-                        };
-                        match CodeEntityBuilder::default()
-                            .entity_id(entity_id)
-                            .repository_id(repo_id.to_string())
-                            .name(crate_info.name.clone())
-                            .qualified_name(qn)
-                            .entity_type(EntityType::Module)
-                            .file_path(crate_info.entry_path.clone())
-                            .location(SourceLocation {
-                                start_line: 1,
-                                start_column: 1,
-                                end_line: 1,
-                                end_column: 1,
-                            })
-                            .visibility(Some(Visibility::Public))
-                            .language(Language::Rust)
-                            .relationships(relationships)
-                            .build()
-                        {
-                            Ok(entity) => Some(entity),
-                            Err(e) => {
-                                warn!(
-                                    "Failed to build crate root entity for {}: {}",
-                                    crate_info.name, e
-                                );
-                                None
-                            }
-                        }
+                        build_crate_root_entity(&crate_info.name, &crate_info.entry_path, repo_id)
                     })
                     .collect::<Vec<_>>()
             } else {
@@ -115,46 +121,9 @@ pub(crate) fn create_crate_root_entities(
                     return vec![];
                 };
 
-                let entity_id = uuid::Uuid::new_v4().to_string();
-
-                // Extract file-level imports for IMPORTS relationships
-                let imports = extract_file_level_imports(&crate_root_file);
-                let relationships = EntityRelationshipData {
-                    imports,
-                    ..Default::default()
-                };
-
-                let qn = match QualifiedName::parse(&info.name) {
-                    Ok(qn) => qn,
-                    Err(e) => {
-                        warn!("Failed to parse qualified name for {}: {}", info.name, e);
-                        return vec![];
-                    }
-                };
-                match CodeEntityBuilder::default()
-                    .entity_id(entity_id)
-                    .repository_id(repo_id.to_string())
-                    .name(info.name.clone())
-                    .qualified_name(qn)
-                    .entity_type(EntityType::Module)
-                    .file_path(crate_root_file)
-                    .location(SourceLocation {
-                        start_line: 1,
-                        start_column: 1,
-                        end_line: 1,
-                        end_column: 1,
-                    })
-                    .visibility(Some(Visibility::Public))
-                    .language(Language::Rust)
-                    .relationships(relationships)
-                    .build()
-                {
-                    Ok(entity) => vec![entity],
-                    Err(e) => {
-                        warn!("Failed to build crate root entity for {}: {}", info.name, e);
-                        vec![]
-                    }
-                }
+                build_crate_root_entity(&info.name, &crate_root_file, repo_id)
+                    .into_iter()
+                    .collect()
             }
         })
         .collect()

@@ -23,35 +23,40 @@ struct FailureContext<'a> {
     first_entity_id: Option<&'a str>,
 }
 
-/// Create all relationship resolvers for Neo4j graph construction
+/// Collection of all relationship resolvers for Neo4j graph construction
 ///
-/// Returns a tuple of all 8 generic resolvers (ContainsResolver is handled separately
-/// as it uses parent_scope rather than the relationships field).
-fn create_resolvers() -> (
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-    crate::generic_resolver::GenericResolver,
-) {
-    use crate::generic_resolver::{
-        associates_resolver, calls_resolver, extends_resolver, implements_resolver,
-        imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
-    };
+/// ContainsResolver is handled separately as it uses parent_scope rather than
+/// the relationships field.
+struct Resolvers {
+    calls: crate::generic_resolver::GenericResolver,
+    uses: crate::generic_resolver::GenericResolver,
+    implements: crate::generic_resolver::GenericResolver,
+    associates: crate::generic_resolver::GenericResolver,
+    extends: crate::generic_resolver::GenericResolver,
+    inherits: crate::generic_resolver::GenericResolver,
+    imports: crate::generic_resolver::GenericResolver,
+    reexports: crate::generic_resolver::GenericResolver,
+}
 
-    (
-        calls_resolver(),
-        uses_resolver(),
-        implements_resolver(),
-        associates_resolver(),
-        extends_resolver(),
-        inherits_resolver(),
-        imports_resolver(),
-        reexports_resolver(),
-    )
+impl Resolvers {
+    /// Create all relationship resolvers
+    fn new() -> Self {
+        use crate::generic_resolver::{
+            associates_resolver, calls_resolver, extends_resolver, implements_resolver,
+            imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
+        };
+
+        Self {
+            calls: calls_resolver(),
+            uses: uses_resolver(),
+            implements: implements_resolver(),
+            associates: associates_resolver(),
+            extends: extends_resolver(),
+            inherits: inherits_resolver(),
+            imports: imports_resolver(),
+            reexports: reexports_resolver(),
+        }
+    }
 }
 
 pub struct OutboxProcessor {
@@ -999,7 +1004,7 @@ impl OutboxProcessor {
                                 let node_ids: Vec<i64> =
                                     node_id_updates.iter().map(|(_, _, n)| *n).collect();
 
-                                if let Err(e) = sqlx::query(
+                                sqlx::query(
                                     "UPDATE entity_metadata AS em
                                      SET neo4j_node_id = data.node_id
                                      FROM unnest($1::uuid[], $2::text[], $3::bigint[]) AS data(repository_id, entity_id, node_id)
@@ -1010,9 +1015,7 @@ impl OutboxProcessor {
                                 .bind(&node_ids)
                                 .execute(&mut **tx)
                                 .await
-                                {
-                                    warn!("Failed to bulk update neo4j_node_ids: {}", e);
-                                }
+                                .map_err(|e| Error::storage(format!("Failed to bulk update neo4j_node_ids: {e}")))?;
                             }
                             info!(
                                 elapsed_ms = neo4j_create_start.elapsed().as_millis() as u64,
@@ -1135,20 +1138,19 @@ impl OutboxProcessor {
         let neo4j_client = self.get_neo4j_client().await?;
 
         // Create all resolvers
-        let (calls, uses, implements, associates, extends, inherits, imports, reexports) =
-            create_resolvers();
+        let resolvers_struct = Resolvers::new();
 
         // Define all resolvers to run (ContainsResolver uses parent_scope, not relationships field)
         let resolvers: Vec<&dyn crate::neo4j_relationship_resolver::RelationshipResolver> = vec![
             &ContainsResolver,
-            &calls,
-            &uses,
-            &implements,
-            &associates,
-            &extends,
-            &inherits,
-            &imports,
-            &reexports,
+            &resolvers_struct.calls,
+            &resolvers_struct.uses,
+            &resolvers_struct.implements,
+            &resolvers_struct.associates,
+            &resolvers_struct.extends,
+            &resolvers_struct.inherits,
+            &resolvers_struct.imports,
+            &resolvers_struct.reexports,
         ];
 
         // Resolve relationships for each repository

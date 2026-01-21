@@ -20,6 +20,61 @@ pub use defaults::default_max_entities_per_db_operation;
 
 use defaults::*;
 
+/// Validate that a usize value is in the range (0, max]
+fn validate_range(name: &str, value: usize, max: usize) -> Result<()> {
+    if value == 0 {
+        return Err(Error::config(format!("{name} must be greater than 0")));
+    }
+    if value > max {
+        return Err(Error::config(format!(
+            "{name} too large (max {max}, got {value})"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that a usize value is greater than 0 (no upper bound)
+fn validate_positive(name: &str, value: usize) -> Result<()> {
+    if value == 0 {
+        return Err(Error::config(format!("{name} must be greater than 0")));
+    }
+    Ok(())
+}
+
+/// Validate that an i64 value is in the range (0, max]
+fn validate_range_i64(name: &str, value: i64, max: i64) -> Result<()> {
+    if value <= 0 {
+        return Err(Error::config(format!("{name} must be greater than 0")));
+    }
+    if value > max {
+        return Err(Error::config(format!(
+            "{name} too large (max {max}, got {value})"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate that an i32 value is non-negative
+fn validate_non_negative_i32(name: &str, value: i32) -> Result<()> {
+    if value < 0 {
+        return Err(Error::config(format!("{name} must be non-negative")));
+    }
+    Ok(())
+}
+
+/// Validate that a u64 value is in the range (0, max]
+fn validate_range_u64(name: &str, value: u64, max: u64) -> Result<()> {
+    if value == 0 {
+        return Err(Error::config(format!("{name} must be greater than 0")));
+    }
+    if value > max {
+        return Err(Error::config(format!(
+            "{name} too large (max {max}, got {value})"
+        )));
+    }
+    Ok(())
+}
+
 /// Returns the path to the global configuration file
 ///
 /// The global config is stored at `~/.codesearch/config.toml` and contains
@@ -569,50 +624,37 @@ impl Default for IndexerConfig {
 impl Config {
     /// Validates the configuration
     pub fn validate(&self) -> Result<()> {
-        // Validate provider
+        // Validate embeddings provider
         let valid_providers = ["jina", "localapi", "api", "mock"];
         if !valid_providers.contains(&self.embeddings.provider.as_str()) {
             return Err(Error::config(format!(
-                "Invalid provider '{}'. Must be one of: {:?}",
-                self.embeddings.provider, valid_providers
+                "Invalid provider '{}'. Must be one of: {valid_providers:?}",
+                self.embeddings.provider
             )));
         }
 
-        // Validate device
+        // Validate embeddings device
         let valid_devices = ["cpu", "cuda", "metal"];
         if !valid_devices.contains(&self.embeddings.device.as_str()) {
             return Err(Error::config(format!(
-                "Invalid device '{}'. Must be one of: {:?}",
-                self.embeddings.device, valid_devices
+                "Invalid device '{}'. Must be one of: {valid_devices:?}",
+                self.embeddings.device
             )));
         }
 
-        // Validate embedding_dimension
-        if self.embeddings.embedding_dimension == 0 {
-            return Err(Error::config(
-                "embedding_dimension must be greater than 0".to_string(),
-            ));
-        }
+        validate_positive("embedding_dimension", self.embeddings.embedding_dimension)?;
+        validate_range(
+            "embeddings.max_concurrent_api_requests",
+            self.embeddings.max_concurrent_api_requests,
+            256,
+        )?;
 
-        // Validate max_concurrent_api_requests
-        if self.embeddings.max_concurrent_api_requests == 0 {
-            return Err(Error::config(
-                "embeddings.max_concurrent_api_requests must be greater than 0".to_string(),
-            ));
-        }
-        if self.embeddings.max_concurrent_api_requests > 256 {
-            return Err(Error::config(format!(
-                "embeddings.max_concurrent_api_requests too large (max 256, got {})",
-                self.embeddings.max_concurrent_api_requests
-            )));
-        }
-
-        // Validate sparse embeddings configuration
+        // Validate sparse embeddings provider
         let valid_sparse_providers = ["granite", "bm25"];
         if !valid_sparse_providers.contains(&self.sparse_embeddings.provider.as_str()) {
             return Err(Error::config(format!(
-                "Invalid sparse embeddings provider '{}'. Must be one of: {:?}",
-                self.sparse_embeddings.provider, valid_sparse_providers
+                "Invalid sparse embeddings provider '{}'. Must be one of: {valid_sparse_providers:?}",
+                self.sparse_embeddings.provider
             )));
         }
 
@@ -625,110 +667,55 @@ impl Config {
             || device.starts_with("cuda:");
         if !valid_sparse_device {
             return Err(Error::config(format!(
-                "Invalid sparse embeddings device '{}'. Must be one of: auto, cpu, cuda, cuda:N, metal",
-                device
+                "Invalid sparse embeddings device '{device}'. Must be one of: auto, cpu, cuda, cuda:N, metal"
             )));
         }
 
-        if self.sparse_embeddings.top_k == 0 {
-            return Err(Error::config(
-                "sparse_embeddings.top_k must be greater than 0".to_string(),
-            ));
-        }
-        if self.sparse_embeddings.top_k > 10000 {
-            return Err(Error::config(format!(
-                "sparse_embeddings.top_k too large (max 10000, got {})",
-                self.sparse_embeddings.top_k
-            )));
-        }
+        validate_range(
+            "sparse_embeddings.top_k",
+            self.sparse_embeddings.top_k,
+            10000,
+        )?;
 
         // Validate indexer configuration
-        if self.indexer.files_per_discovery_batch == 0 {
-            return Err(Error::config(
-                "indexer.files_per_discovery_batch must be greater than 0".to_string(),
-            ));
-        }
-        if self.indexer.files_per_discovery_batch > 1000 {
-            return Err(Error::config(format!(
-                "indexer.files_per_discovery_batch too large (max 1000, got {})",
-                self.indexer.files_per_discovery_batch
-            )));
-        }
+        validate_range(
+            "indexer.files_per_discovery_batch",
+            self.indexer.files_per_discovery_batch,
+            1000,
+        )?;
+        validate_range(
+            "indexer.pipeline_channel_capacity",
+            self.indexer.pipeline_channel_capacity,
+            100,
+        )?;
+        validate_range(
+            "indexer.entities_per_embedding_batch",
+            self.indexer.entities_per_embedding_batch,
+            2000,
+        )?;
+        validate_range(
+            "indexer.max_concurrent_file_extractions",
+            self.indexer.max_concurrent_file_extractions,
+            128,
+        )?;
+        validate_range(
+            "indexer.max_concurrent_snapshot_updates",
+            self.indexer.max_concurrent_snapshot_updates,
+            128,
+        )?;
 
-        if self.indexer.pipeline_channel_capacity == 0 {
-            return Err(Error::config(
-                "indexer.pipeline_channel_capacity must be greater than 0".to_string(),
-            ));
-        }
-        if self.indexer.pipeline_channel_capacity > 100 {
-            return Err(Error::config(format!(
-                "indexer.pipeline_channel_capacity too large (max 100, got {})",
-                self.indexer.pipeline_channel_capacity
-            )));
-        }
-
-        if self.indexer.entities_per_embedding_batch == 0 {
-            return Err(Error::config(
-                "indexer.entities_per_embedding_batch must be greater than 0".to_string(),
-            ));
-        }
-        if self.indexer.entities_per_embedding_batch > 2000 {
-            return Err(Error::config(format!(
-                "indexer.entities_per_embedding_batch too large (max 2000, got {})",
-                self.indexer.entities_per_embedding_batch
-            )));
-        }
-
-        if self.indexer.max_concurrent_file_extractions == 0 {
-            return Err(Error::config(
-                "indexer.max_concurrent_file_extractions must be greater than 0".to_string(),
-            ));
-        }
-        if self.indexer.max_concurrent_file_extractions > 128 {
-            return Err(Error::config(format!(
-                "indexer.max_concurrent_file_extractions too large (max 128, got {})",
-                self.indexer.max_concurrent_file_extractions
-            )));
-        }
-
-        if self.indexer.max_concurrent_snapshot_updates == 0 {
-            return Err(Error::config(
-                "indexer.max_concurrent_snapshot_updates must be greater than 0".to_string(),
-            ));
-        }
-        if self.indexer.max_concurrent_snapshot_updates > 128 {
-            return Err(Error::config(format!(
-                "indexer.max_concurrent_snapshot_updates too large (max 128, got {})",
-                self.indexer.max_concurrent_snapshot_updates
-            )));
-        }
-
-        // Validate reranking configuration
+        // Validate reranking provider
         let valid_reranking_providers = ["jina", "vllm"];
         if !valid_reranking_providers.contains(&self.reranking.provider.as_str()) {
             return Err(Error::config(format!(
-                "Invalid reranking provider '{}'. Must be one of: {:?}",
-                self.reranking.provider, valid_reranking_providers
+                "Invalid reranking provider '{}'. Must be one of: {valid_reranking_providers:?}",
+                self.reranking.provider
             )));
         }
 
         if self.reranking.enabled {
-            if self.reranking.candidates == 0 {
-                return Err(Error::config(
-                    "reranking.candidates must be greater than 0".to_string(),
-                ));
-            }
-            if self.reranking.candidates > 1000 {
-                return Err(Error::config(format!(
-                    "reranking.candidates too large (max 1000, got {})",
-                    self.reranking.candidates
-                )));
-            }
-            if self.reranking.top_k == 0 {
-                return Err(Error::config(
-                    "reranking.top_k must be greater than 0".to_string(),
-                ));
-            }
+            validate_range("reranking.candidates", self.reranking.candidates, 1000)?;
+            validate_positive("reranking.top_k", self.reranking.top_k)?;
             if self.reranking.top_k > self.reranking.candidates {
                 return Err(Error::config(format!(
                     "reranking.top_k ({}) cannot exceed candidates ({})",
@@ -738,62 +725,30 @@ impl Config {
         }
 
         // Validate hybrid search configuration
-        if self.hybrid_search.prefetch_multiplier == 0 {
-            return Err(Error::config(
-                "hybrid_search.prefetch_multiplier must be greater than 0".to_string(),
-            ));
-        }
-        if self.hybrid_search.prefetch_multiplier > 100 {
-            return Err(Error::config(format!(
-                "hybrid_search.prefetch_multiplier too large (max 100, got {})",
-                self.hybrid_search.prefetch_multiplier
-            )));
-        }
+        validate_range(
+            "hybrid_search.prefetch_multiplier",
+            self.hybrid_search.prefetch_multiplier,
+            100,
+        )?;
 
         // Validate outbox configuration
-        if self.outbox.poll_interval_ms == 0 {
-            return Err(Error::config(
-                "outbox.poll_interval_ms must be greater than 0".to_string(),
-            ));
-        }
-        if self.outbox.poll_interval_ms > 60_000 {
-            return Err(Error::config(format!(
-                "outbox.poll_interval_ms too large (max 60000ms, got {})",
-                self.outbox.poll_interval_ms
-            )));
-        }
-        if self.outbox.entries_per_poll <= 0 {
-            return Err(Error::config(
-                "outbox.entries_per_poll must be greater than 0".to_string(),
-            ));
-        }
-        if self.outbox.entries_per_poll > 1000 {
-            return Err(Error::config(format!(
-                "outbox.entries_per_poll too large (max 1000, got {})",
-                self.outbox.entries_per_poll
-            )));
-        }
-        if self.outbox.max_retries < 0 {
-            return Err(Error::config(
-                "outbox.max_retries must be non-negative".to_string(),
-            ));
-        }
-        if self.outbox.max_embedding_dim == 0 {
-            return Err(Error::config(
-                "outbox.max_embedding_dim must be greater than 0".to_string(),
-            ));
-        }
-        if self.outbox.max_cached_collections == 0 {
-            return Err(Error::config(
-                "outbox.max_cached_collections must be greater than 0".to_string(),
-            ));
-        }
-        if self.outbox.max_cached_collections > 1000 {
-            return Err(Error::config(format!(
-                "outbox.max_cached_collections too large (max 1000, got {})",
-                self.outbox.max_cached_collections
-            )));
-        }
+        validate_range_u64(
+            "outbox.poll_interval_ms",
+            self.outbox.poll_interval_ms,
+            60_000,
+        )?;
+        validate_range_i64(
+            "outbox.entries_per_poll",
+            self.outbox.entries_per_poll,
+            1000,
+        )?;
+        validate_non_negative_i32("outbox.max_retries", self.outbox.max_retries)?;
+        validate_positive("outbox.max_embedding_dim", self.outbox.max_embedding_dim)?;
+        validate_range(
+            "outbox.max_cached_collections",
+            self.outbox.max_cached_collections,
+            1000,
+        )?;
 
         Ok(())
     }

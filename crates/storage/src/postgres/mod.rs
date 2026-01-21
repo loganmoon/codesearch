@@ -1,15 +1,18 @@
 mod client;
 pub mod mock;
+mod types;
 
 use async_trait::async_trait;
 use codesearch_core::entities::CodeEntity;
 use codesearch_core::error::Result;
 use uuid::Uuid;
 
-// Re-export client types
-pub use client::{
-    EmbeddingCacheEntry, EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, PostgresClient,
-    TargetStore,
+// Re-export client
+pub use client::PostgresClient;
+
+// Re-export types
+pub use types::{
+    EmbeddingCacheEntry, EntityOutboxBatchEntry, OutboxEntry, OutboxOperation, TargetStore,
 };
 
 /// BM25 statistics for a repository

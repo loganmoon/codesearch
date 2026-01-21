@@ -23,6 +23,42 @@ struct FailureContext<'a> {
     first_entity_id: Option<&'a str>,
 }
 
+/// Collection of all relationship resolvers for Neo4j graph construction
+///
+/// ContainsResolver is handled separately as it uses parent_scope rather than
+/// the relationships field.
+struct Resolvers {
+    calls: crate::generic_resolver::GenericResolver,
+    uses: crate::generic_resolver::GenericResolver,
+    implements: crate::generic_resolver::GenericResolver,
+    associates: crate::generic_resolver::GenericResolver,
+    extends: crate::generic_resolver::GenericResolver,
+    inherits: crate::generic_resolver::GenericResolver,
+    imports: crate::generic_resolver::GenericResolver,
+    reexports: crate::generic_resolver::GenericResolver,
+}
+
+impl Resolvers {
+    /// Create all relationship resolvers
+    fn new() -> Self {
+        use crate::generic_resolver::{
+            associates_resolver, calls_resolver, extends_resolver, implements_resolver,
+            imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
+        };
+
+        Self {
+            calls: calls_resolver(),
+            uses: uses_resolver(),
+            implements: implements_resolver(),
+            associates: associates_resolver(),
+            extends: extends_resolver(),
+            inherits: inherits_resolver(),
+            imports: imports_resolver(),
+            reexports: reexports_resolver(),
+        }
+    }
+}
+
 pub struct OutboxProcessor {
     postgres_client: Arc<dyn PostgresClientTrait>,
     qdrant_config: QdrantConfig,
@@ -39,8 +75,14 @@ impl OutboxProcessor {
     /// Default maximum embedding dimensions to prevent memory exhaustion attacks
     pub const DEFAULT_MAX_EMBEDDING_DIM: usize = 100_000;
 
+    /// Create a new builder for OutboxProcessor
+    pub fn builder(postgres_client: Arc<dyn PostgresClientTrait>) -> OutboxProcessorBuilder {
+        OutboxProcessorBuilder::new(postgres_client)
+    }
+
+    /// Create a new OutboxProcessor from builder parameters
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    fn from_builder(
         postgres_client: Arc<dyn PostgresClientTrait>,
         qdrant_config: QdrantConfig,
         storage_config: StorageConfig,
@@ -962,7 +1004,7 @@ impl OutboxProcessor {
                                 let node_ids: Vec<i64> =
                                     node_id_updates.iter().map(|(_, _, n)| *n).collect();
 
-                                if let Err(e) = sqlx::query(
+                                sqlx::query(
                                     "UPDATE entity_metadata AS em
                                      SET neo4j_node_id = data.node_id
                                      FROM unnest($1::uuid[], $2::text[], $3::bigint[]) AS data(repository_id, entity_id, node_id)
@@ -973,9 +1015,7 @@ impl OutboxProcessor {
                                 .bind(&node_ids)
                                 .execute(&mut **tx)
                                 .await
-                                {
-                                    warn!("Failed to bulk update neo4j_node_ids: {}", e);
-                                }
+                                .map_err(|e| Error::storage(format!("Failed to bulk update neo4j_node_ids: {e}")))?;
                             }
                             info!(
                                 elapsed_ms = neo4j_create_start.elapsed().as_millis() as u64,
@@ -1074,10 +1114,6 @@ impl OutboxProcessor {
     ///
     /// Called once when the outbox drains (index mode completes).
     pub async fn resolve_pending_relationships(&self) -> Result<()> {
-        use crate::generic_resolver::{
-            associates_resolver, calls_resolver, extends_resolver, implements_resolver,
-            imports_resolver, inherits_resolver, reexports_resolver, uses_resolver,
-        };
         use crate::neo4j_relationship_resolver::{
             collect_relationships, ContainsResolver, EntityCache, ExternalRef,
         };
@@ -1101,27 +1137,20 @@ impl OutboxProcessor {
         // Get Neo4j client
         let neo4j_client = self.get_neo4j_client().await?;
 
-        // Create generic resolvers using typed EntityRelationshipData
-        let calls = calls_resolver();
-        let uses = uses_resolver();
-        let implements = implements_resolver();
-        let associates = associates_resolver();
-        let extends = extends_resolver();
-        let inherits = inherits_resolver();
-        let imports = imports_resolver();
-        let reexports = reexports_resolver();
+        // Create all resolvers
+        let resolvers_struct = Resolvers::new();
 
         // Define all resolvers to run (ContainsResolver uses parent_scope, not relationships field)
         let resolvers: Vec<&dyn crate::neo4j_relationship_resolver::RelationshipResolver> = vec![
             &ContainsResolver,
-            &calls,
-            &uses,
-            &implements,
-            &associates,
-            &extends,
-            &inherits,
-            &imports,
-            &reexports,
+            &resolvers_struct.calls,
+            &resolvers_struct.uses,
+            &resolvers_struct.implements,
+            &resolvers_struct.associates,
+            &resolvers_struct.extends,
+            &resolvers_struct.inherits,
+            &resolvers_struct.imports,
+            &resolvers_struct.reexports,
         ];
 
         // Resolve relationships for each repository
@@ -1320,6 +1349,100 @@ impl OutboxProcessor {
         }
 
         Ok(())
+    }
+}
+
+/// Builder for OutboxProcessor with fluent API
+pub struct OutboxProcessorBuilder {
+    postgres_client: Arc<dyn PostgresClientTrait>,
+    qdrant_config: Option<QdrantConfig>,
+    storage_config: Option<StorageConfig>,
+    poll_interval: Duration,
+    batch_size: i64,
+    max_retries: i32,
+    max_embedding_dim: usize,
+    max_cached_collections: u64,
+}
+
+impl OutboxProcessorBuilder {
+    /// Create a new builder with required postgres_client
+    pub fn new(postgres_client: Arc<dyn PostgresClientTrait>) -> Self {
+        Self {
+            postgres_client,
+            qdrant_config: None,
+            storage_config: None,
+            poll_interval: Duration::from_millis(1000),
+            batch_size: 500,
+            max_retries: 3,
+            max_embedding_dim: OutboxProcessor::DEFAULT_MAX_EMBEDDING_DIM,
+            max_cached_collections: 200,
+        }
+    }
+
+    /// Set the Qdrant configuration (required)
+    pub fn with_qdrant_config(mut self, config: QdrantConfig) -> Self {
+        self.qdrant_config = Some(config);
+        self
+    }
+
+    /// Set the storage configuration (required)
+    pub fn with_storage_config(mut self, config: StorageConfig) -> Self {
+        self.storage_config = Some(config);
+        self
+    }
+
+    /// Set the poll interval (default: 1000ms)
+    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
+    /// Set the batch size (default: 500)
+    pub fn with_batch_size(mut self, size: i64) -> Self {
+        self.batch_size = size;
+        self
+    }
+
+    /// Set the maximum retries (default: 3)
+    pub fn with_max_retries(mut self, retries: i32) -> Self {
+        self.max_retries = retries;
+        self
+    }
+
+    /// Set the maximum embedding dimensions (default: 100_000)
+    pub fn with_max_embedding_dim(mut self, dim: usize) -> Self {
+        self.max_embedding_dim = dim;
+        self
+    }
+
+    /// Set the maximum cached collections (default: 200)
+    pub fn with_max_cached_collections(mut self, count: u64) -> Self {
+        self.max_cached_collections = count;
+        self
+    }
+
+    /// Build the OutboxProcessor
+    ///
+    /// # Errors
+    /// Returns an error if qdrant_config or storage_config is not set
+    pub fn build(self) -> Result<OutboxProcessor> {
+        let qdrant_config = self
+            .qdrant_config
+            .ok_or_else(|| Error::config("qdrant_config is required"))?;
+        let storage_config = self
+            .storage_config
+            .ok_or_else(|| Error::config("storage_config is required"))?;
+
+        Ok(OutboxProcessor::from_builder(
+            self.postgres_client,
+            qdrant_config,
+            storage_config,
+            self.poll_interval,
+            self.batch_size,
+            self.max_retries,
+            self.max_embedding_dim,
+            self.max_cached_collections,
+        ))
     }
 }
 

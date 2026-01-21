@@ -15,6 +15,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// Minimal payload for Qdrant search results.
+/// Fields are populated by deserialization but only `entity_id` and `repository_id`
+/// are read in code - other fields must match the stored payload schema.
 #[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 struct MinimalEntityPayload {

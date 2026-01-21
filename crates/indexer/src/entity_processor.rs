@@ -19,6 +19,17 @@ use uuid::Uuid;
 
 const DELIM: &str = " ";
 
+/// Find entity IDs that exist in `old` but not in `new` (stale entities)
+///
+/// Uses HashSet for O(1) lookups instead of O(n) Vec::contains.
+pub fn find_stale_entity_ids(old: &[String], new: &[String]) -> Vec<String> {
+    let new_set: HashSet<&String> = new.iter().collect();
+    old.iter()
+        .filter(|id| !new_set.contains(id))
+        .cloned()
+        .collect()
+}
+
 /// Extract embeddable content from a CodeEntity
 pub fn extract_embedding_content(entity: &CodeEntity) -> String {
     let qualified_name_str = entity.qualified_name.to_string();
@@ -592,14 +603,7 @@ pub async fn update_file_snapshot_and_mark_stale(
         .storage_err("Failed to get file snapshot")?
         .unwrap_or_default();
 
-    // Use HashSet for O(1) lookups instead of O(n) Vec::contains
-    let new_entity_set: HashSet<&String> = new_entity_ids.iter().collect();
-    let stale_ids: Vec<String> = old_entity_ids
-        .iter()
-        .filter(|old_id| !new_entity_set.contains(old_id))
-        .cloned()
-        .collect();
-
+    let stale_ids = find_stale_entity_ids(&old_entity_ids, &new_entity_ids);
     let stale_count = stale_ids.len();
 
     if !stale_ids.is_empty() {
@@ -700,7 +704,6 @@ mod tests {
                 .expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
-            dependencies: vec![],
             file_path: PathBuf::from("src/handlers.rs"),
             location: SourceLocation {
                 start_line: 10,
@@ -809,7 +812,6 @@ mod tests {
             qualified_name: QualifiedName::parse("geometry::Point").expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
-            dependencies: vec![],
             file_path: PathBuf::from("src/geometry.rs"),
             location: SourceLocation {
                 start_line: 5,
@@ -854,7 +856,6 @@ mod tests {
             qualified_name: QualifiedName::parse("crate::utils::test").expect("Invalid qn"),
             path_entity_identifier: None,
             parent_scope: None,
-            dependencies: vec![],
             file_path: PathBuf::from("src/utils.rs"),
             location: SourceLocation {
                 start_line: 1,

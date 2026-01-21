@@ -1305,13 +1305,7 @@ async fn stage_update_snapshots(
             .cloned()
             .unwrap_or_default();
 
-        // Use HashSet for O(1) lookups instead of O(n) Vec::contains
-        let new_entity_set: std::collections::HashSet<&String> = new_entity_ids.iter().collect();
-        let stale_ids: Vec<String> = old_entity_ids
-            .iter()
-            .filter(|old_id| !new_entity_set.contains(old_id))
-            .cloned()
-            .collect();
+        let stale_ids = entity_processor::find_stale_entity_ids(&old_entity_ids, new_entity_ids);
 
         if !stale_ids.is_empty() {
             info!(
@@ -1563,7 +1557,6 @@ mod tests {
             },
             visibility: Some(Visibility::Public),
             parent_scope: None,
-            dependencies: Vec::new(),
             signature: None,
             documentation_summary: None,
             content: Some(format!("fn {name}() {{}}")),

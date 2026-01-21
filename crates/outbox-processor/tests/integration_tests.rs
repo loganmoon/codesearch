@@ -31,7 +31,6 @@ fn create_test_entity(name: &str, entity_id: &str, file_path: &str, repo_id: &st
         },
         visibility: Some(Visibility::Public),
         parent_scope: None,
-        dependencies: Vec::new(),
         signature: None,
         documentation_summary: None,
         content: Some(format!("fn {name}() {{}}")),

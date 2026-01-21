@@ -31,8 +31,8 @@ pub use config::{
 };
 pub use entities::{
     CodeEntity, CodeRelationship, EntityMetadata, EntityRelationshipData, EntityType,
-    FunctionSignature, InternedString, Language, ReferenceType, RelationshipType, SourceLocation,
-    SourceReference, Visibility,
+    FunctionSignature, Language, ReferenceType, RelationshipType, SourceLocation, SourceReference,
+    Visibility,
 };
 pub use entity_id::{generate_anonymous_entity_id, generate_entity_id, ScopeContext};
 pub use error::{Error, Result, ResultExt};
@@ -51,10 +51,3 @@ pub use search_models::{
 
 /// Version of the core library
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Prelude module for convenient imports
-pub mod prelude {
-    pub use crate::config::Config;
-    pub use crate::entities::{CodeEntity, EntityType};
-    pub use crate::error::{Result, ResultExt};
-}

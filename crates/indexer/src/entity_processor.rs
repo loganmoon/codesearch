@@ -902,4 +902,53 @@ mod tests {
             "Content extraction should be deterministic"
         );
     }
+
+    #[test]
+    fn test_find_stale_entity_ids_basic() {
+        let old = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let new = vec!["a".to_string(), "c".to_string()];
+        let stale = find_stale_entity_ids(&old, &new);
+        assert_eq!(stale, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn test_find_stale_entity_ids_no_stale() {
+        let old = vec!["a".to_string(), "b".to_string()];
+        let new = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let stale = find_stale_entity_ids(&old, &new);
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn test_find_stale_entity_ids_all_stale() {
+        let old = vec!["a".to_string(), "b".to_string()];
+        let new = vec!["c".to_string(), "d".to_string()];
+        let stale = find_stale_entity_ids(&old, &new);
+        assert_eq!(stale.len(), 2);
+        assert!(stale.contains(&"a".to_string()));
+        assert!(stale.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn test_find_stale_entity_ids_empty_inputs() {
+        // Both empty
+        let stale = find_stale_entity_ids(&[], &[]);
+        assert!(stale.is_empty());
+
+        // Empty old (nothing can be stale)
+        let stale = find_stale_entity_ids(&[], &["a".to_string()]);
+        assert!(stale.is_empty());
+
+        // Empty new (all old are stale)
+        let old = vec!["a".to_string(), "b".to_string()];
+        let stale = find_stale_entity_ids(&old, &[]);
+        assert_eq!(stale.len(), 2);
+    }
+
+    #[test]
+    fn test_find_stale_entity_ids_identical() {
+        let same = vec!["a".to_string(), "b".to_string()];
+        let stale = find_stale_entity_ids(&same, &same);
+        assert!(stale.is_empty());
+    }
 }

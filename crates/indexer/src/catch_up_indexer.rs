@@ -11,9 +11,18 @@ use std::{path::Path, sync::Arc, time::SystemTime};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// Get the short form of a git commit hash (first 8 chars or full hash if shorter)
+/// Get the short form of a git commit hash (first 8 bytes, or full hash if shorter).
+///
+/// Safe because git hashes contain only ASCII hex digits (0-9, a-f).
 fn short_hash(hash: &str) -> &str {
-    hash.get(..8).unwrap_or(hash)
+    match hash.get(..8) {
+        Some(prefix) => prefix,
+        None => {
+            // Git hashes are always 40 hex chars; a short hash indicates a bug upstream
+            tracing::debug!("Unexpectedly short hash (length: {}): {}", hash.len(), hash);
+            hash
+        }
+    }
 }
 
 /// Statistics for catch-up indexing

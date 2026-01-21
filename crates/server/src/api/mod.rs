@@ -18,6 +18,11 @@ pub use agentic_search::{
 pub use embedding_operations::generate_embeddings;
 pub use entity_operations::{get_entities_batch, list_repositories};
 pub use graph_search::query_graph;
-pub use models::*;
+pub use models::{
+    BackendClients, BatchEntityRequest, BatchEntityResponse, EmbeddingRequest, EmbeddingResponse,
+    EntityResult, GraphQueryParameters, GraphQueryRequest, GraphQueryResponse, GraphQueryType,
+    GraphResponseMetadata, GraphResult, ListRepositoriesResponse, QuerySpec, RepositoryInfo,
+    ResponseMetadata, SearchConfig, SearchFilters, SemanticSearchRequest, SemanticSearchResponse,
+};
 pub use search_impl::SearchApiImpl;
 pub use semantic_search::search_semantic;

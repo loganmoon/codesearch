@@ -53,20 +53,6 @@ impl MockNeo4jClient {
             data: Arc::new(Mutex::new(MockData::default())),
         }
     }
-
-    /// Get number of nodes stored
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn node_count(&self) -> usize {
-        self.data.lock().unwrap().nodes.len()
-    }
-
-    /// Get number of relationships stored
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub fn relationship_count(&self) -> usize {
-        self.data.lock().unwrap().relationships.len()
-    }
 }
 
 impl Default for MockNeo4jClient {

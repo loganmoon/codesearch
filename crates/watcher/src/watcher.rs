@@ -3,8 +3,6 @@
 //! This module provides the main file watcher using the notify crate
 //! with cross-platform support and comprehensive error handling.
 
-#![allow(dead_code)]
-
 use crate::{
     config::{RecoveryConfig, WatcherConfig},
     debouncer::EventDebouncer,

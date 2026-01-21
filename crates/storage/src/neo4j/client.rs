@@ -112,12 +112,6 @@ impl Neo4jClient {
         Ok(Neo4jEdition::Community)
     }
 
-    /// Get the Neo4j edition
-    #[allow(dead_code)]
-    pub fn edition(&self) -> Neo4jEdition {
-        self.edition
-    }
-
     /// Create a new database for a repository
     ///
     /// For Community Edition: This is a no-op since multi-database is not supported.
@@ -226,14 +220,6 @@ impl Neo4jClient {
         current
             .clone()
             .ok_or_else(|| anyhow!("No database selected. Call use_database() first"))
-    }
-
-    /// Get a reference to the underlying Graph for direct query execution
-    ///
-    /// Internal use only. External callers should use validated API methods.
-    #[allow(dead_code)]
-    pub(crate) fn graph(&self) -> &Arc<Graph> {
-        &self.graph
     }
 
     /// Create a single entity node in the current Neo4j database

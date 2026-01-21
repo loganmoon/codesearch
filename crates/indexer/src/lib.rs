@@ -137,7 +137,7 @@ impl IndexStats {
     }
 
     /// Merge another stats instance into this one (for internal use)
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn merge(&mut self, other: IndexStats) {
         self.total_files += other.total_files;
         self.failed_files += other.failed_files;

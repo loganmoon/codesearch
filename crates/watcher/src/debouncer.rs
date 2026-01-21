@@ -3,8 +3,6 @@
 //! This module provides intelligent debouncing of file system events
 //! with per-file timers and event aggregation.
 
-#![allow(dead_code)]
-
 use crate::events::{DebouncedEvent, FileChange};
 use dashmap::DashMap;
 use std::path::PathBuf;

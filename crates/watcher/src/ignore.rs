@@ -21,9 +21,6 @@ pub struct IgnoreFilter {
     ignored_dirs: Arc<HashSet<String>>,
     /// File extensions to explicitly exclude
     exclude_extensions: Arc<HashSet<String>>,
-    /// Whether to follow symbolic links
-    #[allow(dead_code)]
-    follow_symlinks: bool,
     /// Maximum file size to consider (bytes)
     max_file_size: u64,
     /// Base path for resolving relative patterns (typically repository root)
@@ -43,28 +40,9 @@ impl IgnoreFilter {
             patterns: Arc::new(Vec::new()),
             ignored_dirs: Arc::new(HashSet::new()),
             exclude_extensions: Arc::new(HashSet::new()),
-            follow_symlinks: true,
             max_file_size: u64::MAX,
             base_path: None,
         }
-    }
-
-    /// Create a filter from patterns
-    #[allow(dead_code)]
-    pub fn from_patterns(patterns: Vec<String>) -> Result<Self, PatternError> {
-        let compiled_patterns = patterns
-            .iter()
-            .map(|p| Pattern::new(p))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Self {
-            patterns: Arc::new(compiled_patterns),
-            ignored_dirs: Arc::new(HashSet::new()),
-            exclude_extensions: Arc::new(HashSet::new()),
-            follow_symlinks: true,
-            max_file_size: u64::MAX,
-            base_path: None,
-        })
     }
 
     /// Create with builder pattern
@@ -120,12 +98,6 @@ impl IgnoreFilter {
     pub fn exceeds_size_limit(&self, size: u64) -> bool {
         size > self.max_file_size
     }
-
-    /// Check if we should follow a symlink
-    #[allow(dead_code)]
-    pub fn should_follow_symlink(&self, path: &Path) -> bool {
-        self.follow_symlinks && !self.should_ignore(path)
-    }
 }
 
 /// Builder for IgnoreFilter
@@ -133,7 +105,6 @@ pub struct IgnoreFilterBuilder {
     patterns: Vec<String>,
     exclude_extensions: Option<HashSet<String>>,
     ignored_dirs: Option<HashSet<String>>,
-    follow_symlinks: bool,
     max_file_size: u64,
     base_path: Option<PathBuf>,
 }
@@ -144,7 +115,6 @@ impl Default for IgnoreFilterBuilder {
             patterns: Vec::new(),
             exclude_extensions: None,
             ignored_dirs: None,
-            follow_symlinks: true,
             max_file_size: u64::MAX, // No limit by default
             base_path: None,
         }
@@ -153,7 +123,7 @@ impl Default for IgnoreFilterBuilder {
 
 impl IgnoreFilterBuilder {
     /// Add a glob pattern to ignore
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn add_pattern(mut self, pattern: String) -> Self {
         self.patterns.push(pattern);
         self
@@ -166,7 +136,7 @@ impl IgnoreFilterBuilder {
     }
 
     /// Set excluded file extensions (will be converted to lowercase)
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn exclude_extensions(mut self, extensions: HashSet<String>) -> Self {
         let lowercase_exts: HashSet<_> = extensions.into_iter().map(|s| s.to_lowercase()).collect();
         self.exclude_extensions = Some(lowercase_exts);
@@ -174,15 +144,9 @@ impl IgnoreFilterBuilder {
     }
 
     /// Set ignored directory names
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn ignored_dirs(mut self, dirs: HashSet<String>) -> Self {
         self.ignored_dirs = Some(dirs);
-        self
-    }
-
-    /// Set whether to follow symbolic links
-    pub fn follow_symlinks(mut self, follow: bool) -> Self {
-        self.follow_symlinks = follow;
         self
     }
 
@@ -210,7 +174,6 @@ impl IgnoreFilterBuilder {
             patterns: Arc::new(compiled_patterns),
             ignored_dirs: Arc::new(self.ignored_dirs.unwrap_or_default()),
             exclude_extensions: Arc::new(self.exclude_extensions.unwrap_or_default()),
-            follow_symlinks: self.follow_symlinks,
             max_file_size: self.max_file_size,
             base_path: self.base_path.map(Arc::new),
         })

@@ -5,8 +5,6 @@
 
 use codesearch_core::error::{Error, Result};
 use git2::{BranchType, Repository, Status, StatusOptions};
-use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -432,11 +430,16 @@ impl BranchChange {
     }
 }
 
+#[cfg(test)]
+use std::collections::HashSet;
+#[cfg(test)]
+use std::fs;
+
 /// Helper to detect Git repository boundaries
-#[allow(dead_code)]
+#[cfg(test)]
 pub struct GitDetector;
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl GitDetector {
     /// Find the Git repository root for a given path
     pub fn find_repository_root(path: &Path) -> Option<PathBuf> {

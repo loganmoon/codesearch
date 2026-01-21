@@ -3,8 +3,6 @@
 //! This module defines immutable event types for file system changes
 //! with comprehensive metadata for change detection and processing.
 
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -231,7 +229,8 @@ impl ChangeType {
 pub struct DebouncedEvent {
     /// The file change event
     pub event: FileChange,
-    /// When the event was first detected
+    /// When the event was first detected (stored for debugging/metrics, not currently read)
+    #[allow(dead_code)]
     pub first_seen: SystemTime,
     /// When the event was last updated
     pub last_updated: SystemTime,
@@ -268,14 +267,8 @@ impl DebouncedEvent {
         self.occurrence_count += 1;
     }
 
-    /// Get the age of this event since first seen
-    pub fn age(&self) -> std::time::Duration {
-        SystemTime::now()
-            .duration_since(self.first_seen)
-            .unwrap_or_default()
-    }
-
     /// Get the time since last update
+    #[cfg(test)]
     pub fn time_since_update(&self) -> std::time::Duration {
         SystemTime::now()
             .duration_since(self.last_updated)

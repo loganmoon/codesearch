@@ -42,8 +42,6 @@ struct EntityBatch {
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
     collection_name: String,
-    #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
-    failed_files: usize,
 }
 
 /// Triple of (entity, embedding_id, sparse_embedding) for entities that have been embedded
@@ -56,8 +54,6 @@ struct EmbeddedBatch {
     repo_id: uuid::Uuid,
     git_commit: Option<String>,
     collection_name: String,
-    #[allow(dead_code)] // Tracked but not returned to caller (logged instead)
-    entities_skipped: usize,
 }
 
 struct StoredBatch {
@@ -567,7 +563,6 @@ async fn stage_extract_entities(
                     repo_id,
                     git_commit: git_commit.clone(),
                     collection_name: collection_name.clone(),
-                    failed_files: 0,
                 })
                 .await
                 .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
@@ -664,7 +659,6 @@ async fn stage_extract_entities(
                                         repo_id,
                                         git_commit: git_commit.clone(),
                                         collection_name: collection_name.clone(),
-                                        failed_files: batch_failed,
                                     })
                                     .await
                                     .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
@@ -721,7 +715,6 @@ async fn stage_extract_entities(
                 repo_id,
                 git_commit: git_commit.clone(),
                 collection_name: collection_name.clone(),
-                failed_files: batch_failed,
             })
             .await
             .map_err(|_| Error::Other(anyhow!("Entity channel closed")))?;
@@ -1039,7 +1032,6 @@ async fn stage_generate_embeddings(
                 repo_id: batch.repo_id,
                 git_commit: batch.git_commit,
                 collection_name: batch.collection_name,
-                entities_skipped: skipped,
             })
             .await
             .map_err(|_| Error::Other(anyhow!("Embedded channel closed")))?;

@@ -29,8 +29,6 @@ pub struct WorkerQuery {
 
 #[derive(Debug, Clone)]
 pub struct WorkerResult {
-    #[allow(dead_code)]
-    pub worker_type: WorkerType,
     pub entities: Vec<AgenticEntity>,
 }
 
@@ -76,10 +74,7 @@ pub async fn execute_worker(
 
     if search_results.is_empty() {
         debug!("Worker {:?} found no results", query.worker_type);
-        return Ok(WorkerResult {
-            worker_type: query.worker_type,
-            entities: vec![],
-        });
+        return Ok(WorkerResult { entities: vec![] });
     }
 
     debug!(
@@ -101,10 +96,7 @@ pub async fn execute_worker(
         })
         .collect();
 
-    Ok(WorkerResult {
-        worker_type: query.worker_type,
-        entities,
-    })
+    Ok(WorkerResult { entities })
 }
 
 /// Execute multiple workers concurrently with proper cancellation
@@ -181,12 +173,8 @@ mod tests {
 
     #[test]
     fn test_worker_result_construction() {
-        let result = WorkerResult {
-            worker_type: WorkerType::Semantic,
-            entities: vec![],
-        };
+        let result = WorkerResult { entities: vec![] };
 
-        assert_eq!(result.worker_type, WorkerType::Semantic);
         assert_eq!(result.entities.len(), 0);
     }
 

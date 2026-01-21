@@ -15,8 +15,6 @@ pub struct WatcherConfig {
     pub ignore_patterns: Vec<String>,
     /// Maximum file size to watch in bytes (default: 10MB)
     pub max_file_size: u64,
-    /// Whether to follow symbolic links (default: false)
-    pub follow_symlinks: bool,
     /// Maximum recursion depth for directory watching (default: 50)
     pub recursive_depth: u32,
     /// Maximum number of events in queue (default: 100000)
@@ -112,7 +110,6 @@ impl Default for WatcherConfig {
             debounce_ms: 500,
             ignore_patterns: Self::default_ignore_patterns(),
             max_file_size: 10 * 1024 * 1024, // 10MB
-            follow_symlinks: false,
             recursive_depth: 50,
             max_queued_events: 100000, // Increased to handle burst activity from editors
             events_per_batch: 100,
@@ -150,12 +147,6 @@ impl WatcherConfigBuilder {
     /// Set maximum file size
     pub fn max_file_size(mut self, size: u64) -> Self {
         self.config.max_file_size = size;
-        self
-    }
-
-    /// Set whether to follow symlinks
-    pub fn follow_symlinks(mut self, follow: bool) -> Self {
-        self.config.follow_symlinks = follow;
         self
     }
 
@@ -234,13 +225,11 @@ mod tests {
         let config = WatcherConfig::builder()
             .debounce_ms(1000)
             .max_file_size(5 * 1024 * 1024)
-            .follow_symlinks(true)
             .add_ignore_pattern("*.test".to_string())
             .build();
 
         assert_eq!(config.debounce_ms, 1000);
         assert_eq!(config.max_file_size, 5 * 1024 * 1024);
-        assert!(config.follow_symlinks);
         assert!(config.ignore_patterns.contains(&"*.test".to_string()));
     }
 

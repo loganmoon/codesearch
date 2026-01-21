@@ -29,10 +29,6 @@ pub struct GraniteEmbeddings {
     position_embeddings: Embedding,
     token_type_embeddings: Embedding,
     layer_norm: LayerNorm,
-    #[allow(dead_code)]
-    hidden_dropout_prob: f64,
-    #[allow(dead_code)]
-    pad_token_id: u32,
 }
 
 impl GraniteEmbeddings {
@@ -63,8 +59,6 @@ impl GraniteEmbeddings {
             position_embeddings,
             token_type_embeddings,
             layer_norm,
-            hidden_dropout_prob: config.hidden_dropout_prob,
-            pad_token_id: config.pad_token_id as u32,
         })
     }
 
@@ -103,8 +97,6 @@ pub struct GraniteSelfAttention {
     value: Linear,
     num_attention_heads: usize,
     head_dim: usize,
-    #[allow(dead_code)]
-    attention_probs_dropout_prob: f64,
 }
 
 impl GraniteSelfAttention {
@@ -120,7 +112,6 @@ impl GraniteSelfAttention {
             value,
             num_attention_heads: config.num_attention_heads,
             head_dim: config.head_dim(),
-            attention_probs_dropout_prob: config.attention_probs_dropout_prob,
         })
     }
 

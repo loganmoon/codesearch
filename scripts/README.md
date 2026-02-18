@@ -18,8 +18,8 @@ The pre-commit hook enforces the following quality standards:
 
 1. **Branch Protection**: Prevents direct commits to `main` branch
 2. **Code Formatting**: Runs `cargo fmt --check` to ensure consistent formatting
-3. **Linting**: Runs `cargo clippy` with strict warnings as errors
-4. **Testing**: Runs the full test suite to ensure no regressions
+3. **Linting**: Runs `cargo clippy --workspace --all-targets --no-default-features -- -D warnings`
+4. **Testing**: Runs lib-only unit tests (`cargo test --workspace --lib --no-default-features`)
 5. **TODO Detection**: Warns about TODO/FIXME comments (non-blocking)
 
 ### Manual Quality Checks
@@ -33,11 +33,11 @@ cargo fmt
 # Run linting
 cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 
-# Run tests
-cargo test --workspace --no-default-features
+# Run tests (lib only, matching pre-commit hook)
+cargo test --workspace --lib --no-default-features
 
-# Run all checks at once
-cargo fmt && cargo clippy --workspace --all-targets --no-default-features -- -D warnings && cargo test --workspace --no-default-features
+# Run all checks at once (matches pre-commit hook)
+cargo fmt --check && cargo clippy --workspace --all-targets --no-default-features -- -D warnings && cargo test --workspace --lib --no-default-features
 ```
 
 ### Hook Files
@@ -58,12 +58,13 @@ git commit --no-verify -m "emergency commit"
 
 ### Branch Protection
 
-Direct commits and merges to the `main` branch are blocked. Use this workflow instead:
+Direct commits and merges to the `main` branch are blocked. This project uses git worktrees for parallel development:
 
-1. Create a feature branch: `git checkout -b feat/your-feature`
-2. Make your changes and commit: `git add . && git commit -m "your changes"`
-3. Push to remote: `git push -u origin feat/your-feature`
-4. Create a pull request for review
-5. Merge through the pull request interface
+1. Create a worktree from the parent directory: `git worktree add feat--your-feature -b feat/your-feature`
+2. Work within the worktree directory: `cd feat--your-feature`
+3. Make your changes and commit
+4. Push to remote: `git push -u origin feat/your-feature`
+5. Create a pull request for review
+6. Merge through the pull request interface
 
-This ensures all code is reviewed and maintains the quality of the main branch.
+**Important:** Never use `git checkout <branch>` inside a worktree. Each worktree is tied to its specific branch.

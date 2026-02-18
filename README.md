@@ -55,6 +55,16 @@ api_base_url = "http://localhost:8000/v1"
 model = "BAAI/bge-large-en-v1.5"
 ```
 
+### Sparse Embeddings
+
+Sparse embeddings are used alongside dense embeddings for hybrid search. Configured separately:
+```toml
+[sparse_embeddings]
+provider = "granite"  # "granite" (default, learned sparse, requires model download) or "bm25"
+device = "auto"       # "auto", "cpu", "cuda", "metal"
+top_k = 256           # Sparse dimensions to keep
+```
+
 ### Reranking
 
 Optional cross-encoder reranking for improved relevance:
@@ -71,8 +81,22 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 |---------|---------|-------------|
 | `embeddings.provider` | `jina` | `jina`, `localapi`, or `mock` |
 | `embeddings.embedding_dimension` | `1024` | Vector dimension size |
+| `sparse_embeddings.provider` | `granite` | `granite` (learned sparse) or `bm25` |
 | `reranking.enabled` | `false` | Enable cross-encoder reranking |
 | `reranking.candidates` | `100` | Number of candidates to rerank |
+| `languages.enabled` | `["rust"]` | Enabled languages (`rust`, `javascript`, `typescript`) |
+| `server.port` | `3000` | REST API server port |
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `codesearch index` | Index the current repository. Use `--force` to re-index from scratch. |
+| `codesearch serve` | Start the REST API server. Use `--enable_agentic` for agentic search (requires `ANTHROPIC_API_KEY`). |
+| `codesearch drop` | Drop all indexed data for the current repository. |
+| `codesearch cache stats` | Show embedding cache statistics. |
+| `codesearch cache clear` | Clear embedding cache. Use `--model <name>` to clear for a specific model only. |
+| `codesearch mcp` | Start MCP server for Claude Code integration (stdio transport). |
 
 ## Architecture
 
@@ -103,13 +127,13 @@ api_key = "your-jina-api-key"  # or set JINA_API_KEY env var
 ```
 POST /api/v1/search/semantic
 ```
-Hybrid search combining dense embeddings + sparse retrieval (Granite/BM25) with RRF fusion.
+Hybrid search combining dense embeddings + sparse retrieval (Granite learned sparse or BM25) with RRF fusion.
 
 **Agentic Search**:
 ```
 POST /api/v1/search/agentic
 ```
-Multi-agent orchestration using LLMs to answer complex queries by traversing the code graph and aggregating results.
+Multi-agent orchestration using LLMs to answer complex queries by traversing the code graph and aggregating results. Requires `ANTHROPIC_API_KEY` env var.
 
 **Graph Query**:
 ```
@@ -121,8 +145,9 @@ Query code relationships (e.g., "functions that call X").
 
 ```
 GET  /api/v1/repositories           # List indexed repositories
-GET  /health                         # Health check
+POST /api/v1/entities/batch          # Batch entity retrieval by ID
 POST /api/v1/embed                   # Generate embeddings
+GET  /health                         # Health check
 ```
 
 ## Development
@@ -134,13 +159,14 @@ cargo build --workspace --all-targets
 
 **Test:**
 ```bash
-cargo test --workspace                                              # Unit tests
-cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored # E2E tests
+cargo test --workspace --no-default-features                        # Unit tests
+cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored # E2E tests (requires running infrastructure)
 ```
 
 **Lint:**
 ```bash
-cargo clippy --workspace && cargo fmt
+cargo fmt --check
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
 ```
 
 **Run from source:**

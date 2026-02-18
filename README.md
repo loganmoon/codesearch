@@ -2,6 +2,8 @@
 
 A semantic code search engine that indexes codebases using AST-based entity extraction, vector embeddings, and graph relationships.
 
+**Local-only by design:** Codesearch has no authentication or authorization. The server binds to `127.0.0.1` (localhost only) and is intended for single-user, local development use. Do not expose it to untrusted networks.
+
 ## Quick Start
 
 **Prerequisites:**

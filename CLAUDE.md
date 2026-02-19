@@ -15,9 +15,23 @@ codesearch/
 ├── <branch-name>/       # Additional worktrees for feature branches
 │
 # Within each worktree:
-├── crates/              # Rust workspace crates (see CRATE ARCHITECTURE below)
+├── crates/              # Rust workspace crates
+│   ├── core/            # Foundation types, config, error handling
+│   ├── languages/       # AST parsing with spec-driven YAML config
+│   ├── embeddings/      # Dense + sparse embedding providers
+│   ├── reranking/       # Cross-encoder result reranking
+│   ├── indexer/         # Repository indexing with Git integration
+│   ├── outbox-processor/# Reliable event processing
+│   ├── watcher/         # Real-time file system monitoring
+│   ├── storage/         # Postgres, Qdrant, Neo4j persistence
+│   ├── agentic-search/  # Multi-agent query orchestration
+│   ├── mcp-server/      # Model Context Protocol server
+│   ├── server/          # REST API server
+│   ├── cli/             # Command-line interface
+│   ├── e2e-tests/       # End-to-end tests (excluded from default workspace build)
+│   └── evals/           # Evaluation harness (excluded from default workspace build)
 ├── infrastructure/      # Docker Compose configuration for services
-├── migrations/          # PostgreSQL database migrations
+├── migrations/          # PostgreSQL database migrations (001-019)
 ├── scripts/             # Development and deployment scripts
 │   └── hooks/           # Git hook scripts
 ├── .githooks/           # Active git hooks (pre-commit, pre-merge-commit)
@@ -48,7 +62,7 @@ This project uses git worktrees with a separate git directory for parallel devel
 
 **Code Quality Standards:**
 - Return Result types - never panic with .unwrap() or .expect() except in tests
-- Use core::Error for all error types
+- Use `codesearch_core::Error` (`crates/core/src/error.rs`) for all error types
 - Enforce `#![deny(warnings)]`, `#![deny(clippy::unwrap_used)]`, `#![deny(clippy::expect_used)]` in non-test code
 - Strongly favor immutability, borrowing over cloning, builders over `new`
 - Prefer standalone functions over unnecessary &self methods
@@ -62,6 +76,27 @@ This project uses git worktrees with a separate git directory for parallel devel
 
 **Style Rules:**
 - String formatting: `println!("The thing is {thing}");`, NOT `println!("The thing is {}", thing);`
+
+## Build and Test
+
+**Build flags:** Always use `--no-default-features` for clippy and tests. Default features include optional components that may not compile in all environments.
+
+```bash
+# Pre-commit checks (what the hooks run):
+cargo fmt --check
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+cargo test --workspace --lib --no-default-features
+```
+
+**Test levels:**
+- `cargo test --workspace --lib --no-default-features` - Unit tests only (run by pre-commit hook)
+- `cargo test --workspace --no-default-features` - Unit + integration tests
+- `cargo test --manifest-path crates/e2e-tests/Cargo.toml -- --ignored` - E2E tests (requires running infrastructure)
+
+**Environment variables:**
+- `JINA_API_KEY` - Required for Jina embedding/reranking providers
+- `ANTHROPIC_API_KEY` - Required for agentic search endpoint
+- `EMBEDDING_API_KEY` - Alternative to `JINA_API_KEY` for embedding providers
 
 ## Language Extraction (crates/languages)
 

@@ -30,15 +30,15 @@ pub enum Error {
     #[error("Storage error: {0}")]
     Storage(String),
 
-    /// HelixDB installation errors
+    /// Infrastructure installation errors
     #[error("Installation error: {0}")]
     Installation(String),
 
-    /// HelixDB initialization errors
+    /// Infrastructure initialization errors
     #[error("Initialization error: {0}")]
     Initialization(String),
 
-    /// HelixDB schema validation errors
+    /// Schema validation errors
     #[error("Schema validation error: {0}")]
     SchemaValidation(String),
 

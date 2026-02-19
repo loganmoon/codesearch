@@ -102,6 +102,7 @@ pub struct HandlerConfig {
     pub relationship_extractor: Option<RelationshipExtractor>,
     pub visibility_override: Option<Visibility>,
     pub parent_scope_template: Option<&'static str>,
+    pub skip_scopes: Option<&'static [&'static str]>,  // Scope nodes to skip in FQN building
 }
 ```
 
@@ -131,9 +132,14 @@ crates/languages/
 │   │   └── relationships.rs   # Relationship extraction functions
 │   │
 │   ├── common/
+│   │   ├── mod.rs             # Common module exports
 │   │   ├── import_map.rs      # Import resolution
 │   │   ├── reference_resolution.rs  # Reference resolution
 │   │   ├── path_config.rs     # Language path configurations
+│   │   ├── edge_case_handlers.rs    # Shared edge case handling
+│   │   ├── entity_building.rs       # Common entity construction helpers
+│   │   ├── language_path.rs         # Language-aware path utilities
+│   │   ├── module_utils.rs          # Module path derivation utilities
 │   │   └── js_ts_shared/      # Shared JS/TS infrastructure
 │   │
 │   ├── rust/
@@ -285,6 +291,7 @@ extraction_hints:
 | `relationships` | Relationship extractor name | `extract_function_relationships` |
 | `visibility_override` | Force specific visibility | `Public` or `null` |
 | `parent_scope_template` | Override parent derivation | `"{scope}::extern {abi}"` |
+| `skip_scopes` | Scope node types to skip in FQN building | `["constructor"]` |
 
 **Name strategies:**
 - `capture` - Use the `@name` capture directly
@@ -644,6 +651,6 @@ cargo test --manifest-path crates/e2e-tests/Cargo.toml --test spec_validation {l
 | Language | Extraction | Resolution | Notes |
 |----------|-----------|------------|-------|
 | **Rust** | Full | Full | Canonical implementation |
-| **JavaScript** | Full | Partial | Entity extraction complete |
-| **TypeScript** | Full | Partial | Entity extraction complete |
-| **TSX** | Full | Partial | Uses TypeScript handlers |
+| **JavaScript** | Full | Partial | Entity extraction complete; relationship resolution not yet fully implemented |
+| **TypeScript** | Full | Partial | Entity extraction complete; relationship resolution not yet fully implemented |
+| **TSX** | Full | Partial | Uses TypeScript handlers and spec |

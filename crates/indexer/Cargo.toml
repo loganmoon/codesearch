@@ -28,7 +28,6 @@ tree-sitter-go = { workspace = true }
 git2 = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
-lru = "0.12"
 futures = "0.3"
 im = "15.1"
 async-stream = "0.3"

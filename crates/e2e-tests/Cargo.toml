@@ -41,7 +41,7 @@ scip = "0.6"
 protobuf = "3.7"
 
 # Git operations (use git2 instead of shelling out to git CLI)
-git2 = "0.19"
+git2 = "0.20"
 
 # Neo4j driver for graph queries
 neo4rs = "0.8"

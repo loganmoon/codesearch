@@ -10,11 +10,9 @@ Codesearch is a Rust-based semantic code indexing system that provides intellige
 
 ```
 codesearch/
-├── .git/                # Shared git directory (separate from worktrees)
-├── main/                # Worktree for main branch
-├── <branch-name>/       # Additional worktrees for feature branches
-│
-# Within each worktree:
+├── .git/                # Normal git directory (main checked out at repo root)
+├── .worktrees/          # Feature branch worktrees only
+│   └── <branch-name>/
 ├── crates/              # Rust workspace crates
 │   ├── core/            # Foundation types, config, error handling
 │   ├── languages/       # AST parsing with spec-driven YAML config
@@ -39,13 +37,41 @@ codesearch/
 └── CLAUDE.md            # This file
 ```
 
-## WORKTREE WORKFLOW
+## Git Worktree Workflow
 
-This project uses git worktrees with a separate git directory for parallel development. Each issue or feature gets its own worktree.
+All feature work MUST use git worktrees for isolation. Never commit feature work directly to main.
 
-**Important:** The parent directory containing `.git/` is NOT a worktree. All worktrees (`main/`, `feature--xyz/`, etc.) are subdirectories. All worktree management commands must be run from this parent directory.
+- **Main is read-only:** Four hooks enforce this:
+  - `guard-worktree-edit.sh` (PreToolUse, Edit|Write) - blocks file writes outside `.worktrees/` and `.claude/`
+  - `guard-bash-on-main.sh` (PreToolUse, Bash) - blocks non-whitelisted shell commands when CWD is on main with worktrees present
+  - `guard-worktree-escape.sh` (PreToolUse, Bash) - blocks leaving a worktree (`cd` to repo root) unless the branch's PR is merged
+  - `warn-worktree-drift.sh` (PostToolUse, Bash) - warns if CWD drifts to repo root while worktrees exist
+- `cd` into the worktree root before starting work so it becomes CWD
+- Hook changes are git-tracked and must be committed on a branch, not main
 
-**Important:** Never use `git checkout <branch>` inside a worktree. Worktrees are permanently tied to their specific branch.
+### Creating a worktree
+- ALWAYS run `git worktree list` before creating a new worktree -- one may already exist
+- NEVER create a new worktree when work is in progress on one
+
+```bash
+git worktree add .worktrees/<branch-name>
+cd .worktrees/<branch-name>
+```
+- Directory name MUST match branch name (do NOT use `-b` with a different name)
+- This creates both the worktree directory and the branch in one step
+
+### Working in a worktree
+- NEVER run `git checkout <branch>` inside a worktree -- worktrees are locked to their branch
+- To run commands that the bash guard blocks on main (cargo test, npm install, etc.), `cd` into a worktree first
+
+### Cleanup after merge
+The escape guard will allow `cd` to repo root only once the PR is merged:
+```bash
+cd <repo-root>
+git worktree remove .worktrees/<branch-name>
+git branch -D <branch-name>
+```
+- NEVER remove a worktree while it is the shell CWD
 
 ## Rust Development Practices
 
